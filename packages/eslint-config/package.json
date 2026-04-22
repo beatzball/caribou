@@ -19,5 +19,11 @@
   },
   "devDependencies": {
     "eslint": "^9.0.0"
+  },
+  "scripts": {
+    "typecheck": "echo '(config package, no ts)'",
+    "lint": "echo '(config package lints itself by existing)'",
+    "test": "echo '(no tests in eslint-config package)'",
+    "test:coverage": "echo '(no tests in eslint-config package)'"
   }
 }

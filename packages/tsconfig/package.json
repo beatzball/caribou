@@ -8,5 +8,11 @@
     "app.json",
     "library.json"
   ],
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "typecheck": "echo '(no ts in tsconfig package)'",
+    "lint": "echo '(no js in tsconfig package)'",
+    "test": "echo '(no tests in tsconfig package)'",
+    "test:coverage": "echo '(no tests in tsconfig package)'"
+  }
 }

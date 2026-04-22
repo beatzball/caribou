@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.28.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Compute affected filter
+        id: affected
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "args=--filter ...[origin/${{ github.base_ref }}]" >> $GITHUB_OUTPUT
+          else
+            echo "args=-r" >> $GITHUB_OUTPUT
+          fi
+      - run: pnpm ${{ steps.affected.outputs.args }} typecheck
+      - run: pnpm ${{ steps.affected.outputs.args }} lint
+      - run: pnpm ${{ steps.affected.outputs.args }} test:coverage
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: coverage, path: '**/coverage/**' }
+
+  changeset-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.28.0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm changeset status --since=origin/main
