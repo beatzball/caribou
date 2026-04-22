@@ -1,0 +1,23 @@
+{
+  "name": "@beatzball/caribou-eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared ESLint flat config for Caribou.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": ["index.js"],
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "dependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "globals": "^15.14.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}
