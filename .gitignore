@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.output/
+.nitro/
+.nuxt/
+.cache/
+coverage/
+.playwright/
+playwright-report/
+test-results/
+.DS_Store
+*.log
+.vscode/
+.idea/
+.env
+.env.local
+.turbo/
