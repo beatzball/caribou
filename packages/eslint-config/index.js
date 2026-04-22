@@ -1,5 +1,4 @@
 import tsPlugin from '@typescript-eslint/eslint-plugin'
-import tsParser from '@typescript-eslint/parser'
 import globals from 'globals'
 
 /** @type {import('eslint').Linter.Config[]} */
@@ -16,10 +15,10 @@ export default [
       '**/node_modules/**',
     ],
   },
+  ...tsPlugin.configs['flat/recommended'],
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
     languageOptions: {
-      parser: tsParser,
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
@@ -29,11 +28,7 @@ export default [
         ...globals.node,
       },
     },
-    plugins: {
-      '@typescript-eslint': tsPlugin,
-    },
     rules: {
-      ...tsPlugin.configs.recommended.rules,
       '@typescript-eslint/consistent-type-imports': [
         'error',
         { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
