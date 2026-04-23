@@ -1,3 +1,4 @@
+import '@beatzball/caribou-design-tokens/tokens.css'
 // Elena uses progressive enhancement — no hydration script needed.
 
 // Client runtime: Elena adapter router outlet and link custom elements.
