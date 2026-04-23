@@ -1,0 +1,30 @@
+{
+  "name": "@beatzball/caribou-state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@beatzball/caribou-auth": "workspace:*",
+    "@beatzball/caribou-mastodon-client": "workspace:*",
+    "@preact/signals-core": "^1.8.0"
+  },
+  "devDependencies": {
+    "@beatzball/caribou-eslint-config": "workspace:*",
+    "@beatzball/caribou-tsconfig": "workspace:*",
+    "@vitest/coverage-v8": "^2.1.0",
+    "eslint": "^9.0.0",
+    "happy-dom": "^15.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.0"
+  }
+}

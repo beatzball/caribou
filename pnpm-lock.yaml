@@ -144,6 +144,40 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1)
 
+  packages/state:
+    dependencies:
+      '@beatzball/caribou-auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@beatzball/caribou-mastodon-client':
+        specifier: workspace:*
+        version: link:../mastodon-client
+      '@preact/signals-core':
+        specifier: ^1.8.0
+        version: 1.14.1
+    devDependencies:
+      '@beatzball/caribou-eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@beatzball/caribou-tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@vitest/coverage-v8':
+        specifier: ^2.1.0
+        version: 2.1.9(vitest@2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1))
+      eslint:
+        specifier: ^9.0.0
+        version: 9.39.4(jiti@2.6.1)
+      happy-dom:
+        specifier: ^15.0.0
+        version: 15.11.7
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1)
+
   packages/tsconfig: {}
 
 packages:
@@ -866,6 +900,9 @@ packages:
 
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
+
+  '@preact/signals-core@1.14.1':
+    resolution: {integrity: sha512-vxPpfXqrwUe9lpjqfYNjAF/0RF/eFGeLgdJzdmIIZjpOnTmGmAB4BjWone562mJGMRP4frU6iZ6ei3PDsu52Ng==}
 
   '@resvg/resvg-js-android-arm-eabi@2.6.2':
     resolution: {integrity: sha512-FrJibrAk6v29eabIPgcTUMPXiEz8ssrAk7TXxsiZzww9UTQ1Z5KAbFJs+Z0Ez+VZTYgnE5IQJqBcoSiMebtPHA==}
@@ -4384,6 +4421,8 @@ snapshots:
       supports-color: 10.2.2
 
   '@poppinss/exception@1.2.3': {}
+
+  '@preact/signals-core@1.14.1': {}
 
   '@resvg/resvg-js-android-arm-eabi@2.6.2':
     optional: true
