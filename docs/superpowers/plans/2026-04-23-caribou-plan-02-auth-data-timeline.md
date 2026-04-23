@@ -1247,7 +1247,7 @@ describe('createCaribouClient', () => {
     const client = createCaribouClient(userKey, sess)
     server.use(
       http.get('https://fosstodon.org/api/v1/timelines/home', () =>
-        new HttpResponse(null, { status: 401 }),
+        HttpResponse.json({ error: 'unauthorized' }, { status: 401 }),
       ),
     )
     await expect(client.fetchTimeline('home')).rejects.toMatchObject({
