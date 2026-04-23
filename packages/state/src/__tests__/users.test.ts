@@ -73,6 +73,20 @@ describe('persistence', () => {
     loadFromStorage()
     expect(activeUserKey.value).toBeNull()
   })
+
+  it('loadFromStorage resets signals when stored payload is malformed', () => {
+    localStorage.setItem('caribou.users', '{not-json')
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+    loadFromStorage()
+    expect(users.value.size).toBe(0)
+    expect(activeUserKey.value).toBeNull()
+  })
+
+  it('removeActiveUser is a no-op when no user is active', () => {
+    expect(() => removeActiveUser()).not.toThrow()
+    expect(users.value.size).toBe(0)
+    expect(activeUserKey.value).toBeNull()
+  })
 })
 
 describe('activeClient', () => {
@@ -98,5 +112,27 @@ describe('activeClient', () => {
     window.dispatchEvent(new Event('caribou:unauthorized'))
     expect(spy).toHaveBeenCalledOnce()
     window.removeEventListener('caribou:unauthorized', spy)
+  })
+
+  it('emits caribou:unauthorized on the window when the client hits a 401', async () => {
+    const { activeClient } = await import('../users.js')
+    addUserSession(sampleSession())
+    const client = activeClient.value
+    expect(client).not.toBeNull()
+    const spy = vi.fn()
+    window.addEventListener('caribou:unauthorized', spy)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401, headers: { 'content-type': 'application/json' },
+      }),
+    ) as typeof fetch
+    try {
+      await expect(client!.fetchTimeline('home')).rejects.toMatchObject({ code: 'unauthorized' })
+      expect(spy).toHaveBeenCalledOnce()
+    } finally {
+      globalThis.fetch = originalFetch
+      window.removeEventListener('caribou:unauthorized', spy)
+    }
   })
 })

@@ -82,4 +82,67 @@ describe('createTimelineStore', () => {
     await store.poll()
     expect(client.fetchTimeline).not.toHaveBeenCalled()
   })
+
+  it('loadMore() bails when loading is in-flight or hasMore=false', async () => {
+    const client = fakeClient(async () => [])
+    const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
+    await store.load()
+    expect(store.hasMore.value).toBe(false)
+    await store.loadMore()
+    expect(client.fetchTimeline).toHaveBeenCalledTimes(1)
+  })
+
+  it('loadMore() bails when there is no last id', async () => {
+    const client = fakeClient(async () => [])
+    const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
+    await store.loadMore()
+    expect(client.fetchTimeline).not.toHaveBeenCalled()
+  })
+
+  it('loadMore() captures errors on the error signal', async () => {
+    let calls = 0
+    const client = fakeClient(async () => {
+      calls += 1
+      if (calls === 1) return [makeStatus('a')]
+      throw Object.assign(new Error('x'), { name: 'CaribouError', code: 'server_error' })
+    })
+    const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
+    await store.load()
+    await store.loadMore()
+    expect(store.error.value?.code).toBe('server_error')
+    expect(store.loading.value).toBe(false)
+  })
+
+  it('poll() captures errors on the error signal', async () => {
+    let calls = 0
+    const client = fakeClient(async () => {
+      calls += 1
+      if (calls === 1) return [makeStatus('a')]
+      throw Object.assign(new Error('x'), { name: 'CaribouError', code: 'server_error' })
+    })
+    const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
+    await store.load()
+    await store.poll()
+    expect(store.error.value?.code).toBe('server_error')
+  })
+
+  it('applyNewPosts() is a no-op when the buffer is empty', async () => {
+    const client = fakeClient(async () => [makeStatus('a')])
+    const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
+    await store.load()
+    store.applyNewPosts()
+    expect(store.statusIds.value).toEqual(['a'])
+  })
+
+  it('newPosts exposes buffered statuses from the cache', async () => {
+    const client = fakeClient(async (_k, params) => {
+      if (!params) return [makeStatus('b')]
+      if (params.sinceId === 'b') return [makeStatus('c')]
+      return []
+    })
+    const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
+    await store.load()
+    await store.poll()
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['c'])
+  })
 })
