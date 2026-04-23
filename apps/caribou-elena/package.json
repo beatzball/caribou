@@ -22,9 +22,17 @@
   "dependencies": {
     "@beatzball/litro": "latest",
     "@beatzball/litro-router": "^0.1.8",
+    "@beatzball/caribou-auth": "workspace:*",
+    "@beatzball/caribou-mastodon-client": "workspace:*",
+    "@beatzball/caribou-state": "workspace:*",
+    "@beatzball/caribou-design-tokens": "workspace:*",
     "@elenajs/core": "^1.0.0",
     "@elenajs/ssr": "^1.0.0-alpha.10",
-    "h3": "^1.13.0"
+    "@preact/signals-core": "^1.8.0",
+    "dompurify": "^3.1.0",
+    "h3": "^1.13.0",
+    "masto": "^7.0.0",
+    "unstorage": "^1.10.0"
   },
   "devDependencies": {
     "@beatzball/caribou-eslint-config": "workspace:*",
@@ -32,8 +40,10 @@
     "@playwright/test": "^1.48.0",
     "@vitest/coverage-v8": "^2.1.0",
     "@axe-core/playwright": "^4.10.0",
+    "@types/dompurify": "^3.0.0",
     "eslint": "^9.0.0",
     "happy-dom": "^15.0.0",
+    "msw": "^2.6.0",
     "nitropack": "^2.13.1",
     "typescript": "^5.7.3",
     "vite": "^5.4.11",
