@@ -25,7 +25,10 @@ importers:
     dependencies:
       '@beatzball/litro':
         specifier: latest
-        version: 0.9.0(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)
+        version: 0.9.1(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)
+      '@beatzball/litro-router':
+        specifier: ^0.1.8
+        version: 0.1.8
       '@elenajs/core':
         specifier: ^1.0.0
         version: 1.0.0
@@ -129,8 +132,8 @@ packages:
   '@beatzball/litro-router@0.1.8':
     resolution: {integrity: sha512-ferSE6/VlKuCYqTifdz1nH+B3nUtqaav8cgTbmLmSmrRRx5Jzqmi5MuDtVYfa2aA5cPruNUFD7fYr5q30n90xg==}
 
-  '@beatzball/litro@0.9.0':
-    resolution: {integrity: sha512-UJfar9HSLl3JEw/DUnHnxcnHDNe9TPDqsKI61R5N5yRYMMFJUi5KD4jow4Wo9tP/+kZvKIuNOFoO+iuqQz7BOg==}
+  '@beatzball/litro@0.9.1':
+    resolution: {integrity: sha512-rFS5QyB5qOrZVHMMaaW1NiAP6aUQgA/9vL6QsWY4cbJJEhrfH+4zb0TRQ0PpGhmkprs0t+kLvV2298sp7+ScoA==}
     hasBin: true
     peerDependencies:
       '@elenajs/core': ^1.0.0
@@ -3465,7 +3468,7 @@ snapshots:
 
   '@beatzball/litro-router@0.1.8': {}
 
-  '@beatzball/litro@0.9.0(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)':
+  '@beatzball/litro@0.9.1(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)':
     dependencies:
       '@beatzball/litro-router': 0.1.8
       '@lit-labs/ssr': 3.3.1

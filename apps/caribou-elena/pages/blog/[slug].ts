@@ -37,7 +37,7 @@ export class BlogPostPage extends LitroPage {
     };
   }
 
-  render() {
+  override render() {
     const data = this.serverData as PostData | null;
     return html`
       <article>

@@ -1,9 +1,9 @@
 import { Elena, html } from '@elenajs/core';
 
 export class BlogPage extends Elena(HTMLElement) {
-  static tagName = 'page-blog';
+  static override tagName = 'page-blog';
 
-  render() {
+  override render() {
     return html`
       <main>
         <h1>Blog</h1>
