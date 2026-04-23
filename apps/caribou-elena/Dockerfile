@@ -13,7 +13,7 @@ RUN pnpm --filter caribou-elena build
 
 # Stage 2: runtime
 FROM node:22-alpine AS runtime
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini curl
 WORKDIR /app
 RUN mkdir -p /data && chown -R node:node /data
 COPY --from=builder --chown=node:node /repo/apps/caribou-elena/dist ./dist
