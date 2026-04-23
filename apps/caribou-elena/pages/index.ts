@@ -1,44 +1,15 @@
-import { html } from '@elenajs/core';
-import { LitroPage } from '@beatzball/litro/adapter/elena/page';
-import { definePageData } from '@beatzball/litro';
+import { html } from '@elenajs/core'
+import { LitroPage } from '@beatzball/litro/adapter/elena/page'
+import './components/caribou-landing.js'
 
-export interface HomeData {
-  message: string;
-  timestamp: string;
-}
+export default class HomePage extends LitroPage {
+  static override tagName = 'page-home'
 
-// Runs on the server before SSR — result injected as JSON into the HTML shell.
-export const pageData = definePageData(async (_event) => {
-  return {
-    message: 'Hello from caribou-elena!',
-    timestamp: new Date().toISOString(),
-  } satisfies HomeData;
-});
-
-export class HomePage extends LitroPage {
-  static override tagName = 'page-home';
-
-  // Called on client-side navigation (not on the initial SSR load).
-  override async fetchData() {
-    const res = await fetch('/api/hello');
-    return res.json() as Promise<HomeData>;
-  }
-
-  render() {
-    const data = this.serverData as HomeData | null;
-    if (this.loading) return html`<p>Loading\u2026</p>`;
+  override render() {
     return html`
-      <main>
-        <h1>${data?.message ?? 'Welcome to caribou-elena'}</h1>
-        <p><small>Rendered at: ${data?.timestamp ?? '\u2014'}</small></p>
-        <nav>
-          <litro-link href="/blog">Go to Blog \u2192</litro-link>
-        </nav>
-      </main>
-    `;
+      <caribou-landing></caribou-landing>
+    `
   }
 }
 
-HomePage.define();
-
-export default HomePage;
+HomePage.define()
