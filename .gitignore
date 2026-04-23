@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.output/
+.nitro/
+.nuxt/
+.cache/
+coverage/
+.playwright/
+playwright-report/
+test-results/
+.DS_Store
+*.log
+.vscode/
+.idea/
+.env
+.env.local
+.turbo/
+
+# Litro: generated files (overwritten on every build; contain machine-local absolute paths)
+apps/*/routes.generated.ts
+apps/*/server/stubs/

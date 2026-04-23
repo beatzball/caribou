@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/tsconfig" },
+    { "path": "./packages/eslint-config" },
+    { "path": "./apps/caribou-elena" }
+  ]
+}

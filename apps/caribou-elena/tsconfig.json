@@ -1,0 +1,11 @@
+{
+  "extends": "@beatzball/caribou-tsconfig/app.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["./*"]
+    }
+  },
+  "include": ["pages", "server", "tests", "*.ts", "*.config.ts"],
+  "exclude": ["node_modules", ".output", ".nitro"]
+}

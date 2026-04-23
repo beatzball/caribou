@@ -1,13 +1,31 @@
 {
   "name": "caribou",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "private": true,
+  "version": "0.0.0",
+  "description": "Caribou — a Mastodon client built on Litro + Elena.",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10.28.0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.28.0"
+  "scripts": {
+    "dev": "pnpm --filter caribou-elena dev",
+    "dev:portless": "pnpm --filter caribou-elena dev:portless",
+    "build": "pnpm -r build",
+    "preview": "pnpm --filter caribou-elena preview",
+    "preview:portless": "pnpm --filter caribou-elena preview:portless",
+    "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage",
+    "test:e2e": "pnpm --filter caribou-elena test:e2e",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.0",
+    "@changesets/changelog-github": "^0.5.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.7.3"
+  }
 }
