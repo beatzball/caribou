@@ -97,6 +97,21 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1)
 
+  packages/design-tokens:
+    devDependencies:
+      '@beatzball/caribou-eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      eslint:
+        specifier: ^9.0.0
+        version: 9.39.4(jiti@2.6.1)
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1)
+
   packages/eslint-config:
     dependencies:
       '@typescript-eslint/eslint-plugin':
