@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      - name: Generate Litro routes + page manifest
+        run: pnpm --filter caribou-elena build
       - name: Compute affected filter
         id: affected
         run: |
