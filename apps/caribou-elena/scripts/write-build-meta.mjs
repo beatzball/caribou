@@ -10,8 +10,13 @@ function safe(fn, fallback) {
   try { return fn() } catch { return fallback }
 }
 
+// Prefer explicit env (CI / --build-arg GIT_SHA), then Coolify's own
+// per-deploy SOURCE_COMMIT build arg, then a local git read. The
+// generic-named SOURCE_COMMIT is common across PaaS builders and is what
+// Coolify sets when .git has been stripped from the Docker build context.
 const commit =
   process.env.GIT_SHA?.trim() ||
+  process.env.SOURCE_COMMIT?.trim() ||
   safe(
     () => execSync('git rev-parse HEAD', { cwd: appRoot, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(),
     'unknown',

@@ -14,8 +14,12 @@ const EXPECTED_SHA = (() => {
   }
 })()
 
-const RETRIES = 5
-const DELAY_MS = 2000
+// Retry budget is sized to absorb Coolify's build + container-swap window,
+// which runs asynchronously after the deploy webhook returns. A fresh build
+// is typically ready in 60–120s; we budget 4 minutes per check to stay
+// comfortably above that without blocking CI forever.
+const RETRIES = 30
+const DELAY_MS = 8000
 const FETCH_TIMEOUT_MS = 10_000
 
 async function fetchWithTimeout(url, init) {
