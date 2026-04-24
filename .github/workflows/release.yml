@@ -28,4 +28,12 @@ jobs:
           commit: "chore: version packages"
           title: "chore: version packages"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PRs/pushes authored with CHANGESETS_TOKEN (a fine-grained PAT)
+          # are attributed to the token's owner, so GitHub triggers CI on
+          # the resulting `changeset-release/main` PR. Using the default
+          # GITHUB_TOKEN instead attributes events to github-actions[bot],
+          # which GitHub intentionally doesn't run workflows for — leaving
+          # the release PR with indefinitely-pending checks. Falls back to
+          # GITHUB_TOKEN so the workflow still functions if the secret is
+          # unset (CI just won't auto-run on the opened PR, same as before).
+          GITHUB_TOKEN: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
