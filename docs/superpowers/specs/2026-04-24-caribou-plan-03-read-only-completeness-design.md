@@ -27,7 +27,7 @@ This plan executes §14 Appendix B item 6 of the v1 spec. It also depends on and
 
 One small deviation: Plan 2 shipped its home timeline at `/feed` instead of the spec's `/home`. Plan 3 renames `/feed` → `/home` and leaves `/feed` as a 301 redirect. Not a spec change; a Plan 2 drift we are fixing here while the blast radius is zero.
 
-Plan 3 also amends the v1 spec to add **zen mode** (see §9 below) so Plan 5 has a concrete definition to build against.
+Plan 3 also amends the v1 spec in two places (see §9 below): it carves out layout/composition shells from the "light DOM only" policy so `<caribou-app-shell>` can use shadow DOM for `<slot>` composition, and it defines zen mode so Plan 5 has a concrete target.
 
 ## 3. Scope & routes
 
@@ -269,13 +269,22 @@ All inline `style="…"` in the existing surface gets converted to utility class
 
 All new layout components live in `apps/caribou-elena/pages/components/`. Each extends `CaribouElement` (Elena base class) like existing components. Future adapter apps will reimplement these against their own base classes.
 
+**Shadow-DOM scope:** `<caribou-app-shell>` is the **only** component in Plan 3 that uses shadow DOM. Every other component — nav rail, right rail, status card, timeline, profile, thread — stays light-DOM (document-level utility classes continue to work). The shell opts into shadow DOM specifically to get native `<slot>` composition for hosting page content without clobbering it during re-renders.
+
+Rationale for the carve-out (amending v1 spec §7.3):
+- Shell composition needs `<slot>`; light-DOM alternatives (template helpers, render-prop-like patterns) scattered layout across every page.
+- Shadow-DOM shell is idiomatic in Lit and FAST, so the pattern translates cleanly to the future `caribou-lit` / `caribou-fast` ports.
+- Custom properties pierce shadow boundaries — design tokens (`var(--bg-0)`, etc.) work inside the shell unchanged.
+- Slotted content is in the light DOM of the host (not the shell's shadow tree), so document-level utility CSS still styles it correctly.
+
 ### 6.1 Component tree
 
 ```
-<caribou-app-shell>
-├── <caribou-nav-rail>          left
-├── <slot name="main">          center — page content
-└── <caribou-right-rail>        right (≥lg only)
+<caribou-app-shell>                                    shadow-DOM host
+  └─ (shadow root)
+       ├── <caribou-nav-rail>                          light-DOM component
+       ├── <main><slot></slot></main>                  native slot — page content projects here
+       └── <caribou-right-rail>                        light-DOM component (≥lg only)
 ```
 
 ### 6.2 Responsive breakpoints
@@ -327,21 +336,70 @@ Top to bottom:
 
 Slots are visible placeholders — not hidden — so users can see what's coming and so Plan 4/5 don't need to reflow the rail when wiring them.
 
-### 6.5 `<caribou-app-shell>` responsibilities
+### 6.5 `<caribou-app-shell>` — shadow-DOM layout host
 
-- Renders three-pane grid via UnoCSS grid utilities.
-- Exposes `main` slot for pages.
-- Owns responsive logic via a single Uno responsive class binding (no JS breakpoint checks).
-- Focus management: route change → focus `<h1>` in main slot (spec §8.8). Implemented in connected / attribute-changed lifecycle; pages only need to provide an `<h1>`.
+**Declaration:**
+
+```ts
+export class CaribouAppShell extends Elena(HTMLElement) {
+  static override tagName = 'caribou-app-shell'
+  static override shadow = 'open'
+  static override styles = [SHELL_CSS]   // built via @unocss/transformer-directives
+
+  override render() {
+    return html`
+      <div class="shell-grid">
+        <caribou-nav-rail></caribou-nav-rail>
+        <main><slot></slot></main>
+        <caribou-right-rail></caribou-right-rail>
+      </div>
+    `
+  }
+}
+CaribouAppShell.define()
+```
+
+**Responsibilities:**
+
+- Renders the three-pane grid inside its shadow root.
+- Exposes a default `<slot>` for page content.
+- Owns responsive logic via shadow-scoped CSS (container queries if needed; otherwise media queries on `host` width).
+- Focus management: route change → focus `<h1>` in slotted content (spec §8.8). Shadow-DOM can still `focus()` into slotted content via `document.querySelector('caribou-app-shell h1')`.
 - **Does not** own data fetching or route matching — pages still do that.
 
-### 6.6 Page usage pattern
+**Stylesheet source:** `SHELL_CSS` is a small hand-authored + `@unocss/transformer-directives`-processed string containing only what the shell needs — grid template, slot wrapper, responsive breakpoints (~40 lines of CSS). It is NOT the full `uno.css` bundle; the shell's DOM tree is tiny and doesn't need it.
+
+Elena adopts `static styles` via the browser's native `adoptedStyleSheets` API (confirmed at `@elenajs/core/src/elena.js:280–299`). Browsers dedupe shared `CSSStyleSheet` objects, so memory cost is one sheet regardless of how many shell instances mount.
+
+**Utility-class reach:** Document-level `uno.css` (inlined via `UNO_HEAD`) does NOT reach into the shell's shadow root — but it DOES style slotted content (which remains in the host's light DOM). So:
+- Inside shell's shadow tree: only the classes defined in `SHELL_CSS` work. Keep the shell template minimal; no utility classes inside.
+- In slotted content (every page's content): full utility class access as usual.
+
+### 6.6 Validation POC (first task in implementation)
+
+Before the rest of Plan 3 builds on top of this, the implementation plan's first task is a POC that **proves the approach works end to end**:
+
+1. Stand up `<caribou-app-shell>` with `static shadow = 'open'`, a minimal `static styles`, and one `<slot>`.
+2. Render a light-DOM child inside it (e.g., refactor `/home` / existing `<caribou-home-timeline>` into a temporary `<caribou-app-shell><caribou-home-timeline></caribou-home-timeline></caribou-app-shell>` wrapping).
+3. Verify:
+   - [ ] Slotted content renders in the correct grid cell.
+   - [ ] Slotted content inherits `var(--bg-0)`, `var(--text-1)`, etc. (custom properties pierce shadow).
+   - [ ] Utility classes on slotted content (e.g., `mx-auto`, `max-w-[640px]`) take effect from document-level `uno.css`.
+   - [ ] Responsive breakpoint behavior — shell layout changes at `md` / `lg`.
+   - [ ] Elena hydration works (the shell is SSR-rendered, then upgrades in-place without flicker).
+   - [ ] Playwright smoke test: mount shell + child, assert computed styles on slotted child.
+
+If any of these fail, the plan pauses and we reassess (back to template helper or full light-DOM). This POC is a hard gate — Plan 3's Task 1.
+
+### 6.7 Page usage pattern
 
 ```html
 <caribou-app-shell>
-  <caribou-timeline slot="main" kind="local"></caribou-timeline>
+  <caribou-timeline kind="local"></caribou-timeline>
 </caribou-app-shell>
 ```
+
+Pages use the default slot (no `slot="main"` attribute needed). The shell's `<slot>` captures all children and projects them into its `<main>` cell.
 
 The existing `/home` (née `/feed`) page is refactored to this shape in Plan 3, as part of the utility-class migration.
 
@@ -502,9 +560,17 @@ Split the existing component via a new `variant` attr — single component file,
 
 `pages/about.ts` is analogous.
 
-## 9. Spec amendment — zen mode
+## 9. Parent spec amendments
 
-Plan 3 does not implement zen mode. It adds zen mode to the v1 spec so Plan 5 has a concrete definition and so Plan 3 can reserve the right-rail slot with correct future semantics.
+Plan 3 introduces two amendments to the v1 spec (`docs/superpowers/specs/2026-04-21-caribou-v1-design.md`): a carve-out to the light-DOM policy for layout components, and the definition of zen mode so Plan 5 has a concrete target.
+
+### 9.0 Amendment — §7.3 (Styling / DOM mode)
+
+Current text reads "Force light DOM in all three adapter variants." Replace with:
+
+> **DOM mode:** Light DOM by default in all three adapter variants (so utility-class CSS from `uno.css` reaches every component). **Exception: layout/composition components** (`<caribou-app-shell>` and any future shell-like components that need `<slot>` projection) may use shadow DOM. Such components ship their own small `static styles` (adopted stylesheets) rather than relying on document-level utility CSS. Slotted content stays in light DOM and continues to receive document-level styling.
+
+Rationale: composition patterns that need to host arbitrary page content (without clobbering it on re-render) need native `<slot>`, which requires shadow DOM. The carve-out is scoped to layout shells; feature components stay light-DOM. Custom properties pierce shadow boundaries, so design tokens work across both.
 
 ### 9.1 Amendment — §2.1 (In scope)
 
@@ -542,15 +608,16 @@ Tests co-located with source per existing repo convention: `src/*.ts` + `test/*.
 
 Minimal, high-value only:
 
+- **Shell POC (§6.6)** — Playwright smoke test mounting `<caribou-app-shell>` with a slotted child, asserting: (a) slotted content appears in the expected grid cell, (b) slotted child's computed `color` resolves `var(--text-1)` to the dark-theme value, (c) utility class `max-w-[640px]` applied to slotted content produces the expected `max-width`, (d) responsive grid layout changes between 500px / 800px / 1200px viewports. This test is the gate for §6.6 and must pass before any other Plan 3 work merges.
 - `caribou-status-card` variant rendering — four tests (one per variant) with a canned `Status` fixture. Assert the utility classes applied on the root element, not pixel output.
 - `caribou-thread` indent cap — render a depth-5 descendant chain, assert DOM indentation stops at depth 3.
 - `caribou-profile` tab parsing — mount with `?tab=media`, assert `onlyMedia: true` was passed to `createProfileStore`.
 
 ### 10.3 E2E tests
 
-**None added in Plan 3.** Existing Playwright suite (signin + home timeline from Plan 2) runs in CI unchanged.
+Only the shell POC test (in §10.2) is new. Existing Playwright suite (signin + home timeline from Plan 2) runs in CI unchanged.
 
-Rationale: adding Playwright coverage for read-only screens delivers little signal per minute of test runtime. Unit + integration tests above catch regressions more cheaply. Plan 4 adds E2E for interactions — the feature that genuinely needs click-through coverage.
+Rationale: adding Playwright coverage for remaining read-only screens delivers little signal per minute of test runtime. Unit + integration tests catch regressions more cheaply. Plan 4 adds E2E for interactions — the feature that genuinely needs click-through coverage.
 
 ### 10.4 Manual verification checklist
 
@@ -617,6 +684,8 @@ Restated so Plan 3 reviewers don't expect them:
 - **Custom 404 page** — Litro default acceptable for Plan 3; polish lives in Plan 5.
 - **Error-boundary component** — per-store error state inside timeline/profile/thread is sufficient.
 - **Profile avatar upload / edit** — write feature, out of plan's scope (probably Plan 5).
+- **Light-DOM shell with template helper function** — rejected in favor of shadow-DOM shell. Template helpers scatter layout markup across every page's render method; shadow-DOM shell centralizes it and uses `<slot>` native composition. Also translates to Lit/FAST ports more cleanly.
+- **Full-app shadow DOM** — keeps light-DOM default for feature components so document-level `uno.css` keeps working without per-component adopted stylesheets. Only layout shells opt into shadow.
 
 ---
 
@@ -630,3 +699,5 @@ None. All decisions closed during brainstorming:
 - Architecture: Approach B (infrastructure-first — UI-headless package, status-card variants, UnoCSS stand-up).
 - Dark-mode only in Plan 3; theme toggle + light-mode → Plan 5.
 - Zen-mode spec amendment included in this plan.
+- **Shell composition:** shadow-DOM opt-in for `<caribou-app-shell>` only; all other components stay light-DOM. Validated via POC (§6.6) as Plan 3's first task, gating everything else.
+- **v1 spec §7.3 amendment:** light-DOM default with carve-out for layout shells — documented in §9.0.
