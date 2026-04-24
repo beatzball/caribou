@@ -9,19 +9,63 @@ const MESSAGES: Record<string, string> = {
   unreachable: "Couldn't reach that instance. Check the spelling and try again.",
 }
 
+/**
+ * Captured once per document lifetime. Litro's client-side router
+ * destroys and re-creates the outlet subtree after SSR hydration, which
+ * means every route swap produces a brand-new <caribou-error-banner>.
+ * If each instance tried to read `location.search` and then clear the
+ * query param, the FIRST (SSR-hydrated) instance would consume `?error=…`
+ * and clean the URL — leaving the second (router-mounted) instance,
+ * which is the one actually visible to the user, with `code = null`.
+ *
+ * We read the param at module load so every instance sees the same
+ * code. The URL clean-up is deferred to a rAF so that external
+ * observers (e.g. Playwright's `waitForURL` watching for a redirect to
+ * `/?error=unauthorized`) have a chance to see the query param in the
+ * address bar before we strip it.
+ */
+function scheduleUrlCleanup(): void {
+  const doCleanup = () => {
+    const u = new URL(location.href)
+    if (!u.searchParams.has('error') && !u.searchParams.has('instance')) return
+    u.searchParams.delete('error')
+    u.searchParams.delete('instance')
+    history.replaceState(null, '', u.pathname + (u.search ? u.search : ''))
+  }
+  // Defer the rewrite so CDP observers (e.g. Playwright's `waitForURL`,
+  // which waits for `load` by default) can read `?error=…` before we
+  // strip it. Schedule well after `load`: a synchronous `replaceState`
+  // during the load phase can be interpreted as the frame "navigating
+  // away" by Playwright, which surfaces as `net::ERR_ABORTED`.
+  const run = () => setTimeout(doCleanup, 250)
+  if (document.readyState === 'complete') {
+    run()
+  } else {
+    window.addEventListener('load', run, { once: true })
+  }
+}
+
+function captureErrorCode(): string | null {
+  if (typeof window === 'undefined') return null
+  const url = new URL(location.href)
+  const code = url.searchParams.get('error')
+  if (code) scheduleUrlCleanup()
+  return code
+}
+
+let capturedCode: string | null | undefined
+function getCapturedCode(): string | null {
+  if (capturedCode === undefined) capturedCode = captureErrorCode()
+  return capturedCode
+}
+
 export class CaribouErrorBanner extends Elena(HTMLElement) {
   static override tagName = 'caribou-error-banner'
   private code: string | null = null
 
   override connectedCallback() {
     super.connectedCallback?.()
-    const url = new URL(location.href)
-    this.code = url.searchParams.get('error')
-    if (this.code) {
-      url.searchParams.delete('error')
-      url.searchParams.delete('instance')
-      history.replaceState(null, '', url.pathname + (url.search ? url.search : ''))
-    }
+    this.code = getCapturedCode()
     this.requestUpdate()
   }
 

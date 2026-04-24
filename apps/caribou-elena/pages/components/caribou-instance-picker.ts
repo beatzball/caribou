@@ -2,8 +2,24 @@ import { Elena, html } from '@elenajs/core'
 
 export class CaribouInstancePicker extends Elena(HTMLElement) {
   static override tagName = 'caribou-instance-picker'
+  // Forward `submit` on the inner element up to this host; submit is a
+  // non-bubbling, non-composed event so Elena re-dispatches it on the host.
+  static override events = ['submit']
+
   private submitting = false
   private error: string | null = null
+
+  /**
+   * Elena wires `this.element.addEventListener('submit', this)` (see
+   * `_delegateEvents` in @elenajs/core). That invokes `handleEvent` on
+   * this host. The inner element is the <form>, so submit reaches us
+   * with `currentTarget` = the form element.
+   */
+  handleEvent(e: Event) {
+    if (e.type === 'submit') {
+      void this.onSubmit(e)
+    }
+  }
 
   private async onSubmit(e: Event) {
     e.preventDefault()
@@ -35,17 +51,24 @@ export class CaribouInstancePicker extends Elena(HTMLElement) {
     }
   }
 
+  override updated() {
+    // Boolean `disabled` must be assigned imperatively: Elena's template
+    // engine only supports plain `attr="…"` interpolation, and any value
+    // (including "") reads as truthy on `disabled`.
+    const btn = this.querySelector<HTMLButtonElement>('button[type="submit"]')
+    if (btn) btn.disabled = this.submitting
+  }
+
   override render() {
     return html`
-      <form @submit=${(e: Event) => this.onSubmit(e)}
-            style="display:flex;flex-direction:column;gap:var(--space-3);max-width:400px;margin:0 auto;">
+      <form style="display:flex;flex-direction:column;gap:var(--space-3);max-width:400px;margin:0 auto;">
         <label for="server" style="color:var(--fg-1);">Your Mastodon instance</label>
         <input id="server" name="server" type="text" autocomplete="off"
                placeholder="mastodon.social"
                required
                style="padding:var(--space-3);border-radius:var(--radius-md);
                       border:1px solid var(--border);background:var(--bg-1);color:var(--fg-0);" />
-        <button type="submit" ?disabled=${this.submitting}
+        <button type="submit"
                 style="padding:var(--space-3);border-radius:var(--radius-md);
                        border:0;background:var(--accent);color:var(--accent-fg);cursor:pointer;">
           ${this.submitting ? 'Connecting…' : 'Sign in'}

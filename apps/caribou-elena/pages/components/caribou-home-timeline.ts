@@ -41,6 +41,30 @@ export class CaribouHomeTimeline extends Elena(HTMLElement) {
     super.disconnectedCallback?.()
   }
 
+  override updated() {
+    // Elena's template engine only interpolates plain `attr=`. It does
+    // NOT wire `.prop=` bindings, so we assign object/number props on
+    // child components imperatively after each render. Guard each
+    // assignment against re-setting the same object/number — setting a
+    // reactive prop triggers a child re-render, and the child's own
+    // `updated()` rewrites its `.status-content` innerHTML, producing
+    // a brief DOM mutation storm that Playwright's `toBeVisible` can
+    // transiently observe as "more than one match" under strict mode.
+    const banner = this.querySelector<HTMLElement & { count?: number }>(
+      'caribou-new-posts-banner',
+    )
+    if (banner && banner.count !== this.newCount) banner.count = this.newCount
+
+    const cards = this.querySelectorAll<HTMLElement & { status?: mastodon.v1.Status | null }>(
+      'caribou-status-card[data-index]',
+    )
+    cards.forEach((card) => {
+      const idx = Number(card.dataset.index)
+      const status = this.statuses[idx]
+      if (status && card.status !== status) card.status = status
+    })
+  }
+
   override render() {
     if (this.errorMsg) {
       return html`
@@ -50,20 +74,22 @@ export class CaribouHomeTimeline extends Elena(HTMLElement) {
       `
     }
     if (this.loading && this.statuses.length === 0) {
-      return html`<p style="padding:var(--space-4);color:var(--fg-muted);">Loading your timeline…</p>`
+      return html`<div style="padding:var(--space-4);color:var(--fg-muted);">Loading your timeline…</div>`
     }
     if (this.statuses.length === 0) {
-      return html`<p style="padding:var(--space-4);color:var(--fg-muted);">No posts yet.</p>`
+      return html`<div style="padding:var(--space-4);color:var(--fg-muted);">No posts yet.</div>`
     }
     return html`
-      <caribou-new-posts-banner .count=${this.newCount}></caribou-new-posts-banner>
-      <ul style="list-style:none;margin:0;padding:0;">
-        ${this.statuses.map((s) => html`
-          <li>
-            <caribou-status-card .status=${s}></caribou-status-card>
-          </li>
-        `)}
-      </ul>
+      <div>
+        <caribou-new-posts-banner></caribou-new-posts-banner>
+        <ul style="list-style:none;margin:0;padding:0;">
+          ${this.statuses.map((s, i) => html`
+            <li>
+              <caribou-status-card data-index=${i} data-status-id=${s.id}></caribou-status-card>
+            </li>
+          `)}
+        </ul>
+      </div>
     `
   }
 }
