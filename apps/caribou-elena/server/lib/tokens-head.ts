@@ -6,15 +6,11 @@
 // links — inlining keeps the source of truth in @beatzball/caribou-design-tokens
 // while guaranteeing the variables are defined on initial render.
 //
-// At ~1KB, inline beats a separate <link>: no extra RTT, no flash of
-// unstyled content, and robust against the Vite-manifest path changing.
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-
-const require = createRequire(import.meta.url)
-const TOKENS_CSS = readFileSync(
-  require.resolve('@beatzball/caribou-design-tokens/tokens.css'),
-  'utf8',
-)
+// TOKENS_CSS is baked in at build time by scripts/write-tokens-head.mjs.
+// Reading the file at module init (readFileSync + require.resolve) would
+// throw MODULE_NOT_FOUND in production, because the deployed Docker image
+// only ships `dist/` — no node_modules, so the workspace package isn't
+// resolvable at runtime.
+import { TOKENS_CSS } from './tokens-head.generated.js'
 
 export const TOKENS_HEAD = `<style id="caribou-tokens">${TOKENS_CSS}</style>`
