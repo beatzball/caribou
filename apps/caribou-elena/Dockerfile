@@ -7,14 +7,19 @@ RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 WORKDIR /repo
 COPY . .
 RUN pnpm install --frozen-lockfile
-# GIT_SHA and version are baked into server/build-meta.generated.ts by the
-# package's prebuild script (`write-build-meta.mjs`), which reads git HEAD.
-# Passing --build-arg GIT_SHA=<sha> is optional — the script reads env first,
-# then falls back to `git rev-parse HEAD` against the repo copied into the
-# build context (see .dockerignore — we intentionally keep .git).
+# The commit SHA feeding /api/health.commit comes (in order of preference)
+# from: an explicit --build-arg GIT_SHA, Coolify's own SOURCE_COMMIT build
+# arg (set automatically per deploy), or `git rev-parse HEAD` against the
+# repo in the build context. The build script (`write-build-meta.mjs`) walks
+# that chain. Coolify strips .git from the build context in some
+# configurations, so the SOURCE_COMMIT fallback is what keeps the canary
+# honest in prod.
 ARG GIT_SHA
+ARG SOURCE_COMMIT
 ENV GIT_SHA=${GIT_SHA}
-RUN pnpm --filter caribou-elena build
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
+RUN echo "[build-meta env] GIT_SHA=${GIT_SHA:-<unset>} SOURCE_COMMIT=${SOURCE_COMMIT:-<unset>} .git=$(test -d .git && echo present || echo missing)" \
+ && pnpm --filter caribou-elena build
 
 # Stage 2: runtime
 FROM node:22-alpine AS runtime
