@@ -52,7 +52,10 @@ jobs:
         with: { name: playwright-report, path: apps/caribou-elena/playwright-report }
 
   changeset-check:
-    if: github.event_name == 'pull_request'
+    # Skip on the bot-authored release PR, which legitimately consumes all
+    # pending changesets — `changeset status` treats "packages changed but
+    # no changesets" as a hard error, which is the whole point of that PR.
+    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
