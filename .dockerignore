@@ -8,6 +8,6 @@
 **/test-results
 **/tests/e2e
 **/*.log
-.git
+# Intentionally keep .git so `write-build-meta` can read HEAD during Docker build.
 .github
 docs
