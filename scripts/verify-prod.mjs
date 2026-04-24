@@ -4,7 +4,14 @@ import { execSync } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 const BASE = (process.env.CARIBOU_BASE_URL ?? 'https://caribou.quest').replace(/\/$/, '')
+// CARIBOU_SKIP_SHA_ASSERT is set by the pre-merge smoke-image job, where the
+// probe target is a freshly built container on localhost and GITHUB_SHA can
+// legitimately match the image's baked commit — but we don't want CI to
+// assert on it, because that would couple the smoke test to the write-build-meta
+// fallback chain (env → SOURCE_COMMIT → git rev-parse). The post-deploy
+// probe against caribou.quest is where commit-pinning actually matters.
 const EXPECTED_SHA = (() => {
+  if (process.env.CARIBOU_SKIP_SHA_ASSERT === '1') return null
   const fromEnv = process.env.GITHUB_SHA?.trim()
   if (fromEnv) return fromEnv
   try {
@@ -17,9 +24,10 @@ const EXPECTED_SHA = (() => {
 // Retry budget is sized to absorb Coolify's build + container-swap window,
 // which runs asynchronously after the deploy webhook returns. A fresh build
 // is typically ready in 60–120s; we budget 4 minutes per check to stay
-// comfortably above that without blocking CI forever.
-const RETRIES = 30
-const DELAY_MS = 8000
+// comfortably above that without blocking CI forever. The smoke-image job
+// probes a local container (starts in ~2s) and overrides these via env.
+const RETRIES = Number(process.env.CARIBOU_PROBE_RETRIES) || 30
+const DELAY_MS = Number(process.env.CARIBOU_PROBE_DELAY_MS) || 8000
 const FETCH_TIMEOUT_MS = 10_000
 
 async function fetchWithTimeout(url, init) {
