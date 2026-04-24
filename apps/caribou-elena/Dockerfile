@@ -2,12 +2,17 @@
 
 # Stage 1: build
 FROM node:22-alpine AS builder
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat git
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 WORKDIR /repo
 COPY . .
 RUN pnpm install --frozen-lockfile
-ARG GIT_SHA=dev
+# GIT_SHA and version are baked into server/build-meta.generated.ts by the
+# package's prebuild script (`write-build-meta.mjs`), which reads git HEAD.
+# Passing --build-arg GIT_SHA=<sha> is optional — the script reads env first,
+# then falls back to `git rev-parse HEAD` against the repo copied into the
+# build context (see .dockerignore — we intentionally keep .git).
+ARG GIT_SHA
 ENV GIT_SHA=${GIT_SHA}
 RUN pnpm --filter caribou-elena build
 

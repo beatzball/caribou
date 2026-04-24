@@ -74,3 +74,17 @@ jobs:
           curl -fSsL -X POST \
             -H "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}" \
             "${{ secrets.COOLIFY_WEBHOOK_URL }}"
+
+  verify-prod:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Probe caribou.quest
+        env:
+          CARIBOU_BASE_URL: https://caribou.quest
+          GITHUB_SHA: ${{ github.sha }}
+        run: node scripts/verify-prod.mjs

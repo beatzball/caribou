@@ -7,17 +7,18 @@
     "#litro/page-manifest": "./server/stubs/page-manifest.ts"
   },
   "scripts": {
-    "dev": "litro dev",
-    "dev:portless": "portless run litro dev",
-    "build": "litro build",
+    "build-meta": "node scripts/write-build-meta.mjs",
+    "dev": "pnpm build-meta && litro dev",
+    "dev:portless": "pnpm build-meta && portless run litro dev",
+    "build": "pnpm build-meta && litro build",
     "preview": "litro preview",
     "preview:portless": "portless run litro preview",
     "generate": "litro generate",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm build-meta && tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test": "pnpm build-meta && vitest run",
+    "test:coverage": "pnpm build-meta && vitest run --coverage",
+    "test:e2e": "pnpm build-meta && playwright test"
   },
   "dependencies": {
     "@beatzball/litro": "latest",
