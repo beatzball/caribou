@@ -1,13 +1,15 @@
 {
   "name": "@beatzball/caribou-design-tokens",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "./tokens.css",
   "exports": {
     "./tokens.css": "./tokens.css"
   },
-  "files": ["tokens.css"],
+  "files": [
+    "tokens.css"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit --allowJs false --skipLibCheck || true",
     "lint": "eslint .",
