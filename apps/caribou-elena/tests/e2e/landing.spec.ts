@@ -41,9 +41,13 @@ test('landing page has no a11y violations', async ({ page }) => {
   expect(results.violations).toEqual([])
 })
 
-test('health endpoint returns ok', async ({ request }) => {
+test('health endpoint returns ok with build metadata', async ({ request }) => {
   const res = await request.get('/api/health')
   expect(res.status()).toBe(200)
   const body = await res.json()
   expect(body.status).toBe('ok')
+  expect(typeof body.commit).toBe('string')
+  expect(body.commit.length).toBeGreaterThan(0)
+  expect(typeof body.version).toBe('string')
+  expect(body.version.length).toBeGreaterThan(0)
 })
