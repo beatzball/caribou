@@ -2,6 +2,7 @@ import { defineEventHandler, setResponseHeader, getRequestURL } from 'h3';
 import { createPageHandler } from '@beatzball/litro/runtime/create-page-handler.js';
 import type { LitroRoute } from '@beatzball/litro';
 import { routes, pageModules } from '#litro/page-manifest';
+import { TOKENS_HEAD } from '../lib/tokens-head.js';
 
 function matchRoute(
   pathname: string,
@@ -54,6 +55,12 @@ export default defineEventHandler(async (event) => {
   const handler = createPageHandler({
     route: matched,
     pageModule: pageModules[matched.filePath],
+    // `routeMeta.head` is appended into every page's <head> by Litro's
+    // shell builder. Inlining the design-token <style> here is what makes
+    // `var(--bg-0)` et al. resolve on the very first paint — Vite
+    // extracts `tokens.css` out of the client JS bundle, so without this
+    // injection the shell would ship zero stylesheet references.
+    routeMeta: { head: TOKENS_HEAD },
   });
   return handler(event);
 });
