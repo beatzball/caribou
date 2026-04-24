@@ -44,7 +44,7 @@ const HTML = `<!DOCTYPE html>
         localStorage.setItem('caribou.users', JSON.stringify(Array.from(users.entries())));
         localStorage.setItem('caribou.activeUserKey', JSON.stringify(userKey));
         history.replaceState(null, '', '/');
-        location.replace('/home');
+        location.replace('/feed');
       } catch (e) {
         showFallback();
       }

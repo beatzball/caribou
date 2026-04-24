@@ -28,25 +28,36 @@ test.beforeEach(async ({ page }) => {
     account: SAMPLE_ACCOUNT,
     createdAt: 1,
   }
+  // `addInitScript` runs on every new document in the context, including
+  // post-redirect navigations inside a single test. The 401-interceptor
+  // test asserts that `removeActiveUser()` clears the active key — so if
+  // we blindly re-seed on the redirect target (`/`), localStorage is
+  // restored before the assertion reads it. Guard with a sentinel that
+  // survives same-context navigations (localStorage is per-origin, so
+  // it persists across the replace).
   await page.addInitScript((data) => {
+    if (localStorage.getItem('caribou.__seeded__') === '1') return
     localStorage.setItem('caribou.users', JSON.stringify([[data.userKey, data]]))
     localStorage.setItem('caribou.activeUserKey', JSON.stringify(data.userKey))
+    localStorage.setItem('caribou.__seeded__', '1')
   }, session)
 })
 
-test('/home without activeUserKey redirects to /', async ({ page, context }) => {
+test('/feed without activeUserKey redirects to /', async ({ page, context }) => {
   // Clear the script from beforeEach for this one test.
   await context.clearCookies()
   await page.addInitScript(() => {
     localStorage.removeItem('caribou.users')
     localStorage.removeItem('caribou.activeUserKey')
   })
-  await page.goto('/home')
+  await page.goto('/feed')
   await page.waitForURL((url) => url.pathname === '/')
   expect(new URL(page.url()).pathname).toBe('/')
 })
 
-test('/home with activeUserKey renders timeline statuses from the fake Mastodon API', async ({ page }) => {
+test('/feed with activeUserKey renders timeline statuses from the fake Mastodon API', async ({ page }) => {
+  // Note: `/api/v1/timelines/home` is the Mastodon API endpoint for the
+  // "home" timeline type — unrelated to our page route. Do not rename it.
   await page.route('**/api/v1/timelines/home*', (route) => {
     const u = new URL(route.request().url())
     const since = u.searchParams.get('since_id')
@@ -56,12 +67,21 @@ test('/home with activeUserKey renders timeline statuses from the fake Mastodon 
       body: JSON.stringify([makeStatus('a', '<p>hello world</p>'), makeStatus('b', '<p>second post</p>')]),
     })
   })
-  await page.goto('/home')
-  await expect(page.getByText('hello world')).toBeVisible()
-  await expect(page.getByText('second post')).toBeVisible()
+  await page.goto('/feed')
+  // During the first client-side navigation, Litro's router appends the
+  // newly-routed <page-feed> alongside the SSR-rendered one (the former
+  // is hidden until the inner components finish their first render, then
+  // the SSR element is removed). Both elements run Elena's custom-element
+  // lifecycle, so both fetch and both render the timeline — meaning the
+  // same post text briefly appears in TWO parts of the DOM. Scope text
+  // assertions to the currently-visible <main> to avoid strict-mode
+  // collisions on that transient duplicate.
+  const mainVisible = page.locator('main').filter({ visible: true }).first()
+  await expect(mainVisible.getByText('hello world')).toBeVisible()
+  await expect(mainVisible.getByText('second post')).toBeVisible()
 })
 
-test('/home surfaces a "new posts" banner when polling finds newer statuses', async ({ page }) => {
+test('/feed surfaces a "new posts" banner when polling finds newer statuses', async ({ page }) => {
   let sawInitial = false
   await page.route('**/api/v1/timelines/home*', (route) => {
     const u = new URL(route.request().url())
@@ -78,24 +98,36 @@ test('/home surfaces a "new posts" banner when polling finds newer statuses', as
       body: JSON.stringify([makeStatus('a', '<p>first post</p>')]),
     })
   })
-  await page.goto('/home')
-  await expect(page.getByText('first post')).toBeVisible()
+  await page.goto('/feed')
+  // Scope to the visible <main> — see comment in the previous test about
+  // Litro's double-mount during initial hydration.
+  const mainVisible = page.locator('main').filter({ visible: true }).first()
+  await expect(mainVisible.getByText('first post')).toBeVisible()
   expect(sawInitial).toBe(true)
 
   // Force a poll immediately by dispatching the banner's host visibility transition.
   await page.evaluate(() =>
     document.dispatchEvent(new Event('visibilitychange')))
 
-  await expect(page.getByRole('button', { name: /1 new post/i })).toBeVisible({ timeout: 5000 })
-  await page.getByRole('button', { name: /1 new post/i }).click()
-  await expect(page.getByText('newer post')).toBeVisible()
+  await expect(mainVisible.getByRole('button', { name: /1 new post/i })).toBeVisible({ timeout: 5000 })
+  await mainVisible.getByRole('button', { name: /1 new post/i }).click()
+  await expect(mainVisible.getByText('newer post')).toBeVisible()
 })
 
-test('/home clears session and redirects on 401', async ({ page }) => {
+test('/feed clears session and redirects on 401', async ({ page }) => {
+  // masto 7.10.2's `HttpNativeImpl.createError` throws `MastoUnexpectedError`
+  // (no statusCode) when the error response has no Content-Type — so a
+  // body-less `{ status: 401 }` never reaches our `normalizeError` 401
+  // branch. Return a JSON body so `MastoHttpError` is raised with
+  // `statusCode: 401` and `session.onUnauthorized()` actually fires.
   await page.route('**/api/v1/timelines/home*', (route) =>
-    route.fulfill({ status: 401 }),
+    route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'unauthorized' }),
+    }),
   )
-  await page.goto('/home')
+  await page.goto('/feed')
   await page.waitForURL((url) => url.pathname === '/' && url.search.includes('unauthorized'))
   const ls = await page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))
   expect(ls).toBe('null')

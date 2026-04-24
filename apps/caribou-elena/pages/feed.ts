@@ -2,12 +2,19 @@ import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import './components/caribou-home-timeline.js'
 
-export default class HomePage extends LitroPage {
-  static override tagName = 'page-home-feed'
+export default class FeedPage extends LitroPage {
+  static override tagName = 'page-feed'
+  // `click` bubbles, so Elena's listener on the inner wrapper element
+  // catches the Sign-out button click and routes it through this host's
+  // `handleEvent`.
+  static override events = ['click']
 
-  private onSignOut() {
+  handleEvent(e: Event) {
+    if (e.type !== 'click') return
+    const target = e.target as HTMLElement | null
+    if (!target?.closest('button[data-action="sign-out"]')) return
     if (typeof window === 'undefined') return
-    import('@beatzball/caribou-state').then(({ removeActiveUser }) => {
+    void import('@beatzball/caribou-state').then(({ removeActiveUser }) => {
       removeActiveUser()
       location.href = '/'
     })
@@ -28,7 +35,7 @@ export default class HomePage extends LitroPage {
         <header style="display:flex;align-items:center;justify-content:space-between;
                        padding:var(--space-3) var(--space-4);border-bottom:1px solid var(--border);">
           <h1 style="margin:0;font-size:1.25rem;">Home</h1>
-          <button type="button" @click=${() => this.onSignOut()}
+          <button type="button" data-action="sign-out"
                   style="padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);
                          border:1px solid var(--border);background:transparent;color:var(--fg-1);cursor:pointer;">
             Sign out
@@ -39,4 +46,4 @@ export default class HomePage extends LitroPage {
     `
   }
 }
-HomePage.define()
+FeedPage.define()
