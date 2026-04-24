@@ -47,6 +47,19 @@ function scheduleUrlCleanup(): void {
 
 function captureErrorCode(): string | null {
   if (typeof window === 'undefined') return null
+  // Client-side flows (401 interceptor) signal errors via sessionStorage
+  // — race-free across the same-tab `location.replace`. Consume-on-read
+  // so a later mount doesn't pick it up again.
+  try {
+    const stashed = sessionStorage.getItem('caribou.error')
+    if (stashed) {
+      sessionStorage.removeItem('caribou.error')
+      return stashed
+    }
+  } catch { /* ignore */ }
+  // Server-side OAuth callback flows (e.g. `/signin/callback` 302
+  // redirecting to `/?error=denied`) signal via URL query param — then
+  // we clean it up for cosmetics.
   const url = new URL(location.href)
   const code = url.searchParams.get('error')
   if (code) scheduleUrlCleanup()

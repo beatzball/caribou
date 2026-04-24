@@ -28,7 +28,14 @@ if (typeof window !== 'undefined') {
     if (unauthorizedHandled) return
     unauthorizedHandled = true
     removeActiveUser()
-    location.replace('/?error=unauthorized')
+    // Signal the error via sessionStorage instead of `?error=` on the
+    // replace target. Firefox + webkit race the query param between
+    // `location.replace` and navigation commit (firefox sometimes drops
+    // it entirely; webkit observes the banner's post-load URL cleanup).
+    // sessionStorage survives the same-tab navigation atomically and is
+    // browser-agnostic.
+    try { sessionStorage.setItem('caribou.error', 'unauthorized') } catch { /* ignore */ }
+    location.replace('/')
   })
 }
 
