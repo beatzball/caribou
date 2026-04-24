@@ -1,4 +1,6 @@
-import '@beatzball/caribou-design-tokens/tokens.css'
+// Design tokens are inlined server-side via `server/lib/tokens-head.ts`
+// so `var(--bg-0)` et al. resolve on first paint (Vite otherwise extracts
+// a tokens.css import into a stylesheet the SSR shell never links to).
 
 // Elena adapter router outlet + link custom elements.
 import '@beatzball/litro/adapter/elena/runtime'
