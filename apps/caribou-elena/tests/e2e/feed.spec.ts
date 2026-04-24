@@ -128,7 +128,16 @@ test('/feed clears session and redirects on 401', async ({ page }) => {
     }),
   )
   await page.goto('/feed')
-  await page.waitForURL((url) => url.pathname === '/' && url.search.includes('unauthorized'))
+  // `caribou-error-banner` strips the `error=` query param ~250ms after
+  // the landing page's `load` event fires (to avoid looking like an
+  // ongoing navigation while CDP clients read the URL). Use
+  // `waitUntil: 'domcontentloaded'` so `waitForURL` observes the URL
+  // before that cleanup timer fires — `domcontentloaded` is committed
+  // well before `load`, so the query param is guaranteed present.
+  await page.waitForURL(
+    (url) => url.pathname === '/' && url.search.includes('unauthorized'),
+    { waitUntil: 'domcontentloaded' },
+  )
   const ls = await page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))
   expect(ls).toBe('null')
 })
