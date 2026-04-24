@@ -1,0 +1,9 @@
+{
+  "extends": "@beatzball/caribou-tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true
+  },
+  "include": ["src", "vitest.config.ts"],
+  "exclude": ["node_modules"]
+}

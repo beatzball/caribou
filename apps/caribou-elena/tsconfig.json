@@ -6,6 +6,6 @@
       "~/*": ["./*"]
     }
   },
-  "include": ["pages", "server", "tests", "*.ts", "*.config.ts"],
+  "include": ["pages", "server", "tests", "types", "*.ts", "*.config.ts"],
   "exclude": ["node_modules", ".output", ".nitro"]
 }

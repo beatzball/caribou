@@ -1,0 +1,29 @@
+{
+  "name": "@beatzball/caribou-mastodon-client",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@beatzball/caribou-auth": "workspace:*",
+    "masto": "^7.0.0"
+  },
+  "devDependencies": {
+    "@beatzball/caribou-eslint-config": "workspace:*",
+    "@beatzball/caribou-tsconfig": "workspace:*",
+    "@vitest/coverage-v8": "^2.1.0",
+    "eslint": "^9.0.0",
+    "msw": "^2.6.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.0"
+  }
+}
