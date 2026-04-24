@@ -116,8 +116,15 @@ test('/feed surfaces a "new posts" banner when polling finds newer statuses', as
     document.dispatchEvent(new Event('visibilitychange')))
 
   await expect(mainVisible.getByRole('button', { name: /1 new post/i })).toBeVisible({ timeout: 5000 })
+  // REGRESSION: the existing timeline must stay mounted while the banner is
+  // showing — otherwise the "X new posts" button appears alone and the user
+  // loses access to the posts they were reading before the poll.
+  await expect(mainVisible.getByText('first post')).toBeVisible()
   await mainVisible.getByRole('button', { name: /1 new post/i }).click()
   await expect(mainVisible.getByText('newer post')).toBeVisible()
+  // After applying, both the pre-existing post and the newer post should be
+  // present.
+  await expect(mainVisible.getByText('first post')).toBeVisible()
 })
 
 test('/feed clears session and redirects on 401', async ({ page }) => {

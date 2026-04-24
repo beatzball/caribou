@@ -42,26 +42,45 @@ export class CaribouHomeTimeline extends Elena(HTMLElement) {
   }
 
   override updated() {
-    // Elena's template engine only interpolates plain `attr=`. It does
-    // NOT wire `.prop=` bindings, so we assign object/number props on
-    // child components imperatively after each render. Guard each
-    // assignment against re-setting the same object/number — setting a
-    // reactive prop triggers a child re-render, and the child's own
-    // `updated()` rewrites its `.status-content` innerHTML, producing
-    // a brief DOM mutation storm that Playwright's `toBeVisible` can
-    // transiently observe as "more than one match" under strict mode.
-    const banner = this.querySelector<HTMLElement & { count?: number }>(
+    // Elena's template engine only interpolates plain `attr=`; it does
+    // NOT wire `.prop=` bindings, so object/number props on child
+    // components are assigned imperatively after each parent render.
+    //
+    // Elena's morph also recurses into the light DOM of custom-element
+    // children (see @elenajs/core render.js `morphContent`). Our child
+    // templates here (`<caribou-status-card>`, `<caribou-new-posts-banner>`)
+    // are rendered empty from the parent's perspective, so morph strips
+    // whatever each child rendered for itself — blanking the timeline to
+    // the bare sticky "N new posts" button on every poll tick. Assigning
+    // a different prop value repairs the child because Elena's setter
+    // triggers `_safeRender`; but when the prop reference is stable
+    // (cached status objects are the same map entry across polls), the
+    // `===` short-circuit skips the re-render and the wiped inner DOM
+    // stays wiped. Fall back to `requestUpdate()` whenever the child's
+    // light DOM was emptied.
+    const banner = this.querySelector<HTMLElement & { count?: number; requestUpdate?: () => void }>(
       'caribou-new-posts-banner',
     )
-    if (banner && banner.count !== this.newCount) banner.count = this.newCount
+    if (banner) {
+      if (banner.count !== this.newCount) {
+        banner.count = this.newCount
+      } else if (banner.children.length === 0) {
+        banner.requestUpdate?.()
+      }
+    }
 
-    const cards = this.querySelectorAll<HTMLElement & { status?: mastodon.v1.Status | null }>(
+    const cards = this.querySelectorAll<HTMLElement & { status?: mastodon.v1.Status | null; requestUpdate?: () => void }>(
       'caribou-status-card[data-index]',
     )
     cards.forEach((card) => {
       const idx = Number(card.dataset.index)
       const status = this.statuses[idx]
-      if (status && card.status !== status) card.status = status
+      if (!status) return
+      if (card.status !== status) {
+        card.status = status
+      } else if (card.children.length === 0) {
+        card.requestUpdate?.()
+      }
     })
   }
 

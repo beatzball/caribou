@@ -20,6 +20,17 @@ describe('buildAuthorizeUrl', () => {
     expect(u.searchParams.get('state')).toBe('Xyz-AbC_dEf')
   })
 
+  it('sets force_login=true so Mastodon shows the login/account picker instead of silently reusing the active session', () => {
+    const url = buildAuthorizeUrl({
+      server: 'fosstodon.org',
+      clientId: 'abc123',
+      redirectUri: 'https://caribou.quest/api/signin/callback',
+      scope: 'read',
+      state: 's',
+    })
+    expect(new URL(url).searchParams.get('force_login')).toBe('true')
+  })
+
   it('strips scheme from server if included', () => {
     const url = buildAuthorizeUrl({
       server: 'https://mastodon.social',
