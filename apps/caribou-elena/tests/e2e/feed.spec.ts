@@ -50,14 +50,15 @@ test('/feed without activeUserKey redirects to /', async ({ page, context }) => 
     localStorage.removeItem('caribou.users')
     localStorage.removeItem('caribou.activeUserKey')
   })
-  await page.goto('/feed')
-  // Use `waitUntil: 'commit'` — the `/feed` navigation is aborted by
-  // `FeedPage.connectedCallback`'s `location.replace('/')` during the
-  // initial load. Firefox surfaces the abort as `NS_BINDING_ABORTED`
-  // if we wait on the default `'load'` event. Observing at commit
-  // catches the redirect target as soon as the browser commits to it.
-  await page.waitForURL((url) => url.pathname === '/', { waitUntil: 'commit' })
-  expect(new URL(page.url()).pathname).toBe('/')
+  // `FeedPage.connectedCallback` triggers `location.replace('/')`
+  // synchronously during /feed's load — firefox reports the aborted
+  // /feed load as `NS_BINDING_ABORTED`, which surfaces from both
+  // `goto` and `waitForURL`. Use `waitUntil: 'commit'` on goto and
+  // swallow the abort: the abort *is* the redirect firing.
+  await page.goto('/feed', { waitUntil: 'commit' }).catch((e) => {
+    if (!String(e).includes('NS_BINDING_ABORTED')) throw e
+  })
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/')
 })
 
 test('/feed with activeUserKey renders timeline statuses from the fake Mastodon API', async ({ page }) => {
@@ -132,17 +133,19 @@ test('/feed clears session and redirects on 401', async ({ page }) => {
       body: JSON.stringify({ error: 'unauthorized' }),
     }),
   )
-  await page.goto('/feed')
-  // `caribou-error-banner` strips the `error=` query param 250ms after
-  // `load` via `history.replaceState`. On webkit, Playwright's frame
-  // URL sampling can land *after* that cleanup even when we ask for
-  // `domcontentloaded` — the observed URL is then `/` (query already
-  // gone) and the predicate misses. Use `waitUntil: 'commit'` so the
-  // URL is checked at navigation-commit time, before any script runs.
-  await page.waitForURL(
-    (url) => url.pathname === '/' && url.search.includes('unauthorized'),
-    { waitUntil: 'commit' },
-  )
+  // `location.replace('/?error=unauthorized')` fires from the 401
+  // interceptor mid-fetch. Firefox aborts the in-flight /feed load
+  // (NS_BINDING_ABORTED); webkit samples `page.url()` after the
+  // banner's 250ms-post-`load` cleanup (query already stripped). Both
+  // make `waitForURL(?error=unauthorized)` unreliable across browsers.
+  // Instead assert through user-visible state: pathname `/` + the
+  // "session expired" alert (proof the banner saw `?error=unauthorized`
+  // before stripping it) + cleared localStorage.
+  await page.goto('/feed', { waitUntil: 'commit' }).catch((e) => {
+    if (!String(e).includes('NS_BINDING_ABORTED')) throw e
+  })
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/')
+  await expect(page.getByRole('alert')).toContainText(/session expired|sign in again/i)
   const ls = await page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))
   expect(ls).toBe('null')
 })
