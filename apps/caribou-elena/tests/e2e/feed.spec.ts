@@ -51,7 +51,12 @@ test('/feed without activeUserKey redirects to /', async ({ page, context }) => 
     localStorage.removeItem('caribou.activeUserKey')
   })
   await page.goto('/feed')
-  await page.waitForURL((url) => url.pathname === '/')
+  // Use `waitUntil: 'commit'` — the `/feed` navigation is aborted by
+  // `FeedPage.connectedCallback`'s `location.replace('/')` during the
+  // initial load. Firefox surfaces the abort as `NS_BINDING_ABORTED`
+  // if we wait on the default `'load'` event. Observing at commit
+  // catches the redirect target as soon as the browser commits to it.
+  await page.waitForURL((url) => url.pathname === '/', { waitUntil: 'commit' })
   expect(new URL(page.url()).pathname).toBe('/')
 })
 
@@ -128,15 +133,15 @@ test('/feed clears session and redirects on 401', async ({ page }) => {
     }),
   )
   await page.goto('/feed')
-  // `caribou-error-banner` strips the `error=` query param ~250ms after
-  // the landing page's `load` event fires (to avoid looking like an
-  // ongoing navigation while CDP clients read the URL). Use
-  // `waitUntil: 'domcontentloaded'` so `waitForURL` observes the URL
-  // before that cleanup timer fires — `domcontentloaded` is committed
-  // well before `load`, so the query param is guaranteed present.
+  // `caribou-error-banner` strips the `error=` query param 250ms after
+  // `load` via `history.replaceState`. On webkit, Playwright's frame
+  // URL sampling can land *after* that cleanup even when we ask for
+  // `domcontentloaded` — the observed URL is then `/` (query already
+  // gone) and the predicate misses. Use `waitUntil: 'commit'` so the
+  // URL is checked at navigation-commit time, before any script runs.
   await page.waitForURL(
     (url) => url.pathname === '/' && url.search.includes('unauthorized'),
-    { waitUntil: 'domcontentloaded' },
+    { waitUntil: 'commit' },
   )
   const ls = await page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))
   expect(ls).toBe('null')
