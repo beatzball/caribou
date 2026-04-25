@@ -111,6 +111,16 @@ test('/feed surfaces a "new posts" banner when polling finds newer statuses', as
   await expect(mainVisible.getByText('first post')).toBeVisible()
   expect(sawInitial).toBe(true)
 
+  // Wait for Litro's SSR-mount cleanup before dispatching the visibility
+  // event. During the brief window when both the SSR and client
+  // <page-feed> coexist, the dispatch can be processed by the SSR mount's
+  // polling listener — which is about to be torn down — while the client
+  // mount's `connectedCallback` hasn't yet attached its own listener. The
+  // poll then never reaches the surviving timeline, the banner stays at
+  // count=0, and this assertion times out. (Test was 1/39 flaky on
+  // chromium in CI before this guard.)
+  await page.waitForFunction(() => document.querySelectorAll('main').length === 1)
+
   // Force a poll immediately by dispatching the banner's host visibility transition.
   await page.evaluate(() =>
     document.dispatchEvent(new Event('visibilitychange')))
