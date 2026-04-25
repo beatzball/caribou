@@ -111,13 +111,99 @@ test('/feed surfaces a "new posts" banner when polling finds newer statuses', as
   await expect(mainVisible.getByText('first post')).toBeVisible()
   expect(sawInitial).toBe(true)
 
+  // Wait for Litro's SSR-mount cleanup before dispatching the visibility
+  // event. During the brief window when both the SSR and client
+  // <page-feed> coexist, the dispatch can be processed by the SSR mount's
+  // polling listener — which is about to be torn down — while the client
+  // mount's `connectedCallback` hasn't yet attached its own listener. The
+  // poll then never reaches the surviving timeline, the banner stays at
+  // count=0, and this assertion times out. (Test was 1/39 flaky on
+  // chromium in CI before this guard.)
+  await page.waitForFunction(() => document.querySelectorAll('main').length === 1)
+
   // Force a poll immediately by dispatching the banner's host visibility transition.
   await page.evaluate(() =>
     document.dispatchEvent(new Event('visibilitychange')))
 
   await expect(mainVisible.getByRole('button', { name: /1 new post/i })).toBeVisible({ timeout: 5000 })
+  // REGRESSION: the existing timeline must stay mounted while the banner is
+  // showing — otherwise the "X new posts" button appears alone and the user
+  // loses access to the posts they were reading before the poll.
+  await expect(mainVisible.getByText('first post')).toBeVisible()
   await mainVisible.getByRole('button', { name: /1 new post/i }).click()
   await expect(mainVisible.getByText('newer post')).toBeVisible()
+  // After applying, both the pre-existing post and the newer post should be
+  // present.
+  await expect(mainVisible.getByText('first post')).toBeVisible()
+})
+
+test('/feed does not re-fetch avatar images when polling discovers new posts', async ({ page }) => {
+  // When a poll tick surfaces new statuses, the already-displayed status
+  // cards must NOT re-render — otherwise Elena's template creates new <img>
+  // elements and the browser re-fetches every avatar, which flickers the
+  // profile pictures and wastes network. This guards against that by
+  // counting avatar requests across the poll boundary.
+  await page.route('**/api/v1/timelines/home*', (route) => {
+    const u = new URL(route.request().url())
+    const since = u.searchParams.get('since_id')
+    if (since === 'a') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify([makeStatus('c', '<p>newer post</p>')]),
+      })
+    }
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify([makeStatus('a', '<p>first post</p>')]),
+    })
+  })
+  const avatarRequests: string[] = []
+  page.on('request', (req) => {
+    if (req.url().endsWith('/a.png')) avatarRequests.push(req.url())
+  })
+
+  await page.goto('/feed')
+  const mainVisible = page.locator('main').filter({ visible: true }).first()
+  await expect(mainVisible.getByText('first post')).toBeVisible()
+
+  // Wait for Litro's SSR-mount cleanup so we're not tagging an element on a
+  // <main> that's about to be removed.
+  await page.waitForFunction(() => document.querySelectorAll('main').length === 1)
+
+  const initialFetchCount = avatarRequests.length
+
+  // Tag every avatar image so we can detect ANY card re-render.
+  const taggedCount = await page.evaluate(() => {
+    const imgs = document.querySelectorAll<HTMLImageElement>('caribou-status-card img')
+    imgs.forEach((img) => { (img as HTMLImageElement & { __tag?: string }).__tag = 'pre-poll' })
+    return imgs.length
+  })
+  expect(taggedCount).toBeGreaterThan(0)
+
+  // Trigger a poll and wait for the banner to reflect the new post.
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event('visibilitychange')))
+  await expect(mainVisible.getByRole('button', { name: /1 new post/i })).toBeVisible({ timeout: 5000 })
+
+  expect(
+    avatarRequests.length,
+    `expected no additional avatar fetches during a poll that only buffers new posts, got ${avatarRequests.length - initialFetchCount} extra fetch(es)`,
+  ).toBe(initialFetchCount)
+
+  // After the poll, every previously-tagged img should still be tagged. If
+  // any was replaced (Elena re-rendered the card), the tag is lost — even a
+  // browser-cached src swap produces visible flicker.
+  const taggedAfter = await page.evaluate(() => {
+    const imgs = document.querySelectorAll<HTMLImageElement>('caribou-status-card img')
+    let tagged = 0
+    let untagged = 0
+    imgs.forEach((img) => {
+      if ((img as HTMLImageElement & { __tag?: string }).__tag === 'pre-poll') tagged++
+      else untagged++
+    })
+    return { total: imgs.length, tagged, untagged }
+  })
+  expect(taggedAfter.untagged, `expected zero replaced avatar nodes after poll, got ${taggedAfter.untagged}/${taggedAfter.total}`).toBe(0)
 })
 
 test('/feed clears session and redirects on 401', async ({ page }) => {

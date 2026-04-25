@@ -43,3 +43,28 @@ html { color-scheme: dark; background: var(--bg-0); color: var(--fg-0); }
 
 body { margin: 0; font-family: var(--font-body); background: var(--bg-0); color: var(--fg-0); }
 * { box-sizing: border-box; }
+
+/* Sanitized post HTML lives inside .status-content. Long unbreakable runs
+   (stacks of hashtag <a> links, raw URLs) push the timeline off-screen on
+   narrow viewports without an explicit wrap rule — overflow-wrap on the
+   parent isn't enough because the actual lines live on the inner <p> and
+   <a> elements that masto.js/Mastodon emits. Apply on the children too. */
+.status-content,
+.status-content > p,
+.status-content a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+
+/* Mastodon emits adjacent hashtag/mention links verbatim from the source —
+   author-typed "#AI#Tech" yields <a>#AI</a><a>#Tech</a> with no whitespace
+   text node between them, so the rendered tokens visually merge into one
+   underlined run. Push the second link a quarter em to its inline-start
+   side; margins sit outside the link's content area, so the underline ends
+   cleanly with each link instead of extending across an injected space.
+   Posts with normal "#AI #Tech" spacing render with the natural space plus
+   this margin (slightly wider than a default space, but still natural). */
+.status-content a + a {
+  margin-inline-start: 0.25em;
+}
