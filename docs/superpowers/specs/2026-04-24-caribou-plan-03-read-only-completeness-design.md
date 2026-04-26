@@ -1,16 +1,18 @@
 ---
 title: Caribou Plan 3 — Read-Only Completeness — Design Spec
 date: 2026-04-24
+last-revised: 2026-04-26
 status: approved, ready for implementation planning
 supersedes: none
 parent-spec: docs/superpowers/specs/2026-04-21-caribou-v1-design.md
+behavioral-contract: packages/elena-morph-spec/src/__tests__/morph-custom-elements.test.ts
 ---
 
 # Caribou Plan 3 — Read-Only Completeness
 
 ## 1. Summary
 
-Plan 3 completes every **read-only** screen of the Caribou v1 spec (`§14 Appendix B item 6`): local timeline, public timeline, single-status view, thread view, and account profiles. Alongside the feature work, Plan 3 stands up UnoCSS and builds real layout components (`<caribou-app-shell>`, `<caribou-nav-rail>`, `<caribou-right-rail>`, status-card variants) so the app stops being a pile of inline `style="…"` scraps.
+Plan 3 completes every **read-only** screen of the Caribou v1 spec (`§14 Appendix B item 6`): local timeline, public timeline, single-status view, thread view, and account profiles. Alongside the feature work, Plan 3 stands up UnoCSS and builds real layout components (`<caribou-app-shell>`, `<caribou-nav-rail>`, `<caribou-right-rail>`, status-card variants) so the app stops being a pile of inline `style="…"` scraps. It also fixes boost rendering (currently blank cards when `status.reblog != null`) so the read-only experience is actually complete.
 
 Dark-mode only. Light mode + theme toggle are deferred to Plan 5. No interactions, no compose, no notifications, no settings — those are Plan 4.
 
@@ -27,7 +29,7 @@ This plan executes §14 Appendix B item 6 of the v1 spec. It also depends on and
 
 One small deviation: Plan 2 shipped its home timeline at `/feed` instead of the spec's `/home`. Plan 3 renames `/feed` → `/home` and leaves `/feed` as a 301 redirect. Not a spec change; a Plan 2 drift we are fixing here while the blast radius is zero.
 
-Plan 3 also amends the v1 spec in two places (see §9 below): it carves out layout/composition shells from the "light DOM only" policy so `<caribou-app-shell>` can use shadow DOM for `<slot>` composition, and it defines zen mode so Plan 5 has a concrete target.
+Plan 3 also amends the v1 spec in two places (see §9 below): it inverts the §7.3 DOM-mode policy from "light DOM only" to "shadow-DOM-by-default for self-rendering components, light-DOM exception for components that coordinate keyed children" (matching the precedent set by PR #14 and the behavioral contract in `packages/elena-morph-spec`), and it defines zen mode so Plan 5 has a concrete target.
 
 ## 3. Scope & routes
 
@@ -259,33 +261,46 @@ Plan 5 adds the toggle: zero Plan-3 migration work is required to keep that door
 
 All inline `style="…"` in the existing surface gets converted to utility classes as part of Plan 3. Each conversion is its own commit:
 
-- `pages/components/caribou-status-card.ts`
-- `pages/components/caribou-timeline.ts`
-- `pages/feed.ts` (during rename to `pages/home.ts`)
-- `pages/index.ts` (landing)
-- `app.ts`'s inline scraps
+- `pages/components/caribou-status-card.ts` — already shadow-DOM as of PR #14, so document-level `uno.css` does NOT reach inside. Migration here goes through `@unocss/transformer-directives` baked into `static styles`, NOT raw utility classes on the rendered template. Same approach applies to every other shadow-DOM component built in Plan 3 (nav-rail, right-rail, profile-header, profile-tabs, thread).
+- `pages/components/caribou-timeline.ts` — light-DOM (see §6 table); document-level utility classes apply directly.
+- `pages/feed.ts` (during rename to `pages/home.ts`) — light-DOM page content.
+- `pages/index.ts` (landing) — light-DOM page content.
+- `app.ts`'s inline scraps — light-DOM page content.
 
 ## 6. Layout components
 
 All new layout components live in `apps/caribou-elena/pages/components/`. Each extends `CaribouElement` (Elena base class) like existing components. Future adapter apps will reimplement these against their own base classes.
 
-**Shadow-DOM scope:** `<caribou-app-shell>` is the **only** component in Plan 3 that uses shadow DOM. Every other component — nav rail, right rail, status card, timeline, profile, thread — stays light-DOM (document-level utility classes continue to work). The shell opts into shadow DOM specifically to get native `<slot>` composition for hosting page content without clobbering it during re-renders.
+**Shadow-DOM is the default for self-rendering components.** This is the recommended pattern per `packages/elena-morph-spec` Section 1, and was set as precedent by PR #14's `<caribou-status-card>` migration. Every Plan 3 component that owns its rendered tree uses `static shadow = 'open'` + `static styles`:
 
-Rationale for the carve-out (amending v1 spec §7.3):
-- Shell composition needs `<slot>`; light-DOM alternatives (template helpers, render-prop-like patterns) scattered layout across every page.
-- Shadow-DOM shell is idiomatic in Lit and FAST, so the pattern translates cleanly to the future `caribou-lit` / `caribou-fast` ports.
-- Custom properties pierce shadow boundaries — design tokens (`var(--bg-0)`, etc.) work inside the shell unchanged.
-- Slotted content is in the light DOM of the host (not the shell's shadow tree), so document-level utility CSS still styles it correctly.
+| Component | DOM | Reason |
+|---|---|---|
+| `<caribou-app-shell>` | shadow + `<slot>` | hosts arbitrary page content; `<slot>` projection requires shadow |
+| `<caribou-nav-rail>` | shadow | self-renders chrome; immune to parent re-render wipes (morph-spec §1) |
+| `<caribou-right-rail>` | shadow | same |
+| `<caribou-status-card>` | shadow (already done in PR #14) | parent timeline polls every 30s; shadow walls the avatar `<img>` off |
+| `<caribou-profile-header>` | shadow | self-renders avatar/bio chrome |
+| `<caribou-profile-tabs>` | shadow | self-renders nav anchors |
+| `<caribou-thread>` | shadow | self-renders ancestor/focused/descendant tree |
+| `<caribou-timeline>` (renamed from `caribou-home-timeline`) | light-DOM | exception — owns parent of status cards, holds polling state, and was just stabilized in PR #13's split-bindings rework. See §8.2. |
+
+Slotted content (anything between `<caribou-app-shell>` opening and closing tags) stays in the host's light DOM and continues to receive document-level utility CSS from `uno.css`.
+
+**Custom properties pierce shadow boundaries** — design tokens (`var(--bg-0)`, etc.) work unchanged inside every shadow root.
+
+**Why the timeline stays light-DOM** — it's the parent of status cards and currently uses an imperative `card.status = …` assignment in `updated()` (see `caribou-home-timeline.ts:104-111`). Moving it to shadow DOM would push that assignment across a shadow boundary and require additional plumbing for no behavioral gain — Section 1 of morph-spec only protects the *children's* rendered content, which the cards already handle. The timeline's own re-renders are already gated by a shallow-compare in PR #13's `effect()` binding.
 
 ### 6.1 Component tree
 
 ```
 <caribou-app-shell>                                    shadow-DOM host
   └─ (shadow root)
-       ├── <caribou-nav-rail>                          light-DOM component
+       ├── <caribou-nav-rail>                          shadow-DOM component
        ├── <main><slot></slot></main>                  native slot — page content projects here
-       └── <caribou-right-rail>                        light-DOM component (≥lg only)
+       └── <caribou-right-rail>                        shadow-DOM component (≥lg only)
 ```
+
+The nav rail and right rail are themselves shadow-DOM components — their internal trees are walled off from both the shell's shadow root and the host page's morph engine. Each owns a small `static styles` adopted stylesheet (built via `@unocss/transformer-directives`) for its layout and chrome.
 
 ### 6.2 Responsive breakpoints
 
@@ -303,6 +318,8 @@ Mobile: bottom tab bar rather than a hamburger drawer. Rationale: every nav dest
 
 ### 6.3 `<caribou-nav-rail>`
 
+Shadow-DOM component (`static shadow = 'open'`, `static styles = [NAV_RAIL_CSS]`). Self-rendering, no slotted content. Its rendered chrome (anchors, icons, active-route highlight) lives entirely inside its shadow root, immune to parent re-renders per `packages/elena-morph-spec` Section 1.
+
 Nav items (top to bottom / left to right on mobile):
 
 | Item | Icon | Route |
@@ -316,6 +333,8 @@ Nav items (top to bottom / left to right on mobile):
 Active route gets `aria-current="page"` + accent-bg utility. Active detection: shell reads `window.location.pathname` on mount and on `popstate`.
 
 ### 6.4 `<caribou-right-rail>` (v1 content)
+
+Shadow-DOM component (`static shadow = 'open'`, `static styles = [RIGHT_RAIL_CSS]`). Self-rendering, no slotted content. Like the nav rail, its full rendered tree (about card, links list, disabled-slot placeholders) lives inside its shadow root.
 
 Top to bottom:
 
@@ -476,11 +495,20 @@ All in `apps/caribou-elena/pages/` or `pages/components/`.
 
 ### 8.2 `<caribou-timeline>` modifications
 
-Existing component (Plan 2). Changes:
+Existing component (Plan 2), currently named `<caribou-home-timeline>` after the only timeline kind it served. Changes:
 
+- **Rename** `caribou-home-timeline` → `caribou-timeline` (file, class, custom-element tag, all callers, all tests). Done as a single sweeping commit.
 - Accept `kind` attribute: `"home" | "local" | "public"`.
 - Instantiate the appropriate `createTimelineStore(kind)` based on attr.
 - No other changes — loading/error/empty/list/"N new posts" banner all unchanged.
+
+**Stays light-DOM** (see §6 table). The existing PR #13 reactivity pattern carries over verbatim:
+
+- Two separate `effect()` blocks. The first drives this component's `requestUpdate()` and shallow-compares `statuses` (length + element references) to gate re-renders, so a poll tick that only changes `statusCache` won't cascade through morph.
+- The second pushes `newPostsCount` imperatively into the banner so banner-only updates never invalidate the timeline's render.
+- Status-card props are assigned imperatively in `updated()` (`card.status = status`) since Elena does not wire `.prop=` bindings.
+
+These remain correct under shadow-DOM status cards: the cards' rendered content lives inside their own shadow roots, so even when the timeline does re-render, morph never reaches into the cards' content. See `caribou-home-timeline.ts` and `caribou-status-card.ts` on the current main for the production wiring.
 
 ### 8.3 `<caribou-profile>` (new)
 
@@ -528,20 +556,46 @@ FOCUSED (larger, accent border, full timestamp)
 
 ### 8.5 `<caribou-status-card>` variants (modification)
 
-Split the existing component via a new `variant` attr — single component file, variant drives CSS:
+The core card was upgraded in PR #14 to its current shape: shadow-DOM (`static shadow = 'open'`), `static styles` carrying the sanitized-content wrap rules, DOMPurify-sanitized content via `unsafeHTML` inside `render()`, avatar onerror retry (300ms / 600ms backoff, dim on permanent failure), `loading="lazy" decoding="async"` on the avatar `<img>`. Plan 3 does **not** redo any of that — it only layers variant rendering on top of the existing component.
+
+Plan 3 changes:
+
+- Add a `variant` attr / prop to the existing `<caribou-status-card>`.
+- Per-variant styling lives in `static styles`, not in document-level utility classes (the card is shadow-DOM; document-level `uno.css` does not reach inside).
+- Variant CSS is built via `@unocss/transformer-directives` so the same token utilities can be `@apply`'d inside the adopted stylesheet.
 
 | Variant | Used by | Visual |
 |---|---|---|
-| `timeline` (default) | timelines, profile lists | current Plan-2 look (compact) |
+| `timeline` (default) | timelines, profile lists | current PR-#14 look (compact) |
 | `focused` | thread center | larger text, accent border, full absolute timestamp, no truncation |
 | `ancestor` | thread above focused | muted (`opacity-75`), compact |
 | `descendant` | thread below focused | indent via `margin-left` utility, "→ @replied-to-handle" line above content |
 
-- Variant is a CSS concern only — classes conditional on attr value.
+- Variant is a CSS concern only — classes conditional on attr value, applied inside the shadow tree.
 - Existing DOMPurify + `PURIFY_OPTS` content rendering is shared across all variants.
+- Existing avatar retry + `loading="lazy"` behavior is shared across all variants.
 - No separate component files.
 
-### 8.6 Stub page markup
+### 8.6 Boost rendering
+
+Currently `<caribou-status-card>` treats every status as if its content lived on the outer status. For boosts (`status.reblog != null`), the outer `status.content` is empty and the renderable content lives on `status.reblog`. The card therefore renders boosts as blank cards in production today. Plan 3 fixes this.
+
+**Render rule:**
+
+- If `status.reblog` is present, render the reblog: avatar, display name, handle, timestamp, sanitized content, and (later) media all come from `status.reblog`.
+- Above the reblog content, render a one-line attribution row: `↻ {status.account.displayName} boosted` (icon `i-lucide-repeat-2`). Clicking the attribution row links to `/@{status.account.acct}` (the booster's profile), wired in Plan 4 — Plan 3 renders it as a non-interactive label.
+- The reblog's own `id` is what `[statusId].ts` and `<caribou-thread>` operate on when navigating to a status.
+
+**Variants:** the boost handling is identical across `timeline`, `focused`, `ancestor`, and `descendant` variants — same attribution row above, same inner reblog content. Thread layout treats the reblog (not the wrapper) as the canonical status for ancestor / descendant chain calculations.
+
+**Determining the status to render:** introduce a tiny pure helper inside the card, e.g. `const display = status.reblog ?? status` — and use `display.account`, `display.content`, `display.createdAt`, etc. throughout the template. The wrapper is consulted only for the attribution row.
+
+**Tests:**
+
+- Unit-level: render the card with a reblog fixture; assert (a) the displayed account is the reblogged author, (b) the displayed content is the reblogged content, (c) the attribution row contains the booster's display name + repeat icon, (d) the same assertions hold for `focused` / `ancestor` / `descendant` variants.
+- Integration-level: extend the existing timeline Playwright smoke test with one reblog in the fixture set; assert no blank cards.
+
+### 8.7 Stub page markup
 
 `pages/privacy.ts`:
 
@@ -568,9 +622,13 @@ Plan 3 introduces two amendments to the v1 spec (`docs/superpowers/specs/2026-04
 
 Current text reads "Force light DOM in all three adapter variants." Replace with:
 
-> **DOM mode:** Light DOM by default in all three adapter variants (so utility-class CSS from `uno.css` reaches every component). **Exception: layout/composition components** (`<caribou-app-shell>` and any future shell-like components that need `<slot>` projection) may use shadow DOM. Such components ship their own small `static styles` (adopted stylesheets) rather than relying on document-level utility CSS. Slotted content stays in light DOM and continues to receive document-level styling.
+> **DOM mode:** Shadow DOM is the default for components that own their rendered tree (`<caribou-app-shell>`, `<caribou-nav-rail>`, `<caribou-right-rail>`, `<caribou-status-card>`, `<caribou-profile-header>`, `<caribou-profile-tabs>`, `<caribou-thread>`, etc.). Self-rendering components walled off behind a shadow root are immune to parent re-render wipes — see the behavioral contract in `packages/elena-morph-spec/src/__tests__/morph-custom-elements.test.ts`. Such components ship their own small `static styles` (adopted via the browser's native `adoptedStyleSheets`) built with `@unocss/transformer-directives` so token utilities still apply.
+>
+> **Exception:** components whose primary job is to host children with arbitrary keyed identity (e.g. `<caribou-timeline>`, which manages a list of status cards plus polling state) may stay light-DOM. These components must gate their own re-renders explicitly (shallow-compare on signal change, split bindings per child component) so morph never wipes their child trees needlessly.
+>
+> Slotted content (anything between a shadow-DOM component's opening and closing tags) stays in the host's light DOM and continues to receive document-level utility CSS from `uno.css`. Custom properties (design tokens) pierce shadow boundaries.
 
-Rationale: composition patterns that need to host arbitrary page content (without clobbering it on re-render) need native `<slot>`, which requires shadow DOM. The carve-out is scoped to layout shells; feature components stay light-DOM. Custom properties pierce shadow boundaries, so design tokens work across both.
+Rationale: PR #14 demonstrated that the simplest, most durable pattern for a component that polls (timeline) hosting components that self-render (status cards) is for the children to use shadow DOM. This generalizes: any component that wants to be re-rendered safely by an arbitrary parent should opt into shadow DOM. The earlier "light DOM only" stance traded reactivity safety for one-stylesheet convenience and was incompatible with `<slot>`-based composition. The exception covers the small number of components whose internal model genuinely needs to coordinate light-DOM children.
 
 ### 9.1 Amendment — §2.1 (In scope)
 
@@ -610,8 +668,11 @@ Minimal, high-value only:
 
 - **Shell POC (§6.6)** — Playwright smoke test mounting `<caribou-app-shell>` with a slotted child, asserting: (a) slotted content appears in the expected grid cell, (b) slotted child's computed `color` resolves `var(--text-1)` to the dark-theme value, (c) utility class `max-w-[640px]` applied to slotted content produces the expected `max-width`, (d) responsive grid layout changes between 500px / 800px / 1200px viewports. This test is the gate for §6.6 and must pass before any other Plan 3 work merges.
 - `caribou-status-card` variant rendering — four tests (one per variant) with a canned `Status` fixture. Assert the utility classes applied on the root element, not pixel output.
+- `caribou-status-card` boost rendering — render with a reblog fixture; assert displayed account/content come from `status.reblog`, attribution row shows the booster, and no blank card. Repeat across all four variants.
 - `caribou-thread` indent cap — render a depth-5 descendant chain, assert DOM indentation stops at depth 3.
 - `caribou-profile` tab parsing — mount with `?tab=media`, assert `onlyMedia: true` was passed to `createProfileStore`.
+
+**Behavioral contract for shadow-DOM components:** every shadow-DOM component built in Plan 3 is implicitly tested by `packages/elena-morph-spec/src/__tests__/morph-custom-elements.test.ts`. That suite verifies (Section 1) that children with `static shadow = 'open'` survive parent re-renders without their internal trees being wiped. Plan 3 does not add new morph-spec tests — it relies on the existing suite and the precedent set by PR #14. If a Plan 3 component breaks under poll-driven re-render in production, the fix is to make it shadow-DOM, not to add another bespoke test.
 
 ### 10.3 E2E tests
 
@@ -642,7 +703,7 @@ Existing `typecheck` + `test` + `build` matrix extends automatically to the new 
 
 ### 11.1 Deferred to Plan 4 (interactions + write features)
 
-- Favourite / boost / reply / follow
+- Favourite / boost / reply / follow (interactions)
 - Compose dialog (textarea, CW, visibility, media upload, alt-text)
 - Notifications view + unread badge + 60s polling
 - Bookmarks view
@@ -651,6 +712,10 @@ Existing `typecheck` + `test` + `build` matrix extends automatically to the new 
 - Settings page (account mgmt, default timeline picker)
 - Keyboard shortcut registry + `createFocusTrap` in `caribou-ui-headless`
 - E2E coverage for any of the above
+
+### 11.1a Deferred follow-up (separate post-Plan-3 PR, before Plan 4 starts)
+
+- **Keyed-list reconciliation in `<caribou-timeline>`.** The current shallow-compare in PR #13's `effect()` binding gates re-renders correctly but, when a re-render does happen, morph still walks the full status list by index. Long timelines pay the cost; cards that didn't change are still reconciled in place. Replace the indexed `.map()` render with keyed reconciliation by `status.id` so prepends (poll, applyNewPosts) only insert new nodes and appends (loadMore) only push new ones. Lands as a focused PR after Plan 3 merges; not in Plan 3's scope because (a) it's not blocking read-only completeness and (b) it deserves its own PR with measurable before/after numbers.
 
 ### 11.2 Deferred to Plan 5 (polish + themes + PWA)
 
@@ -685,7 +750,8 @@ Restated so Plan 3 reviewers don't expect them:
 - **Error-boundary component** — per-store error state inside timeline/profile/thread is sufficient.
 - **Profile avatar upload / edit** — write feature, out of plan's scope (probably Plan 5).
 - **Light-DOM shell with template helper function** — rejected in favor of shadow-DOM shell. Template helpers scatter layout markup across every page's render method; shadow-DOM shell centralizes it and uses `<slot>` native composition. Also translates to Lit/FAST ports more cleanly.
-- **Full-app shadow DOM** — keeps light-DOM default for feature components so document-level `uno.css` keeps working without per-component adopted stylesheets. Only layout shells opt into shadow.
+- **Light-DOM-by-default for all components** — earlier draft kept feature components light-DOM and only opted shells into shadow. Rejected once PR #14 demonstrated that shadow-DOM is also the simplest way to make a self-rendering component immune to parent-driven re-renders (the timeline-polls-card-flicker problem). Plan 3 inverts the default: shadow-DOM for self-rendering components, light-DOM only as a deliberate exception (`<caribou-timeline>`). See §9.0.
+- **Keyed-list reconciliation as part of Plan 3** — would touch `<caribou-timeline>`'s render path under poll pressure; high-blast-radius for a plan whose goal is read-only completeness. Deferred to a focused post-Plan-3 PR (§11.1a).
 
 ---
 
@@ -699,5 +765,7 @@ None. All decisions closed during brainstorming:
 - Architecture: Approach B (infrastructure-first — UI-headless package, status-card variants, UnoCSS stand-up).
 - Dark-mode only in Plan 3; theme toggle + light-mode → Plan 5.
 - Zen-mode spec amendment included in this plan.
-- **Shell composition:** shadow-DOM opt-in for `<caribou-app-shell>` only; all other components stay light-DOM. Validated via POC (§6.6) as Plan 3's first task, gating everything else.
-- **v1 spec §7.3 amendment:** light-DOM default with carve-out for layout shells — documented in §9.0.
+- **Shell composition:** shadow-DOM-by-default for self-rendering components (shell, nav rail, right rail, status card, profile header/tabs, thread); light-DOM only for `<caribou-timeline>`. Validated via POC (§6.6) as Plan 3's first task, gating everything else.
+- **v1 spec §7.3 amendment:** shadow-DOM-by-default with light-DOM exception for child-coordinating components — documented in §9.0.
+- **Boost rendering** absorbed into Plan 3 (§8.6) so the read-only experience doesn't ship with blank reblog cards.
+- **Keyed-list reconciliation** in `<caribou-timeline>` deferred to a focused post-Plan-3 PR (§11.1a) before Plan 4 starts.
