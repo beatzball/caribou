@@ -172,11 +172,21 @@ test('/feed does not re-fetch avatar images when polling discovers new posts', a
 
   const initialFetchCount = avatarRequests.length
 
-  // Tag every avatar image so we can detect ANY card re-render.
+  // Tag every avatar image so we can detect ANY card re-render. The card
+  // renders into shadow DOM, so the avatar lives in `card.shadowRoot`,
+  // not light DOM. querySelector('caribou-status-card img') would never
+  // see it; reach in via shadowRoot.
   const taggedCount = await page.evaluate(() => {
-    const imgs = document.querySelectorAll<HTMLImageElement>('caribou-status-card img')
-    imgs.forEach((img) => { (img as HTMLImageElement & { __tag?: string }).__tag = 'pre-poll' })
-    return imgs.length
+    const cards = document.querySelectorAll<HTMLElement>('caribou-status-card')
+    let tagged = 0
+    cards.forEach((card) => {
+      const img = card.shadowRoot?.querySelector<HTMLImageElement>('img')
+      if (img) {
+        (img as HTMLImageElement & { __tag?: string }).__tag = 'pre-poll'
+        tagged++
+      }
+    })
+    return tagged
   })
   expect(taggedCount).toBeGreaterThan(0)
 
@@ -194,14 +204,18 @@ test('/feed does not re-fetch avatar images when polling discovers new posts', a
   // any was replaced (Elena re-rendered the card), the tag is lost — even a
   // browser-cached src swap produces visible flicker.
   const taggedAfter = await page.evaluate(() => {
-    const imgs = document.querySelectorAll<HTMLImageElement>('caribou-status-card img')
+    const cards = document.querySelectorAll<HTMLElement>('caribou-status-card')
     let tagged = 0
     let untagged = 0
-    imgs.forEach((img) => {
+    let total = 0
+    cards.forEach((card) => {
+      const img = card.shadowRoot?.querySelector<HTMLImageElement>('img')
+      if (!img) return
+      total++
       if ((img as HTMLImageElement & { __tag?: string }).__tag === 'pre-poll') tagged++
       else untagged++
     })
-    return { total: imgs.length, tagged, untagged }
+    return { total, tagged, untagged }
   })
   expect(taggedAfter.untagged, `expected zero replaced avatar nodes after poll, got ${taggedAfter.untagged}/${taggedAfter.total}`).toBe(0)
 })
