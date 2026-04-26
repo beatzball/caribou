@@ -83,39 +83,31 @@ export class CaribouHomeTimeline extends Elena(HTMLElement) {
     // NOT wire `.prop=` bindings, so object/number props on child
     // components are assigned imperatively after each parent render.
     //
-    // Elena's morph also recurses into the light DOM of custom-element
-    // children (see @elenajs/core render.js `morphContent`). Our child
-    // templates here (`<caribou-status-card>`, `<caribou-new-posts-banner>`)
-    // are rendered empty from the parent's perspective, so any time this
-    // component re-renders, morph strips whatever each child rendered for
-    // itself. Assigning a changed prop repairs the child (Elena's setter
-    // triggers `_safeRender`), but when the prop reference is stable —
-    // cached status objects are the same map entries across polls — the
-    // `===` short-circuit skips the re-render and the wiped inner DOM
-    // stays wiped. Fall back to `requestUpdate()` when a child's light
-    // DOM was emptied.
+    // `caribou-status-card` uses shadow DOM (`static shadow = 'open'`),
+    // which walls its rendered tree off from this component's morph
+    // engine — `card.childNodes` is always empty, and morph never reaches
+    // the shadow content. So we only need to assign `card.status` when
+    // it actually changed; no recover-from-wipe fallback is necessary.
     //
-    // Banner count is pushed by a dedicated effect in `connectedCallback`
-    // so poll ticks don't trigger this component's render in the first
+    // `caribou-new-posts-banner` still uses light DOM, so it remains
+    // vulnerable to a parent re-render wiping its inner content. Banner
+    // count is pushed via a dedicated effect in `connectedCallback` so
+    // poll ticks don't trigger this component's render in the first
     // place; we only need to re-render the banner here if the timeline
-    // re-rendered for an unrelated reason and morph wiped it.
+    // re-rendered for an unrelated reason (loadMore, applyNewPosts) and
+    // morph emptied its children.
     const banner = this.querySelector<HTMLElement & { requestUpdate?: () => void }>(
       'caribou-new-posts-banner',
     )
     if (banner && banner.children.length === 0) banner.requestUpdate?.()
 
-    const cards = this.querySelectorAll<HTMLElement & { status?: mastodon.v1.Status | null; requestUpdate?: () => void }>(
+    const cards = this.querySelectorAll<HTMLElement & { status?: mastodon.v1.Status | null }>(
       'caribou-status-card[data-index]',
     )
     cards.forEach((card) => {
       const idx = Number(card.dataset.index)
       const status = this.statuses[idx]
-      if (!status) return
-      if (card.status !== status) {
-        card.status = status
-      } else if (card.children.length === 0) {
-        card.requestUpdate?.()
-      }
+      if (status && card.status !== status) card.status = status
     })
   }
 
