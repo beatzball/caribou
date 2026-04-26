@@ -1,0 +1,23 @@
+{
+  "name": "@beatzball/elena-morph-spec",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Behavioral spec for @elenajs/core's morphContent vs custom-element children. Designed to run unchanged inside Elena's own repo so a maintainer can lift the file directly.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@elenajs/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@beatzball/caribou-eslint-config": "workspace:*",
+    "@beatzball/caribou-tsconfig": "workspace:*",
+    "eslint": "^9.0.0",
+    "happy-dom": "^15.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.0"
+  }
+}
