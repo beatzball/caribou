@@ -1,5 +1,13 @@
 # @beatzball/caribou-auth
 
+## 0.0.2
+
+### Patch Changes
+
+- [#13](https://github.com/beatzball/caribou/pull/13) [`3b8baed`](https://github.com/beatzball/caribou/commit/3b8baed1f40343bd3dc44149c41a54417193b467) Thanks [@beatzball](https://github.com/beatzball)! - `buildAuthorizeUrl()` now sets `force_login=true` on the Mastodon `/oauth/authorize` URL.
+
+  Without it, an active Mastodon session cookie + a previously-authorized OAuth app caused the authorize endpoint to silently auto-redirect with a token for the existing session. Consumers (such as caribou-elena) that clear local state on sign-out couldn't actually switch to a different Mastodon account on the same instance — the picker round-tripped to the OAuth flow and came back with the same account. Forcing `force_login=true` makes Mastodon always show the login/account picker.
+
 ## 0.0.1
 
 ### Patch Changes
