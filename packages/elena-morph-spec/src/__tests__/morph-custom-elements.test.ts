@@ -322,10 +322,10 @@ describe('Section 2: slotted content under custom elements still morphs', () => 
 
     class Parent2a extends Elena(HTMLElement) {
       static override tagName = 'morph-parent-2a'
-      static override props = [{ name: 'title', reflect: false }]
-      title = 'first'
+      static override props = [{ name: 'heading', reflect: false }]
+      heading = 'first'
       override render() {
-        return html`<morph-wrap-2a><h2 data-t>${this.title}</h2></morph-wrap-2a>`
+        return html`<morph-wrap-2a><h2 data-t>${this.heading}</h2></morph-wrap-2a>`
       }
     }
     Parent2a.define()
@@ -337,7 +337,7 @@ describe('Section 2: slotted content under custom elements still morphs', () => 
     const h2Before = parent.querySelector('h2[data-t]')!
     expect(h2Before.textContent).toBe('first')
 
-    parent.title = 'second'
+    parent.heading = 'second'
     await flush()
 
     const h2After = parent.querySelector('h2[data-t]')!
