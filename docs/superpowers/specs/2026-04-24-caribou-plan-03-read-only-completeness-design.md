@@ -36,7 +36,7 @@ Plan 3 also amends the v1 spec in two places (see §9 below): it inverts the §7
 
 ## 3. Scope & routes
 
-### 3.1 New routes (all SSR shell, all auth-required)
+### 3.1 New routes (SSR shell; auth gating per §12.9)
 
 | Path | Purpose |
 |---|---|
@@ -267,7 +267,7 @@ Plan 5 adds the toggle: zero Plan-3 migration work is required to keep that door
 All inline `style="…"` in the existing surface gets converted to utility classes as part of Plan 3. Each conversion is its own commit:
 
 - `pages/components/caribou-status-card.ts` — already shadow-DOM as of PR #14, so document-level `uno.css` does NOT reach inside. Migration here goes through `@unocss/transformer-directives` baked into `static styles`, NOT raw utility classes on the rendered template. Same approach applies to every other shadow-DOM component built in Plan 3 (nav-rail, right-rail, profile-header, profile-tabs, thread).
-  - **Note for §12 (no-JS):** declarative shadow DOM (`<template shadowrootmode="open">`) ships its initial CSS as an inline `<style>` *inside* the DSD template — `static styles` is adopted on hydration, but the no-JS render needs the rules in the SSR HTML directly. The SSR helper that emits a shadow-DOM component's DSD wraps its `static styles` source in an inline `<style>` at the top of the template; on hydration, Elena's `adoptedStyleSheets` path takes over and the inline `<style>` is left in place (browsers de-duplicate equivalent rules; the inline copy stops mattering). See §12.6.
+  - **Note for §12 (no-JS):** declarative shadow DOM (`<template shadowrootmode="open">`) ships its initial CSS as an inline `<style>` *inside* the DSD template — without it, the SSR'd shadow tree has no styling at all (custom-property tokens still inherit, but layout/spacing rules from `static styles` would be missing). The SSR helper (`renderShadowComponentToString`, see §12.6) wraps the component's `static styles` in a single `<style id="caribou-dsd-style">` element at the top of the DSD template. On client hydration, Elena's adoption path is **suppressed** when this sentinel `<style>` is detected — the inline copy is the authoritative source. The platform does NOT de-duplicate rules across `<style>` and `adoptedStyleSheets`, and `adoptedStyleSheets` comes earlier in the cascade, so leaving both in place would create a precedence trap if `static styles` is later edited. Skipping adoption on first upgrade keeps a single source of truth. See §12.6 for the full upgrade flow.
 - `pages/components/caribou-timeline.ts` — light-DOM (see §6 table); document-level utility classes apply directly.
 - `pages/feed.ts` (during rename to `pages/home.ts`) — light-DOM page content.
 - `pages/index.ts` (landing) — light-DOM page content.
@@ -355,7 +355,7 @@ Top to bottom:
 2. **Links list**
    - Privacy → `/privacy`
    - About → `/about`
-   - **Signed-in indicator (no-JS path only).** When the no-JS / SSR path is being used (i.e. the page was rendered without seeing localStorage), the right rail renders one extra line: "Signed in to **{instance}**" followed by a "Sign out" anchor pointing to `/api/signout` (existing endpoint from Plan 2). The `{instance}` value is read from the `caribou.instance` cookie on the server. Hydration replaces this with the JS-driven account chip from `me.signal` (Plan 4); for Plan 3 it remains visible whenever the cookie is set. Rationale: without JS, the user otherwise has no visible cue that they are signed in or how to sign out.
+   - **Signed-in indicator.** When the `caribou.instance` cookie is set and validated against the OAuth registry (§12.2), the right rail renders one extra line: "Signed in to **{instance}**" followed by a "Sign out" anchor pointing to `/api/signout` (existing endpoint from Plan 2). The `{instance}` value is read from the cookie on the server and surfaced via the `instance` reflected prop on `<caribou-right-rail>`. The right rail itself lives inside the shell's shadow root (§6.5), so pages do not address it directly: they set `.instance` on `<caribou-app-shell>` and the shell's `render()` forwards it (`<caribou-right-rail .instance=${this.instance}>`). The same prop drives the client-side `render()` so the SSR HTML and post-hydration HTML are byte-equal — no flash and no mismatch warning. The page's `pageData` includes `shell: ShellInfo` (§12.6a) alongside the route's primary payload; on hydration, the page reads it from `__litro_data` and assigns `shell.instance` to the shell before Elena's upgrade settles. In Plan 4 (account chip), this line is replaced by a richer JS-driven account chip from `me.signal`; for Plan 3 it remains as-is whenever the cookie is set. Rationale: without JS, the user otherwise has no visible cue that they are signed in or how to sign out.
 
 3. **Disabled slots** (visible but `aria-disabled="true"`, tooltip "Coming soon"):
    - Theme toggle (Plan 5)
@@ -373,13 +373,21 @@ export class CaribouAppShell extends Elena(HTMLElement) {
   static override tagName = 'caribou-app-shell'
   static override shadow = 'open'
   static override styles = [SHELL_CSS]   // built via @unocss/transformer-directives
+  // `instance` is a string prop forwarded into the shadow-internal
+  // <caribou-right-rail> for the §6.4 signed-in indicator. It mirrors
+  // the validated `caribou.instance` cookie value (or null when unset).
+  // Reflected so SSR can populate it via plain HTML attribute, with no
+  // post-hydration prop assignment required for first paint.
+  static override props = [{ name: 'instance', reflect: true }]
+
+  instance: string | null = null
 
   override render() {
     return html`
       <div class="shell-grid">
         <caribou-nav-rail></caribou-nav-rail>
         <main><slot></slot></main>
-        <caribou-right-rail></caribou-right-rail>
+        <caribou-right-rail .instance=${this.instance}></caribou-right-rail>
       </div>
     `
   }
@@ -392,6 +400,7 @@ CaribouAppShell.define()
 - Renders the three-pane grid inside its shadow root.
 - Exposes a default `<slot>` for page content.
 - Owns responsive logic via shadow-scoped CSS (container queries if needed; otherwise media queries on `host` width).
+- Forwards the `instance` prop into its shadow-internal `<caribou-right-rail>` so pages set the signed-in indicator with a single `.instance=${shell.instance}` assignment on the shell element. The right rail itself is not directly addressable by the page (it lives inside the shell's shadow root).
 - Focus management: route change → focus `<h1>` in slotted content (spec §8.8). Shadow-DOM can still `focus()` into slotted content via `document.querySelector('caribou-app-shell h1')`.
 - **Does not** own data fetching or route matching — pages still do that.
 
@@ -416,6 +425,9 @@ Before the rest of Plan 3 builds on top of this, the implementation plan's first
    - [ ] Responsive breakpoint behavior — shell layout changes at `md` / `lg`.
    - [ ] Elena hydration works (the shell is SSR-rendered, then upgrades in-place without flicker).
    - [ ] Playwright smoke test: mount shell + child, assert computed styles on slotted child.
+   - [ ] **DSD emission helper** (`renderShadowComponentToString`, §12.10) renders `<caribou-app-shell>` to a DSD template string: `<caribou-app-shell><template shadowrootmode="open"><style id="caribou-dsd-style">…</style>…</template></caribou-app-shell>`. The inline `<style>` content matches `static styles` byte-for-byte.
+   - [ ] **Hydration parity assertion** — the harness renders `<caribou-app-shell>` once via `renderComponentToString` (server-side path) and once via the same helper called against the client component class in pre-hydration mode; the two strings are byte-equal after whitespace normalization. This is the gate for the §10.2 hydration-parity tests; if it fails for the shell, all downstream tests are blocked.
+   - [ ] **DSD upgrade — adoption suppression** — load the SSR'd shell into a real browser (Playwright), assert that `shadowRoot.adoptedStyleSheets.length === 0` after Elena upgrade (the inline `<style>` is the authoritative stylesheet), and that the rendered styles match the static-styles source.
 
 If any of these fail, the plan pauses and we reassess (back to template helper or full light-DOM). This POC is a hard gate — Plan 3's Task 1.
 
@@ -596,7 +608,19 @@ Plan 3 changes:
 - Existing avatar retry + `loading="lazy"` behavior is shared across all variants.
 - No separate component files.
 
-**PURIFY_OPTS hoisted to a shared module.** The current literal lives at the top of `apps/caribou-elena/pages/components/caribou-status-card.ts` (`PURIFY_OPTS = { ALLOWED_TAGS: [...], ALLOWED_ATTR: [...], ALLOW_DATA_ATTR: false }`). Plan 3 moves it to `packages/caribou-mastodon-client/src/sanitize-opts.ts` so the same allowlist is consumed by both client-side (status card) and server-side (`server/lib/sanitize.ts`, §12.5) sanitization. Identical allowlist on both sides is a prerequisite for hydration parity (§12.6) — an even subtle divergence would cause the server-rendered HTML to differ byte-for-byte from the client `render()` output, triggering Elena's morph step to rebuild every status card on hydration.
+**PURIFY_OPTS hoisted to a shared module.** The current literal lives at the top of `apps/caribou-elena/pages/components/caribou-status-card.ts` (`PURIFY_OPTS = { ALLOWED_TAGS: [...], ALLOWED_ATTR: [...], ALLOW_DATA_ATTR: false }`). Plan 3 moves it to `packages/mastodon-client/src/sanitize-opts.ts` (package name `@beatzball/caribou-mastodon-client`) so the same allowlist is consumed by both client-side (status card) and server-side (`server/lib/sanitize.ts`, §12.5) sanitization. Identical allowlist on both sides is a prerequisite for hydration parity (§12.6) — an even subtle divergence would cause the server-rendered HTML to differ byte-for-byte from the client `render()` output, triggering Elena's morph step to rebuild every status card on hydration.
+
+**Package `exports` subpath.** The `mastodon-client` package's `exports` field today only exposes `.`. Plan 3 adds `"./sanitize-opts"` so callers can import `PURIFY_OPTS` directly without pulling in the rest of the package's surface:
+
+```jsonc
+// packages/mastodon-client/package.json
+"exports": {
+  ".": "./src/index.ts",
+  "./sanitize-opts": "./src/sanitize-opts.ts"
+}
+```
+
+Do **not** also re-export `PURIFY_OPTS` from the package root — having two import paths invites accidental drift if a future refactor renames or moves the literal. The subpath is the single canonical entry point used by both `caribou-status-card.ts` and `server/lib/sanitize.ts`.
 
 ### 8.6 Boost rendering
 
@@ -619,10 +643,21 @@ Currently `<caribou-status-card>` treats every status as if its content lived on
 
 ### 8.7 Stub page markup
 
-`pages/privacy.ts`:
+`pages/privacy.ts` — server-side render is driven by a tiny `pageData` that surfaces only `ShellInfo` (no upstream fetch), so the `<caribou-app-shell>` `instance` prop is populated and the right-rail signed-in indicator (§6.4) renders correctly when the user is signed in:
+
+```ts
+// pages/privacy.ts (sketch)
+export const pageData = definePageData<{ shell: ShellInfo }>(async (event) => {
+  const resolution = await resolveInstanceForRoute(event, {}, { storage, origin })
+  return { shell: { instance: resolution.instance } }
+})
+// In render(): <caribou-app-shell .instance=${pageData.shell.instance}>…</caribou-app-shell>
+```
+
+The slotted markup remains static:
 
 ```html
-<caribou-app-shell>
+<caribou-app-shell .instance=${shell.instance}>
   <article slot="main" class="prose text-1">
     <h1 class="text-2xl font-semibold mb-4">Privacy</h1>
     <p class="text-2">
@@ -638,14 +673,14 @@ Currently `<caribou-status-card>` treats every status as if its content lived on
 </caribou-app-shell>
 ```
 
-`pages/about.ts` is analogous.
+`pages/about.ts` is analogous (same `ShellInfo`-only `pageData`, different slotted body).
 
 ### 8.8 Auth-required placeholder (`/home`, `/@me`, `/@me/[id]`)
 
-Routes that require the user's access token cannot be SSR-rendered (Caribou's server never sees the token — see §11 of the parent spec, §12.1). For these routes, the SSR shell emits a placeholder card inside `<caribou-app-shell>`:
+Routes that require the user's access token cannot be SSR-rendered (Caribou's server never sees the token — see §11 of the parent spec, §12.1). For these routes, `pageData` returns `{ kind: 'auth-required', shell: ShellInfo }` (§12.6a) — the cookie is read server-side so the shell still gets `.instance` set, and the right-rail "Signed in to {instance}" indicator renders correctly even on the placeholder. The SSR shell emits a placeholder card inside `<caribou-app-shell>`:
 
 ```html
-<caribou-app-shell>
+<caribou-app-shell .instance=${shell.instance}>
   <article class="auth-required-placeholder">
     <h1 class="text-2xl font-semibold">Sign in to continue</h1>
     <p class="text-2">
@@ -658,7 +693,11 @@ Routes that require the user's access token cannot be SSR-rendered (Caribou's se
 </caribou-app-shell>
 ```
 
-When JS runs and an active session is present in localStorage, the home / profile-me / status-me pages take over and replace the placeholder with the real component (`<caribou-timeline kind="home">`, `<caribou-profile handle="@me">`, etc.). The placeholder remains visible the entire time JS is bootstrapping; once `me.signal` resolves and the active client is ready, the page swaps.
+Note that on these routes a signed-in user with the `caribou.instance` cookie set may see "Signed in to {instance}" in the right rail while the main pane shows "Sign in to continue". This is correct: the cookie says the user has signed in at least once; the access token (held only in localStorage) is what's missing. Re-signing-in via the link restores the token without invalidating the cookie. See §12.11's failure-mode entry "Cookie set, localStorage token never written".
+
+When JS runs and an active session is present in localStorage, the home / profile-me / status-me pages take over and replace the placeholder with the real component (`<caribou-timeline kind="home">`, `<caribou-profile handle="@me">`, etc.).
+
+**Swap mechanism.** On client mount, the page reads `me.signal` synchronously from localStorage (already populated by Plan 2's bootstrap before any page mounts). If `me.signal` resolves to a signed-in user, the page calls `appShell.replaceChildren(<real component>)` — a single DOM mutation that swaps the placeholder `<article>` for the real component element inside the shell's default slot. The shell itself does not remount; only the slotted child changes. If `me.signal` is empty, the placeholder remains as the final state. Because localStorage is synchronous, there is no three-state flash (placeholder → blank → skeleton → content); the swap happens in the same tick as the page mount, before paint.
 
 **Routes covered:**
 
@@ -742,7 +781,7 @@ Minimal, high-value only:
 - `caribou-status-card` boost rendering — render with a reblog fixture; assert displayed account/content come from `status.reblog`, attribution row shows the booster, and no blank card. Repeat across all four variants.
 - `caribou-thread` indent cap — render a depth-5 descendant chain, assert DOM indentation stops at depth 3.
 - `caribou-profile` tab parsing — mount with `?tab=media`, assert `onlyMedia: true` was passed to `createProfileStore`.
-- **SSR hydration parity** — for each SSR'd public route (`/local`, `/public`, `/@user@host`, `/@user@host/[id]`), unit-level test that renders the route's `pageData` output and the corresponding component's `render()` output and asserts the two HTML strings are byte-equal (after normalizing whitespace). Catches the most common hydration-flicker class: a server-side branch that adds or omits an attribute the client doesn't. Uses a fixed `now` so relative timestamps are deterministic in both paths (in fact, server emits absolute timestamp; client substitutes the relative form on hydration — see §12.6).
+- **SSR hydration parity** — for each SSR'd public route (`/local`, `/public`, `/@user@host`, `/@user@host/[id]`), unit-level test that renders the route's `pageData` output and the corresponding component's `render()` output (in pre-hydration mode, see §12.6 step 3) and asserts the two HTML strings are byte-equal (after normalizing whitespace). Catches the most common hydration-flicker class: a server-side branch that adds or omits an attribute the client doesn't. Both paths go through the same harness — `renderComponentToString(tagName, props): Promise<string>` — exported from `server/lib/render-shadow.ts` (§12.10). On the server side it is called by `pageData`; on the test side it is also called against the client component class (in pre-hydration mode) so the comparison is apples-to-apples. The harness is built and validated as part of Plan 3's POC task (§6.6) before any other Plan-3 work merges; the byte-equal assertion is the gate that proves DSD emission and pre-hydration `render()` agree.
 - **Cookie hostname validation** — unit test for `getInstance(event)`: cookie set to a registered host returns the host; cookie set to an unregistered host returns `undefined`; cookie set to `169.254.169.254` returns `undefined`; missing cookie returns `undefined`.
 - **Playwright JS-disabled smoke** — single Playwright test launched with `javaScriptEnabled: false`. Visits `/local` (using a test fixture instance), asserts: at least one status card is visible, "Older posts →" anchor is visible, clicking the anchor navigates to `/local?max_id=…` and renders a different status set, no console errors. Also visits `/home` and asserts the auth-required placeholder is shown. This is the only no-JS Playwright test in Plan 3 — the rest of the no-JS path is covered by the byte-equal hydration parity tests above.
 
@@ -853,7 +892,7 @@ Caribou's public read paths must be **fully usable without JavaScript**. With JS
 1. The server sees which instance a user signed in to (already implicit from the OAuth handshake).
 2. The server sees which public statuses / profiles a no-JS user is browsing (this disclosure is genuinely new and is called out in the privacy stub copy, §3.5).
 
-**What this rules out.** No SSR for the home timeline. No SSR for boost / favourite / reply actions (write features, deferred to Plan 4 anyway). No SSR for "load more on scroll without leaving the page" — JS users get IO-sentinel hijacks; no-JS users get full-page navigations via the same anchor.
+**What this rules out.** No SSR for the home timeline. No SSR for boost / favourite / reply actions (write features, deferred to Plan 4 anyway). No SSR for "load more on scroll without leaving the page" — JS users get IO-sentinel hijacks; no-JS users get full-page navigations via the same anchor. No server-side WebFinger resolution: bare-handle URLs (`/@user`, `/@user/[id]`) without the `caribou.instance` cookie show the auth-required placeholder rather than attempting to resolve which instance the handle belongs to. Users sharing links to other readers should use the host-qualified form (`/@user@host`); the bare form is a convenience for the signed-in user's own browsing context, not a universal share format.
 
 ### 12.2 The `caribou.instance` cookie
 
@@ -991,6 +1030,8 @@ export async function fetchThreadContext(
 
 **No upstream auth.** Every fetch in this module is unauthenticated. Mastodon servers expose `/api/v1/timelines/public`, `/api/v1/accounts/*`, `/api/v1/statuses/*` to anonymous requests for public content. Caribou never attaches the user's bearer token server-side.
 
+**Parameter naming is normative.** The names `instance`, `kind`, and `maxId` (and the option-bag shape `{ instance, kind, maxId }`) are normative across this module and across `pageData` payloads in §12.6a. Do **not** rename them to `host`, `cursor`, etc. even if existing client-side stores in `packages/state` use other conventions — divergence will fail the byte-equal SSR↔client-render parity tests in §10.2 because the components' `initial` prop shape won't line up with what `pageData` returned.
+
 **Error handling.** Upstream 404 → the route renders an error state inside the shell ("Status not found", "Account not found"). Upstream 5xx / network error → render a transient-error state with a "Retry" link that re-runs the same URL. No retries inside the cache layer (one shot per request); retries belong to the JS hydration path or to the user clicking "Retry".
 
 ### 12.4 The upstream cache
@@ -1050,6 +1091,10 @@ export async function cachedFetch<T>(url: string, ttlMs: number): Promise<T> {
 
 **No persistence.** Cache is per-process, in memory. Server restart drops all entries. Acceptable: TTLs are short anyway.
 
+**Errors are not cached.** Upstream 4xx (incl. 404) and 5xx responses, network errors, and JSON-parse errors all throw out of `cachedFetch` without writing to the LRU. Implications: (a) every refresh of a not-found URL re-hits upstream until the upstream answers `200`, and (b) a transient upstream blip becomes immediately recoverable on the next request. The trade-off is intentional — caching error responses would mask new accounts becoming visible (e.g., a 404 cached for `TTL.PROFILE = 5min` would hide an account that was just created). The 404-thundering-herd risk for popular not-found URLs is mitigated by the in-flight dedup `Map`: concurrent requests share one upstream call, so even under load only one 404 is in flight per URL at a time. Sustained pressure that breaks this assumption (e.g., crawlers hammering deleted-status URLs) is an operational concern, deferred to §11.1b's cache-observability follow-up.
+
+**Rejection sharing.** Because `inflight.get(url)` returns the same `Promise` to every joined caller, a rejected upstream fetch propagates to all of them. One failed upstream serves error states to N concurrent visitors. Documented as intentional — retrying inside `cachedFetch` would amplify upstream load on every joiner; per-page error UI handles the user-facing recovery, and the next request after `inflight.delete` fires fresh.
+
 **Operational deferments.** Hit/miss counters, structured logging, metrics endpoint are deferred to §11.1b.
 
 ### 12.5 The server-side sanitizer
@@ -1068,7 +1113,7 @@ export function sanitize(html: string): string {
 }
 ```
 
-**`PURIFY_OPTS` is the shared allowlist** at `packages/caribou-mastodon-client/src/sanitize-opts.ts`:
+**`PURIFY_OPTS` is the shared allowlist** at `packages/mastodon-client/src/sanitize-opts.ts`:
 
 ```ts
 export const PURIFY_OPTS = {
@@ -1090,16 +1135,23 @@ export const PURIFY_OPTS = {
 
 1. **Sanitization differences.** Mitigated by shared `PURIFY_OPTS` (§12.5).
 2. **Locale-dependent output.** Mitigated by passing the page's `Accept-Language` to the SSR rendering context and using the same `Intl` calls on both sides. For Plan 3, only English copy is rendered, so divergence risk is low; we still pass the locale to the rendering context for forward-compatibility.
-3. **Time-dependent output (relative timestamps).** The client renders relative timestamps via `formatRelativeTime` (§7.3); the server cannot, because "5m" vs "6m" depends on the wall clock at render. **Resolution:** SSR emits the absolute ISO timestamp inside a `<time datetime="…">…</time>` element with the absolute formatted form as inner text ("Apr 14, 16:32"). On client mount, the status card replaces the inner text with the relative form. The `<time>` element's `datetime=` attribute is unchanged by hydration; only the inner text changes. This swap happens after morph, so it does not cause a hydration mismatch — it's a deliberate post-hydration update, gated by JS being present.
+3. **Time-dependent output (relative timestamps).** The client renders relative timestamps via `formatRelativeTime` (§7.3); the server cannot, because "5m" vs "6m" depends on the wall clock at render. **Resolution:** the status card's `render()` method has two modes — pre-hydration and post-hydration — gated by an internal flag (`this._hydrated`). On the very first `render()` call (server-side, and on the first client-side call during DSD upgrade) the absolute formatted timestamp is emitted: `<time datetime="…">Apr 14, 16:32</time>`. After Elena's upgrade settles (component is connected to the document and the DSD root has been adopted), the card schedules a microtask (`queueMicrotask`) that sets `this._hydrated = true` and calls `requestUpdate()`. The second `render()` produces `<time datetime="…">5m</time>`, and morph rewrites only the `<time>` element's text node. Hydration parity holds because the byte-equal SSR↔client-render comparison in §10.2 runs against the **pre-hydration** branch (`this._hydrated = false` on both sides). The post-hydration relative form is a deliberate, scheduled DOM mutation, not a hydration mismatch.
 4. **Element ordering inside collections.** Trivially preserved as long as both sides iterate `statuses` in the same order. Passing `initial` directly into `createTimelineStore` guarantees this.
 5. **Whitespace inside templates.** Elena's template engine collapses whitespace consistently. SSR emits HTML through the same template strings (the components themselves run server-side via `renderToString`); both sides go through the same whitespace handling.
 
 **Declarative shadow DOM (DSD) flow:**
 
-When a page contains `<caribou-status-card>` (a shadow-DOM component), SSR emits:
+The DSD emission helper is `renderShadowComponentToString(tagName, props): Promise<string>`, exported from a new file `apps/caribou-elena/server/lib/render-shadow.ts`. It is a Caribou-local helper — Elena does not currently ship a DSD-aware SSR API, and shipping it upstream is out of scope for Plan 3. Plan 3's POC task (§6.6) builds and validates this helper as a hard gate before any other Plan-3 work merges. The helper:
+
+1. Looks up the component class by `tagName`.
+2. Constructs an instance, assigns `props`, calls `render()` to produce the inner template.
+3. Reads `static styles` and emits its CSS as a single inline `<style>` tag at the top of the DSD template.
+4. Wraps everything in `<${tagName} …attrs><template shadowrootmode="open"><style>…</style>…rendered template…</template></${tagName}>`.
+
+A typical SSR emission for `<caribou-status-card>`:
 
 ```html
-<caribou-status-card data-index="0" data-status-id="…">
+<caribou-status-card data-status-id="…">
   <template shadowrootmode="open">
     <style>/* contents of static styles */</style>
     <article>… status card markup …</article>
@@ -1110,30 +1162,138 @@ When a page contains `<caribou-status-card>` (a shadow-DOM component), SSR emits
 The browser parses `<template shadowrootmode="open">` and attaches a shadow root automatically (it is a built-in HTML platform feature; no JS required). Without JS, the user sees the styled card. With JS, on hydration:
 
 1. Elena's upgrade path runs (`@elenajs/core/src/elena.js:267-275`): it sees `this.shadowRoot != null`, so it skips its own `attachShadow()` call and reuses the DSD-attached root.
-2. `static styles` is converted to `CSSStyleSheet` and pushed onto `shadowRoot.adoptedStyleSheets`. The browser de-duplicates equivalent rules — the inline `<style>` from DSD remains in the DOM but its rules are overlapped by the adopted sheet.
-3. The component's `render()` runs; morph is a no-op because the existing DOM matches.
-4. Props (`status`) are assigned imperatively from the parent's `updated()` lifecycle (existing pattern from PR #14).
+2. The upgrade-time `static styles` adoption is **suppressed** when DSD is detected. Specifically: Elena's adoption path runs only if the shadow root has no `<style id="caribou-dsd-style">` sentinel as its first child; the DSD emission helper inserts that sentinel `<style>` element so adoption is skipped on first upgrade. The **inline `<style>` from DSD becomes the authoritative stylesheet** — same source (`static styles`), just delivered via the DOM rather than `adoptedStyleSheets`. Rationale: the platform does NOT de-duplicate rules across `<style>` elements and `adoptedStyleSheets`, and `adoptedStyleSheets` come *before* author stylesheets in cascade order, so leaving both in place creates a real precedence trap when `static styles` is later edited (the frozen inline copy would lose). Skipping adoption on first upgrade keeps a single source of truth.
+3. On any subsequent `static styles` change (HMR in dev, or any deliberate `requestUpdate` that needs to swap stylesheets), Elena's adoption path runs normally and replaces `adoptedStyleSheets`. The inline DSD `<style>` is removed at that point. For Plan 3's runtime behavior, this branch is unused — `static styles` is fixed per class — but documenting it keeps the contract clean for HMR.
+4. The component's `render()` runs in pre-hydration mode (see §12.6 step 3 above for the timestamp swap); morph is a no-op because the existing DOM matches.
+5. Props (`status`) are assigned imperatively from the parent's `updated()` lifecycle (existing pattern from PR #14). The behavior of `card.status = status` post-DSD-hydration (re-render-and-morph vs. skip via `requestUpdate` gating) is governed by Elena's existing reactivity rules; both produce identical observable DOM. The behavioral contract is `packages/elena-morph-spec/src/__tests__/morph-custom-elements.test.ts` Section 1.
 
 **Light-DOM components** (e.g., `<caribou-timeline>`) are simpler — no DSD. SSR emits the rendered light-DOM children directly inside the custom element. On hydration, Elena's upgrade calls `connectedCallback`, which runs the same effect bindings, sees `this.statuses` already populated from the `initial` prop (set imperatively by the page on mount, just before the upgrade settles), and morph is a no-op.
 
-**Initial-data delivery.** Each page's render method receives a `pageData` object from Litro's `definePageData`. The page assigns the relevant slice to the component imperatively, e.g.:
+**Initial-data delivery.** Each page's render method receives a `pageData` object from Litro's `definePageData`, typed against the §12.6a contracts. The page assigns the relevant slice to the component imperatively:
 
 ```ts
-// pages/local.ts (sketch)
-export const pageData = definePageData(async (event) => {
-  const instance = await getInstance(event, { storage, origin })
-  if (!instance) return { kind: 'auth-required' as const }
-  const maxId = getQueryParam(event, 'max_id') || undefined
-  const statuses = await fetchPublicTimeline({ instance, kind: 'local', maxId })
-  return { kind: 'ok' as const, statuses, nextMaxId: statuses.at(-1)?.id }
-})
+// pages/local.ts (sketch — concrete shape comes from §12.6a)
+export const pageData = definePageData<TimelinePageData & { shell: ShellInfo }>(
+  async (event) => {
+    const resolution = await resolveInstanceForRoute(event, {}, { storage, origin })
+    const shell: ShellInfo = { instance: resolution.instance }
+    if (!resolution.instance) return { kind: 'auth-required', shell }
+    const maxId = getQueryParam(event, 'max_id') || undefined
+    try {
+      const statuses = await fetchPublicTimeline({
+        instance: resolution.instance, kind: 'local', maxId,
+      })
+      const nextMaxId = statuses.length > 0 ? statuses.at(-1)!.id : null
+      return { kind: 'ok', statuses, nextMaxId, shell }
+    } catch (err) {
+      return { kind: 'error', message: String(err), shell }
+    }
+  },
+)
 
-// in render path:
-//   if (pageData.kind === 'auth-required') emit placeholder (§8.8)
-//   else: <caribou-app-shell><caribou-timeline kind="local" .initial=${pageData}></caribou-timeline></caribou-app-shell>
+// in render path (sketch):
+//   const { shell, ...rest } = pageData
+//   // <caribou-right-rail> lives inside the shell's shadow root (§6.5);
+//   // the page sets the signed-in indicator by setting `.instance` on the
+//   // shell, which forwards to the rail. No direct rail child here.
+//   <caribou-app-shell .instance=${shell.instance}>
+//     ${rest.kind === 'ok'
+//       ? html`<caribou-timeline kind="local" .initial=${rest}></caribou-timeline>`
+//       : rest.kind === 'auth-required'
+//         ? authRequiredPlaceholder()  // §8.8
+//         : errorPlaceholder(rest.message)}
+//   </caribou-app-shell>
 ```
 
 Litro serializes `pageData` into a `<script type="application/json" id="__litro_data">…</script>` block in the SSR HTML; on hydration, the page's client bootstrap reads that JSON and uses it to set the `initial` prop on the relevant component before Elena's upgrade settles. Plan 3 is the first plan to use per-route `pageData` for hydration (Plan 2's signed-in session lives in localStorage, not in a server-rendered `pageData` block).
+
+### 12.6a Normative type contracts
+
+These types are the contract between server-side `pageData` (§12.3, §12.6) and client-side component `initial` props (§8.2, §8.3, §8.4). They are normative: implementations must match these shapes exactly. The byte-equal hydration parity tests in §10.2 verify that `pageData.kind === 'ok'` payloads round-trip through both server SSR and client `render()` to identical HTML.
+
+```ts
+// All types live in apps/caribou-elena/server/lib/page-data-types.ts
+// (re-exported by the relevant page modules and consumed by the
+//  matching component's `initial` prop type).
+
+import type { Status, Account } from '@beatzball/caribou-mastodon-client'
+
+// Common discriminator: every pageData payload is a kind-tagged union.
+type AuthRequired = { kind: 'auth-required' }
+type Failed       = { kind: 'error'; message: string }
+
+// ----- /local and /public -----
+export type TimelinePageData =
+  | AuthRequired
+  | Failed
+  | {
+      kind: 'ok'
+      statuses: Status[]
+      nextMaxId: string | null  // null = upstream returned 0 results, no anchor emitted
+    }
+
+// <caribou-timeline initial> matches the 'ok' branch's data:
+//   { statuses: Status[]; nextMaxId: string | null }
+
+// ----- /@[handle] (profile) -----
+export type ProfilePageData =
+  | AuthRequired
+  | Failed
+  | {
+      kind: 'ok'
+      account: Account
+      statuses: Status[]
+      nextMaxId: string | null
+      tab: 'posts' | 'replies' | 'media'
+    }
+
+// <caribou-profile initial> matches the 'ok' branch's data (excluding the kind tag).
+
+// ----- /@[handle]/[statusId] (single status + thread) -----
+export type ThreadPageData =
+  | AuthRequired
+  | Failed
+  | {
+      kind: 'ok'
+      focused: Status                    // from fetchStatus
+      ancestors: Status[]                // from fetchThreadContext
+      descendants: Status[]              // from fetchThreadContext
+    }
+
+// <caribou-thread initial> matches the 'ok' branch's data.
+// The store unwraps it internally:
+//   focused → focused.value = { status: 'ready', data: focused }
+//   { ancestors, descendants } → context.value = { status: 'ready', data: { ancestors, descendants } }
+
+// ----- /home, /@me, /@me/[statusId] -----
+export type AuthRequiredOnlyPageData = AuthRequired
+// pageData returns { kind: 'auth-required', shell } — the cookie is still
+// read so the shell's signed-in indicator renders. No upstream fetch.
+
+// ----- /privacy, /about -----
+export type StubPageData = Record<never, never>
+// pageData returns { shell } — no upstream fetch, but the cookie is read so
+// the shell's signed-in indicator renders consistently across all routes.
+
+// ----- Shared shell payload -----
+// Every public-read pageData also carries an optional shellInfo slice consumed
+// by <caribou-app-shell> / <caribou-right-rail> for the signed-in indicator.
+export interface ShellInfo {
+  instance: string | null  // from caribou.instance cookie, validated against OAuth registry
+}
+
+// Concrete pageData returned by /local etc. is therefore:
+//   TimelinePageData & { shell: ShellInfo }
+// The page assigns shell.instance to <caribou-app-shell .instance=…>;
+// the shell forwards it into its shadow-internal <caribou-right-rail>
+// (§6.5). The right rail is not directly addressable by pages.
+```
+
+**Why a shared discriminated union and not per-route ad-hoc shapes:** the shell's signed-in indicator (§6.4), the auth-required placeholder swap (§8.8), and the SSR error state are all cross-cutting. Carrying the same `kind` tag at the top level means each page's render method has one switch instead of N condition checks, and the `__litro_data` JSON block has a stable shape readable by tooling.
+
+**Why `initial` prop shapes mirror the `ok` branch (without the tag):** so a component never has to defensively check `kind === 'ok'`. Pages handle the `auth-required` and `error` branches before assigning anything to the component; the component sees only valid data or no `initial` at all (in which case it falls back to its mount-time fetch as before).
+
+**Why `<caribou-thread>` flattens `ancestors` / `descendants` instead of a nested `context` object in `initial`:** the SSR side fetches `focused` and `context` in parallel from two separate endpoints; flattening at the `pageData` boundary lets the JSON serialize as a single record with no extra nesting. The store's internal split (`focused: Signal<AsyncState<Status>>`, `context: Signal<AsyncState<{ ancestors, descendants }>>`) is reconstructed when `createThreadStore(client, statusId, { initial })` is called: it seeds `focused.value = { status: 'ready', data: initial.focused }` and `context.value = { status: 'ready', data: { ancestors: initial.ancestors, descendants: initial.descendants } }`.
 
 ### 12.7 Pagination — anchor as source of truth
 
@@ -1155,8 +1315,11 @@ With JS, the timeline component:
 
 1. On mount, registers an `IntersectionObserver` on the anchor element (`data-sentinel`).
 2. When the anchor scrolls into view, the IO callback calls `loadMore()` on the store. `loadMore()` issues an authenticated client-side fetch (for `/local` and `/public` it is also unauthenticated — same code path as anonymous reads, but routed through the client `CaribouClient` instance), appends results to `statuses`, and the timeline re-renders with the appended cards.
-3. The IO callback also updates the anchor's `href` to point to the new `nextMaxId` (or removes the anchor entirely if the upstream returned an empty array). The anchor is the single source of truth for "where the next page lives."
-4. `event.preventDefault()` is wired on the anchor's `click` event to prevent the full-page navigation when JS is active.
+3. After `loadMore()` resolves successfully, the same microtask updates the anchor's `href` to the new `nextMaxId` and re-observes it (`io.observe(anchor)`). On rejection, the `href` is left unchanged so a subsequent retry hits the same URL — do **not** update optimistically before the network call settles. The anchor is the single source of truth for "where the next page lives."
+4. **End-of-list:** if `loadMore()` resolves with an empty array (upstream signals exhaustion), JS removes the anchor element from the DOM entirely (`anchor.remove()`). The IO observer's reference is dropped at the same time. The no-JS path simply does not emit the anchor in this case — the server has already paginated to the end. There is no "no more posts" label in Plan 3; absence of the anchor is the signal.
+5. `event.preventDefault()` is wired on the anchor's `click` event to prevent the full-page navigation when JS is active.
+
+**Anchor `href` construction.** The `href` always preserves the current URL's other query params (e.g., `?tab=replies`) and only mutates `max_id`. Use `new URL(location.href); url.searchParams.set('max_id', id); anchor.href = url.pathname + url.search`. SSR follows the same construction rule so the `href` is stable across render paths. Without this, profile pagination (`?tab=replies&max_id=…`) would silently lose the `tab` param on every page navigation.
 
 **Why anchor-as-source-of-truth:** the alternative is "JS computes the next URL from the store; HTML doesn't have a working link." That breaks no-JS users entirely. Anchor-as-source-of-truth means both paths converge on the same data: the URL the JS path is about to fetch is the same URL the no-JS path would navigate to.
 
@@ -1180,11 +1343,11 @@ The placeholder is emitted by routes that depend on the user's access token. It 
 | `/@user` (bare) | Full SSR if `caribou.instance` cookie set; placeholder otherwise | same | same |
 | `/@user@host/[id]` | Full SSR | `fetchStatus` + `fetchThreadContext` | n/a (single status + bounded thread) |
 | `/@user/[id]` | Full SSR if cookie set; placeholder otherwise | same | n/a |
-| `/home` | Auth-required placeholder | n/a | n/a (hydration loads timeline client-side) |
-| `/@me` | Auth-required placeholder (handle resolved client-side) | n/a | n/a |
-| `/@me/[id]` | Auth-required placeholder | n/a | n/a |
-| `/privacy` | Static HTML | n/a | n/a |
-| `/about` | Static HTML | n/a | n/a |
+| `/home` | Auth-required placeholder | `pageData` reads cookie → `{ kind: 'auth-required', shell }` | n/a (hydration loads timeline client-side) |
+| `/@me` | Auth-required placeholder (handle resolved client-side) | same | n/a |
+| `/@me/[id]` | Auth-required placeholder | same | n/a |
+| `/privacy` | Static HTML | `pageData` reads cookie → `{ shell }` (no upstream fetch) | n/a |
+| `/about` | Static HTML | same | n/a |
 | `<caribou-app-shell>` | DSD shadow root with grid + nav-rail + right-rail children | n/a | n/a |
 | `<caribou-nav-rail>` | DSD shadow root with anchors | n/a | n/a |
 | `<caribou-right-rail>` | DSD shadow root with about/links/disabled-slots; signed-in line if cookie set | n/a | n/a |
@@ -1198,12 +1361,22 @@ The placeholder is emitted by routes that depend on the user's access token. It 
 | Module | Purpose | Approx. size |
 |---|---|---|
 | `server/lib/instance-cookie.ts` | `getInstance` (with format check + registry membership), `setInstance`, `clearInstance` | ~30 lines |
+| `server/lib/resolve-instance.ts` | `resolveInstanceForRoute(event, params, deps)` — single entry point used by every public-read `pageData` fetcher to decide which instance to pass; returns `{ instance, source: 'path' | 'cookie' } \| { instance: null }` | ~25 lines |
 | `server/lib/mastodon-public.ts` | `fetchPublicTimeline`, `fetchAccountByHandle`, `fetchAccountStatuses`, `fetchStatus`, `fetchThreadContext` — all unauth, all routed through `cachedFetch` | ~120 lines |
 | `server/lib/upstream-cache.ts` | LRU + TTL constants + in-flight dedup `Map<url, Promise>`; exports `cachedFetch` and `TTL` | ~50 lines |
 | `server/lib/sanitize.ts` | DOMPurify + jsdom glue; exports `sanitize(html)` reading shared `PURIFY_OPTS` | ~10 lines |
-| `packages/caribou-mastodon-client/src/sanitize-opts.ts` | Shared `PURIFY_OPTS` constant | ~10 lines |
+| `server/lib/render-shadow.ts` | DSD emission helper `renderShadowComponentToString(tagName, props)`; wraps `static styles` in inline `<style id="caribou-dsd-style">` and emits `<template shadowrootmode="open">…</template>` | ~50 lines |
+| `packages/mastodon-client/src/sanitize-opts.ts` | Shared `PURIFY_OPTS` constant; exposed via package `exports` subpath `"./sanitize-opts"` (package name `@beatzball/caribou-mastodon-client`) | ~10 lines |
 
-All five modules are added in Plan 3. New runtime dependencies on `apps/caribou-elena`: `lru-cache`, `jsdom`, `dompurify`. `dompurify` is already a client-side dep on the same app from PR #14, so the addition there is moving it from `dependencies` to a shared spot (it is also imported on the server). `jsdom` is a server-only dep and adds ~7 MB installed; acceptable for a Nitro server image.
+All seven modules are added in Plan 3. New runtime dependencies on `apps/caribou-elena`:
+
+| Dependency | Version | Notes |
+|---|---|---|
+| `lru-cache` | `^11` | Used by `upstream-cache.ts`. New dep. |
+| `jsdom` | `^25` | Used by `sanitize.ts`. New server-only dep; ~7 MB installed, acceptable for Nitro server image. |
+| `dompurify` | `^3` | Already a client-side dep on `apps/caribou-elena` from PR #14 (status card import). The same major version is imported by `server/lib/sanitize.ts`; do not split majors between client and server, since v2 and v3 differ in the `JSDOM('').window` cast pattern used in §12.5. |
+
+Versions are pinned at the floor of the latest major at the time of Plan 3 implementation. The implementation plan's first task adds these to `package.json` before any module that imports them is committed.
 
 ### 12.11 Signin / signout wiring
 
@@ -1217,8 +1390,11 @@ All five modules are added in Plan 3. New runtime dependencies on `apps/caribou-
 **Failure modes:**
 
 - User signs in successfully but cookie write fails (browser refused, third-party-cookie policy, etc.). Effect: `getInstance(event)` returns `undefined` for subsequent SSR requests; bare-handle profile views fall through to the auth-required placeholder. JS-driven pages still work normally because they read instance from `me.signal`, which lives in localStorage. **Action:** none; the placeholder copy explains the situation.
-- Cookie present but the corresponding `apps:<host>:<origin>` entry has been evicted from storage (e.g., admin cleared the OAuth registry). Effect: `getInstance(event)` returns `undefined`; same behavior as above. The client-side path is also affected because the next signed-in API call will get a 401 from the upstream — at which point the existing client-side error handling kicks in (sign-out, redirect to landing). **Action:** none for Plan 3; storage retention is an operational concern, not a feature.
+- Cookie present but the corresponding `apps:<host>:<origin>` entry has been evicted from storage (e.g., admin cleared the OAuth registry). Effect: `getInstance(event)` returns `undefined`; SSR renders the auth-required placeholder. The client-side path is also affected because the next signed-in API call will get a 401 from the upstream — at which point the existing client-side error handling kicks in (sign-out, redirect to landing). **Action:** none beyond the existing registry check; storage retention is operational, not a feature.
 - Cookie is forged with a hostname that is not in the `apps:*` registry. Effect: `getInstance(event)` returns `undefined`; the SSR path treats the user as unauthenticated. **Action:** none; this is the SSRF-amplification mitigation working as designed.
+- **Cookie set, localStorage token never written** (user closes the tab at `/signin/done` before the client bootstrap reads the URL fragment). Effect: server sees signed-in state via the cookie; client has no token in localStorage. Bare-handle SSR routes work; auth-required routes (`/home`, `/@me`) render the placeholder. The right-rail "Signed in to {instance}" line shows correctly because it derives from the cookie, not the token. **Action:** none; the user re-signs-in to recover (the OAuth handshake re-issues a token without invalidating the cookie). The mismatch is harmless — no privacy leak, no upstream call surface gained.
+- **Cross-instance signin without signout in between.** User signs in to `mastodon.social`, never explicitly signs out, then signs in to `fosstodon.org`. Effect: `setInstance` overwrites the cookie to the new host. The `apps:mastodon.social:<origin>` storage entry persists indefinitely — by design. The OAuth `apps:*` registry is a permanent allowlist of every instance Caribou has ever onboarded for this origin; permanence is the threat model (registered instances are real Mastodon servers, not arbitrary attacker-controlled hosts). The cookie is the *current selection* among that allowlist; previously-registered hosts staying in the registry does not expand the SSRF blast radius beyond "valid Mastodon instances Caribou knows about." Documented here so future plans don't accidentally introduce registry retention as a new requirement. Stricter retention (e.g., evict `apps:*` entries unused for >N days) is deferred to §11.1b.
+- **Signout: client purge succeeds, server cookie clear fails (or vice versa).** Effect: localStorage-side state is gone (or kept) regardless of the cookie clear. The two halves are independent; neither half blocks the other. The next request after a partial signout falls back to whichever half remained: cookie-only → SSR routes work, JS routes show placeholder; localStorage-only → JS routes work, SSR cookie-dependent routes show placeholder. Both states are recoverable by re-signing-in or by hitting `/api/signout` again. **Action:** none for Plan 3; double-clearing on every signout request makes a single retry fully recover any partial state.
 
 ---
 
@@ -1240,5 +1416,5 @@ None. All decisions closed during brainstorming:
 - **Bare-handle profile resolution.** B1 — set a hostname-only `caribou.instance` cookie on signin so `/@user` can resolve which instance to query. Cookie validated against the OAuth `apps:*` registry on every read.
 - **Pagination semantics under no-JS.** A — real `?max_id=` cursor links rendered as anchors. With JS, an `IntersectionObserver` sentinel hijacks the anchor for in-place append; without JS, the anchor is a full-page navigation. Anchor is the single source of truth.
 - **Auth-required views without JS.** A — server emits sign-in placeholder card for `/home`, `/@me`, `/@me/[id]`. Hydration replaces the placeholder once JS resolves the active session.
-- **HTML sanitization on the server.** C — DOMPurify + jsdom directly (≈10 lines of glue in `server/lib/sanitize.ts`). Same `PURIFY_OPTS` consumed on both client and server, hoisted to `packages/caribou-mastodon-client/src/sanitize-opts.ts`.
+- **HTML sanitization on the server.** C — DOMPurify + jsdom directly (≈10 lines of glue in `server/lib/sanitize.ts`). Same `PURIFY_OPTS` consumed on both client and server, hoisted to `packages/mastodon-client/src/sanitize-opts.ts`.
 - **Upstream cache.** A — short-TTL in-memory LRU keyed by upstream URL. TTLs: public timelines 15s, statuses + thread context 60s, profiles 300s, profile statuses 60s. In-flight request dedup (`Map<url, Promise>`) included in Plan 3 scope to kill thundering-herd.
