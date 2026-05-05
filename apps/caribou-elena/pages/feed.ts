@@ -17,10 +17,14 @@ export default class FeedPage extends LitroPage {
     const target = e.target as HTMLElement | null
     if (!target?.closest('button[data-action="sign-out"]')) return
     if (typeof window === 'undefined') return
-    void import('@beatzball/caribou-state').then(({ removeActiveUser }) => {
-      removeActiveUser()
-      location.href = '/'
-    })
+    void fetch('/api/signout', { method: 'POST' })
+      .catch(() => {/* server-side cookie clear is best-effort; localStorage purge runs regardless */})
+      .finally(() => {
+        void import('@beatzball/caribou-state').then(({ removeActiveUser }) => {
+          removeActiveUser()
+          location.href = '/'
+        })
+      })
   }
 
   override connectedCallback() {
