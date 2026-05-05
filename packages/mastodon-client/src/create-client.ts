@@ -16,6 +16,7 @@ export interface CaribouClient {
     maxId?: string
     limit?: number
   }): Promise<mastodon.v1.Status[]>
+  fetchStatus(statusId: string): Promise<mastodon.v1.Status>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -55,6 +56,9 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         if (kind.type === 'list')    return c.v1.timelines.list.$select(kind.id).list(listParams)
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
       })
+    },
+    async fetchStatus(statusId) {
+      return run(`status:${statusId}`, (c) => c.v1.statuses.$select(statusId).fetch())
     },
   }
 }

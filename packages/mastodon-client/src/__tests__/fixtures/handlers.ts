@@ -14,4 +14,8 @@ export const handlers = [
   http.get('https://fosstodon.org/api/v1/accounts/verify_credentials', () =>
     HttpResponse.json(sampleAccount),
   ),
+  http.get('https://fosstodon.org/api/v1/statuses/:id', ({ params }) => {
+    if (params.id === '110') return HttpResponse.json(makeStatus('110'))
+    return HttpResponse.json({ error: 'Record not found' }, { status: 404 })
+  }),
 ]
