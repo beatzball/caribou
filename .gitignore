@@ -30,3 +30,7 @@ apps/*/server/build-meta.generated.ts
 # must be baked into the server bundle because the Docker runtime image
 # ships only `dist/` (no node_modules to resolve the workspace package).
 apps/*/server/lib/tokens-head.generated.ts
+
+# UnoCSS-generated utility-class CSS, same pattern as tokens-head.generated.ts.
+# Regenerated on every `pnpm build-meta` by scripts/write-uno-head.mjs.
+apps/*/server/lib/uno-head.generated.ts

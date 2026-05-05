@@ -7,7 +7,7 @@
     "#litro/page-manifest": "./server/stubs/page-manifest.ts"
   },
   "scripts": {
-    "build-meta": "node scripts/write-build-meta.mjs && node scripts/write-tokens-head.mjs",
+    "build-meta": "node scripts/write-build-meta.mjs && node scripts/write-tokens-head.mjs && node scripts/write-uno-head.mjs",
     "dev": "pnpm build-meta && litro dev",
     "dev:portless": "pnpm build-meta && portless run litro dev",
     "build": "pnpm build-meta && litro build",
