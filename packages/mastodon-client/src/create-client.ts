@@ -17,6 +17,10 @@ export interface CaribouClient {
     limit?: number
   }): Promise<mastodon.v1.Status[]>
   fetchStatus(statusId: string): Promise<mastodon.v1.Status>
+  fetchThread(statusId: string): Promise<{
+    ancestors: mastodon.v1.Status[]
+    descendants: mastodon.v1.Status[]
+  }>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -59,6 +63,9 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchStatus(statusId) {
       return run(`status:${statusId}`, (c) => c.v1.statuses.$select(statusId).fetch())
+    },
+    async fetchThread(statusId) {
+      return run(`thread:${statusId}`, (c) => c.v1.statuses.$select(statusId).context.fetch())
     },
   }
 }

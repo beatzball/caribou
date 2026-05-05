@@ -18,4 +18,8 @@ export const handlers = [
     if (params.id === '110') return HttpResponse.json(makeStatus('110'))
     return HttpResponse.json({ error: 'Record not found' }, { status: 404 })
   }),
+  http.get('https://fosstodon.org/api/v1/statuses/:id/context', ({ params }) => {
+    if (params.id === '110') return HttpResponse.json({ ancestors: [], descendants: [] })
+    return HttpResponse.json({ error: 'Record not found' }, { status: 404 })
+  }),
 ]
