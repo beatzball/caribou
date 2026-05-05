@@ -1,12 +1,7 @@
 import { Elena, html, unsafeHTML } from '@elenajs/core'
 import DOMPurify from 'dompurify'
 import type { mastodon } from 'masto'
-
-const PURIFY_OPTS = {
-  ALLOWED_TAGS: ['p', 'br', 'a', 'span', 'em', 'strong', 'ul', 'ol', 'li', 'code', 'pre'],
-  ALLOWED_ATTR: ['href', 'rel', 'target', 'class', 'lang'],
-  ALLOW_DATA_ATTR: false,
-}
+import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 
 // Wrap rules for sanitized post HTML. They used to live in the global
 // design-tokens stylesheet, but moving the card to shadow DOM walls the
