@@ -5,20 +5,27 @@
   "type": "module",
   "main": "./tokens.css",
   "exports": {
-    "./tokens.css": "./tokens.css"
+    "./tokens.css": "./tokens.css",
+    "./uno-preset": {
+      "types": "./uno-preset.ts",
+      "import": "./uno-preset.ts"
+    }
   },
   "files": [
-    "tokens.css"
+    "tokens.css",
+    "uno-preset.ts"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit --allowJs false --skipLibCheck || true",
+    "typecheck": "tsc --noEmit --skipLibCheck",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@beatzball/caribou-eslint-config": "workspace:*",
+    "@beatzball/caribou-tsconfig": "workspace:*",
     "eslint": "^9.0.0",
     "typescript": "^5.7.3",
+    "unocss": "^0.65.0",
     "vitest": "^2.1.0"
   }
 }
