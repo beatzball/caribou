@@ -22,6 +22,10 @@ export interface CaribouClient {
     descendants: mastodon.v1.Status[]
   }>
   lookupAccount(handle: string): Promise<mastodon.v1.Account>
+  fetchAccountStatuses(
+    accountId: string,
+    params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
+  ): Promise<mastodon.v1.Status[]>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -70,7 +74,18 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async lookupAccount(handle) {
       return run(`account-lookup:${handle}`, (c) =>
-        c.v1.accounts.lookup.fetch({ acct: handle }),
+        c.v1.accounts.lookup({ acct: handle }),
+      )
+    },
+    async fetchAccountStatuses(accountId, { tab, maxId, limit }) {
+      const key = `acct-statuses:${accountId}:${tab}:${maxId ?? ''}:${limit ?? ''}`
+      return run(key, async (c) =>
+        c.v1.accounts.$select(accountId).statuses.list({
+          ...(tab === 'posts' ? { excludeReplies: true } : {}),
+          ...(tab === 'media' ? { onlyMedia: true } : {}),
+          ...(maxId ? { maxId } : {}),
+          ...(limit ? { limit } : {}),
+        }),
       )
     },
   }
