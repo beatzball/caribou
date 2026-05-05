@@ -1,4 +1,5 @@
-import { Elena, html } from '@elenajs/core'
+import { html } from '@elenajs/core'
+import { CaribouElena } from './elena-shadow.js'
 
 // Minimal POC version of the app shell: just enough surface for Phase A's
 // DSD render + hydration-parity gates to target a real component. The full
@@ -8,14 +9,15 @@ import { Elena, html } from '@elenajs/core'
 // Shadow DOM is mandatory. The shell sits at the root of every read-only
 // route's pageData → DOM tree, so its shadow boundary is what walls the
 // timeline + cards off from each other's morph engines (see §6 of the
-// Plan 3 spec).
+// Plan 3 spec). Use `CaribouElena` (not upstream `Elena`) so the §6.5
+// adoption-suppression contract holds when DSD pre-emits the shell.
 const SHELL_CSS = `
   :host { display: block; min-height: 100vh; background: var(--bg-0); color: var(--fg-0); }
   .shell-grid { display: grid; min-height: 100vh; }
   main { padding: var(--space-4); }
 `
 
-export class CaribouAppShell extends Elena(HTMLElement) {
+export class CaribouAppShell extends CaribouElena(HTMLElement) {
   static override tagName = 'caribou-app-shell'
   static override shadow = 'open' as const
   static override styles = SHELL_CSS
