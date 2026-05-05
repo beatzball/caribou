@@ -1,6 +1,9 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import './components/caribou-home-timeline.js'
+// Phase A POC: side-effect import so the customElements registry sees the
+// shell class in dev. Wired into the page template in Phase F.
+import './components/caribou-app-shell.js'
 
 export default class FeedPage extends LitroPage {
   static override tagName = 'page-feed'
