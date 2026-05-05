@@ -27,6 +27,7 @@
     "@beatzball/caribou-mastodon-client": "workspace:*",
     "@beatzball/caribou-state": "workspace:*",
     "@beatzball/caribou-design-tokens": "workspace:*",
+    "@beatzball/caribou-ui-headless": "workspace:*",
     "@elenajs/core": "^1.0.0",
     "@elenajs/ssr": "^1.0.0-alpha.10",
     "@preact/signals-core": "^1.8.0",
