@@ -21,6 +21,7 @@ export interface CaribouClient {
     ancestors: mastodon.v1.Status[]
     descendants: mastodon.v1.Status[]
   }>
+  lookupAccount(handle: string): Promise<mastodon.v1.Account>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -66,6 +67,11 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchThread(statusId) {
       return run(`thread:${statusId}`, (c) => c.v1.statuses.$select(statusId).context.fetch())
+    },
+    async lookupAccount(handle) {
+      return run(`account-lookup:${handle}`, (c) =>
+        c.v1.accounts.lookup.fetch({ acct: handle }),
+      )
     },
   }
 }

@@ -22,4 +22,10 @@ export const handlers = [
     if (params.id === '110') return HttpResponse.json({ ancestors: [], descendants: [] })
     return HttpResponse.json({ error: 'Record not found' }, { status: 404 })
   }),
+  http.get('https://fosstodon.org/api/v1/accounts/lookup', ({ request }) => {
+    const url = new URL(request.url)
+    const acct = url.searchParams.get('acct')
+    if (acct === 'beatzball') return HttpResponse.json(sampleAccount)
+    return HttpResponse.json({ error: 'Record not found' }, { status: 404 })
+  }),
 ]
