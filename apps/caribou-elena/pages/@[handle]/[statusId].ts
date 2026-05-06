@@ -69,8 +69,14 @@ export default class HandleStatusPage extends LitroPage {
   override updated() {
     const data = this.serverData as StatusPageData | null
     if (!data || data.kind !== 'ok') return
+    // Elena's class-field default makes `thread.initial` settle at `null`
+    // (not `undefined`) once the child has been upgraded; an `=== undefined`
+    // guard would be a permanent no-op. Set whenever it's still null so the
+    // thread skips its mount-time fetch and renders directly from the
+    // SSR-baked context. The thread yields once before reading `initial`,
+    // which gives this hook time to run first.
     const thread = this.querySelector<HTMLElement & { initial?: unknown }>('caribou-thread')
-    if (!thread || thread.initial !== undefined) return
+    if (!thread || thread.initial != null) return
     thread.initial = {
       focused: data.focused,
       ancestors: data.ancestors,
@@ -103,7 +109,7 @@ export default class HandleStatusPage extends LitroPage {
     }
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-thread status-id="${data.statusId}"></caribou-thread>
+        <caribou-thread statusid="${data.statusId}"></caribou-thread>
       </caribou-app-shell>
     `
   }

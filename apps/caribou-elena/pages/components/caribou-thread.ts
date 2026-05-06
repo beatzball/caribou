@@ -41,11 +41,19 @@ export class CaribouThread extends Elena(HTMLElement) {
   static override tagName = 'caribou-thread'
   static override shadow = 'open' as const
   static override styles = THREAD_CSS
+  // Lowercase prop names: HTML attributes are stored lowercase by the
+  // browser, and Elena's `observedAttributes` returns prop names verbatim.
+  // A camelCase prop (`statusId`) returns `['statusId']` from
+  // observedAttributes, but the parsed attribute name is `statusid` — the
+  // case-sensitive comparison in the Custom Elements spec misses, the
+  // attributeChangedCallback never fires, and the property stays at its
+  // class-field default (`''`). Keep prop names lowercase so the SSR'd
+  // attribute → prop wiring works.
   static override props = [
-    { name: 'statusId', reflect: true },
+    { name: 'statusid', reflect: true },
     { name: 'initial',  reflect: false },
   ]
-  statusId: string = ''
+  statusid: string = ''
   initial: ThreadInitial | null = null
 
   private store: ThreadStore | null = null
@@ -53,12 +61,19 @@ export class CaribouThread extends Elena(HTMLElement) {
 
   override async connectedCallback() {
     super.connectedCallback?.()
+    // Yield once before reading `this.initial`. Elena's lifecycle runs the
+    // child's connectedCallback synchronously inside the parent's render,
+    // so the parent page's `updated()` (which sets `this.initial` from its
+    // SSR-baked pageData) hasn't run yet at this point. A microtask hop
+    // lets the parent's updated() complete before we decide whether to
+    // skip the redundant fetch.
+    await Promise.resolve()
     const client = activeClient.value
     // With `initial` set, load() short-circuits without touching the client,
     // so a missing client is safe in the SSR-seeded path.
     this.store = createThreadStore(
       client as CaribouClient,
-      this.statusId,
+      this.statusid,
       this.initial ? { initial: this.initial } : {},
     )
     if (!this.initial) await this.store.load()

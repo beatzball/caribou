@@ -14,11 +14,15 @@ const G = { id: 'g', content: '<p>g</p>', account: ACCT, createdAt: '2026-04-28T
 describe('<caribou-thread> indent cap at depth 3', () => {
   it('caps depth at 3 for descendants more than 3 levels below focused', async () => {
     document.body.innerHTML = ''
-    const el = document.createElement('caribou-thread') as HTMLElement & { initial: unknown; statusId: string }
-    el.statusId = 'f'
+    const el = document.createElement('caribou-thread') as HTMLElement & { initial: unknown; statusid: string }
+    el.statusid = 'f'
     el.initial = { focused: F, ancestors: [A, B], descendants: [C, D, E, G] }
     document.body.appendChild(el)
-    await Promise.resolve()
+    // Flush a few microtasks: the thread yields once in connectedCallback
+    // before reading `this.initial`, then creates the store, then the
+    // signals effect schedules a requestUpdate. Each step costs at least
+    // one microtask, so chain awaits until the shadow tree settles.
+    await new Promise((r) => setTimeout(r, 0))
     const cards = el.shadowRoot!.querySelectorAll('caribou-status-card[data-depth]')
     const depths = Array.from(cards).map((c) => Number((c as HTMLElement).dataset.depth))
     expect(Math.max(...depths)).toBeLessThanOrEqual(3)
@@ -26,11 +30,15 @@ describe('<caribou-thread> indent cap at depth 3', () => {
 
   it('renders ancestors (no indent), focused, then descendants (indented)', async () => {
     document.body.innerHTML = ''
-    const el = document.createElement('caribou-thread') as HTMLElement & { initial: unknown; statusId: string }
-    el.statusId = 'f'
+    const el = document.createElement('caribou-thread') as HTMLElement & { initial: unknown; statusid: string }
+    el.statusid = 'f'
     el.initial = { focused: F, ancestors: [A, B], descendants: [C] }
     document.body.appendChild(el)
-    await Promise.resolve()
+    // Flush a few microtasks: the thread yields once in connectedCallback
+    // before reading `this.initial`, then creates the store, then the
+    // signals effect schedules a requestUpdate. Each step costs at least
+    // one microtask, so chain awaits until the shadow tree settles.
+    await new Promise((r) => setTimeout(r, 0))
     const cards = el.shadowRoot!.querySelectorAll('caribou-status-card')
     expect(cards.length).toBe(4)
     const variants = Array.from(cards).map((c) => c.getAttribute('variant'))
