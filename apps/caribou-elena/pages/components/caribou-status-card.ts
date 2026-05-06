@@ -57,6 +57,32 @@ function absoluteLabel(iso: string): string {
   })
 }
 
+// Build a permalink that the route resolver can re-fetch from the *origin*
+// instance. For federated posts the home instance assigns its own local
+// `status.id` distinct from the origin's id, so a naive `/@${acct}/${id}`
+// targets `origin-host` with `home-id` and 404s. Mastodon's `status.url` is
+// `https://<host>/@<user>/<originId>` — parse it for both pieces.
+export function statusPermalink(s: {
+  id: string
+  url?: string | null
+  account: { acct: string }
+}): string {
+  const url = s.url ?? null
+  if (url) {
+    try {
+      const u = new URL(url)
+      const segments = u.pathname.split('/').filter(Boolean)
+      const userSeg = segments.find(seg => seg.startsWith('@'))
+      const idSeg = segments[segments.length - 1]
+      if (userSeg && idSeg && idSeg !== userSeg) {
+        const userBare = userSeg.slice(1).split('@')[0]
+        return `/@${userBare}@${u.host}/${idSeg}`
+      }
+    } catch { /* fall through */ }
+  }
+  return `/@${s.account.acct}/${s.id}`
+}
+
 export class CaribouStatusCard extends Elena(HTMLElement) {
   static override tagName = 'caribou-status-card'
   // Shadow DOM walls the rendered <article> off from the parent timeline's
@@ -144,7 +170,7 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
     // it sees the inner one. Elk-style "click anywhere on the card" delegation
     // (target-walking + selection check) is a JS-only enhancement deferred to
     // Plan 4 (interactions); the timestamp anchor is the no-JS-safe primitive.
-    const permalink = `/@${display.account.acct}/${display.id}`
+    const permalink = statusPermalink(display)
     return html`
       <article data-variant=${this.variant}
                style="padding:var(--space-4);border-bottom:1px solid var(--border);">

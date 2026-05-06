@@ -55,4 +55,28 @@ describe('<caribou-status-card> boost rendering', () => {
     const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
     expect(permalink?.getAttribute('href')).toBe('/@a/1')
   })
+
+  it('federated status uses origin host + origin id from status.url', async () => {
+    // Cross-instance ID hazard: when a federated post is in our home
+    // timeline, `status.id` is the home instance's local id, but querying
+    // the origin instance with that id 404s. The permalink must derive
+    // host + id from `status.url` so the route resolver hits origin with
+    // origin's own id.
+    document.body.innerHTML = ''
+    const el = document.createElement('caribou-status-card') as HTMLElement & { status: unknown; variant: string }
+    el.variant = 'timeline'
+    el.status = {
+      id: 'HOME_LOCAL_ID',
+      url: 'https://bildung.social/@oerinfo/116527480439295750',
+      content: '<p>federated</p>',
+      account: { id: '7', acct: 'oerinfo@bildung.social', username: 'oerinfo',
+                 displayName: 'OER', avatar: '', avatarStatic: '' },
+      createdAt: '2026-04-28T12:00:00Z',
+    }
+    document.body.appendChild(el)
+    await Promise.resolve()
+    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    expect(permalink?.getAttribute('href'))
+      .toBe('/@oerinfo@bildung.social/116527480439295750')
+  })
 })

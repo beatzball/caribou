@@ -45,7 +45,9 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
 })
 
 export default class HandleStatusPage extends LitroPage {
-  static override tagName = 'page-handle-status'
+  // Must match Litro's manifest-derived tag for `pages/@[handle]/[statusId].ts`:
+  // bracket params lowercase verbatim, so `[statusId]` → `statusid` (not `status`).
+  static override tagName = 'page-handle-statusid'
 
   override updated() {
     const data = this.serverData as StatusPageData | null
