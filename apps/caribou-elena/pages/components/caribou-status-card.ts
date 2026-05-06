@@ -27,11 +27,10 @@ const STATUS_STYLES = `
   .status-content a + a {
     margin-inline-start: 0.25em;
   }
-  article[data-variant="focused"] {
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-md);
-    padding: var(--space-4);
-  }
+  /* Focused post emphasis: bigger body type only. The accent border was
+     visually load-bearing in the wrong direction — readers mistook the
+     blue 1px outline for an "older posts" affordance. Ancestor opacity
+     and descendant indentation already differentiate the focused row. */
   article[data-variant="focused"] .status-content { font-size: 1.1rem; }
   article[data-variant="ancestor"] { opacity: 0.75; }
   article[data-variant="descendant"] { margin-inline-start: var(--space-4); }
