@@ -35,6 +35,11 @@ const STATUS_STYLES = `
   article[data-variant="ancestor"] { opacity: 0.75; }
   article[data-variant="descendant"] { margin-inline-start: var(--space-4); }
   time { color: var(--fg-muted); font-size: 0.875rem; }
+  .boost-attribution {
+    display: flex; gap: var(--space-2); align-items: center;
+    padding: 0 0 var(--space-2) var(--space-2);
+    color: var(--fg-muted); font-size: 0.875rem;
+  }
 `
 
 type Variant = 'timeline' | 'focused' | 'ancestor' | 'descendant'
@@ -118,25 +123,40 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
     // rest of the render.
     const s = this.status
     if (!s) return html``
-    const safe = DOMPurify.sanitize(s.content ?? '', PURIFY_OPTS)
-    const dt = s.createdAt
+    // For reblogs the rendered post is the inner status — boosts ARE the
+    // inner post in Mastodon's data model. The wrapper carries only the
+    // booster's account + a createdAt for "when this was boosted to my
+    // timeline". Render the inner content as the body, prepend a small
+    // attribution row that names the booster.
+    const display = s.reblog ?? s
+    const safe = DOMPurify.sanitize(display.content ?? '', PURIFY_OPTS)
+    const dt = display.createdAt
     const relLabel = this._hydrated ? formatRelativeTime(dt) : absoluteLabel(dt)
+    const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
     return html`
       <article data-variant=${this.variant}
-               style="padding:var(--space-4);border-bottom:1px solid var(--border);display:flex;gap:var(--space-3);">
-        <img src=${s.account.avatarStatic || s.account.avatar}
-             alt=""
-             width="48" height="48"
-             loading="lazy"
-             decoding="async"
-             style="border-radius:var(--radius-md);flex-shrink:0;" />
-        <div style="min-width:0;flex:1;">
-          <header style="display:flex;gap:var(--space-2);align-items:baseline;flex-wrap:wrap;">
-            <strong style="color:var(--fg-0);">${s.account.displayName || s.account.username}</strong>
-            <span style="color:var(--fg-muted);">@${s.account.acct}</span>
-            <time datetime=${dt}>${relLabel}</time>
-          </header>
-          <div class="status-content" style="color:var(--fg-0);margin-top:var(--space-2);">${unsafeHTML(safe)}</div>
+               style="padding:var(--space-4);border-bottom:1px solid var(--border);">
+        ${boostName
+          ? html`<div class="boost-attribution">
+                   <span class="i-lucide-repeat-2"></span>
+                   <span>${boostName} boosted</span>
+                 </div>`
+          : html``}
+        <div style="display:flex;gap:var(--space-3);">
+          <img src=${display.account.avatarStatic || display.account.avatar}
+               alt=""
+               width="48" height="48"
+               loading="lazy"
+               decoding="async"
+               style="border-radius:var(--radius-md);flex-shrink:0;" />
+          <div style="min-width:0;flex:1;">
+            <header style="display:flex;gap:var(--space-2);align-items:baseline;flex-wrap:wrap;">
+              <strong style="color:var(--fg-0);">${display.account.displayName || display.account.username}</strong>
+              <span style="color:var(--fg-muted);">@${display.account.acct}</span>
+              <time datetime=${dt}>${relLabel}</time>
+            </header>
+            <div class="status-content" style="color:var(--fg-0);margin-top:var(--space-2);">${unsafeHTML(safe)}</div>
+          </div>
         </div>
       </article>
     `
