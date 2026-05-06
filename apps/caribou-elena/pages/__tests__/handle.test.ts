@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type * as H3 from 'h3'
+import type * as HandlePage from '../@[handle].js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import {
   fetchAccountByHandle, fetchAccountStatuses,
@@ -13,7 +15,7 @@ vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
 vi.mock('h3', async () => {
-  const actual = await vi.importActual<typeof import('h3')>('h3')
+  const actual = await vi.importActual<typeof H3>('h3')
   return {
     ...actual,
     getRequestURL: () => new URL('http://localhost:3000/'),
@@ -48,7 +50,7 @@ describe('/@[handle] pageData', () => {
     const event = {
       context: { params: { handle: 'alice@example.social' } },
       url: '/@alice@example.social',
-    } as unknown as Parameters<typeof import('../@[handle].js').pageData.fetcher>[0]
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle].js')
     const result = await pageData.fetcher(event)
     expect(result).toMatchObject({
@@ -70,7 +72,7 @@ describe('/@[handle] pageData', () => {
     const event = {
       context: { params: { handle: 'alice@example.social' } },
       url: '/@alice@example.social?tab=media',
-    } as unknown as Parameters<typeof import('../@[handle].js').pageData.fetcher>[0]
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle].js')
     await pageData.fetcher(event)
     expect(fetchAccountStatuses).toHaveBeenCalledWith(
@@ -83,7 +85,7 @@ describe('/@[handle] pageData', () => {
     const event = {
       context: { params: { handle: 'alice' } },
       url: '/@alice',
-    } as unknown as Parameters<typeof import('../@[handle].js').pageData.fetcher>[0]
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle].js')
     const result = await pageData.fetcher(event)
     expect(result.kind).toBe('auth-required')

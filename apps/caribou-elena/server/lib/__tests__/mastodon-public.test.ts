@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type * as MastodonPublic from '../mastodon-public.js'
 
 describe('mastodon-public', () => {
-  let mod: typeof import('../mastodon-public.js')
+  let mod: typeof MastodonPublic
   beforeEach(async () => {
     vi.resetModules()
     mod = await import('../mastodon-public.js')

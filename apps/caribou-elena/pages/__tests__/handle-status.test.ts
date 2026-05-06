@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type * as H3 from 'h3'
+import type * as StatusPage from '../@[handle]/[statusId].js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import {
   fetchStatus, fetchThreadContext,
@@ -13,7 +15,7 @@ vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
 vi.mock('h3', async () => {
-  const actual = await vi.importActual<typeof import('h3')>('h3')
+  const actual = await vi.importActual<typeof H3>('h3')
   return {
     ...actual,
     getRequestURL: () => new URL('http://localhost:3000/'),
@@ -38,7 +40,7 @@ describe('/@[handle]/[statusId] pageData', () => {
     })
     const event = {
       context: { params: { handle: 'alice@example.social', statusId: '99' } },
-    } as unknown as Parameters<typeof import('../@[handle]/[statusId].js').pageData.fetcher>[0]
+    } as unknown as Parameters<typeof StatusPage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle]/[statusId].js')
     const result = await pageData.fetcher(event)
     expect(result.kind).toBe('ok')
@@ -56,7 +58,7 @@ describe('/@[handle]/[statusId] pageData', () => {
     vi.mocked(fetchThreadContext).mockResolvedValue({ ancestors: [], descendants: [] })
     const event = {
       context: { params: { handle: 'alice@example.social', statusId: '99' } },
-    } as unknown as Parameters<typeof import('../@[handle]/[statusId].js').pageData.fetcher>[0]
+    } as unknown as Parameters<typeof StatusPage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle]/[statusId].js')
     const result = await pageData.fetcher(event)
     expect(result.kind).toBe('error')

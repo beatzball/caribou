@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type * as H3 from 'h3'
+import type * as LocalPage from '../local.js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../../server/lib/mastodon-public.js'
 
@@ -12,7 +14,7 @@ vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
 vi.mock('h3', async () => {
-  const actual = await vi.importActual<typeof import('h3')>('h3')
+  const actual = await vi.importActual<typeof H3>('h3')
   return {
     ...actual,
     getRequestURL: () => new URL('http://localhost:3000/local'),
@@ -43,7 +45,7 @@ describe('/local pageData', () => {
       { id: '10', content: 'older' },
     ] as Awaited<ReturnType<FetchTimelineFn>>
     vi.mocked(fetchPublicTimeline).mockResolvedValue(fixture)
-    const event = { url: '/local' } as unknown as Parameters<typeof import('../local.js').pageData.fetcher>[0]
+    const event = { url: '/local' } as unknown as Parameters<typeof LocalPage.pageData.fetcher>[0]
     const { pageData } = await import('../local.js')
     const result = await pageData.fetcher(event)
     expect(result).toEqual({
@@ -56,7 +58,7 @@ describe('/local pageData', () => {
 
   it('returns auth-required when no instance', async () => {
     vi.mocked(resolveInstanceForRoute).mockResolvedValue({ instance: null })
-    const event = { url: '/local' } as unknown as Parameters<typeof import('../local.js').pageData.fetcher>[0]
+    const event = { url: '/local' } as unknown as Parameters<typeof LocalPage.pageData.fetcher>[0]
     const { pageData } = await import('../local.js')
     const result = await pageData.fetcher(event)
     expect(result.kind).toBe('auth-required')
@@ -67,7 +69,7 @@ describe('/local pageData', () => {
       instance: 'mastodon.social', source: 'cookie',
     })
     vi.mocked(fetchPublicTimeline).mockRejectedValue(new Error('upstream 503'))
-    const event = { url: '/local' } as unknown as Parameters<typeof import('../local.js').pageData.fetcher>[0]
+    const event = { url: '/local' } as unknown as Parameters<typeof LocalPage.pageData.fetcher>[0]
     const { pageData } = await import('../local.js')
     const result = await pageData.fetcher(event)
     expect(result.kind).toBe('error')

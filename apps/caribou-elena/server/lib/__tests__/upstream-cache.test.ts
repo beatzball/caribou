@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type * as UpstreamCache from '../upstream-cache.js'
 
 describe('cachedFetch', () => {
-  let cachedFetch: typeof import('../upstream-cache.js').cachedFetch
-  let TTL: typeof import('../upstream-cache.js').TTL
+  let cachedFetch: typeof UpstreamCache.cachedFetch
+  let TTL: typeof UpstreamCache.TTL
 
   beforeEach(async () => {
     vi.resetModules()

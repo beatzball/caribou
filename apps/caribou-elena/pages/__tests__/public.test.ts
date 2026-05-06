@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import type * as H3 from 'h3'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../../server/lib/mastodon-public.js'
 
@@ -8,7 +9,7 @@ vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
 vi.mock('h3', async () => {
-  const actual = await vi.importActual<typeof import('h3')>('h3')
+  const actual = await vi.importActual<typeof H3>('h3')
   return {
     ...actual,
     getRequestURL: () => new URL('http://localhost:3000/public'),

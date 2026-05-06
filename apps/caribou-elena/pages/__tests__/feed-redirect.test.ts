@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
+import type * as H3 from 'h3'
 
 const sendRedirectMock = vi.fn()
 
 vi.mock('h3', async () => {
-  const actual = await vi.importActual<typeof import('h3')>('h3')
+  const actual = await vi.importActual<typeof H3>('h3')
   return { ...actual, sendRedirect: sendRedirectMock }
 })
 

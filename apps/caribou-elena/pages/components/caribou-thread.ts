@@ -63,8 +63,8 @@ export class CaribouThread extends Elena(HTMLElement) {
     )
     if (!this.initial) await this.store.load()
     this.dispose = effect(() => {
-      this.store!.focused.value
-      this.store!.context.value
+      void this.store!.focused.value
+      void this.store!.context.value
       this.requestUpdate()
     })
   }
