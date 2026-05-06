@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify'
 import type { mastodon } from 'masto'
 import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
+import { ICONS } from './_icons.js'
 
 // Wrap rules for sanitized post HTML. They used to live in the global
 // design-tokens stylesheet, but moving the card to shadow DOM walls the
@@ -138,7 +139,7 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
                style="padding:var(--space-4);border-bottom:1px solid var(--border);">
         ${boostName
           ? html`<div class="boost-attribution">
-                   <span class="i-lucide-repeat-2"></span>
+                   <span class="boost-icon">${ICONS.repeat2}</span>
                    <span>${boostName} boosted</span>
                  </div>`
           : html``}

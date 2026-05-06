@@ -5,14 +5,14 @@ beforeAll(async () => {
 })
 
 describe('<caribou-nav-rail>', () => {
-  it('renders five nav anchors with aria-current on the active route', async () => {
+  it('renders four nav anchors with aria-current on the active route', async () => {
     document.body.innerHTML = ''
     const el = document.createElement('caribou-nav-rail')
     el.setAttribute('current', '/local')
     document.body.appendChild(el)
     await Promise.resolve()
     const anchors = el.shadowRoot!.querySelectorAll('a')
-    expect(anchors.length).toBe(5)
+    expect(anchors.length).toBe(4)
     const active = el.shadowRoot!.querySelector('a[aria-current="page"]')
     expect(active?.getAttribute('href')).toBe('/local')
   })
@@ -32,5 +32,17 @@ describe('<caribou-nav-rail>', () => {
     await Promise.resolve()
     const active = el.shadowRoot!.querySelector('a[aria-current="page"]')
     expect(active?.getAttribute('href')).toBe('/@me')
+  })
+
+  it('renders sign-out as a POST form to /api/signout (not a GET anchor)', async () => {
+    document.body.innerHTML = ''
+    const el = document.createElement('caribou-nav-rail')
+    document.body.appendChild(el)
+    await Promise.resolve()
+    expect(el.shadowRoot!.querySelector('a[href="/api/signout"]')).toBeFalsy()
+    const form = el.shadowRoot!.querySelector('form[action="/api/signout"]')
+    expect(form).toBeTruthy()
+    expect(form?.getAttribute('method')?.toLowerCase()).toBe('post')
+    expect(form?.querySelector('button[type="submit"]')).toBeTruthy()
   })
 })

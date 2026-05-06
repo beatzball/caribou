@@ -30,7 +30,7 @@ describe('<caribou-status-card> boost rendering', () => {
     expect(el.shadowRoot!.textContent).toContain('Alice')
     expect(el.shadowRoot!.textContent).toContain('Booster')
     expect(el.shadowRoot!.querySelector('.boost-attribution')).toBeTruthy()
-    expect(el.shadowRoot!.querySelector('.i-lucide-repeat-2')).toBeTruthy()
+    expect(el.shadowRoot!.querySelector('.boost-attribution svg')).toBeTruthy()
   })
 
   it('non-reblog status does NOT render attribution row', async () => {
