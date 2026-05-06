@@ -56,16 +56,16 @@ describe('<caribou-status-card> boost rendering', () => {
     expect(permalink?.getAttribute('href')).toBe('/@a/1')
   })
 
-  it('federated Mastodon status uses origin host + origin id from status.url', async () => {
-    // Cross-instance ID hazard: in our home timeline, `status.id` is the
-    // home instance's local id, but querying the origin instance with that
-    // id 404s. The permalink must derive host + id from `status.url` so
-    // the route resolver hits origin with origin's own id.
+  it('federated post uses the home-instance id (not origin id) in the permalink', async () => {
+    // The route resolver fetches from the cookie host (home) — never from
+    // the path host — because status ids are minted per-instance and only
+    // home recognizes the id we have here. So the permalink encodes home's
+    // id verbatim; the handle's `@host` is for display + share-context.
     document.body.innerHTML = ''
     const el = document.createElement('caribou-status-card') as HTMLElement & { status: unknown; variant: string }
     el.variant = 'timeline'
     el.status = {
-      id: 'HOME_LOCAL_ID',
+      id: '116527525773628717',
       url: 'https://bildung.social/@oerinfo/116527480439295750',
       content: '<p>federated</p>',
       account: { id: '7', acct: 'oerinfo@bildung.social', username: 'oerinfo',
@@ -76,22 +76,21 @@ describe('<caribou-status-card> boost rendering', () => {
     await Promise.resolve()
     const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
     expect(permalink?.getAttribute('href'))
-      .toBe('/@oerinfo@bildung.social/116527480439295750')
+      .toBe('/@oerinfo@bildung.social/116527525773628717')
     expect(permalink?.getAttribute('target')).toBeNull()
   })
 
-  it('non-Mastodon origin (Flipboard etc.) links externally to status.url', async () => {
-    // Flipboard, Misskey, Pleroma all federate via ActivityPub but their
-    // URL shapes (and REST APIs) differ from Mastodon's. Internal routing
-    // would 404 because we'd try to query their host as if it spoke
-    // Mastodon REST. Link out instead.
+  it('encodes ids with unsafe characters (non-Mastodon ActivityPub bridges)', async () => {
+    // Some bridges (Flipboard, etc.) produce ids that contain `/` or `:`.
+    // The path must round-trip safely: encodeURIComponent on render, the
+    // page decodes via decodeURIComponent.
     document.body.innerHTML = ''
     const el = document.createElement('caribou-status-card') as HTMLElement & { status: unknown; variant: string }
     el.variant = 'timeline'
     el.status = {
       id: 'a-KG-G6ylKSNW1-Fu18u5PnA:a:2586892611-/0',
       url: 'https://flipboard.com/@smithsonianmag/a-KG-G6ylKSNW1-Fu18u5PnA:a:2586892611-/0',
-      content: '<p>federated from Flipboard</p>',
+      content: '<p>flipboard-bridged</p>',
       account: { id: '8', acct: 'smithsonianmag@flipboard.com',
                  username: 'smithsonianmag', displayName: 'Smithsonian',
                  avatar: '', avatarStatic: '' },
@@ -101,8 +100,6 @@ describe('<caribou-status-card> boost rendering', () => {
     await Promise.resolve()
     const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
     expect(permalink?.getAttribute('href'))
-      .toBe('https://flipboard.com/@smithsonianmag/a-KG-G6ylKSNW1-Fu18u5PnA:a:2586892611-/0')
-    expect(permalink?.getAttribute('target')).toBe('_blank')
-    expect(permalink?.getAttribute('rel')).toBe('noopener')
+      .toBe('/@smithsonianmag@flipboard.com/a-KG-G6ylKSNW1-Fu18u5PnA%3Aa%3A2586892611-%2F0')
   })
 })

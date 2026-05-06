@@ -2,7 +2,7 @@ import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
 import { getRequestURL, getRouterParams } from 'h3'
-import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
+import { getInstance } from '../../server/lib/instance-cookie.js'
 import {
   fetchStatus, fetchThreadContext,
 } from '../../server/lib/mastodon-public.js'
@@ -21,16 +21,33 @@ export type StatusPageData = ThreadPageData & {
 export const pageData = definePageData<StatusPageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string; statusId?: string }
   const handle = String(params.handle ?? '')
-  const statusId = String(params.statusId ?? '')
+  // `statusId` is decoded from the URL path; the matcher's regex captures
+  // the raw segment (which may be `encodeURIComponent`-encoded for ids
+  // that contain `/`, `:`, etc. from non-Mastodon ActivityPub bridges).
+  const statusId = decodeURIComponent(String(params.statusId ?? ''))
+
+  // Status detail uses the cookie host (user's home instance) — NOT the
+  // path host. Status ids are minted per-instance, and the id we have in
+  // the URL came from a card the user saw in their home timeline, so the
+  // home instance is the only one guaranteed to recognize this id. The
+  // path's `@user@host` is for display + share-context.
+  //
+  // This is a deliberate departure from the spec's "host-qualified handle
+  // uses path host directly" rule (§8.3 / §8.4). The spec assumed
+  // Mastodon-on-Mastodon federation where origin-host could resolve the
+  // id, but federation with Flipboard, Misskey, Pleroma, etc. (or even
+  // any non-trivial id-mapping case) breaks that assumption. Following
+  // Elk's `/{home-instance}/@{user}@{host}/{home-id}` model — Caribou
+  // ties the home instance to the cookie instead of the URL.
   const origin = getRequestURL(event).origin
-  const resolution = await resolveInstanceForRoute(event, { handle }, { storage: getStorage(), origin })
-  const shell: ShellInfo = { instance: resolution.instance }
-  if (!resolution.instance) {
+  const cookieHost = await getInstance(event, { storage: getStorage(), origin })
+  const shell: ShellInfo = { instance: cookieHost ?? null }
+  if (!cookieHost) {
     return { kind: 'auth-required', shell, statusId, handle } as StatusPageData
   }
   const [focusedR, contextR] = await Promise.allSettled([
-    fetchStatus(statusId, { instance: resolution.instance }),
-    fetchThreadContext(statusId, { instance: resolution.instance }),
+    fetchStatus(statusId, { instance: cookieHost }),
+    fetchThreadContext(statusId, { instance: cookieHost }),
   ])
   if (focusedR.status === 'rejected') {
     return { kind: 'error', message: String(focusedR.reason), shell, statusId, handle } as StatusPageData

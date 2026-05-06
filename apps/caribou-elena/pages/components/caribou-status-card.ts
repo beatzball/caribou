@@ -57,50 +57,25 @@ function absoluteLabel(iso: string): string {
   })
 }
 
-// Build a permalink for the timestamp anchor.
+// Permalink for the timestamp anchor.
 //
-// The cross-instance hazard: in our home timeline, federated posts come
-// with the home instance's local `status.id`, distinct from origin's id.
-// A naive `/@${acct}/${id}` would target origin-host with home-id and 404.
+// The id we encode is the home instance's local id for the status (i.e.
+// `status.id` as masto.js returns it from the home timeline). The route
+// resolver for `/@:handle/:statusId` queries the home instance — never
+// the path host — because status ids are minted per-instance and the home
+// instance is the only one guaranteed to recognize this id. The handle in
+// the path is for display + share-context, not routing.
 //
-// Strategy:
-//   - If `status.url` parses as the Mastodon URL shape `/@user/<id>`
-//     (exactly two path segments, first @-prefixed), build an internal
-//     route to origin using origin's own id. Caribou re-fetches the
-//     thread from origin via its Mastodon REST API.
-//   - Otherwise (Flipboard, Misskey, Pleroma, etc. — different URL shapes
-//     and no Mastodon REST API), link out to `status.url` directly with
-//     `target="_blank"`. We can't render their threads server-side and
-//     the user expects to see the canonical post.
-//   - If `status.url` is missing entirely, fall back to a best-effort
-//     internal route with the id URL-encoded; will 404 if the id is
-//     non-Mastodon-shaped, but caller can't dereference anything else.
-export type StatusPermalink =
-  | { kind: 'internal'; href: string }
-  | { kind: 'external'; href: string }
-
-export function statusPermalink(s: {
-  id: string
-  url?: string | null
-  account: { acct: string }
-}): StatusPermalink {
-  const url = s.url ?? null
-  if (url) {
-    try {
-      const u = new URL(url)
-      const segments = u.pathname.split('/').filter(Boolean)
-      const [userSeg, idSeg, ...rest] = segments
-      if (
-        userSeg && idSeg && rest.length === 0 &&
-        userSeg.startsWith('@') && !idSeg.startsWith('@')
-      ) {
-        const userBare = userSeg.slice(1).split('@')[0]
-        return { kind: 'internal', href: `/@${userBare}@${u.host}/${idSeg}` }
-      }
-      return { kind: 'external', href: url }
-    } catch { /* fall through */ }
-  }
-  return { kind: 'internal', href: `/@${s.account.acct}/${encodeURIComponent(s.id)}` }
+// This matches Elk's `/{home-instance}/@{user}@{host}/{home-id}` model;
+// Caribou drops the leading `/{home-instance}/` segment because we tie
+// the home instance to the `caribou.instance` cookie instead of the URL.
+//
+// Edge case: a status whose id contains characters that are unsafe in a
+// URL path (some non-Mastodon ActivityPub bridges expose ids with `/`,
+// `:`, etc.). Encode via `encodeURIComponent` so the URL stays
+// well-formed; the route resolver decodes it back.
+export function statusPermalink(s: { id: string; account: { acct: string } }): string {
+  return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
 }
 
 export class CaribouStatusCard extends Elena(HTMLElement) {
@@ -211,14 +186,9 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
             <header style="display:flex;gap:var(--space-2);align-items:baseline;flex-wrap:wrap;">
               <strong style="color:var(--fg-0);">${display.account.displayName || display.account.username}</strong>
               <span style="color:var(--fg-muted);">@${display.account.acct}</span>
-              ${permalink.kind === 'external'
-                ? html`<a class="permalink" href=${permalink.href}
-                          target="_blank" rel="noopener">
-                         <time datetime=${dt}>${relLabel}</time>
-                       </a>`
-                : html`<a class="permalink" href=${permalink.href}>
-                         <time datetime=${dt}>${relLabel}</time>
-                       </a>`}
+              <a class="permalink" href="${permalink}">
+                <time datetime=${dt}>${relLabel}</time>
+              </a>
             </header>
             <div class="status-content" style="color:var(--fg-0);margin-top:var(--space-2);">${unsafeHTML(safe)}</div>
           </div>
