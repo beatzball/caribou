@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 const SAMPLE_ACCOUNT = {
   id: 'a1', username: 'beatzball', acct: 'beatzball', display_name: 'Beatz Ball',
@@ -26,7 +26,7 @@ function makeStatus(id: string, content = `<p>post ${id}</p>`) {
 // shell's shadow root in Plan 3, so the prior `querySelectorAll('main')`
 // sentinel no longer reflects mount count from the document; count the
 // page custom element instead.
-async function waitForSingleMount(page: import('@playwright/test').Page) {
+async function waitForSingleMount(page: Page) {
   await page.waitForFunction(() => document.querySelectorAll('page-home').length === 1)
 }
 
