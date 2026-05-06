@@ -114,6 +114,33 @@ The timestamp anchor remains the no-JS fallback either way.
 
 Surfaced during Plan 3 local QA, 2026-05-06.
 
+## upstream
+
+### Drop the @beatzball/litro path-to-route patch when upstream ships the fix
+
+`patches/@beatzball__litro@0.9.1.patch` extends Litro's `transformSegment`
+to support prefix/suffix on bracketed dynamic segments. Without it,
+`pages/@[handle]/[statusId].ts` is emitted as `/@[handle]/:statusId`
+(literal `[handle]`) and every `/@user` URL 404s. The fix is a
+two-line regex change:
+
+  - dynamic regex: `/^\[(.+)\]$/`
+    →                `/^([^\[\]]*)\[([^\[\]]+)\]([^\[\]]*)$/`
+    (allows pre/suf around brackets, e.g. `@[handle]` → `@:handle`)
+  - `isSegmentDynamic`: `transformed.startsWith(':')`
+    →                    `/:[A-Za-z_]/.test(transformed)`
+    (prefixed `@:handle` is still dynamic)
+
+File the upstream PR (Nuxt and SvelteKit both support this naming
+convention; cite for parity). When a Litro release ships the fix:
+bump `apps/caribou-elena/package.json`, drop the patch from
+`pnpm-workspace.yaml` and `patches/`, regenerate, verify routes via
+`server/lib/__tests__/match-route.test.ts`.
+
+Surfaced during Plan 3 local QA, 2026-05-06.
+
+## elena-app
+
 ### Stale avatars when timeline polling appends new posts
 
 When the timeline polls and prepends new statuses, avatar images for

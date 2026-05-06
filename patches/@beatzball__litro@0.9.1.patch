@@ -1,0 +1,93 @@
+diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
+index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6eaa9bff8ce564633904fc9a8c00bdf8be3e55a2 100644
+--- a/dist/plugins/path-to-route.js
++++ b/dist/plugins/path-to-route.js
+@@ -33,10 +33,13 @@ function transformSegment(segment) {
+     if (optionalMatch) {
+         return `:${optionalMatch[1]}?`;
+     }
+-    // Dynamic: [param] → :param
+-    const dynamicMatch = segment.match(/^\[(.+)\]$/);
++    // Dynamic with optional prefix/suffix: pre[param]suf → pre:paramsuf
++    // (Mastodon-style URLs need pages/@[handle]/[statusId].ts — Nuxt and
++    // SvelteKit also allow this.)
++    const dynamicMatch = segment.match(/^([^\[\]]*)\[([^\[\]]+)\]([^\[\]]*)$/);
+     if (dynamicMatch) {
+-        return `:${dynamicMatch[1]}`;
++        const [, prefix, param, suffix] = dynamicMatch;
++        return `${prefix}:${param}${suffix}`;
+     }
+     // index → '' (stripped by the caller)
+     if (segment === 'index') {
+@@ -45,11 +48,11 @@ function transformSegment(segment) {
+     return segment;
+ }
+ /**
+- * Returns true if a transformed route segment is dynamic (starts with ':')
+- * or is a catch-all (contains '(.*)').
++ * Returns true if a transformed route segment is dynamic — bare `:param`
++ * or prefixed `pre:param` (e.g. `@:handle`).
+  */
+ function isSegmentDynamic(transformed) {
+-    return transformed.startsWith(':');
++    return /:[A-Za-z_]/.test(transformed);
+ }
+ /**
+  * Returns true if a transformed route segment is a catch-all.
+diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
+index 1eda380860b8900f201db9f07e3a36f785a6bd73..952725e1e0cba6711c0bba32be522b1fe3e243dd 100644
+--- a/src/plugins/path-to-route.ts
++++ b/src/plugins/path-to-route.ts
+@@ -22,9 +22,15 @@ import type { LitroRoute } from '../types/route.js';
+  * Conversion table:
+  *   index            → '' (stripped — represents parent route)
+  *   [param]          → :param
++ *   pre[param]suf    → pre:paramsuf  (prefix and/or suffix supported)
+  *   [...param]       → :param(.*)* (catch-all)
+  *   [[param]]        → :param? (optional)
+  *   anything else    → unchanged (static segment)
++ *
++ * Prefix/suffix support is required for filename conventions like
++ * `pages/@[handle]/[statusId].ts` (Mastodon-style URLs) where a literal
++ * character precedes the bracketed param within the same segment. Nuxt
++ * and SvelteKit allow the same pattern.
+  */
+ function transformSegment(segment: string): string {
+   // Catch-all: [...param] → :param(.*)* — must be tested before single-bracket
+@@ -39,10 +45,14 @@ function transformSegment(segment: string): string {
+     return `:${optionalMatch[1]}?`;
+   }
+ 
+-  // Dynamic: [param] → :param
+-  const dynamicMatch = segment.match(/^\[(.+)\]$/);
++  // Dynamic with optional prefix/suffix: pre[param]suf → pre:paramsuf
++  // Prefix and suffix may be empty, so this also covers the bare [param] case.
++  // The character classes exclude brackets so the optional/catch-all forms
++  // above remain unambiguous.
++  const dynamicMatch = segment.match(/^([^\[\]]*)\[([^\[\]]+)\]([^\[\]]*)$/);
+   if (dynamicMatch) {
+-    return `:${dynamicMatch[1]}`;
++    const [, prefix, param, suffix] = dynamicMatch;
++    return `${prefix}:${param}${suffix}`;
+   }
+ 
+   // index → '' (stripped by the caller)
+@@ -54,11 +64,15 @@ function transformSegment(segment: string): string {
+ }
+ 
+ /**
+- * Returns true if a transformed route segment is dynamic (starts with ':')
+- * or is a catch-all (contains '(.*)').
++ * Returns true if a transformed route segment is dynamic — either a bare
++ * `:param` token or a prefixed `pre:param` token (e.g. `@:handle`).
++ *
++ * Detects a colon followed by an identifier character so static segments
++ * that happen to contain an unrelated `:` (none today, but defensive)
++ * aren't misclassified as dynamic.
+  */
+ function isSegmentDynamic(transformed: string): boolean {
+-  return transformed.startsWith(':');
++  return /:[A-Za-z_]/.test(transformed);
+ }
+ 
+ /**

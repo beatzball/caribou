@@ -1,10 +1,10 @@
 packages:
-  - "apps/*"
-  - "packages/*"
+  - apps/*
+  - packages/*
 
-# UnoCSS pulls in @unocss/inspector → vue-flow-layout, which declares Vue as
-# a peer. We don't use the inspector and don't ship Vue. Suppress the warning
-# to keep CI green.
+patchedDependencies:
+  '@beatzball/litro@0.9.1': patches/@beatzball__litro@0.9.1.patch
+
 peerDependencyRules:
   ignoreMissing:
-    - "vue"
+    - vue
