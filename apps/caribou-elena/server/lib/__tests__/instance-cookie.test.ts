@@ -66,6 +66,16 @@ describe('getInstance — SSRF amplification mitigation', () => {
     const event = mockEvent({ 'caribou.instance': 'user@evil.com' })
     expect(await getInstance(event, deps)).toBeUndefined()
   })
+
+  it('rejects host:port form', async () => {
+    const event = mockEvent({ 'caribou.instance': 'mastodon.social:8080' })
+    expect(await getInstance(event, deps)).toBeUndefined()
+  })
+
+  it('rejects empty cookie value', async () => {
+    const event = mockEvent({ 'caribou.instance': '' })
+    expect(await getInstance(event, deps)).toBeUndefined()
+  })
 })
 
 describe('setInstance / clearInstance', () => {
