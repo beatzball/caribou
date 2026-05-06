@@ -31,6 +31,12 @@ describe('<caribou-status-card> boost rendering', () => {
     expect(el.shadowRoot!.textContent).toContain('Booster')
     expect(el.shadowRoot!.querySelector('.boost-attribution')).toBeTruthy()
     expect(el.shadowRoot!.querySelector('.boost-attribution svg')).toBeTruthy()
+    // Permalink targets the inner reblog (alice/inner), not the wrapper
+    // (booster/wrapper) — clicking through a boost should land on the
+    // boosted post's thread page.
+    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    expect(permalink?.getAttribute('href')).toBe('/@alice/inner')
+    expect(permalink?.querySelector('time')).toBeTruthy()
   })
 
   it('non-reblog status does NOT render attribution row', async () => {
@@ -46,5 +52,7 @@ describe('<caribou-status-card> boost rendering', () => {
     document.body.appendChild(el)
     await Promise.resolve()
     expect(el.shadowRoot!.querySelector('.boost-attribution')).toBeFalsy()
+    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    expect(permalink?.getAttribute('href')).toBe('/@a/1')
   })
 })

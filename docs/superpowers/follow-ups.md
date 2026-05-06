@@ -72,17 +72,45 @@ AA for both modes.
 
 Surfaced during Plan 3 local QA, 2026-05-06.
 
-### SPA-nav jitter / suspected FOUC on internal link clicks
+### Full-reload FOUC on internal link clicks
 
-Clicking Home / Local / About etc. produces visible jitter — likely a
-flash of unstyled content during the client-side route transition.
-Investigate whether (a) declarative-shadow-DOM adoption is being
-re-run on hydration, (b) UnoCSS classes are missing on the inbound
-chunk, or (c) the new page is rendering before tokens-head /
-uno-head are applied.
+Clicking Home / Local / About etc. produces visible jitter — a flash
+of unstyled content as the new page paints. Caribou's nav rail and
+all internal anchors are plain `<a>` tags, so each click is a full
+browser navigation; `litro-router` is installed but only intercepts
+`<litro-link>`, which we don't use yet. Investigate whether (a)
+declarative-shadow-DOM adoption is being re-run on hydration,
+(b) UnoCSS classes are missing on the inbound chunk, or (c) the
+new page is rendering before tokens-head / uno-head are applied.
 
 Repro: load `/home`, click `Local`, watch for layout shift before
 content settles.
+
+A separate decision (deferred): swap nav-rail anchors and the
+status-card permalink to `<litro-link>` for SPA navigation. Keeps
+the app shell mounted, eliminates the full-reload FOUC by
+construction, but requires coordinated change across every internal
+link and care that route transitions don't tear down stores that
+were warm.
+
+Surfaced during Plan 3 local QA, 2026-05-06.
+
+### Click-anywhere-on-card → thread (Elk-style delegation)
+
+Status cards currently expose the thread permalink only on the
+timestamp anchor (the no-JS-safe primitive). Most social UIs let you
+click anywhere on the card body to open the thread. Elk's pattern:
+a `<div tabindex="0" @click @keydown.enter>` wrapper that walks
+`event.target.closest('a, button, img, video')`, bails if the click
+landed on an interactive child, also bails if `window.getSelection()`
+is non-empty (don't hijack text selection), and otherwise calls
+`router.push(statusRoute)`. Cmd/Ctrl-click → `window.open` for
+new-tab.
+
+Deferred to Plan 4 because the target-walking logic wants to know
+about boost / favourite / reply buttons that don't exist until
+interactions ship; adding it earlier means rewriting the predicate.
+The timestamp anchor remains the no-JS fallback either way.
 
 Surfaced during Plan 3 local QA, 2026-05-06.
 

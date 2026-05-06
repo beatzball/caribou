@@ -36,6 +36,10 @@ const STATUS_STYLES = `
   article[data-variant="ancestor"] { opacity: 0.75; }
   article[data-variant="descendant"] { margin-inline-start: var(--space-4); }
   time { color: var(--fg-muted); font-size: 0.875rem; }
+  .permalink {
+    color: inherit; text-decoration: none;
+  }
+  .permalink:hover time { text-decoration: underline; }
   .boost-attribution {
     display: flex; gap: var(--space-2); align-items: center;
     padding: 0 0 var(--space-2) var(--space-2);
@@ -134,6 +138,13 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
     const dt = display.createdAt
     const relLabel = this._hydrated ? formatRelativeTime(dt) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
+    // Permalink: anchor on the timestamp, not the whole article — wrapping the
+    // <article> would put the post-content links (hashtags, mentions, external
+    // urls) inside an <a>, and the HTML parser closes the outer anchor when
+    // it sees the inner one. Elk-style "click anywhere on the card" delegation
+    // (target-walking + selection check) is a JS-only enhancement deferred to
+    // Plan 4 (interactions); the timestamp anchor is the no-JS-safe primitive.
+    const permalink = `/@${display.account.acct}/${display.id}`
     return html`
       <article data-variant=${this.variant}
                style="padding:var(--space-4);border-bottom:1px solid var(--border);">
@@ -154,7 +165,9 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
             <header style="display:flex;gap:var(--space-2);align-items:baseline;flex-wrap:wrap;">
               <strong style="color:var(--fg-0);">${display.account.displayName || display.account.username}</strong>
               <span style="color:var(--fg-muted);">@${display.account.acct}</span>
-              <time datetime=${dt}>${relLabel}</time>
+              <a class="permalink" href=${permalink}>
+                <time datetime=${dt}>${relLabel}</time>
+              </a>
             </header>
             <div class="status-content" style="color:var(--fg-0);margin-top:var(--space-2);">${unsafeHTML(safe)}</div>
           </div>
