@@ -21,7 +21,8 @@
     "lint": "pnpm -r lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify:prod": "node scripts/verify-prod.mjs"
+    "verify:prod": "node scripts/verify-prod.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",

@@ -1,0 +1,50 @@
+#!/usr/bin/env node
+/* eslint-disable no-console */
+// Tracked pre-commit hook. Generic shape patterns only — never names.
+// Blocks absolute home paths in staged content. Bypass with --no-verify
+// if you have a documented reason (and prefer ~/, $HOME, or relative paths).
+import { execSync } from 'node:child_process'
+
+const PATTERNS = [
+  {
+    re: /(?<![\w$])\/Users\/[A-Za-z0-9._-]+\//,
+    label: 'absolute macOS home path — use ~/, $HOME, or a relative path',
+  },
+  {
+    re: /(?<![\w$])\/home\/[A-Za-z0-9._-]+\//,
+    label: 'absolute Linux home path — use ~/, $HOME, or a relative path',
+  },
+]
+
+let diff = ''
+try {
+  diff = execSync('git diff --cached --unified=0 --no-color', { encoding: 'utf8' })
+} catch {
+  process.exit(0)
+}
+
+const hits = []
+let file = null
+let lineNo = 0
+for (const line of diff.split('\n')) {
+  const fileMatch = line.match(/^\+\+\+ b\/(.+)$/)
+  if (fileMatch) { file = fileMatch[1]; continue }
+  const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
+  if (hunkMatch) { lineNo = parseInt(hunkMatch[1], 10); continue }
+  if (!line.startsWith('+') || line.startsWith('+++')) continue
+  const text = line.slice(1)
+  for (const { re, label } of PATTERNS) {
+    if (re.test(text)) hits.push({ file, lineNo, text: text.trim().slice(0, 200), label })
+  }
+  lineNo += 1
+}
+
+if (hits.length === 0) process.exit(0)
+
+console.error('\npre-commit: blocked content matched a generic personal-identifier pattern:\n')
+for (const h of hits) {
+  console.error(`  ${h.file}:${h.lineNo}  ${h.label}`)
+  console.error(`    ${h.text}`)
+}
+console.error('\nFix the matches above, or run `git commit --no-verify` if you have a documented reason.\n')
+process.exit(1)
