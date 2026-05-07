@@ -27,9 +27,9 @@ export class CaribouProfileHeader extends Elena(HTMLElement) {
     const safe = DOMPurify.sanitize(a.note ?? '', PURIFY_OPTS) as unknown as string
     const headerImg = a.headerStatic || a.header
     return html`
-      <div class="banner" style=${headerImg ? `background-image:url(${headerImg});background-size:cover;` : ''}></div>
+      <div class="banner" style="${headerImg ? `background-image:url(${headerImg});background-size:cover;` : ''}"></div>
       <div class="row">
-        <img class="avatar" src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async"/>
+        <img class="avatar" src="${a.avatarStatic || a.avatar}" alt="" loading="lazy" decoding="async"/>
         <div>
           <div class="name">${a.displayName || a.username}</div>
           <div class="handle">@${a.acct}</div>

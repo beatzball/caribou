@@ -174,12 +174,12 @@ export class CaribouTimeline extends Elena(HTMLElement) {
         <ul style="list-style:none;margin:0;padding:0;">
           ${this.statuses.map((s, i) => html`
             <li>
-              <caribou-status-card data-index=${i} data-status-id=${s.id}></caribou-status-card>
+              <caribou-status-card data-index="${i}" data-status-id="${s.id}"></caribou-status-card>
             </li>
           `)}
         </ul>
         ${nextHref
-          ? html`<a href=${nextHref} rel="next" data-sentinel
+          ? html`<a href="${nextHref}" rel="next" data-sentinel
                    style="display:block;padding:var(--space-4);color:var(--fg-muted);text-align:center;">Older posts →</a>`
           : html``}
       </div>

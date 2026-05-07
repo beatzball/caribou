@@ -124,14 +124,14 @@ export class CaribouThread extends Elena(HTMLElement) {
     return html`
       <ul>
         ${ancestors.map((s) => html`
-          <li><caribou-status-card data-id=${s.id} variant="ancestor"></caribou-status-card></li>
+          <li><caribou-status-card data-id="${s.id}" variant="ancestor"></caribou-status-card></li>
         `)}
-        <li><caribou-status-card data-id=${focused.id} variant="focused"></caribou-status-card></li>
+        <li><caribou-status-card data-id="${focused.id}" variant="focused"></caribou-status-card></li>
         ${descendants.map((s) => {
           const depth = depths.get(s.id) ?? MAX_DEPTH
           const ind = `margin-inline-start:calc(var(--space-4)*${String(depth)})`
-          return html`<li data-depth=${String(depth)} style="${ind}">
-            <caribou-status-card data-id=${s.id} data-depth=${String(depth)} variant="descendant"></caribou-status-card>
+          return html`<li data-depth="${String(depth)}" style="${ind}">
+            <caribou-status-card data-id="${s.id}" data-depth="${String(depth)}" variant="descendant"></caribou-status-card>
           </li>`
         })}
       </ul>

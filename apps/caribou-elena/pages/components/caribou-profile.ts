@@ -134,7 +134,7 @@ export class CaribouProfile extends Elena(HTMLElement) {
       <ul style="list-style:none;margin:0;padding:0;">
         ${this.statuses.map((s, i) => html`
           <li>
-            <caribou-status-card data-index=${i} data-status-id=${s.id} variant="timeline"></caribou-status-card>
+            <caribou-status-card data-index="${i}" data-status-id="${s.id}" variant="timeline"></caribou-status-card>
           </li>
         `)}
       </ul>

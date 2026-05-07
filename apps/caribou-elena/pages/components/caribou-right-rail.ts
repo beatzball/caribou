@@ -32,7 +32,7 @@ export class CaribouRightRail extends CaribouElena(HTMLElement) {
       <div class="card">
         <strong>${APP_NAME}</strong>
         <div>v${PACKAGE_VERSION}</div>
-        <a href=${REPO_URL} rel="noopener" target="_blank">GitHub</a>
+        <a href="${REPO_URL}" rel="noopener" target="_blank">GitHub</a>
       </div>
       <div class="card">
         <ul class="links">

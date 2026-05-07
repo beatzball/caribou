@@ -165,8 +165,15 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
     // (target-walking + selection check) is a JS-only enhancement deferred to
     // Plan 4 (interactions); the timestamp anchor is the no-JS-safe primitive.
     const permalink = statusPermalink(display)
+    // Quote every interpolated attribute below. Elena recognizes attribute
+    // slots by /name\s*=\s*["']$/ on the preceding static; unquoted slots
+    // fall back to a comment placeholder, and the HTML parser eats the
+    // marker (and trailing siblings) into the unquoted value, leaving
+    // garbage attribute names. First render's replaceChildren swallows the
+    // mess; second render's morph walks el.attributes and calls
+    // setAttribute(badName, ...) which throws InvalidCharacterError.
     return html`
-      <article data-variant=${this.variant}
+      <article data-variant="${this.variant}"
                style="padding:var(--space-4);border-bottom:1px solid var(--border);">
         ${boostName
           ? html`<div class="boost-attribution">
@@ -175,7 +182,7 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
                  </div>`
           : html``}
         <div style="display:flex;gap:var(--space-3);">
-          <img src=${display.account.avatarStatic || display.account.avatar}
+          <img src="${display.account.avatarStatic || display.account.avatar}"
                alt=""
                width="48" height="48"
                loading="lazy"
@@ -186,7 +193,7 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
               <strong style="color:var(--fg-0);">${display.account.displayName || display.account.username}</strong>
               <span style="color:var(--fg-muted);">@${display.account.acct}</span>
               <a class="permalink" href="${permalink}">
-                <time datetime=${dt}>${relLabel}</time>
+                <time datetime="${dt}">${relLabel}</time>
               </a>
             </header>
             <div class="status-content" style="color:var(--fg-0);margin-top:var(--space-2);">${unsafeHTML(safe)}</div>

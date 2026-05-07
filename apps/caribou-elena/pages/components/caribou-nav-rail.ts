@@ -66,8 +66,8 @@ export class CaribouNavRail extends CaribouElena(HTMLElement) {
         ${ITEMS.map((it) => {
           const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
           return isActive
-            ? html`<a href=${it.href} aria-current="page"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a>`
-            : html`<a href=${it.href}><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a>`
+            ? html`<a href="${it.href}" aria-current="page"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a>`
+            : html`<a href="${it.href}"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a>`
         })}
         <form class="signout-form" action="/api/signout" method="post">
           <button type="submit" class="signout-btn">

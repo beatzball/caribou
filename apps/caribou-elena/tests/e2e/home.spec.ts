@@ -69,7 +69,12 @@ test('/home without activeUserKey shows the auth-required placeholder', async ({
   await page.goto('/home')
   // Plan 3: signed-out users land on a placeholder that explains the
   // auth requirement instead of a hard redirect to /. Match the visible
-  // copy from <caribou-auth-required>.
+  // copy from <caribou-auth-required>. Wait for Litro's atomic-swap
+  // (router pre-renders the new <page-home> alongside the SSR'd one with
+  // `hidden`, then removes the old after a rAF) to settle — otherwise
+  // both pages each render the auth-required paragraph and strict mode
+  // reports two matches.
+  await waitForSingleMount(page)
   await expect(page.getByText(/requires a Mastodon access token/i)).toBeVisible()
   expect(new URL(page.url()).pathname).toBe('/home')
 })
