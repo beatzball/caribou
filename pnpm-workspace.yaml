@@ -1,3 +1,10 @@
 packages:
-  - "apps/*"
-  - "packages/*"
+  - apps/*
+  - packages/*
+
+patchedDependencies:
+  '@beatzball/litro@0.9.1': patches/@beatzball__litro@0.9.1.patch
+
+peerDependencyRules:
+  ignoreMissing:
+    - vue

@@ -473,7 +473,7 @@ describe('Section 3: native elements morph normally', () => {
 // engine treats the child's `childNodes` as its own to manage). Caribou
 // hit this in the timeline-flicker incident; the fix was to either
 // (a) move the child to shadow DOM (Section 1's pattern) or (b) make the
-// parent re-render less frequently (caribou-home-timeline's split-bindings).
+// parent re-render less frequently (caribou-timeline's split-bindings).
 //
 // `it.fails` makes these run as "expected failures": the assertion below
 // is what we'd want, but Elena's current semantics violate it. If a future

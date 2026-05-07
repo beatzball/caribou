@@ -28,6 +28,7 @@ describe('completeSignin', () => {
     const res = await completeSignin({ code: 'C1', state: 'S1' }, d)
     expect(res).toEqual({
       kind: 'ok',
+      server: 'fosstodon.org',
       location:
         '/signin/done#token=ACCESS-TOKEN-1' +
         '&server=fosstodon.org' +

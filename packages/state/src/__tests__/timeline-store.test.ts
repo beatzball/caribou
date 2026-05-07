@@ -16,9 +16,14 @@ interface FakeClient extends CaribouClient {
 }
 
 function fakeClient(impl?: FetchImpl): FakeClient {
+  const unused = () => Promise.reject(new Error('not used in timeline-store tests'))
   return {
     userKey: toUserKey('beatzball', 'fosstodon.org'),
     fetchTimeline: vi.fn<FetchImpl>(impl ?? (async () => [])),
+    fetchStatus: unused as CaribouClient['fetchStatus'],
+    fetchThread: unused as CaribouClient['fetchThread'],
+    lookupAccount: unused as CaribouClient['lookupAccount'],
+    fetchAccountStatuses: unused as CaribouClient['fetchAccountStatuses'],
   }
 }
 

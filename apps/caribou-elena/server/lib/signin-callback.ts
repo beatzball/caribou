@@ -17,7 +17,7 @@ export interface CompleteSigninDeps {
 }
 
 export type CompleteSigninResult =
-  | { kind: 'ok';    location: string }
+  | { kind: 'ok';    location: string; server: string }
   | { kind: 'error'; location: string }
 
 export interface CompleteSigninInput {
@@ -68,7 +68,7 @@ export async function completeSignin(input: CompleteSigninInput, deps: CompleteS
     vapidKey: app.vapid_key,
   }).toString()
 
-  return { kind: 'ok', location: `/signin/done#${fragment}` }
+  return { kind: 'ok', location: `/signin/done#${fragment}`, server }
 }
 
 export async function exchangeCodeForToken(input: {

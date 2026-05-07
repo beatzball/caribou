@@ -1,5 +1,6 @@
 import { defineEventHandler, getQuery, sendRedirect } from 'h3'
 import { completeSignin, exchangeCodeForToken, verifyCredentialsFetch } from '../../../lib/signin-callback.js'
+import { setInstance } from '../../../lib/instance-cookie.js'
 import { getStorage } from '../../../lib/storage.js'
 
 export default defineEventHandler(async (event) => {
@@ -16,5 +17,6 @@ export default defineEventHandler(async (event) => {
       verifyCredentials: verifyCredentialsFetch,
     },
   )
+  if (result.kind === 'ok') setInstance(event, result.server)
   return sendRedirect(event, result.location, 302)
 })

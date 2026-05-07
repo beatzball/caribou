@@ -16,6 +16,16 @@ export interface CaribouClient {
     maxId?: string
     limit?: number
   }): Promise<mastodon.v1.Status[]>
+  fetchStatus(statusId: string): Promise<mastodon.v1.Status>
+  fetchThread(statusId: string): Promise<{
+    ancestors: mastodon.v1.Status[]
+    descendants: mastodon.v1.Status[]
+  }>
+  lookupAccount(handle: string): Promise<mastodon.v1.Account>
+  fetchAccountStatuses(
+    accountId: string,
+    params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
+  ): Promise<mastodon.v1.Status[]>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -55,6 +65,28 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         if (kind.type === 'list')    return c.v1.timelines.list.$select(kind.id).list(listParams)
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
       })
+    },
+    async fetchStatus(statusId) {
+      return run(`status:${statusId}`, (c) => c.v1.statuses.$select(statusId).fetch())
+    },
+    async fetchThread(statusId) {
+      return run(`thread:${statusId}`, (c) => c.v1.statuses.$select(statusId).context.fetch())
+    },
+    async lookupAccount(handle) {
+      return run(`account-lookup:${handle}`, (c) =>
+        c.v1.accounts.lookup({ acct: handle }),
+      )
+    },
+    async fetchAccountStatuses(accountId, { tab, maxId, limit }) {
+      const key = `acct-statuses:${accountId}:${tab}:${maxId ?? ''}:${limit ?? ''}`
+      return run(key, async (c) =>
+        c.v1.accounts.$select(accountId).statuses.list({
+          ...(tab === 'posts' ? { excludeReplies: true } : {}),
+          ...(tab === 'media' ? { onlyMedia: true } : {}),
+          ...(maxId ? { maxId } : {}),
+          ...(limit ? { limit } : {}),
+        }),
+      )
     },
   }
 }
