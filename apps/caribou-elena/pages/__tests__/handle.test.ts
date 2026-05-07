@@ -90,4 +90,25 @@ describe('/@[handle] pageData', () => {
     const result = await pageData.fetcher(event)
     expect(result.kind).toBe('auth-required')
   })
+
+  // /@me is an auth-required route per the Plan 3 spec §8.8: the user's own
+  // profile requires the access token that lives only in localStorage, so the
+  // server must not perform a public lookup. It returns an auth-required
+  // placeholder regardless of the cookie state; the client-side swap (mirror
+  // of /home) hydrates the real profile from the active userKey.
+  it('returns auth-required for /@me without calling the public lookup, even when signed in', async () => {
+    vi.mocked(resolveInstanceForRoute).mockResolvedValue({
+      instance: 'mastodon.social', source: 'cookie',
+    })
+    const event = {
+      context: { params: { handle: 'me' } },
+      url: '/@me',
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
+    const { pageData } = await import('../@[handle].js')
+    const result = await pageData.fetcher(event)
+    expect(result.kind).toBe('auth-required')
+    expect(result).toMatchObject({ handle: 'me', shell: { instance: 'mastodon.social' } })
+    expect(vi.mocked(fetchAccountByHandle)).not.toHaveBeenCalled()
+    expect(vi.mocked(fetchAccountStatuses)).not.toHaveBeenCalled()
+  })
 })
