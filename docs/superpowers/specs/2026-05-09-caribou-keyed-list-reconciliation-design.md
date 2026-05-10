@@ -1,8 +1,8 @@
 # Caribou — Keyed-List Reconciliation Design Spec
 
-**Status:** approved (brainstorm complete, awaiting implementation plan)
+**Status:** approved (revised 2026-05-10 after validation POC failed; mount-element pivot now baked in)
 **Origin:** Plan 3 spec §11.1a deferred follow-up. Lands as a focused PR after Plan 3 merges, before Plan 4 starts.
-**Companion plan:** to be written by `superpowers:writing-plans` after this spec is approved.
+**Companion plan:** `docs/superpowers/plans/2026-05-09-caribou-keyed-list-reconciliation.md` (revised in lockstep).
 
 ## 0. Goal
 
@@ -15,9 +15,10 @@ The work is mandated as a discrete PR by Plan 3 §11.1a: "deserves its own PR wi
 In scope:
 
 - New module `packages/caribou-ui-headless/src/reconcile-keyed-list.ts` exporting one pure function.
+- New element `packages/caribou-ui-headless/src/list-mount.ts` exporting `<caribou-list-mount>` — a tiny shadow-DOM container that renders an internal `<ul>`. Required because the validation POC (§4) confirmed Elena's morph engine wipes live `<ul>` children when the host's render template emits the `<ul>` empty.
 - Adoption in `<caribou-timeline>`, `<caribou-profile>`, `<caribou-thread>`.
 - Op-count-based regression metric in CI (§8).
-- Validation POC (§4) — must pass before any other work in this PR merges.
+- Validation POC (§4) — already executed; results pinned in the morph spec.
 
 Out of scope (deferred or excluded — see §9 for the full list):
 
@@ -27,16 +28,19 @@ Out of scope (deferred or excluded — see §9 for the full list):
 
 ## 2. Architecture & module boundary
 
-One new module:
+Two new modules in `@beatzball/caribou-ui-headless`:
 
 - **`packages/caribou-ui-headless/src/reconcile-keyed-list.ts`** — exports one pure function `reconcileKeyedList`. Re-exported from the package's `index.ts`. No module-level state, no class, no DOM globals. Runs unmodified in happy-dom and real browsers.
+- **`packages/caribou-ui-headless/src/list-mount.ts`** — exports the `CaribouListMount` class and registers the `<caribou-list-mount>` custom element on import. The element attaches its own shadow root, renders an internal `<ul>` (with `list-style:none;margin:0;padding:0;` baked in), and exposes a `mountUl` getter that returns the inner `<ul>`. Plain HTMLElement; no Elena dependency, so it's adapter-portable for future caribou-lit / caribou-fast.
+
+**Why the mount is required.** Elena's `morphContent` recurses into native children — that's standard DOM behavior, documented in the morph spec README ("Native HTML elements: never affected by the above. Morph always recurses into native children — that's what the parent's template describes."). If a host renders `<ul></ul>` empty in its template and we imperatively add `<li>` children, the next host re-render will morph the live `<ul>` to match the template — and wipe the children. The validation POC confirmed this (§4). Wrapping the `<ul>` in a custom element with `static shadow = 'open'` (or here, plain `attachShadow({mode:'open'})`) places the `<ul>` inside a shadow root, where `host.childNodes` doesn't reach. The mount renders empty in the host's template; Elena's morph leaves it alone (per morph spec §1, shadow-DOM custom-element children are morph-opaque).
 
 Pattern in each host component:
 
-- `render()` emits the wrapping `<ul>` (with frame chrome — banner, sentinel anchor, header, etc., as siblings) but **no `<li>` children**.
+- `render()` emits `<caribou-list-mount></caribou-list-mount>` (with frame chrome — banner, sentinel anchor, header, etc., as siblings) but **no inline list children**.
 - The host's existing reactivity hook (timeline's `effect()`, profile's `effect()`, thread's store subscription) calls `this.requestUpdate()` when the relevant store output changes.
-- `updated()` stashes a reference to the `<ul>` on first run and calls `reconcileKeyedList(parent, items, …)` against it.
-- The pre-existing `effect()` shallow-compare gate stays. `render()` returns four different shapes for timeline (error / loading / empty / list) — only one shape contains a `<ul>` — so the gate is the right place to short-circuit non-list state transitions; the helper only short-circuits the no-op *list* case.
+- `updated()` stashes a reference to the mount's inner `<ul>` on first run (`this.listEl ??= this.querySelector('caribou-list-mount').mountUl`) and calls `reconcileKeyedList(parent, items, …)` against it.
+- The pre-existing `effect()` shallow-compare gate stays. `render()` returns four different shapes for timeline (error / loading / empty / list) — only one shape contains a mount — so the gate is the right place to short-circuit non-list state transitions; the helper only short-circuits the no-op *list* case.
 
 Helper-owned attribute: **`data-key`** on every direct child of `parent`. Caller never writes it. Helper assumes `parent.children` only contains elements it created; any direct child without `data-key` (or with a stale one) is removed on the next reconcile (§3).
 
@@ -112,22 +116,17 @@ Detection: `typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV`
 
 The duplicate-key throw is a contract assertion, not a meaningful production gate — `keyOf(s) = s.id` and Mastodon API guarantees unique IDs per page; the `statusCache` Map in `@beatzball/caribou-state` already de-dupes. The throw fires only on store-side bugs that nothing else exercises in dev. We keep it because it's cheap and makes the contract explicit; we do not pretend it adds defense in depth.
 
-## 4. Validation POC (must pass before other work merges)
+## 4. Validation POC — RESULT: morph wipes empty-template native children
 
-The single largest unverified assumption in this design: when a host's render template emits an empty `<ul></ul>` but the live DOM has a populated `<ul>` with helper-managed children, what does Elena's `morphContent` do? The morph spec at `packages/elena-morph-spec/src/__tests__/morph-custom-elements.test.ts` covers custom-element children but not native-element parents whose template-side appears empty. If morph wipes live children to match the empty template, the entire design fails.
+**Original question:** when a host's render template emits an empty `<ul></ul>` but the live DOM has a populated `<ul>` with helper-managed children, what does Elena's `morphContent` do?
 
-**Validation POC** — implemented and passing before any host adoption work merges:
+**Result (2026-05-10):** **morph wipes the children.** Both POC tests against the bare-`<ul>` pattern failed: after one host re-render, `ul.children.length` dropped from 3 to 0 (and from 1 to 0 in the consecutive-render test). This is consistent with the morph spec README's documentation of native children ("Morph always recurses into native children — that's what the parent's template describes") — the bare-`<ul>` design tried to evade that and failed.
 
-A vitest test in `packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts` (lifted into Elena upstream when ready, per the package's stated purpose):
+The POC test lives at `packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts` and stays in the repo as **pinned documentation** of this behavior. It uses vitest's `it.fails(...)` pattern (per the morph-spec convention used in `morph-custom-elements.test.ts §4` for the light-DOM-children-get-wiped gotcha): the test asserts the property we'd *want* to hold (children survive); `it.fails` flips that to "this is expected to fail today, alert us if Elena ever changes this." If the test ever passes (Elena fixes morph), `it.fails` itself fails and we know the mount workaround can be removed.
 
-1. Define a minimal Elena element whose render emits `<div><ul></ul></div>`.
-2. Mount it; populate the `<ul>` with three `<li>` children imperatively.
-3. Trigger a re-render.
-4. Assert the three `<li>` children survive (`Object.is` on captured node refs) and the `<ul>` still has length 3.
+**Pivot adopted:** every host wraps its `<ul>` in a `<caribou-list-mount>` custom element with shadow DOM. Inside the shadow root, the `<ul>` is morph-opaque to the outer host's morph engine. Hosts pass `mount.mountUl` (the inner shadow `<ul>`) to the helper as the parent. See §2 for the architecture; §5 for per-host integration sketches.
 
-If the assertion holds, design proceeds as written. If it fails, the design pivots — most likely to wrapping each list in its own light-DOM child custom element with `static shadow = 'open'`, which morph respects (per spec §1) — and the spec is revised before any host adoption.
-
-This mirrors Plan 3 §6.6's validation-POC pattern.
+A separate unit test lives at `packages/caribou-ui-headless/src/__tests__/list-mount.test.ts` to confirm `<caribou-list-mount>` itself behaves correctly: attaches shadow on `connectedCallback`, exposes `mountUl`, and survives host morph cycles when nested inside a host element that re-renders. That test is the new gate before host adoption work.
 
 ## 5. Integration in three call sites
 
@@ -135,19 +134,27 @@ This mirrors Plan 3 §6.6's validation-POC pattern.
 
 Changes:
 
-- `render()` emits the empty `<ul data-status-list></ul>` plus existing siblings (banner, sentinel anchor). The four-shape early-return branches (error / loading / empty / list) are preserved.
+- `render()` emits `<caribou-list-mount></caribou-list-mount>` plus existing siblings (banner, sentinel anchor). The four-shape early-return branches (error / loading / empty / list) are preserved.
 - The `effect()` shallow-compare gate is preserved.
-- `updated()` stashes `this.listEl ??= this.querySelector('ul[data-status-list]')`, then calls `this.reconcile()`. Banner imperative wire and IO-sentinel logic are unchanged.
+- `updated()` stashes `this.listEl ??= this.querySelector('caribou-list-mount')?.mountUl ?? null`, then calls `this.reconcile()`. Banner imperative wire and IO-sentinel logic are unchanged.
 - The existing `data-index`-keyed `card.status =` loop in `updated()` (currently lines 109–116) is **deleted**. Its responsibility moves to the helper's `update` callback.
 - `data-status-id` on the card stays as a debug attribute. The helper's `data-key` lives on the `<li>` parent — no collision.
 
 Sketch:
 
 ```ts
+import { reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
+// importing CaribouListMount is a side-effect import that registers the
+// <caribou-list-mount> element. The class itself is also exported in case
+// callers want to type-check against it.
+
 private listEl: HTMLUListElement | null = null
 
 override updated() {
-  this.listEl ??= this.querySelector<HTMLUListElement>('ul[data-status-list]')
+  if (!this.listEl) {
+    const mount = this.querySelector<HTMLElement & { mountUl?: HTMLUListElement }>('caribou-list-mount')
+    this.listEl = mount?.mountUl ?? null
+  }
   // … existing banner imperative wire …
   // … existing IO-sentinel first-run setup …
   this.reconcile()
@@ -176,12 +183,14 @@ private reconcile() {
 
 ### 5.2 `<caribou-profile>` (light DOM)
 
-Identical shape to 5.1. The card gets `variant="timeline"` set imperatively in `create`. Header imperative wire (`header.account = …`) and sentinel logic are unchanged. The current `data-index`-keyed `card.status =` loop in `updated()` (lines 84–91) is **deleted**.
+Identical shape to 5.1: render emits `<caribou-list-mount>`, `updated()` stashes `mount.mountUl`, helper reconciles into it. The card gets `variant="timeline"` set imperatively in `create`. Header imperative wire (`header.account = …`) and sentinel logic are unchanged. The current `data-index`-keyed `card.status =` loop in `updated()` (lines 84–91) is **deleted**.
 
 ### 5.3 `<caribou-thread>` (shadow DOM)
 
-`<ul data-thread-list>` lives inside the shadow root and mixes three sources of children: ancestors → focused → descendants.
+Thread renders into its own shadow root. The mount nests inside thread's shadow — shadow-DOM-in-shadow-DOM is standard. The mount mixes three sources of children: ancestors → focused → descendants.
 
+- `render()` emits `<caribou-list-mount></caribou-list-mount>` inside the thread shadow's content (replacing the current `<ul>...</ul>`).
+- `updated()` queries the mount via `this.shadowRoot!.querySelector('caribou-list-mount')` and stashes `mount.mountUl`.
 - `collectStatuses()` is renamed and extended to `collectThreadItems()`, returning a flat array of `{ status, depth: number | null }`. Ancestors and the focused status get `depth: null`. Descendants get a numeric depth.
 - `keyOf({ status }) = status.id`.
 - `create({ status, depth })` constructs `<li><caribou-status-card variant="…" /></li>`. Variant is `"focused"` for the focused item, `"ancestor"` for `depth === null` non-focused items, `"descendant"` otherwise. When `depth !== null`: `li.dataset.depth = String(depth)`, `li.style.marginInlineStart = \`calc(var(--space-4)*\${depth})\``, and `card.dataset.depth = String(depth)` (the inner-card `data-depth` is preserved per current behavior at `caribou-thread.ts:134`; remove only if confirmed dead code).
@@ -245,11 +254,24 @@ This is the user-perceived property the whole PR is delivering. happy-dom does n
 
 Repurposed from `morph-custom-elements.test.ts §1c`'s flicker-repro pattern: render a card with `<img src="...">`, prepend new statuses, assert the original `<img>` element is `Object.is` to the post-prepend `<img>`. Lives in the timeline component test file.
 
-### 7.5 Validation POC (§4)
+### 7.5 Validation POC (§4) — pinned
 
-Standalone test file in `packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts`. Lifts into Elena upstream alongside the existing `morph-custom-elements.test.ts` — the package's stated boundary.
+`packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts` documents the morph-wipe behavior using `it.fails(...)`. Stays as documentation; lifts into Elena upstream alongside the existing `morph-custom-elements.test.ts`. The test PASSING (i.e., `it.fails` failing because the assertion now holds) would mean Elena fixed the wipe behavior and the mount workaround can be retired.
 
-### 7.6 Out of scope for tests
+### 7.6 `<caribou-list-mount>` unit tests
+
+`packages/caribou-ui-headless/src/__tests__/list-mount.test.ts`. Required scenarios:
+
+- On `connectedCallback`, attaches a shadow root if absent and renders an internal `<ul>`. The `<ul>` has the expected baked-in styles (list-style:none, margin:0, padding:0).
+- `mountUl` getter returns the inner `<ul>`. Repeated access returns the same node identity.
+- `mountUl` is safe to access before `connectedCallback` fires (defensive: forces synchronous mount).
+- Re-attaching the mount to a different parent does not re-create the inner `<ul>` (shadow root persists).
+- Custom-element registration is idempotent: importing the module twice does not throw.
+- Smoke: nested inside an Elena host whose template renders `<caribou-list-mount></caribou-list-mount>` empty, the inner `<ul>`'s children survive a host re-render. (This is the integration property the validation POC §4 motivates.)
+
+Coverage target: same package threshold as the helper (95% lines/functions/statements, 90% branches).
+
+### 7.7 Out of scope for tests
 
 - Playwright E2E. Visual identity is already covered by Plan 3's no-JS smoke; this PR is a pure refactor of the JS render path.
 - Real-browser parity for the helper. The algorithm uses only `parent.children`, `dataset`, `insertBefore`, `remove` — universal DOM primitives. If parity ever breaks here, every other component breaks first.
@@ -327,7 +349,15 @@ The op-count metric (§8.1) plus the render-avoidance metric (§8.2) — countin
 
 If a future case calls for real-browser numbers — e.g., a perf-regression investigation, a marketing piece, or an Elena upstream contribution arguing for keyed reconciliation as a framework primitive — the right tool is a Playwright `page.evaluate()` harness measuring `performance.now()` deltas against a real page. That work is non-blocking for this PR and is captured here only so future readers know why happy-dom benchmarks are absent. (This rationale is also a candidate for a future technical-details blog post — happy-dom-as-perf-harness is a common antipattern that's worth a public write-up.)
 
-### 10.6 Dropping the `effect()` shallow-compare gate
+### 10.6 Converting timeline / profile to shadow-DOM hosts
+
+Once the validation POC failed, an alternative to `<caribou-list-mount>` was to convert the entire `<caribou-timeline>` and `<caribou-profile>` from light DOM to shadow DOM, putting the `<ul>` inside the host's own shadow root and getting morph isolation for free. Rejected: timeline and profile both rely on light-DOM cascading for token styles and CSS that targets `caribou-timeline > *` selectors from the surrounding shell; switching them to shadow DOM means auditing every selector and `<style>` block for the two components and surrounding chrome, which is far broader than the mount's blast radius. The mount is ~30 LOC and changes one line in each host's render(); the shadow-DOM-host approach would touch dozens of files.
+
+### 10.7 Inline `attachShadow` per host (no shared mount class)
+
+Considered: each host opens its own ad-hoc shadow region for the list — e.g., a dedicated `<div>` whose `connectedCallback` calls `attachShadow`. Rejected: replicates the same logic three times, costs the helper's portability story (caribou-lit / caribou-fast can't reuse), and makes the mount's behavior harder to test in isolation. A single `<caribou-list-mount>` element with one unit-test file covers the same ground at lower total cost.
+
+### 10.8 Dropping the `effect()` shallow-compare gate
 
 Earlier iteration claimed the helper's `parent.children` attribute-read scan was cheap enough to replace the host's pre-existing shallow-compare gate. Wrong: the host's `render()` returns four different DOM shapes for timeline (error / loading / empty / list), and only the list shape contains a `<ul>`. Without the gate, every `cacheStatus()` write — which mints a new `statusCache` Map reference on every poll tick, including ticks that don't add statuses to the displayed timeline — would re-run the host's full `render()` and replace whatever shape was there. The helper does not help with non-list shapes; it only short-circuits the no-op case *within* the list shape. The gate stays.
 
@@ -341,10 +371,12 @@ None blocking. Captured for context:
 ## 12. Diff size estimate
 
 - New module (`reconcile-keyed-list.ts`): ~80 LOC.
+- New module (`list-mount.ts`): ~30 LOC.
 - Helper unit tests + bench-counts test: ~250 LOC.
-- Validation POC test: ~40 LOC.
+- Mount unit test: ~80 LOC.
+- Validation POC test (now `it.fails`-pinned): ~40 LOC.
 - Three component modifications (timeline, profile, thread): ~30 / 20 / 40 LOC modified each.
 - Three component test additions (integration + scroll + image-identity): ~150 LOC total across the three test files.
 - Changesets: one per modified package (caribou-ui-headless, caribou-elena, elena-morph-spec).
 
-Total: ~600 LOC added/modified, dominated by tests. The production-code change is ~150 LOC.
+Total: ~720 LOC added/modified, dominated by tests. The production-code change is ~180 LOC.

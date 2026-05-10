@@ -4,7 +4,7 @@
 
 **Goal:** Replace index-keyed `${items.map(...)}` rendering in `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` with a `reconcileKeyedList` helper in `@beatzball/caribou-ui-headless` that diffs by `status.id`, so polls/loadMore/applyNewPosts only touch nodes whose underlying status actually changed.
 
-**Architecture:** One pure function in `@beatzball/caribou-ui-headless`. Each host's `render()` emits an empty `<ul>`; the host's existing reactive hook stashes a ref on first `updated()` and calls the helper. Cards (already shadow-DOM, PR #14) keep object identity across re-renders. Helper owns `data-key` on direct children of the `<ul>`; DOM is the single source of truth (no caller-side cache map). Validation POC against Elena's morph behavior gates all integration work.
+**Architecture:** One pure function (`reconcileKeyedList`) and one tiny custom element (`<caribou-list-mount>`) in `@beatzball/caribou-ui-headless`. Each host's `render()` emits the mount empty in its template; the host's existing reactive hook queries `mount.mountUl` (the inner shadow `<ul>`) on first `updated()` and calls the helper against it. The mount is required because Elena's morph engine wipes live `<ul>` children when the host's render template emits `<ul></ul>` empty (validation POC pinned this on 2026-05-10); shadow DOM provides a morph-opaque container. Cards (already shadow-DOM, PR #14) keep object identity across re-renders. Helper owns `data-key` on direct children of the `<ul>`; DOM is the single source of truth.
 
 **Tech Stack:** TypeScript, Vitest + happy-dom (`@beatzball/caribou-ui-headless` and `@beatzball/elena-morph-spec`), Elena custom elements (`@elenajs/core`), `@preact/signals-core` (existing reactivity), Changesets for versioning.
 
@@ -17,15 +17,16 @@
 All of the following must be true before this plan is considered done:
 
 1. `pnpm install`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` all pass from a clean worktree.
-2. **Validation POC (Task 1) passes** before any helper or host work merges.
-3. `packages/caribou-ui-headless/src/reconcile-keyed-list.ts` exists, is re-exported from `index.ts`, and has ≥95% line/function/statement and ≥90% branch coverage per the package's vitest threshold.
-4. Op-count regression test asserts the exact counts from spec §3.4 for prepend-K, append-K, remove-middle, swap-adjacent, full-reverse, and N→identical.
-5. `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` all render through `reconcileKeyedList`. The pre-existing `effect()` shallow-compare gate in timeline is preserved. The `data-index`-keyed `card.status =` loops in timeline `updated()` and profile `updated()` are deleted.
-6. Component integration tests assert (a) surviving cards keep identity across prepend/append/tab-swap, (b) `caribou-status-card.prototype` `status` setter fires zero times for surviving cards (render-avoidance metric).
-7. Scroll position is preserved in the scroll-preservation test for the timeline.
-8. PR description contains a "Before / After" table with real op-counts and setter-fire counts captured against Plan 3 head and against the new code.
-9. One `.changeset/*.md` per modified package: `@beatzball/caribou-ui-headless`, `apps/caribou-elena`, `@beatzball/elena-morph-spec`.
-10. Every existing Plan 3 component test still passes (no regression).
+2. **Validation POC (Task 1) committed** as `it.fails`-pinned documentation of morph's wipe behavior (the POC ran 2026-05-10 and confirmed morph wipes; the test is now permanent documentation).
+3. **`<caribou-list-mount>` (Task 2) lands and passes its unit tests** before any host adoption work.
+4. `packages/caribou-ui-headless/src/reconcile-keyed-list.ts` exists, is re-exported from `index.ts`, and has ≥95% line/function/statement and ≥90% branch coverage per the package's vitest threshold.
+5. Op-count regression test asserts the exact counts from spec §3.4 for prepend-K, append-K, remove-middle, swap-adjacent, full-reverse, and N→identical.
+6. `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` all render through `<caribou-list-mount>` + `reconcileKeyedList`. The pre-existing `effect()` shallow-compare gate in timeline is preserved. The `data-index`-keyed `card.status =` loops in timeline `updated()` and profile `updated()` are deleted.
+7. Component integration tests assert (a) surviving cards keep identity across prepend/append/tab-swap, (b) `caribou-status-card.prototype` `status` setter fires zero times for surviving cards (render-avoidance metric).
+8. Scroll position is preserved in the scroll-preservation test for the timeline.
+9. PR description contains a "Before / After" table with real op-counts and setter-fire counts captured against Plan 3 head and against the new code.
+10. One `.changeset/*.md` per modified package: `@beatzball/caribou-ui-headless`, `apps/caribou-elena`, `@beatzball/elena-morph-spec`.
+11. Every existing Plan 3 component test still passes (no regression).
 
 ---
 
@@ -39,12 +40,14 @@ caribou/
 │   ├── caribou-ui-headless/
 │   │   └── src/
 │   │       ├── reconcile-keyed-list.ts                       # the helper
+│   │       ├── list-mount.ts                                 # <caribou-list-mount> shadow-DOM container
 │   │       └── __tests__/
 │   │           ├── reconcile-keyed-list.test.ts              # behavior + invariants
-│   │           └── reconcile-keyed-list.bench-counts.test.ts # op-count regression metric
+│   │           ├── reconcile-keyed-list.bench-counts.test.ts # op-count regression metric
+│   │           └── list-mount.test.ts                        # mount unit tests
 │   └── elena-morph-spec/
 │       └── src/__tests__/
-│           └── morph-empty-native-parent.test.ts             # validation POC (§4)
+│           └── morph-empty-native-parent.test.ts             # validation POC (§4) — it.fails-pinned
 ├── docs/
 │   └── superpowers/
 │       └── (this plan + the spec already exist)
@@ -73,14 +76,16 @@ caribou/
 
 ---
 
-## Task 1: Validation POC — empty native parent template
+## Task 1: POC documentation — morph wipes empty-template native children
 
-**Goal of this task:** Verify the load-bearing assumption that Elena's `morphContent` does NOT wipe live `<ul>` children when the host's render template emits `<ul></ul>` empty. If this assumption breaks, the entire design fails and we redesign before any helper work.
+**Background.** This POC was originally written to verify whether morph would tolerate an empty `<ul>` in the host's template against a populated live `<ul>`. The POC ran on 2026-05-10 and morph **did** wipe the live children (`children.length` went from 3 to 0). The design pivoted to `<caribou-list-mount>` (Task 2). This task now CAPTURES that result as `it.fails`-pinned documentation in the morph spec — it documents the "we'd want this to work but Elena doesn't yet" gotcha, mirroring the morph-custom-elements.test.ts §4 pattern.
+
+**Goal of this task:** Replace the existing uncommitted POC test file with the `it.fails`-framed version and commit it. The file already exists on disk uncommitted at `packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts` — overwrite it.
 
 **Files:**
-- Create: `packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts`
+- Modify (overwrite uncommitted): `packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Overwrite the test file**
 
 ```ts
 // packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts
@@ -88,19 +93,24 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { Elena, html } from '@elenajs/core'
 
 /**
- * Validation POC for keyed-list reconciliation (Plan 3 §11.1a follow-up).
+ * Behavioral spec for morph against empty native parents in the host
+ * template — i.e., a host whose render() emits `<ul></ul>` empty while
+ * the live `<ul>` has imperatively-inserted children.
  *
- * The keyed-reconciler design has each host render() emit `<ul></ul>`
- * empty, then manage <li> children imperatively from updated() via a
- * helper. This test pins the assumption that Elena's morphContent does
- * NOT wipe live <ul> children when the new template fragment shows the
- * <ul> as empty. If morph DID wipe them, the design fails — every
- * reconcile would be undone by the next host re-render.
+ * Confirmed 2026-05-10: morph wipes the live children to match the
+ * empty template (consistent with the README's "morph always recurses
+ * into native children" rule — native children's identity is the
+ * parent template's responsibility).
  *
- * If this test ever starts failing, the design must pivot — most likely
- * to wrapping each list in its own light-DOM child custom element with
- * `static shadow = 'open'`, which morph respects (per §1 of
- * morph-custom-elements.test.ts).
+ * The two `it.fails` assertions below describe the property we'd WANT
+ * Elena to hold (children survive). They are expected to fail today.
+ * The day Elena's morph stops wiping native-empty-template children,
+ * `it.fails` itself fails — alerting us that Caribou's
+ * <caribou-list-mount> workaround can be retired.
+ *
+ * This is the same gotcha-pinning pattern used in
+ * morph-custom-elements.test.ts §4 for light-DOM self-rendering
+ * children getting wiped.
  */
 
 class TestEmptyUlHost extends Elena(HTMLElement) {
@@ -117,7 +127,7 @@ TestEmptyUlHost.define()
 describe('morph behavior: empty native <ul> in template vs populated live <ul>', () => {
   beforeEach(() => { document.body.innerHTML = '' })
 
-  it('preserves imperatively-inserted <li> children across host re-renders', async () => {
+  it.fails('would preserve imperatively-inserted <li> children across host re-renders (Elena gotcha — currently wipes them)', async () => {
     const host = document.createElement('test-empty-ul-host') as HTMLElement & { rev: number; requestUpdate?: () => void }
     document.body.appendChild(host)
     await new Promise((r) => setTimeout(r, 0))
@@ -130,19 +140,18 @@ describe('morph behavior: empty native <ul> in template vs populated live <ul>',
 
     expect(ul.children.length).toBe(3)
 
-    // Trigger a host re-render. The render template's <ul> is empty;
-    // the live <ul> has 3 children. If morph wipes them, this fails.
     host.rev = 1
     host.requestUpdate?.()
     await new Promise((r) => setTimeout(r, 0))
 
+    // What we'd want Elena to do — but currently morph wipes these.
     expect(ul.children.length).toBe(3)
     expect(ul.children[0]).toBe(liA)
     expect(ul.children[1]).toBe(liB)
     expect(ul.children[2]).toBe(liC)
   })
 
-  it('preserves children across two consecutive host re-renders', async () => {
+  it.fails('would preserve children across two consecutive host re-renders (Elena gotcha)', async () => {
     const host = document.createElement('test-empty-ul-host') as HTMLElement & { rev: number; requestUpdate?: () => void }
     document.body.appendChild(host)
     await new Promise((r) => setTimeout(r, 0))
@@ -157,31 +166,259 @@ describe('morph behavior: empty native <ul> in template vs populated live <ul>',
     expect(ul.children.length).toBe(1)
     expect(ul.children[0]).toBe(liA)
   })
+
+  it('observed behavior: morph wipes the children (this is the case Caribou works around with <caribou-list-mount>)', async () => {
+    const host = document.createElement('test-empty-ul-host') as HTMLElement & { rev: number; requestUpdate?: () => void }
+    document.body.appendChild(host)
+    await new Promise((r) => setTimeout(r, 0))
+
+    const ul = host.querySelector('ul[data-list]')!
+    ul.append(
+      Object.assign(document.createElement('li'), { textContent: 'a' }),
+      Object.assign(document.createElement('li'), { textContent: 'b' }),
+    )
+    expect(ul.children.length).toBe(2)
+
+    host.rev = 1
+    host.requestUpdate?.()
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(ul.children.length).toBe(0) // morph wiped
+  })
 })
 ```
 
-- [ ] **Step 2: Run test to verify expected behavior**
+- [ ] **Step 2: Run the test**
 
 Run: `pnpm --filter @beatzball/elena-morph-spec test`
 
-Expected: PASS. (This is a *validation* POC — passing means the design assumption holds. If it FAILS, halt the plan immediately. Re-read the spec §4 fallback: pivot to wrapping each list in its own light-DOM child custom element with `static shadow = 'open'`. Notify the user before proceeding.)
+Expected: PASS — vitest reports the two `it.fails` cases as PASSING (because the inner assertions fail, and `it.fails` flips that to a pass), and the third "observed behavior" case PASSES on its assertions directly. Total: 3/3 green at the suite level.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add packages/elena-morph-spec/src/__tests__/morph-empty-native-parent.test.ts
-git commit -m "test(elena-morph-spec): pin morph behavior on empty native <ul> template
+git commit -m "test(elena-morph-spec): pin morph wipe behavior on empty native parents
 
-Validation POC for the keyed-list reconciliation design (Plan 3 §11.1a
-follow-up). Establishes that Elena's morphContent leaves live <ul>
-children alone when the host's render template emits <ul></ul> empty.
-This is the load-bearing assumption for the design. Lifts directly into
-Elena upstream alongside morph-custom-elements.test.ts."
+Documents that Elena's morphContent wipes live <ul> children when the
+host's render template emits <ul></ul> empty. Two it.fails-pinned
+assertions describe what we'd want; one direct assertion captures the
+observed wipe. Same gotcha-pinning pattern as morph-custom-elements.test.ts §4.
+
+This is why Caribou's keyed-list reconciliation needs the
+<caribou-list-mount> shadow-DOM workaround (Plan 3 §11.1a follow-up,
+spec §4)."
 ```
 
 ---
 
-## Task 2: Helper module — bootstrap + initial-mount scenario
+## Task 2: `<caribou-list-mount>` element + tests
+
+**Goal of this task:** Implement the morph-opaque shadow-DOM container that hosts use to wrap their lists. Pure HTMLElement; no Elena dependency. Must export the class AND register the `<caribou-list-mount>` tag on import.
+
+**Files:**
+- Create: `packages/caribou-ui-headless/src/list-mount.ts`
+- Create: `packages/caribou-ui-headless/src/__tests__/list-mount.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// packages/caribou-ui-headless/src/__tests__/list-mount.test.ts
+import { describe, it, expect, beforeEach } from 'vitest'
+import { CaribouListMount } from '../list-mount.js'
+
+describe('<caribou-list-mount>', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('registers the custom element on import', () => {
+    expect(customElements.get('caribou-list-mount')).toBeDefined()
+  })
+
+  it('attaches a shadow root and renders an internal <ul> on connectedCallback', () => {
+    const m = document.createElement('caribou-list-mount') as CaribouListMount
+    document.body.appendChild(m)
+    expect(m.shadowRoot).not.toBeNull()
+    const ul = m.shadowRoot!.querySelector('ul')
+    expect(ul).not.toBeNull()
+  })
+
+  it('inner <ul> has list-style:none, margin:0, padding:0', () => {
+    const m = document.createElement('caribou-list-mount') as CaribouListMount
+    document.body.appendChild(m)
+    const ul = m.shadowRoot!.querySelector('ul')!
+    expect(ul.style.listStyle).toBe('none')
+    expect(ul.style.margin).toBe('0')
+    expect(ul.style.padding).toBe('0')
+  })
+
+  it('mountUl returns the same node identity across calls', () => {
+    const m = document.createElement('caribou-list-mount') as CaribouListMount
+    document.body.appendChild(m)
+    expect(m.mountUl).toBe(m.mountUl)
+  })
+
+  it('mountUl is safe to access before connectedCallback fires (forces synchronous mount)', () => {
+    const m = document.createElement('caribou-list-mount') as CaribouListMount
+    expect(() => m.mountUl).not.toThrow()
+    expect(m.mountUl.tagName).toBe('UL')
+  })
+
+  it('shadow root persists across detach + re-attach to a different parent', () => {
+    const m = document.createElement('caribou-list-mount') as CaribouListMount
+    document.body.appendChild(m)
+    const ulBefore = m.mountUl
+    const otherParent = document.createElement('div')
+    document.body.appendChild(otherParent)
+    otherParent.appendChild(m)
+    expect(m.mountUl).toBe(ulBefore)
+  })
+
+  it('importing the module twice does not throw on duplicate registration', async () => {
+    // Re-importing is a no-op because the registration is guarded by
+    // customElements.get('caribou-list-mount').
+    await expect(import('../list-mount.js')).resolves.toBeDefined()
+  })
+})
+```
+
+- [ ] **Step 2: Run the test to verify failure**
+
+Run: `pnpm --filter @beatzball/caribou-ui-headless test list-mount`
+
+Expected: FAIL — `Cannot find module '../list-mount.js'`.
+
+- [ ] **Step 3: Implement the mount**
+
+```ts
+// packages/caribou-ui-headless/src/list-mount.ts
+
+/**
+ * Morph-opaque container for keyed-list reconciliation.
+ *
+ * Elena's morphContent recurses into native children (per the morph
+ * spec README), so a host that renders <ul></ul> empty in its template
+ * will have morph wipe any imperatively-added <li> children on the
+ * next host re-render. This element sidesteps that by placing the
+ * <ul> inside its own shadow root — morph never crosses a shadow
+ * boundary (per morph-custom-elements.test.ts §1).
+ *
+ * Hosts render <caribou-list-mount></caribou-list-mount> empty in their
+ * template. The keyed reconciler operates against `mount.mountUl`.
+ *
+ * Plain HTMLElement; no Elena dependency. Adapter-portable for
+ * future caribou-lit / caribou-fast.
+ */
+export class CaribouListMount extends HTMLElement {
+  private _ul: HTMLUListElement | null = null
+
+  connectedCallback(): void {
+    if (!this.shadowRoot) {
+      const shadow = this.attachShadow({ mode: 'open' })
+      const style = document.createElement('style')
+      style.textContent = ':host { display: block }'
+      const ul = document.createElement('ul')
+      ul.style.listStyle = 'none'
+      ul.style.margin = '0'
+      ul.style.padding = '0'
+      shadow.append(style, ul)
+      this._ul = ul
+    } else if (!this._ul) {
+      this._ul = this.shadowRoot.querySelector('ul')
+    }
+  }
+
+  /**
+   * Returns the inner <ul> that the keyed reconciler should target.
+   * Defensive: if accessed before connectedCallback fires, forces a
+   * synchronous mount so the caller never sees null.
+   */
+  get mountUl(): HTMLUListElement {
+    if (!this._ul) this.connectedCallback()
+    return this._ul!
+  }
+}
+
+if (!customElements.get('caribou-list-mount')) {
+  customElements.define('caribou-list-mount', CaribouListMount)
+}
+```
+
+- [ ] **Step 4: Run the test to verify pass**
+
+Run: `pnpm --filter @beatzball/caribou-ui-headless test list-mount`
+
+Expected: PASS — all seven tests green.
+
+- [ ] **Step 5: Add a smoke test for the morph-opaque property**
+
+This is the integration test that justifies the entire mount: a host whose render emits `<caribou-list-mount></caribou-list-mount>` empty must NOT wipe inner `<li>` children on re-render. Add to `list-mount.test.ts`:
+
+```ts
+import { Elena, html } from '@elenajs/core'
+
+describe('<caribou-list-mount> — morph isolation property', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('inner <ul> children survive an Elena host re-render (the property the validation POC §4 motivates)', async () => {
+    class TestMountHost extends Elena(HTMLElement) {
+      static override tagName = 'test-mount-host'
+      static override props = [{ name: 'rev', reflect: true }]
+      rev = 0
+      override render() {
+        return html`<div><caribou-list-mount></caribou-list-mount></div>`
+      }
+    }
+    TestMountHost.define()
+
+    const host = document.createElement('test-mount-host') as HTMLElement & { rev: number; requestUpdate?: () => void }
+    document.body.appendChild(host)
+    await new Promise((r) => setTimeout(r, 0))
+
+    const mount = host.querySelector('caribou-list-mount') as CaribouListMount
+    const ul = mount.mountUl
+    const liA = document.createElement('li'); liA.dataset.key = 'a'
+    const liB = document.createElement('li'); liB.dataset.key = 'b'
+    ul.append(liA, liB)
+    expect(ul.children.length).toBe(2)
+
+    host.rev = 1
+    host.requestUpdate?.()
+    await new Promise((r) => setTimeout(r, 0))
+
+    // Mount's shadow root is morph-opaque to the host's morph engine.
+    expect(ul.children.length).toBe(2)
+    expect(ul.children[0]).toBe(liA)
+    expect(ul.children[1]).toBe(liB)
+  })
+})
+```
+
+Note: this requires `@elenajs/core` to be available to the headless package's test environment. If it's not in the package's devDependencies, add it: edit `packages/caribou-ui-headless/package.json` to include `"@elenajs/core": "<version-already-used-elsewhere-in-repo>"` under devDependencies, then `pnpm install`.
+
+- [ ] **Step 6: Run all mount tests**
+
+Run: `pnpm --filter @beatzball/caribou-ui-headless test list-mount`
+
+Expected: PASS — all 8 tests green (7 unit + 1 integration). If the smoke test fails, the entire design is broken; STOP and surface to the user.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/caribou-ui-headless/src/list-mount.ts packages/caribou-ui-headless/src/__tests__/list-mount.test.ts packages/caribou-ui-headless/package.json
+git commit -m "feat(caribou-ui-headless): <caribou-list-mount> shadow-DOM container
+
+Morph-opaque container for keyed-list reconciliation. Hosts render the
+mount empty in their template; the inner <ul> lives in shadow DOM and
+survives the host's morph cycles. Plain HTMLElement, no Elena
+dependency — portable for future adapter packages.
+
+Smoke test confirms the morph-isolation property the validation POC
+(elena-morph-spec) motivates."
+```
+
+---
+
+## Task 3: Helper module — bootstrap + initial-mount scenario
 
 **Goal of this task:** Create the `reconcile-keyed-list.ts` module with the `ReconcileKeyedListOptions` interface and a minimal implementation that handles the simplest scenario (empty parent → N items). Establishes the test file scaffolding.
 
@@ -317,7 +554,7 @@ dev-mode invariants."
 
 ---
 
-## Task 3: Helper — N → identical N (reference identity short-circuit)
+## Task 4: Helper — N → identical N (reference identity short-circuit)
 
 **Goal of this task:** Extend the helper to recognize existing children by `data-key` and avoid re-creating them. After this task, identical re-runs do zero DOM work.
 
@@ -430,7 +667,7 @@ removal of stale children and dev-mode invariants."
 
 ---
 
-## Task 4: Helper — prepend / append scenarios
+## Task 5: Helper — prepend / append scenarios
 
 **Goal of this task:** Add tests for prepend-K and append-K. Implementation should already pass without changes — the cursor-walk algorithm covers these natively.
 
@@ -489,7 +726,7 @@ describe('reconcileKeyedList — prepend / append', () => {
 
 Run: `pnpm --filter @beatzball/caribou-ui-headless test reconcile-keyed-list`
 
-Expected: PASS — algorithm from Task 3 already handles these. If FAIL, debug the cursor walk before proceeding.
+Expected: PASS — algorithm from Task 4 already handles these. If FAIL, debug the cursor walk before proceeding.
 
 - [ ] **Step 3: Commit**
 
@@ -504,7 +741,7 @@ keep identity and op counts match the spec §3.4 contract."
 
 ---
 
-## Task 5: Helper — remove + swap-adjacent + full-reverse + mixed
+## Task 6: Helper — remove + swap-adjacent + full-reverse + mixed
 
 **Goal of this task:** Add the remaining algorithm tests. Remove-middle requires an addition to the impl (currently nothing strips stale children); swap/reverse/mixed should already pass via cursor-walk.
 
@@ -706,9 +943,9 @@ guard."
 
 ---
 
-## Task 6: Helper — stable identity invariant + missing-data-key recovery
+## Task 7: Helper — stable identity invariant + missing-data-key recovery
 
-**Goal of this task:** Add explicit cross-cutting tests for the load-bearing invariant ("surviving elements are `Object.is` to pre-call refs") and the missing-`data-key` recovery path (already handled by Task 5's impl).
+**Goal of this task:** Add explicit cross-cutting tests for the load-bearing invariant ("surviving elements are `Object.is` to pre-call refs") and the missing-`data-key` recovery path (already handled by Task 6's impl).
 
 **Files:**
 - Modify: `packages/caribou-ui-headless/src/__tests__/reconcile-keyed-list.test.ts`
@@ -771,7 +1008,7 @@ describe('reconcileKeyedList — direct child without data-key', () => {
 
 Run: `pnpm --filter @beatzball/caribou-ui-headless test reconcile-keyed-list`
 
-Expected: PASS — both describe blocks green; impl from Task 5 already handles them.
+Expected: PASS — both describe blocks green; impl from Task 6 already handles them.
 
 - [ ] **Step 3: Commit**
 
@@ -787,7 +1024,7 @@ next reconcile."
 
 ---
 
-## Task 7: Helper — dev-mode duplicate-key throw + post-condition assertion
+## Task 8: Helper — dev-mode duplicate-key throw + post-condition assertion
 
 **Goal of this task:** Add the dev-mode invariants from spec §3.5: throw on duplicate keys, assert post-condition. Use the hardened guard so Nitro server bundles tolerate the absence of `import.meta.env`.
 
@@ -954,7 +1191,7 @@ condition path with a synthetic buggy keyOf."
 
 ---
 
-## Task 8: Op-count regression test file (CI metric §8.1)
+## Task 9: Op-count regression test file (CI metric §8.1)
 
 **Goal of this task:** Create a dedicated test file that asserts EXACT op counts per spec §3.4. This is the CI-locked algorithmic perf contract.
 
@@ -1108,7 +1345,7 @@ loudly with a clear delta."
 
 ---
 
-## Task 9: Helper — wire export
+## Task 10: Helper — wire export
 
 **Goal of this task:** Make `reconcileKeyedList` importable from the package root.
 
@@ -1140,9 +1377,9 @@ git commit -m "feat(caribou-ui-headless): export reconcileKeyedList from package
 
 ---
 
-## Task 10: Timeline — replace render() and updated() with helper call
+## Task 11: Timeline — replace render() and updated() with helper call
 
-**Goal of this task:** Switch `<caribou-timeline>` to render an empty `<ul>` and reconcile children via the helper. Preserve the `effect()` shallow-compare gate (spec §10.6) and delete the `data-index`-keyed `card.status =` loop in `updated()`.
+**Goal of this task:** Switch `<caribou-timeline>` to render `<caribou-list-mount>` and reconcile children via the helper into the mount's inner `<ul>`. Preserve the `effect()` shallow-compare gate (spec §10.6) and delete the `data-index`-keyed `card.status =` loop in `updated()`.
 
 **Files:**
 - Modify: `apps/caribou-elena/pages/components/caribou-timeline.ts`
@@ -1153,7 +1390,7 @@ Use Read on `apps/caribou-elena/pages/components/caribou-timeline.ts`. Familiari
 
 - [ ] **Step 2: Modify the imports**
 
-At the top of the file, add the helper import. The line currently reads:
+At the top of the file, add the helper + mount imports. The line currently reads:
 
 ```ts
 import { createIntersectionObserver } from '@beatzball/caribou-ui-headless'
@@ -1162,8 +1399,10 @@ import { createIntersectionObserver } from '@beatzball/caribou-ui-headless'
 Replace with:
 
 ```ts
-import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
+import { createIntersectionObserver, reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
 ```
+
+(Importing `CaribouListMount` is what registers the `<caribou-list-mount>` custom element; the named import is required as a side-effect-import handle even though we don't reference the class by name in the body.)
 
 - [ ] **Step 3: Add a stashed listEl field**
 
@@ -1173,7 +1412,7 @@ Add a private field declaration near the existing private fields (around line 27
   private listEl: HTMLUListElement | null = null
 ```
 
-- [ ] **Step 4: Update render() to emit an empty <ul>**
+- [ ] **Step 4: Update render() to emit `<caribou-list-mount>`**
 
 Replace the `<ul>...</ul>` section in `render()` (lines 174–180):
 
@@ -1190,8 +1429,10 @@ Replace the `<ul>...</ul>` section in `render()` (lines 174–180):
 Replace with:
 
 ```ts
-        <ul data-status-list style="list-style:none;margin:0;padding:0;"></ul>
+        <caribou-list-mount></caribou-list-mount>
 ```
+
+The mount's inner `<ul>` carries the `list-style:none;margin:0;padding:0;` styling (baked into the mount's shadow DOM), so the host doesn't need to repeat them.
 
 - [ ] **Step 5: Replace the data-index card-walk in updated() with a reconcile call**
 
@@ -1211,7 +1452,10 @@ In `updated()`, the block currently at lines 109–116 reads:
 Replace it with:
 
 ```ts
-    this.listEl ??= this.querySelector<HTMLUListElement>('ul[data-status-list]')
+    if (!this.listEl) {
+      const mount = this.querySelector<CaribouListMount>('caribou-list-mount')
+      this.listEl = mount?.mountUl ?? null
+    }
     this.reconcile()
 ```
 
@@ -1252,18 +1496,19 @@ Expected: typecheck PASS; existing tests PASS (Plan 3 tests should still hold; t
 
 ```bash
 git add apps/caribou-elena/pages/components/caribou-timeline.ts
-git commit -m "refactor(caribou-elena): timeline renders via reconcileKeyedList
+git commit -m "refactor(caribou-elena): timeline renders via <caribou-list-mount> + reconcileKeyedList
 
-render() emits an empty <ul data-status-list>; updated() stashes the ref
-and calls the keyed reconciler. Drops the data-index-keyed card.status
-loop. Preserves the effect() shallow-compare gate (spec §10.6) and the
-banner/sentinel imperative wiring. Cards keep object identity across
-prepend/append/poll cycles."
+render() emits <caribou-list-mount></caribou-list-mount>; updated() stashes
+mount.mountUl and calls the keyed reconciler against it. Drops the
+data-index-keyed card.status loop. Preserves the effect() shallow-compare
+gate (spec §10.6) and the banner/sentinel imperative wiring. Cards keep
+object identity across prepend/append/poll cycles. The mount provides
+morph-opaque shadow DOM for the <ul> per spec §4 / §10.6."
 ```
 
 ---
 
-## Task 11: Timeline — applyNewPosts identity + render-avoidance integration test
+## Task 12: Timeline — applyNewPosts identity + render-avoidance integration test
 
 **Goal of this task:** Pin the user-facing properties: surviving cards keep `Object.is` identity across prepends, and the card's `status` setter does NOT fire for surviving cards.
 
@@ -1313,7 +1558,8 @@ describe('<caribou-timeline> — keyed reconciliation', () => {
     await new Promise((r) => setTimeout(r, 0))
     await new Promise((r) => setTimeout(r, 0))
 
-    const ul = tl.querySelector('ul[data-status-list]')!
+    const mount = tl.querySelector('caribou-list-mount') as HTMLElement & { mountUl: HTMLUListElement }
+    const ul = mount.mountUl
     const beforeRefs = Array.from(ul.children) as HTMLLIElement[]
     expect(beforeRefs).toHaveLength(10)
 
@@ -1331,7 +1577,7 @@ describe('<caribou-timeline> — keyed reconciliation', () => {
       bufferable._testOnlyPrepend(newOnes)
     } else {
       // Fallback: dispatch apply-new-posts after seeding via the cache layer.
-      // If your store does not yet expose a test seam, add one (see Task 11
+      // If your store does not yet expose a test seam, add one (see Task 12
       // adaptation note below) before completing this step.
       tl.dispatchEvent(new CustomEvent('apply-new-posts', { bubbles: true }))
     }
@@ -1414,7 +1660,7 @@ metric from spec §8.2)."
 
 ---
 
-## Task 12: Timeline — scroll-preservation test
+## Task 13: Timeline — scroll-preservation test
 
 **Goal of this task:** Pin the actual user-facing benefit — scroll position survives a poll-driven prepend.
 
@@ -1448,7 +1694,7 @@ describe('<caribou-timeline> — scroll preservation', () => {
     container.scrollTop = 800
     expect(container.scrollTop).toBe(800)
 
-    // Prepend via the same path as the identity test in Task 11.
+    // Prepend via the same path as the identity test in Task 12.
     const newOnes = [mkStatus('n0'), mkStatus('n1'), mkStatus('n2')]
     const store = (tl as unknown as { store: { _testOnlyPrepend?: (xs: unknown[]) => void } }).store
     if (store._testOnlyPrepend) {
@@ -1487,7 +1733,7 @@ when the keyed reconciler moves rather than recreates surviving
 
 ---
 
-## Task 13: Timeline — image-element identity test
+## Task 14: Timeline — image-element identity test
 
 **Goal of this task:** Repurposed from the morph-spec flicker repro: assert that an `<img>` rendered inside a card survives prepends with the same DOM-node identity. This is the structural property that prevents the avatar-flicker class of bug.
 
@@ -1533,7 +1779,8 @@ describe('<caribou-timeline> — card-internal element identity', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     // Card s0 has moved from index 0 to index 1; its <img> should be the same node.
-    const ul = tl.querySelector('ul[data-status-list]')!
+    const mount = tl.querySelector('caribou-list-mount') as HTMLElement & { mountUl: HTMLUListElement }
+    const ul = mount.mountUl
     const survivingCard = (ul.children[1] as HTMLElement).querySelector('caribou-status-card') as HTMLElement
     const afterImgRef = survivingCard.shadowRoot!.querySelector('img')!
     expect(afterImgRef).toBe(beforeImgRef)
@@ -1562,9 +1809,9 @@ children."
 
 ---
 
-## Task 14: Profile — replace render() and updated() with helper call
+## Task 15: Profile — replace render() and updated() with helper call
 
-**Goal of this task:** Same shape as Task 10. Drop the `data-index` card-walk; reconcile via the helper.
+**Goal of this task:** Same shape as Task 11. Drop the `data-index` card-walk; reconcile via the helper.
 
 **Files:**
 - Modify: `apps/caribou-elena/pages/components/caribou-profile.ts`
@@ -1573,7 +1820,7 @@ children."
 
 Use Read on `apps/caribou-elena/pages/components/caribou-profile.ts`. Note: similar layout to timeline. Header imperative wiring (`header.account = ...`) and sentinel logic stay untouched.
 
-- [ ] **Step 2: Add the helper import**
+- [ ] **Step 2: Add the helper + mount imports**
 
 Find the existing import line:
 
@@ -1584,7 +1831,7 @@ import { createIntersectionObserver } from '@beatzball/caribou-ui-headless'
 Replace with:
 
 ```ts
-import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
+import { createIntersectionObserver, reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
 ```
 
 - [ ] **Step 3: Add a stashed listEl field**
@@ -1610,7 +1857,7 @@ In the `render()` method, replace:
 With:
 
 ```ts
-      <ul data-status-list style="list-style:none;margin:0;padding:0;"></ul>
+      <caribou-list-mount></caribou-list-mount>
 ```
 
 - [ ] **Step 5: Replace the data-index card walk in updated()**
@@ -1631,7 +1878,10 @@ Replace this block (currently at lines 84–91):
 With:
 
 ```ts
-    this.listEl ??= this.querySelector<HTMLUListElement>('ul[data-status-list]')
+    if (!this.listEl) {
+      const mount = this.querySelector<CaribouListMount>('caribou-list-mount')
+      this.listEl = mount?.mountUl ?? null
+    }
     this.reconcile()
 ```
 
@@ -1673,16 +1923,16 @@ Expected: typecheck PASS; existing profile tests PASS.
 
 ```bash
 git add apps/caribou-elena/pages/components/caribou-profile.ts
-git commit -m "refactor(caribou-elena): profile renders via reconcileKeyedList
+git commit -m "refactor(caribou-elena): profile renders via <caribou-list-mount> + reconcileKeyedList
 
-Same shape as the timeline change: render() emits empty <ul data-status-list>;
-updated() stashes the ref and calls the keyed reconciler. Header
+Same shape as the timeline change: render() emits <caribou-list-mount>;
+updated() stashes mount.mountUl and calls the keyed reconciler. Header
 imperative wire (header.account = ...) and IO sentinel logic preserved."
 ```
 
 ---
 
-## Task 15: Profile — tab-swap integration test
+## Task 16: Profile — tab-swap integration test
 
 **Goal of this task:** Pin (a) full-list swap on tab change works, (b) `header.account` is NOT re-set when account didn't change.
 
@@ -1761,7 +2011,7 @@ sibling element churn."
 
 ---
 
-## Task 16: Thread — extend collectStatuses to collectThreadItems
+## Task 17: Thread — extend collectStatuses to collectThreadItems
 
 **Goal of this task:** Refactor `<caribou-thread>` to emit a flat `{ status, depth }` array suitable for the helper. Pure-internal change; no behavior change yet.
 
@@ -1812,7 +2062,7 @@ With the new shape (keep the old name as a thin alias if other code uses it; oth
 
 - [ ] **Step 3: Update the existing updated() / render() callers to use the new method**
 
-Search the file for any remaining `collectStatuses()` calls. Where they were used to feed cards by id (the existing `updated()` block at lines 92–102), keep that loop intact for now — Task 17 will replace it. The rename + new shape is independent.
+Search the file for any remaining `collectStatuses()` calls. Where they were used to feed cards by id (the existing `updated()` block at lines 92–102), keep that loop intact for now — Task 18 will replace it. The rename + new shape is independent.
 
 If `updated()` references `collectStatuses()` directly (line 93 in the current file: `const all = this.collectStatuses()`), update to:
 
@@ -1838,24 +2088,24 @@ Preparatory rename + shape change. collectStatuses → collectThreadItems
 returns ancestors/focused (depth: null) + descendants (depth: number).
 updated() now reads the status field; behavior unchanged.
 
-Sets up Task 17 to call reconcileKeyedList against the flat tuple list."
+Sets up Task 18 to call reconcileKeyedList against the flat tuple list."
 ```
 
 ---
 
-## Task 17: Thread — replace render() and updated() with helper call
+## Task 18: Thread — replace render() and updated() with helper call
 
-**Goal of this task:** Switch thread to render an empty `<ul data-thread-list>` and reconcile via the helper. Sync `data-depth` on both the `<li>` and the inner card per spec §5.3.
+**Goal of this task:** Switch thread to render `<caribou-list-mount>` inside its shadow root and reconcile via the helper into the mount's inner `<ul>`. Sync `data-depth` on both the `<li>` and the inner card per spec §5.3.
 
 **Files:**
 - Modify: `apps/caribou-elena/pages/components/caribou-thread.ts`
 
-- [ ] **Step 1: Add the helper import**
+- [ ] **Step 1: Add the helper + mount imports**
 
 Add at the top with the other imports:
 
 ```ts
-import { reconcileKeyedList } from '@beatzball/caribou-ui-headless'
+import { reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
 ```
 
 - [ ] **Step 2: Add a stashed listEl field**
@@ -1866,7 +2116,7 @@ import { reconcileKeyedList } from '@beatzball/caribou-ui-headless'
 
 - [ ] **Step 3: Update render()**
 
-Replace the existing render() body (lines 115–139). The new render() returns the loading guard or an empty `<ul data-thread-list>`:
+Replace the existing render() body (lines 115–139). The new render() returns the loading guard or `<caribou-list-mount>`:
 
 ```ts
   override render() {
@@ -1875,7 +2125,7 @@ Replace the existing render() body (lines 115–139). The new render() returns t
         this.store.context.value.status !== 'ready') {
       return html`<div style="padding:var(--space-4);color:var(--fg-muted);">Loading…</div>`
     }
-    return html`<ul data-thread-list></ul>`
+    return html`<caribou-list-mount></caribou-list-mount>`
   }
 ```
 
@@ -1901,7 +2151,10 @@ Replace with:
 
 ```ts
   override updated() {
-    this.listEl ??= this.shadowRoot!.querySelector<HTMLUListElement>('ul[data-thread-list]')
+    if (!this.listEl) {
+      const mount = this.shadowRoot!.querySelector<CaribouListMount>('caribou-list-mount')
+      this.listEl = mount?.mountUl ?? null
+    }
     this.reconcile()
   }
 
@@ -1956,10 +2209,11 @@ Expected: typecheck PASS; existing thread tests PASS (they assert variants, dept
 
 ```bash
 git add apps/caribou-elena/pages/components/caribou-thread.ts
-git commit -m "refactor(caribou-elena): thread renders via reconcileKeyedList
+git commit -m "refactor(caribou-elena): thread renders via <caribou-list-mount> + reconcileKeyedList
 
-render() emits empty <ul data-thread-list> in the shadow root; updated()
-stashes the ref and calls the reconciler with a flat {status, depth}
+render() emits <caribou-list-mount> inside the thread's shadow root;
+updated() stashes mount.mountUl and calls the reconciler with a flat
+{status, depth}
 items array. Variant ('ancestor' | 'focused' | 'descendant') and depth
 indent (li.dataset.depth + style.marginInlineStart + card.dataset.depth)
 are set in create/update. Existing test coverage preserved."
@@ -1967,7 +2221,7 @@ are set in create/update. Existing test coverage preserved."
 
 ---
 
-## Task 18: Thread — descendant-arrival depth recompute test
+## Task 19: Thread — descendant-arrival depth recompute test
 
 **Goal of this task:** Pin that when a new descendant arrives whose insertion shifts an existing leaf's depth (reparenting under a previously-orphaned parent), the helper's `update` callback resyncs depth on the surviving `<li>`.
 
@@ -2006,9 +2260,9 @@ describe('<caribou-thread> — depth recompute on descendant arrival', () => {
     if (store._testOnlySetDescendants) {
       store._testOnlySetDescendants([D, E])
     } else {
-      // If no test seam exists, surface the same caveat as Task 11: add one to
+      // If no test seam exists, surface the same caveat as Task 12: add one to
       // packages/caribou-state/src/thread-store.ts before completing this step.
-      throw new Error('Need _testOnlySetDescendants on thread store; see Task 11 adaptation note')
+      throw new Error('Need _testOnlySetDescendants on thread store; see Task 12 adaptation note')
     }
 
     await new Promise((r) => setTimeout(r, 0))
@@ -2040,7 +2294,7 @@ indent style on the surviving <li> — without recreating the <li>."
 
 ---
 
-## Task 19: Capture before/after numbers for PR description
+## Task 20: Capture before/after numbers for PR description
 
 **Goal of this task:** Produce the §8.3 headline table for the PR description: real op-counts and setter-fire counts captured against Plan 3 head and against the new code.
 
@@ -2116,7 +2370,7 @@ git commit -m "test(caribou-elena): timeline integration also drives loadMore ap
 
 ---
 
-## Task 20: Changesets
+## Task 21: Changesets
 
 **Goal of this task:** Add one `.changeset/*.md` per modified package. Per project convention (see `feedback_changeset_one_per_package.md`), each changeset describes only that package's change.
 
@@ -2138,7 +2392,7 @@ Note the configured packages and whether they're versioned independently or in l
 "@beatzball/caribou-ui-headless": minor
 ---
 
-Add `reconcileKeyedList`, a pure-function keyed-list DOM reconciler that diffs by a stable key. Designed for re-rendering surfaces that need to preserve child element identity across prepends, appends, and reorderings. Used internally by `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` to avoid re-creating `<li>` wrappers for surviving statuses.
+Add `reconcileKeyedList`, a pure-function keyed-list DOM reconciler that diffs by a stable key, plus `<caribou-list-mount>`, a tiny shadow-DOM container that wraps the helper-managed `<ul>` so it's morph-opaque to the surrounding Elena host. Designed for re-rendering surfaces that need to preserve child element identity across prepends, appends, and reorderings. Used internally by `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` to avoid re-creating `<li>` wrappers for surviving statuses.
 
 The helper owns `data-key` on every direct child of the parent; callers never write it. Cursor-walk algorithm; O(n) time; O(removed + added + moved) DOM ops. Includes dev-mode duplicate-key throw and post-condition assertion (gated on `import.meta.env.DEV`).
 ```
@@ -2152,7 +2406,7 @@ Save to a new file under `.changeset/` (Changesets generates the filename hash; 
 "caribou-elena": patch
 ---
 
-Switch `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` to render via `reconcileKeyedList` (from `@beatzball/caribou-ui-headless`). Cards keep object identity across polls, `loadMore`, and `applyNewPosts` — `caribou-status-card.status` no longer fires the setter on surviving cards, eliminating the avoidable card-internal re-renders that contributed to avatar flicker and lost scroll position under load.
+Switch `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` to render via `<caribou-list-mount>` + `reconcileKeyedList` (both from `@beatzball/caribou-ui-headless`). The mount provides a shadow-DOM container that's morph-opaque (Elena's `morphContent` would otherwise wipe `<li>` children when the host's template emits the wrapping `<ul>` empty); the helper diffs the mount's inner `<ul>` by `status.id`. Cards keep object identity across polls, `loadMore`, and `applyNewPosts` — `caribou-status-card.status` no longer fires the setter on surviving cards, eliminating the avoidable card-internal re-renders that contributed to avatar flicker and lost scroll position under load.
 
 Pure refactor; no user-facing UI changes. Plan 3 §11.1a deferred follow-up.
 ```
@@ -2166,7 +2420,7 @@ Save under `.changeset/`.
 "@beatzball/elena-morph-spec": patch
 ---
 
-Pin morph behavior on empty native `<ul>` template parents — establishes that Elena's `morphContent` does NOT wipe live `<ul>` children when the host's render template emits the `<ul>` empty. Validation POC for the keyed-list reconciliation design (Plan 3 §11.1a follow-up); also useful as upstream documentation if/when lifted into `@elenajs/core`.
+Pin morph behavior on empty native `<ul>` template parents — documents that Elena's `morphContent` **does** wipe live `<ul>` children when the host's render template emits the `<ul>` empty. `it.fails`-pinned: the day Elena's morph stops wiping these, the test will fail and Caribou's `<caribou-list-mount>` workaround can be retired. Useful as upstream documentation if/when lifted into `@elenajs/core`.
 ```
 
 Save under `.changeset/`.
@@ -2186,7 +2440,7 @@ git commit -m "chore: changesets for keyed-list reconciliation"
 
 ---
 
-## Task 21: Final verification
+## Task 22: Final verification
 
 **Goal of this task:** Confirm everything is green before opening the PR.
 
@@ -2208,7 +2462,7 @@ Expected: all five PASS.
 
 Run: `pnpm --filter @beatzball/caribou-ui-headless test:coverage`
 
-Expected: thresholds met (lines ≥95, functions ≥95, statements ≥95, branches ≥90). Specifically check the coverage report for `reconcile-keyed-list.ts` — every algorithm branch should be covered. If the `IS_DEV` initialization branch dips below 90 because the `false` path is not exercised in vitest, that's acceptable per Task 7 step 5; otherwise investigate the specific uncovered branch and add a test.
+Expected: thresholds met (lines ≥95, functions ≥95, statements ≥95, branches ≥90). Specifically check the coverage report for `reconcile-keyed-list.ts` — every algorithm branch should be covered. If the `IS_DEV` initialization branch dips below 90 because the `false` path is not exercised in vitest, that's acceptable per Task 8 step 5; otherwise investigate the specific uncovered branch and add a test.
 
 - [ ] **Step 3: Spot-check the rendered timeline manually**
 
@@ -2231,7 +2485,7 @@ Expected: ~600 LOC changed, dominated by tests; production code change ~150 LOC,
 Compose the PR description with:
 - Goal (one sentence from the spec).
 - Architecture (one paragraph).
-- Before / After table (from Task 19).
+- Before / After table (from Task 20).
 - Link to the design spec.
 - Test plan checklist.
 
@@ -2242,26 +2496,27 @@ Use `gh pr create` per the harness's PR conventions.
 ## Self-Review (skill checklist — completed pre-handoff)
 
 **Spec coverage:** every spec section maps to one or more tasks:
-- §0 Goal → Task 21 step 5 (PR description).
-- §1 Scope → Tasks 2–9 (helper), Tasks 10–18 (three host integrations).
-- §2 Architecture → Tasks 2, 9 (helper module + export).
-- §3 API + algorithm → Tasks 2–8 (TDD on each scenario + dev-mode invariants).
-- §4 Validation POC → Task 1.
-- §5.1 Timeline → Tasks 10–13.
-- §5.2 Profile → Tasks 14–15.
-- §5.3 Thread → Tasks 16–18.
+- §0 Goal → Task 22 step 5 (PR description).
+- §1 Scope → Task 2 (mount), Tasks 3–10 (helper), Tasks 11–19 (three host integrations).
+- §2 Architecture → Task 2 (mount), Tasks 3, 10 (helper module + export).
+- §3 API + algorithm → Tasks 3–8 (TDD on each scenario + dev-mode invariants).
+- §4 Validation POC → Task 1 (POC documentation, `it.fails`-pinned).
+- §5.1 Timeline → Tasks 11–14.
+- §5.2 Profile → Tasks 15–16.
+- §5.3 Thread → Tasks 17–19.
 - §6 SSR/hydration impact → no task; spec documents this is out of scope for this PR.
-- §7.1 Helper unit tests → Tasks 2–7.
-- §7.2 Component integration tests → Tasks 11, 15, 18.
-- §7.3 Scroll preservation → Task 12.
-- §7.4 Image identity → Task 13.
+- §7.1 Helper unit tests → Tasks 3–8.
+- §7.2 Component integration tests → Tasks 12, 16, 19.
+- §7.3 Scroll preservation → Task 13.
+- §7.4 Image identity → Task 14.
 - §7.5 Validation POC test → Task 1.
-- §8.1 Op-count regression → Task 8.
-- §8.2 Render-avoidance metric → Task 11 (timeline) + Task 15 (profile).
-- §8.3 Before/after numbers → Task 19.
+- §7.6 `<caribou-list-mount>` unit tests → Task 2.
+- §8.1 Op-count regression → Task 9.
+- §8.2 Render-avoidance metric → Task 12 (timeline) + Task 16 (profile).
+- §8.3 Before/after numbers → Task 20.
 - §9 Out of scope → no task; spec captures.
 - §10 Considered and rejected → no task; spec captures.
 
-**Placeholder scan:** none — all code blocks are concrete; the only "TBD"-like content is the Task 19 numbers, which are intentionally captured at execution time (the table format is fully specified).
+**Placeholder scan:** none — all code blocks are concrete; the only "TBD"-like content is the Task 20 numbers, which are intentionally captured at execution time (the table format is fully specified).
 
-**Type consistency:** `reconcileKeyedList` API is identical across all uses (Tasks 2, 9, 10, 14, 17). The `ReconcileKeyedListOptions<T>` interface is defined once in Task 2 and consumed unchanged thereafter. `data-key` ownership is consistently the helper's. `keyOf` always takes the item type T and returns a string.
+**Type consistency:** `reconcileKeyedList` API is identical across all uses (Tasks 3, 10, 11, 15, 18). The `ReconcileKeyedListOptions<T>` interface is defined once in Task 3 and consumed unchanged thereafter. `data-key` ownership is consistently the helper's. `keyOf` always takes the item type T and returns a string. `<caribou-list-mount>`'s `mountUl` getter is the single source for the parent passed to the helper across all three host integrations.
