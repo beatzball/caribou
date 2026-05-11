@@ -4,7 +4,7 @@ import type { mastodon } from 'masto'
 import {
   activeClient, createTimelineStore, startPolling, type TimelineStore,
 } from '@beatzball/caribou-state'
-import { createIntersectionObserver } from '@beatzball/caribou-ui-headless'
+import { createIntersectionObserver, reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
 import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 
@@ -25,6 +25,7 @@ export class CaribouTimeline extends Elena(HTMLElement) {
   private disposeBannerBinding: (() => void) | null = null
   private stopPolling: (() => void) | null = null
   private io: { observe(el: Element): void; disconnect(): void } | null = null
+  private listEl: HTMLUListElement | null = null
 
   private statuses: mastodon.v1.Status[] = []
   private loading = false
@@ -106,14 +107,11 @@ export class CaribouTimeline extends Elena(HTMLElement) {
     )
     if (banner && banner.children.length === 0) banner.requestUpdate?.()
 
-    const cards = this.querySelectorAll<HTMLElement & { status?: mastodon.v1.Status | null }>(
-      'caribou-status-card[data-index]',
-    )
-    cards.forEach((card) => {
-      const idx = Number(card.dataset.index)
-      const status = this.statuses[idx]
-      if (status && card.status !== status) card.status = status
-    })
+    if (!this.listEl) {
+      const mount = this.querySelector<CaribouListMount>('caribou-list-mount')
+      this.listEl = mount?.mountUl ?? null
+    }
+    this.reconcile()
 
     // Wire the IntersectionObserver sentinel on the "Older posts" anchor.
     // The anchor is the no-JS path's source-of-truth pagination link; with
@@ -152,6 +150,27 @@ export class CaribouTimeline extends Elena(HTMLElement) {
     this.io?.observe(sentinel)
   }
 
+  private reconcile() {
+    if (!this.listEl) return
+    reconcileKeyedList({
+      parent: this.listEl,
+      items: this.statuses,
+      keyOf: (s) => s.id,
+      create: (s) => {
+        const li = document.createElement('li')
+        const card = document.createElement('caribou-status-card') as HTMLElement & { status?: mastodon.v1.Status }
+        card.dataset.statusId = s.id
+        card.status = s
+        li.appendChild(card)
+        return li
+      },
+      update: (li, s) => {
+        const card = li.firstElementChild as HTMLElement & { status?: mastodon.v1.Status }
+        if (card.status !== s) card.status = s
+      },
+    })
+  }
+
   override render() {
     if (this.errorMsg) {
       return html`
@@ -171,13 +190,7 @@ export class CaribouTimeline extends Elena(HTMLElement) {
     return html`
       <div>
         <caribou-new-posts-banner></caribou-new-posts-banner>
-        <ul style="list-style:none;margin:0;padding:0;">
-          ${this.statuses.map((s, i) => html`
-            <li>
-              <caribou-status-card data-index="${i}" data-status-id="${s.id}"></caribou-status-card>
-            </li>
-          `)}
-        </ul>
+        <caribou-list-mount></caribou-list-mount>
         ${nextHref
           ? html`<a href="${nextHref}" rel="next" data-sentinel
                    style="display:block;padding:var(--space-4);color:var(--fg-muted);text-align:center;">Older posts →</a>`
