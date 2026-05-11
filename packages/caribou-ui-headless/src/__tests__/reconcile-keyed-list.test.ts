@@ -294,3 +294,38 @@ describe('reconcileKeyedList — direct child without data-key', () => {
     expect((ul.children[0] as HTMLElement).dataset.key).toBe('a')
   })
 })
+
+describe('reconcileKeyedList — dev-mode invariants', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('throws on duplicate keys', () => {
+    const ul = makeUl()
+    expect(() =>
+      reconcileKeyedList({
+        parent: ul,
+        items: [{ id: 'a' }, { id: 'a' }],
+        keyOf: (i: Item) => i.id,
+        create: makeLi,
+      }),
+    ).toThrow(/duplicate key/i)
+  })
+
+  it('asserts post-condition: parent.children keys equal items keys element-for-element', () => {
+    const ul = makeUl()
+    // Buggy update that corrupts the data-key on the second item
+    const buggyUpdate = (el: HTMLElement, i: Item) => {
+      if (i.id === 'b') {
+        el.dataset.key = 'WRONG' // Simulate a caller bug that mutates the key
+      }
+    }
+    expect(() =>
+      reconcileKeyedList({
+        parent: ul,
+        items: [{ id: 'a' }, { id: 'b' }],
+        keyOf: (i: Item) => i.id,
+        create: makeLi,
+        update: buggyUpdate,
+      }),
+    ).toThrow(/post-condition|invariant|key mismatch/i)
+  })
+})
