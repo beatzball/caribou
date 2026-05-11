@@ -244,3 +244,53 @@ describe('reconcileKeyedList — moves', () => {
     expect(ul.children[2]).toBe(refD)
   })
 })
+
+describe('reconcileKeyedList — stable identity invariant', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('every surviving element is Object.is to its pre-call ref across mixed mutations', () => {
+    const ul = makeUl()
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }],
+      keyOf: (i: Item) => i.id,
+      create: makeLi,
+    })
+    const refs = new Map<string, Element>()
+    for (const child of Array.from(ul.children)) {
+      refs.set((child as HTMLElement).dataset.key!, child)
+    }
+
+    // Drop b, swap d & e, prepend x.
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'x' }, { id: 'a' }, { id: 'c' }, { id: 'e' }, { id: 'd' }],
+      keyOf: (i: Item) => i.id,
+      create: makeLi,
+    })
+
+    for (const child of Array.from(ul.children)) {
+      const k = (child as HTMLElement).dataset.key!
+      if (refs.has(k)) expect(child).toBe(refs.get(k)) // surviving = same ref
+    }
+  })
+})
+
+describe('reconcileKeyedList — direct child without data-key', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('removes hand-injected children that lack a data-key', () => {
+    const ul = makeUl()
+    reconcileKeyedList({ parent: ul, items: [{ id: 'a' }], keyOf: (i: Item) => i.id, create: makeLi })
+
+    // Simulate drift: someone hand-appended an <li> without going through the helper.
+    const stray = document.createElement('li')
+    stray.textContent = 'stray'
+    ul.appendChild(stray)
+    expect(ul.children.length).toBe(2)
+
+    reconcileKeyedList({ parent: ul, items: [{ id: 'a' }], keyOf: (i: Item) => i.id, create: makeLi })
+    expect(ul.children.length).toBe(1)
+    expect((ul.children[0] as HTMLElement).dataset.key).toBe('a')
+  })
+})
