@@ -51,7 +51,10 @@ describe('<caribou-timeline> — keyed reconciliation', () => {
     // applyNewPosts via the component's event listener.
     const newOnes = [mkStatus('n0'), mkStatus('n1'), mkStatus('n2')]
     const store = (tl as unknown as { store: TimelineStore }).store
-    store._testOnlyPrepend(newOnes)
+    // Test fixture deliberately omits the long tail of Status fields the
+    // production API surfaces (uri/editedAt/visibility/etc); the cast is
+    // localized to the test seam call so the seam's strong type stays.
+    store._testOnlyPrepend(newOnes as unknown as Parameters<TimelineStore['_testOnlyPrepend']>[0])
     // The timeline listens for 'apply-new-posts' and calls store.applyNewPosts().
     tl.dispatchEvent(new CustomEvent('apply-new-posts', { bubbles: true }))
 
@@ -174,7 +177,7 @@ describe('<caribou-timeline> — card-internal element identity', () => {
     tl.kind = 'home'
     // Give one status an avatar so the card renders an <img>.
     const initial = [mkStatus('s0'), mkStatus('s1')]
-    initial[0].account = { ...ACCT, avatar: 'https://example.test/a.png', avatarStatic: 'https://example.test/a.png' }
+    initial[0]!.account = { ...ACCT, avatar: 'https://example.test/a.png', avatarStatic: 'https://example.test/a.png' }
     tl.initial = { statuses: initial, nextMaxId: null }
     document.body.appendChild(tl)
 
