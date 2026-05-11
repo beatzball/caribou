@@ -18,6 +18,12 @@ export interface ThreadStore {
   focused: ReadonlySignal<AsyncState<mastodon.v1.Status>>
   context: ReadonlySignal<AsyncState<ThreadContext>>
   load(): Promise<void>
+
+  /** Test-only — do not use in production code. Injects descendants directly
+   *  into the context signal so integration tests can drive descendant-arrival
+   *  scenarios without a real Mastodon client. Mirrors _testOnlyPrepend on
+   *  TimelineStore. */
+  _testOnlySetDescendants(xs: mastodon.v1.Status[]): void
 }
 
 export interface CreateThreadStoreOpts {
@@ -77,5 +83,13 @@ export function createThreadStore(
     }
   }
 
-  return { focused, context, load }
+  // test-only — do not use in production code
+  function _testOnlySetDescendants(xs: mastodon.v1.Status[]): void {
+    for (const s of xs) cacheStatus(s)
+    const currentAncestors =
+      context.value.status === 'ready' ? context.value.data.ancestors : []
+    context.value = { status: 'ready', data: { ancestors: currentAncestors, descendants: xs } }
+  }
+
+  return { focused, context, load, _testOnlySetDescendants }
 }

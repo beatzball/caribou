@@ -2,6 +2,8 @@ import { Elena, html } from '@elenajs/core'
 import { effect } from '@preact/signals-core'
 import type { Status, CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { activeClient, createThreadStore, type ThreadStore } from '@beatzball/caribou-state'
+import { reconcileKeyedList } from '@beatzball/caribou-ui-headless'
+import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
 import './caribou-status-card.js'
 
 const THREAD_CSS = `
@@ -58,6 +60,7 @@ export class CaribouThread extends Elena(HTMLElement) {
 
   private store: ThreadStore | null = null
   private dispose: (() => void) | null = null
+  private listEl: HTMLUListElement | null = null
 
   override async connectedCallback() {
     super.connectedCallback?.()
@@ -90,23 +93,65 @@ export class CaribouThread extends Elena(HTMLElement) {
   }
 
   override updated() {
-    const all = this.collectStatuses()
-    const cards = this.shadowRoot!.querySelectorAll<HTMLElement & { status: Status | null }>(
-      'caribou-status-card[data-id]',
-    )
-    cards.forEach((card) => {
-      const id = card.dataset.id!
-      const s = all.find((x) => x.id === id) ?? null
-      if (s && card.status !== s) card.status = s
+    if (!this.listEl) {
+      const mount = this.shadowRoot!.querySelector<CaribouListMount>('caribou-list-mount')
+      this.listEl = mount?.mountUl ?? null
+    }
+    this.reconcile()
+  }
+
+  private reconcile() {
+    if (!this.listEl) return
+    const focusedId = this.store?.focused.value.status === 'ready' ? this.store.focused.value.data.id : null
+    reconcileKeyedList({
+      parent: this.listEl,
+      items: this.collectThreadItems(),
+      keyOf: ({ status }) => status.id,
+      create: ({ status, depth }) => {
+        const li = document.createElement('li')
+        const card = document.createElement('caribou-status-card') as HTMLElement & { status?: Status }
+        card.dataset.id = status.id
+        const variant =
+          status.id === focusedId ? 'focused' :
+          depth === null ? 'ancestor' :
+          'descendant'
+        card.setAttribute('variant', variant)
+        if (depth !== null) {
+          li.dataset.depth = String(depth)
+          li.style.marginInlineStart = `calc(var(--space-4)*${depth})`
+          card.dataset.depth = String(depth)
+        }
+        card.status = status
+        li.appendChild(card)
+        return li
+      },
+      update: (li, { status, depth }) => {
+        const card = li.firstElementChild as HTMLElement & { status?: Status }
+        if (card.status !== status) card.status = status
+        if (depth !== null) {
+          const want = String(depth)
+          if (li.dataset.depth !== want) {
+            li.dataset.depth = want
+            li.style.marginInlineStart = `calc(var(--space-4)*${want})`
+            card.dataset.depth = want
+          }
+        }
+      },
     })
   }
 
-  private collectStatuses(): Status[] {
-    if (this.store?.focused.value.status === 'ready' && this.store.context.value.status === 'ready') {
+  private collectThreadItems(): { status: Status; depth: number | null }[] {
+    if (
+      this.store?.focused.value.status === 'ready' &&
+      this.store.context.value.status === 'ready'
+    ) {
+      const focused = this.store.focused.value.data
+      const { ancestors, descendants } = this.store.context.value.data
+      const depths = depthMap(focused.id, descendants)
       return [
-        ...this.store.context.value.data.ancestors,
-        this.store.focused.value.data,
-        ...this.store.context.value.data.descendants,
+        ...ancestors.map((s) => ({ status: s, depth: null as number | null })),
+        { status: focused, depth: null as number | null },
+        ...descendants.map((s) => ({ status: s, depth: depths.get(s.id) ?? MAX_DEPTH })),
       ]
     }
     return []
@@ -118,24 +163,7 @@ export class CaribouThread extends Elena(HTMLElement) {
         this.store.context.value.status !== 'ready') {
       return html`<div style="padding:var(--space-4);color:var(--fg-muted);">Loading…</div>`
     }
-    const focused = this.store.focused.value.data
-    const { ancestors, descendants } = this.store.context.value.data
-    const depths = depthMap(focused.id, descendants)
-    return html`
-      <ul>
-        ${ancestors.map((s) => html`
-          <li><caribou-status-card data-id="${s.id}" variant="ancestor"></caribou-status-card></li>
-        `)}
-        <li><caribou-status-card data-id="${focused.id}" variant="focused"></caribou-status-card></li>
-        ${descendants.map((s) => {
-          const depth = depths.get(s.id) ?? MAX_DEPTH
-          const ind = `margin-inline-start:calc(var(--space-4)*${String(depth)})`
-          return html`<li data-depth="${String(depth)}" style="${ind}">
-            <caribou-status-card data-id="${s.id}" data-depth="${String(depth)}" variant="descendant"></caribou-status-card>
-          </li>`
-        })}
-      </ul>
-    `
+    return html`<caribou-list-mount></caribou-list-mount>`
   }
 }
 CaribouThread.define()

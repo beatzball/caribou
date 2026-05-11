@@ -18,6 +18,11 @@ export interface TimelineStore {
   loadMore(): Promise<void>
   poll(): Promise<void>
   applyNewPosts(): void
+
+  /** Test-only — do not use in production code. Injects statuses directly
+   *  into the new-posts buffer so integration tests can drive applyNewPosts
+   *  without a real Mastodon client. */
+  _testOnlyPrepend(xs: mastodon.v1.Status[]): void
 }
 
 export interface CreateTimelineStoreOpts {
@@ -132,9 +137,16 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     newPostIds.value = []
   }
 
+  // test-only — do not use in production code
+  function _testOnlyPrepend(xs: mastodon.v1.Status[]): void {
+    const ids = ingest(xs)
+    const merged = [...ids, ...newPostIds.value]
+    newPostIds.value = Array.from(new Set(merged))
+  }
+
   return {
     statusIds, statuses, loading, error, hasMore,
     newPosts, newPostsCount,
-    load, loadMore, poll, applyNewPosts,
+    load, loadMore, poll, applyNewPosts, _testOnlyPrepend,
   }
 }
