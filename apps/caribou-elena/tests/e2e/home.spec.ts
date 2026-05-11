@@ -185,12 +185,17 @@ test('/home does not re-fetch avatar images when polling discovers new posts', a
 
   const initialFetchCount = avatarRequests.length
 
-  // Tag every avatar image so we can detect ANY card re-render. The card
-  // renders into shadow DOM, so the avatar lives in `card.shadowRoot`,
-  // not light DOM. querySelector('caribou-status-card img') would never
-  // see it; reach in via shadowRoot.
+  // Tag every avatar image so we can detect ANY card re-render. The cards
+  // live inside <caribou-list-mount>'s shadow root (added by the keyed-list
+  // reconciliation PR — Plan 3 §11.1a) and each card renders ITS avatar
+  // into its own shadow root too. So we need to cross two shadow
+  // boundaries: mount.shadowRoot for the card list, then card.shadowRoot
+  // for the <img>.
   const taggedCount = await page.evaluate(() => {
-    const cards = document.querySelectorAll<HTMLElement>('caribou-status-card')
+    const mount = document.querySelector('caribou-list-mount') as HTMLElement | null
+    const cards = mount?.shadowRoot
+      ? Array.from(mount.shadowRoot.querySelectorAll<HTMLElement>('caribou-status-card'))
+      : []
     let tagged = 0
     cards.forEach((card) => {
       const img = card.shadowRoot?.querySelector<HTMLImageElement>('img')
@@ -217,7 +222,10 @@ test('/home does not re-fetch avatar images when polling discovers new posts', a
   // any was replaced (Elena re-rendered the card), the tag is lost — even a
   // browser-cached src swap produces visible flicker.
   const taggedAfter = await page.evaluate(() => {
-    const cards = document.querySelectorAll<HTMLElement>('caribou-status-card')
+    const mount = document.querySelector('caribou-list-mount') as HTMLElement | null
+    const cards = mount?.shadowRoot
+      ? Array.from(mount.shadowRoot.querySelectorAll<HTMLElement>('caribou-status-card'))
+      : []
     let tagged = 0
     let untagged = 0
     let total = 0
