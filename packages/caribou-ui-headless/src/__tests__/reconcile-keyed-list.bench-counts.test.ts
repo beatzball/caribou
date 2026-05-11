@@ -14,7 +14,7 @@
 //  - update: update(el, item) invocation
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { reconcileKeyedList } from '../reconcile-keyed-list.ts'
+import { reconcileKeyedList } from '../reconcile-keyed-list.js'
 
 interface Item { id: string }
 
@@ -32,7 +32,8 @@ function setup() {
   ul.insertBefore = function<T extends Node>(node: T, ref: Node | null): T {
     if (knownChildren.has(node)) {
       // existing element being repositioned: count as move only if not a no-op
-      if (node !== ref && node !== ref?.previousSibling) counts.move++
+      const prevSibling: Node | null = ref?.previousSibling ?? null
+      if (node !== (ref as Node | null) && node !== prevSibling) counts.move++
     } else {
       counts.insert++
       knownChildren.add(node)

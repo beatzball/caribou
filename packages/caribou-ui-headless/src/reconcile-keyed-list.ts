@@ -69,10 +69,14 @@ export function reconcileKeyedList<T>(opts: ReconcileKeyedListOptions<T>): void 
   }
 
   // Walk items in order; reuse existing or create new.
+  // The bang (!) assertions on items[i] / itemKeys[i] are safe under
+  // noUncheckedIndexedAccess: the loop bound `i < items.length`
+  // guarantees both indices are in-range, and itemKeys was populated
+  // 1:1 with items in the same iteration order above.
   let cursor: ChildNode | null = parent.firstChild
   for (let i = 0; i < items.length; i++) {
-    const item = items[i]
-    const key = itemKeys[i]
+    const item = items[i]!
+    const key = itemKeys[i]!
     let el = existing.get(key) as HTMLElement | undefined
     if (el) {
       if (el === cursor) {
