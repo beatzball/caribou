@@ -120,3 +120,46 @@ describe('<caribou-timeline> — keyed reconciliation', () => {
     }
   })
 })
+
+describe('<caribou-timeline> — scroll preservation', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('preserves scrollTop across applyNewPosts prepend', async () => {
+    // Wrap the timeline in a scrollable container so we can set scrollTop.
+    const container = document.createElement('div')
+    container.style.height = '400px'
+    container.style.overflow = 'auto'
+    document.body.appendChild(container)
+
+    const tl = document.createElement('caribou-timeline') as HTMLElement & {
+      kind: string; initial: { statuses: unknown[]; nextMaxId: string | null }
+    }
+    tl.kind = 'home'
+    const initial = Array.from({ length: 50 }, (_, i) => mkStatus(`s${i}`))
+    tl.initial = { statuses: initial, nextMaxId: null }
+    container.appendChild(tl)
+
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    container.scrollTop = 800
+    expect(container.scrollTop).toBe(800)
+
+    // Prepend via the same path as the identity test in Task 12.
+    const newOnes = [mkStatus('n0'), mkStatus('n1'), mkStatus('n2')]
+    const store = (tl as unknown as { store: { _testOnlyPrepend?: (xs: unknown[]) => void } }).store
+    if (store._testOnlyPrepend) {
+      store._testOnlyPrepend(newOnes)
+    } else {
+      tl.dispatchEvent(new CustomEvent('apply-new-posts', { bubbles: true }))
+    }
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    // happy-dom maintains scrollTop across DOM mutations of preceding siblings
+    // when nodes are MOVED, not recreated. This is the test that fails loudly
+    // if the helper ever regresses to creating fresh <li>s for surviving
+    // statuses.
+    expect(container.scrollTop).toBe(800)
+  })
+})
