@@ -89,3 +89,45 @@ describe('reconcileKeyedList — N → identical N', () => {
     expect(update).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('reconcileKeyedList — prepend / append', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('prepend K: K creates + K inserts + 0 moves; surviving nodes keep identity', () => {
+    const ul = makeUl()
+    const initial: Item[] = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+    reconcileKeyedList({ parent: ul, items: initial, keyOf: (i) => i.id, create: makeLi })
+    const [refA, refB, refC] = Array.from(ul.children)
+
+    const create = vi.fn(makeLi)
+    const insertSpy = vi.spyOn(ul, 'insertBefore')
+
+    const next: Item[] = [{ id: 'x' }, { id: 'y' }, { id: 'a' }, { id: 'b' }, { id: 'c' }]
+    reconcileKeyedList({ parent: ul, items: next, keyOf: (i) => i.id, create })
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(insertSpy).toHaveBeenCalledTimes(2) // two inserts of fresh nodes; surviving never re-inserted
+    expect(ul.children[2]).toBe(refA)
+    expect(ul.children[3]).toBe(refB)
+    expect(ul.children[4]).toBe(refC)
+  })
+
+  it('append K: K creates + K inserts + 0 moves; surviving nodes keep identity', () => {
+    const ul = makeUl()
+    const initial: Item[] = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+    reconcileKeyedList({ parent: ul, items: initial, keyOf: (i) => i.id, create: makeLi })
+    const [refA, refB, refC] = Array.from(ul.children)
+
+    const create = vi.fn(makeLi)
+    const insertSpy = vi.spyOn(ul, 'insertBefore')
+
+    const next: Item[] = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'y' }, { id: 'z' }]
+    reconcileKeyedList({ parent: ul, items: next, keyOf: (i) => i.id, create })
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(insertSpy).toHaveBeenCalledTimes(2)
+    expect(ul.children[0]).toBe(refA)
+    expect(ul.children[1]).toBe(refB)
+    expect(ul.children[2]).toBe(refC)
+  })
+})
