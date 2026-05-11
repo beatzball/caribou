@@ -163,3 +163,50 @@ describe('<caribou-timeline> — scroll preservation', () => {
     expect(container.scrollTop).toBe(800)
   })
 })
+
+describe('<caribou-timeline> — card-internal element identity', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('keeps card-internal <img> identity across applyNewPosts prepend', async () => {
+    const tl = document.createElement('caribou-timeline') as HTMLElement & {
+      kind: string; initial: { statuses: unknown[]; nextMaxId: string | null }
+    }
+    tl.kind = 'home'
+    // Give one status an avatar so the card renders an <img>.
+    const initial = [mkStatus('s0'), mkStatus('s1')]
+    initial[0].account = { ...ACCT, avatar: 'https://example.test/a.png', avatarStatic: 'https://example.test/a.png' }
+    tl.initial = { statuses: initial, nextMaxId: null }
+    document.body.appendChild(tl)
+
+    await flush()
+    await flush()
+
+    // Get the mount and ul to find the first card.
+    const mount = tl.querySelector('caribou-list-mount') as HTMLElement & { mountUl: HTMLUListElement }
+    const ul = mount.mountUl
+    const firstLi = ul.children[0] as HTMLElement
+    const firstCard = firstLi.firstElementChild as HTMLElement & { shadowRoot: ShadowRoot | null }
+    const beforeImgRef = firstCard.shadowRoot!.querySelector('img')!
+    const beforeLiRef = firstLi
+
+    // Prepend.
+    const store = (tl as unknown as { store: { _testOnlyPrepend?: (xs: unknown[]) => void } }).store
+    store._testOnlyPrepend?.([mkStatus('n0')])
+    // applyNewPosts processes newPostIds.value into statusIds
+    tl.dispatchEvent(new CustomEvent('apply-new-posts', { bubbles: true }))
+    await flush()
+    await flush()
+
+    // Verify that the <li> itself was preserved (moved, not recreated).
+    // The s0 card should now be at index 1 (after the new n0 at index 0).
+    const survLi = ul.children[1] as HTMLElement
+    expect(survLi).toBe(beforeLiRef)
+
+    // Card s0 has moved from index 0 to index 1; its <img> should be the same node.
+    const survivingCard = survLi.firstElementChild as HTMLElement
+    const afterImgRef = survivingCard.shadowRoot!.querySelector('img')!
+
+    // The object identity must be preserved to avoid avatar flicker.
+    expect(afterImgRef).toBe(beforeImgRef)
+  })
+})
