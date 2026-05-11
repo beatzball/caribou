@@ -5,7 +5,7 @@ import {
   activeClient, createAccountCache, createProfileStore,
   type ProfileStore, type ProfileTab,
 } from '@beatzball/caribou-state'
-import { createIntersectionObserver } from '@beatzball/caribou-ui-headless'
+import { createIntersectionObserver, reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
 import './caribou-profile-header.js'
 import './caribou-profile-tabs.js'
 import './caribou-status-card.js'
@@ -33,6 +33,7 @@ export class CaribouProfile extends Elena(HTMLElement) {
   private dispose: (() => void) | null = null
   private statuses: Status[] = []
   private io: { observe(el: Element): void; disconnect(): void } | null = null
+  private listEl: HTMLUListElement | null = null
 
   override async connectedCallback() {
     super.connectedCallback?.()
@@ -81,14 +82,11 @@ export class CaribouProfile extends Elena(HTMLElement) {
     )
     if (header && header.account !== this.account) header.account = this.account
 
-    const cards = this.querySelectorAll<HTMLElement & { status?: Status | null }>(
-      'caribou-status-card[data-index]',
-    )
-    cards.forEach((card) => {
-      const idx = Number(card.dataset.index)
-      const status = this.statuses[idx]
-      if (status && card.status !== status) card.status = status
-    })
+    if (!this.listEl) {
+      const mount = this.querySelector<CaribouListMount>('caribou-list-mount')
+      this.listEl = mount?.mountUl ?? null
+    }
+    this.reconcile()
 
     const sentinel = this.querySelector<HTMLAnchorElement>('a[data-sentinel]')
     if (sentinel && !this.io) {
@@ -120,6 +118,28 @@ export class CaribouProfile extends Elena(HTMLElement) {
     this.io?.observe(sentinel)
   }
 
+  private reconcile() {
+    if (!this.listEl) return
+    reconcileKeyedList({
+      parent: this.listEl,
+      items: this.statuses,
+      keyOf: (s) => s.id,
+      create: (s) => {
+        const li = document.createElement('li')
+        const card = document.createElement('caribou-status-card') as HTMLElement & { status?: Status }
+        card.dataset.statusId = s.id
+        card.setAttribute('variant', 'timeline')
+        card.status = s
+        li.appendChild(card)
+        return li
+      },
+      update: (li, s) => {
+        const card = li.firstElementChild as HTMLElement & { status?: Status }
+        if (card.status !== s) card.status = s
+      },
+    })
+  }
+
   override render() {
     if (!this.account) {
       return html`<div style="padding:var(--space-4);color:var(--fg-muted);">Loading…</div>`
@@ -131,13 +151,7 @@ export class CaribouProfile extends Elena(HTMLElement) {
     return html`
       <caribou-profile-header></caribou-profile-header>
       <caribou-profile-tabs handle="${this.handle}" tab="${this.tab}"></caribou-profile-tabs>
-      <ul style="list-style:none;margin:0;padding:0;">
-        ${this.statuses.map((s, i) => html`
-          <li>
-            <caribou-status-card data-index="${i}" data-status-id="${s.id}" variant="timeline"></caribou-status-card>
-          </li>
-        `)}
-      </ul>
+      <caribou-list-mount></caribou-list-mount>
       ${nextHref
         ? html`<a href="${nextHref}" rel="next" data-sentinel
                  style="display:block;padding:var(--space-4);color:var(--fg-muted);text-align:center;">Older posts →</a>`
