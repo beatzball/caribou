@@ -24,11 +24,31 @@ export interface ReconcileKeyedListOptions<T> {
 export function reconcileKeyedList<T>(opts: ReconcileKeyedListOptions<T>): void {
   const { parent, items, keyOf, create, update } = opts
 
+  // Step 1: build a map of existing children by data-key.
+  const existing = new Map<string, Element>()
+  for (const child of Array.from(parent.children)) {
+    const k = (child as HTMLElement).dataset.key
+    if (k) existing.set(k, child)
+  }
+
+  // Step 2: walk items in order; reuse existing or create new.
+  let cursor: ChildNode | null = parent.firstChild
   for (const item of items) {
     const key = keyOf(item)
-    const el = create(item)
-    el.dataset.key = key
-    parent.appendChild(el)
+    let el = existing.get(key) as HTMLElement | undefined
+    if (el) {
+      if (el === cursor) {
+        cursor = cursor.nextSibling
+      } else {
+        parent.insertBefore(el, cursor)
+        // cursor unchanged: el is now before cursor
+      }
+    } else {
+      el = create(item)
+      el.dataset.key = key
+      parent.insertBefore(el, cursor)
+      // cursor unchanged: new el is before cursor
+    }
     if (update) update(el, item)
   }
 }
