@@ -31,7 +31,22 @@ export function reconcileKeyedList<T>(opts: ReconcileKeyedListOptions<T>): void 
     if (k) existing.set(k, child)
   }
 
-  // Step 2: walk items in order; reuse existing or create new.
+  // Step 2: compute wanted keys and remove anything stale.
+  const wantedKeys = new Set<string>()
+  for (const item of items) wantedKeys.add(keyOf(item))
+  for (const [k, el] of existing) {
+    if (!wantedKeys.has(k)) {
+      el.remove()
+      existing.delete(k)
+    }
+  }
+  // Children with missing/empty data-key were never added to `existing`;
+  // strip them too so callers can recover from drift.
+  for (const child of Array.from(parent.children)) {
+    if (!(child as HTMLElement).dataset.key) child.remove()
+  }
+
+  // Step 3: walk items in order; reuse existing or create new.
   let cursor: ChildNode | null = parent.firstChild
   for (const item of items) {
     const key = keyOf(item)

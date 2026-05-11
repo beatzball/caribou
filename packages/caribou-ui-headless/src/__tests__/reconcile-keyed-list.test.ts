@@ -131,3 +131,116 @@ describe('reconcileKeyedList — prepend / append', () => {
     expect(ul.children[2]).toBe(refC)
   })
 })
+
+describe('reconcileKeyedList — removal', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('removes middle: 1 remove, 0 creates, 0 moves', () => {
+    const ul = makeUl()
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+      keyOf: (i: Item) => i.id,
+      create: makeLi,
+    })
+    const [refA, , refC, refD] = Array.from(ul.children)
+    const create = vi.fn(makeLi)
+    const insertSpy = vi.spyOn(ul, 'insertBefore')
+
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'a' }, { id: 'c' }, { id: 'd' }],
+      keyOf: (i: Item) => i.id,
+      create,
+    })
+
+    expect(ul.children.length).toBe(3)
+    expect(create).not.toHaveBeenCalled()
+    expect(insertSpy).not.toHaveBeenCalled()
+    expect(ul.children[0]).toBe(refA)
+    expect(ul.children[1]).toBe(refC)
+    expect(ul.children[2]).toBe(refD)
+  })
+
+  it('removes all: N removes, 0 creates', () => {
+    const ul = makeUl()
+    reconcileKeyedList({ parent: ul, items: [{ id: 'a' }, { id: 'b' }], keyOf: (i: Item) => i.id, create: makeLi })
+    reconcileKeyedList({ parent: ul, items: [], keyOf: (i: Item) => i.id, create: makeLi })
+    expect(ul.children.length).toBe(0)
+  })
+})
+
+describe('reconcileKeyedList — moves', () => {
+  beforeEach(() => { document.body.innerHTML = '' })
+
+  it('swap adjacent: 1 move, 0 creates, 0 removes', () => {
+    const ul = makeUl()
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      keyOf: (i: Item) => i.id,
+      create: makeLi,
+    })
+    const create = vi.fn(makeLi)
+    const insertSpy = vi.spyOn(ul, 'insertBefore')
+
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'b' }, { id: 'a' }, { id: 'c' }],
+      keyOf: (i: Item) => i.id,
+      create,
+    })
+
+    expect(create).not.toHaveBeenCalled()
+    expect(insertSpy).toHaveBeenCalledTimes(1) // one move
+    expect(Array.from(ul.children).map((c) => (c as HTMLElement).dataset.key)).toEqual(['b', 'a', 'c'])
+  })
+
+  it('full reverse: (n-1) moves', () => {
+    const ul = makeUl()
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+      keyOf: (i: Item) => i.id,
+      create: makeLi,
+    })
+    const create = vi.fn(makeLi)
+    const insertSpy = vi.spyOn(ul, 'insertBefore')
+
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'd' }, { id: 'c' }, { id: 'b' }, { id: 'a' }],
+      keyOf: (i: Item) => i.id,
+      create,
+    })
+
+    expect(create).not.toHaveBeenCalled()
+    expect(insertSpy).toHaveBeenCalledTimes(3) // n - 1
+    expect(Array.from(ul.children).map((c) => (c as HTMLElement).dataset.key)).toEqual(['d', 'c', 'b', 'a'])
+  })
+
+  it('mixed: prepend X, drop A and C, append Y', () => {
+    const ul = makeUl()
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+      keyOf: (i: Item) => i.id,
+      create: makeLi,
+    })
+    const [, refB, , refD] = Array.from(ul.children)
+    const create = vi.fn(makeLi)
+
+    reconcileKeyedList({
+      parent: ul,
+      items: [{ id: 'x' }, { id: 'b' }, { id: 'd' }, { id: 'y' }],
+      keyOf: (i: Item) => i.id,
+      create,
+    })
+
+    expect(create).toHaveBeenCalledTimes(2) // x and y
+    expect(ul.children.length).toBe(4)
+    expect(Array.from(ul.children).map((c) => (c as HTMLElement).dataset.key)).toEqual(['x', 'b', 'd', 'y'])
+    expect(ul.children[1]).toBe(refB)
+    expect(ul.children[2]).toBe(refD)
+  })
+})
