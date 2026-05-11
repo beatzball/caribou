@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
+import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
 
 beforeAll(async () => { await import('../caribou-thread.js') })
 
@@ -23,7 +24,8 @@ describe('<caribou-thread> indent cap at depth 3', () => {
     // signals effect schedules a requestUpdate. Each step costs at least
     // one microtask, so chain awaits until the shadow tree settles.
     await new Promise((r) => setTimeout(r, 0))
-    const cards = el.shadowRoot!.querySelectorAll('caribou-status-card[data-depth]')
+    const mount = el.shadowRoot!.querySelector<CaribouListMount>('caribou-list-mount')
+    const cards = mount!.mountUl.querySelectorAll('caribou-status-card[data-depth]')
     const depths = Array.from(cards).map((c) => Number((c as HTMLElement).dataset.depth))
     expect(Math.max(...depths)).toBeLessThanOrEqual(3)
   })
@@ -39,7 +41,8 @@ describe('<caribou-thread> indent cap at depth 3', () => {
     // signals effect schedules a requestUpdate. Each step costs at least
     // one microtask, so chain awaits until the shadow tree settles.
     await new Promise((r) => setTimeout(r, 0))
-    const cards = el.shadowRoot!.querySelectorAll('caribou-status-card')
+    const mount = el.shadowRoot!.querySelector<CaribouListMount>('caribou-list-mount')
+    const cards = mount!.mountUl.querySelectorAll('caribou-status-card')
     expect(cards.length).toBe(4)
     const variants = Array.from(cards).map((c) => c.getAttribute('variant'))
     expect(variants).toEqual(['ancestor', 'ancestor', 'focused', 'descendant'])
