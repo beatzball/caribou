@@ -4,7 +4,8 @@ import type { mastodon } from 'masto'
 import {
   activeClient, createTimelineStore, startPolling, type TimelineStore,
 } from '@beatzball/caribou-state'
-import { createIntersectionObserver, reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
+import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
+import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
 import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 

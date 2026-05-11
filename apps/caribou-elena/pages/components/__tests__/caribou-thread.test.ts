@@ -79,7 +79,7 @@ describe('<caribou-thread> — depth recompute on descendant arrival', () => {
     // Now arrive D, which makes E a real depth-2 descendant of F (F → D → E).
     const D2 = { id: 'd', content: '<p>d</p>', account: ACCT2, createdAt: '2026-04-28T12:00:00Z', inReplyToId: 'f' }
     const store = (el as unknown as { store: ThreadStore }).store
-    store._testOnlySetDescendants([D2, E2])
+    store._testOnlySetDescendants([D2, E2] as Parameters<ThreadStore['_testOnlySetDescendants']>[0])
 
     await new Promise((r) => setTimeout(r, 0))
     await new Promise((r) => setTimeout(r, 0))

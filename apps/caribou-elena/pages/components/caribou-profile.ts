@@ -5,7 +5,8 @@ import {
   activeClient, createAccountCache, createProfileStore,
   type ProfileStore, type ProfileTab,
 } from '@beatzball/caribou-state'
-import { createIntersectionObserver, reconcileKeyedList, CaribouListMount } from '@beatzball/caribou-ui-headless'
+import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
+import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
 import './caribou-profile-header.js'
 import './caribou-profile-tabs.js'
 import './caribou-status-card.js'

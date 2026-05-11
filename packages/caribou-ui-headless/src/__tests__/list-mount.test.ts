@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { CaribouListMount } from '../list-mount.js'
+import '../list-mount.js'
+import type { CaribouListMount } from '../list-mount.js'
 import { Elena, html } from '@elenajs/core'
 
 describe('<caribou-list-mount>', () => {
