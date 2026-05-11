@@ -164,6 +164,9 @@ importers:
       '@beatzball/caribou-tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@elenajs/core':
+        specifier: ^1.0.0
+        version: 1.0.0
       '@vitest/coverage-v8':
         specifier: ^2.1.0
         version: 2.1.9(vitest@2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(jsdom@25.0.1)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1))
