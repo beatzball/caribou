@@ -16,6 +16,7 @@
   "devDependencies": {
     "@beatzball/caribou-eslint-config": "workspace:*",
     "@beatzball/caribou-tsconfig": "workspace:*",
+    "@elenajs/core": "^1.0.0",
     "@vitest/coverage-v8": "^2.1.0",
     "eslint": "^9.0.0",
     "happy-dom": "^15.0.0",
