@@ -1,4 +1,4 @@
-import { html } from '@elenajs/core'
+import { html, unsafeHTML } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
 import { getRequestURL, getRouterParams } from 'h3'
@@ -7,10 +7,38 @@ import {
   fetchStatus, fetchThreadContext,
 } from '../../server/lib/mastodon-public.js'
 import { getStorage } from '../../server/lib/storage.js'
+import { getServerNowMs } from '../../server/lib/server-now.js'
+import { renderPopulatedListMount } from '../../server/lib/render-populated-list.js'
+import type { PopulatedListItem } from '../../server/lib/render-populated-list.js'
 import type { ThreadPageData, ShellInfo } from '../../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
 import '../components/caribou-thread.js'
 import '../components/caribou-auth-required.js'
+
+const MAX_DEPTH = 3
+
+function depthMap(
+  focusedId: string,
+  descendants: { id: string; inReplyToId?: string | null }[],
+): Map<string, number> {
+  const byParent = new Map<string, typeof descendants>()
+  for (const d of descendants) {
+    const p = d.inReplyToId
+    if (!p) continue
+    if (!byParent.has(p)) byParent.set(p, [])
+    byParent.get(p)!.push(d)
+  }
+  const depths = new Map<string, number>()
+  function walk(id: string, depth: number) {
+    for (const child of byParent.get(id) ?? []) {
+      const capped = Math.min(depth, MAX_DEPTH)
+      depths.set(child.id, capped)
+      walk(child.id, depth + 1)
+    }
+  }
+  walk(focusedId, 1)
+  return depths
+}
 
 export type StatusPageData = ThreadPageData & {
   shell: ShellInfo
@@ -39,25 +67,38 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
   // any non-trivial id-mapping case) breaks that assumption. Following
   // Elk's `/{home-instance}/@{user}@{host}/{home-id}` model — Caribou
   // ties the home instance to the cookie instead of the URL.
+  const serverNowMs = getServerNowMs()
   const origin = getRequestURL(event).origin
   const cookieHost = await getInstance(event, { storage: getStorage(), origin })
   const shell: ShellInfo = { instance: cookieHost ?? null }
   if (!cookieHost) {
-    return { kind: 'auth-required', shell, statusId, handle } as StatusPageData
+    return { kind: 'auth-required', shell, statusId, handle, serverNowMs } as StatusPageData
   }
   const [focusedR, contextR] = await Promise.allSettled([
     fetchStatus(statusId, { instance: cookieHost }),
     fetchThreadContext(statusId, { instance: cookieHost }),
   ])
   if (focusedR.status === 'rejected') {
-    return { kind: 'error', message: String(focusedR.reason), shell, statusId, handle } as StatusPageData
+    return { kind: 'error', message: String(focusedR.reason), shell, statusId, handle, serverNowMs } as StatusPageData
   }
   const ancestors = contextR.status === 'fulfilled' ? contextR.value.ancestors : []
   const descendants = contextR.status === 'fulfilled' ? contextR.value.descendants : []
+  const focused = focusedR.value
+  const depths = depthMap(focused.id, descendants)
+  const items: PopulatedListItem[] = [
+    ...ancestors.map((s) => ({ status: s, variant: 'ancestor' as const })),
+    { status: focused, variant: 'focused' as const },
+    ...descendants.map((s) => ({
+      status: s,
+      variant: 'descendant' as const,
+      depth: depths.get(s.id) ?? MAX_DEPTH,
+    })),
+  ]
+  const populatedListHtml = await renderPopulatedListMount({ items, serverNowMs })
   return {
     kind: 'ok',
-    focused: focusedR.value, ancestors, descendants,
-    shell, statusId, handle,
+    focused, ancestors, descendants,
+    shell, statusId, handle, serverNowMs, populatedListHtml,
   } as StatusPageData
 })
 
@@ -109,7 +150,7 @@ export default class HandleStatusPage extends LitroPage {
     }
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-thread statusid="${data.statusId}"></caribou-thread>
+        <caribou-thread statusid="${data.statusId}">${unsafeHTML(data.populatedListHtml)}</caribou-thread>
       </caribou-app-shell>
     `
   }

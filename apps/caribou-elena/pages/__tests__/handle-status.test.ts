@@ -14,6 +14,12 @@ vi.mock('../../server/lib/mastodon-public.js', () => ({
 vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
+vi.mock('../../server/lib/server-now.js', () => ({
+  getServerNowMs: () => 1_000_000,
+}))
+vi.mock('../../server/lib/render-populated-list.js', () => ({
+  renderPopulatedListMount: async () => '<caribou-list-mount></caribou-list-mount>',
+}))
 vi.mock('h3', async () => {
   const actual = await vi.importActual<typeof H3>('h3')
   return {
@@ -51,6 +57,8 @@ describe('/@[handle]/[statusId] pageData', () => {
     expect(vi.mocked(fetchThreadContext)).toHaveBeenCalledWith('99', { instance: 'home.example' })
     expect(result.ancestors).toHaveLength(1)
     expect(result.descendants).toHaveLength(1)
+    expect(result.serverNowMs).toBe(1_000_000)
+    expect(result.populatedListHtml).toBe('<caribou-list-mount></caribou-list-mount>')
   })
 
   it('returns auth-required when no cookie host is set', async () => {
