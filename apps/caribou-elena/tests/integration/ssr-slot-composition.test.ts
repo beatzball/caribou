@@ -113,8 +113,10 @@ describe.each(ROUTES)('SSR slot composition: %s', (route) => {
   it('places <caribou-auth-required> inside <caribou-app-shell> as a light-DOM child', () => {
     const shellMatch = body.match(/<caribou-app-shell\b[^>]*>([\s\S]*?)<\/caribou-app-shell>/)
     expect(shellMatch, 'response should contain <caribou-app-shell>').not.toBeNull()
+    const shellInner = shellMatch?.[1]
+    expect(shellInner, '<caribou-app-shell> capture group must be present').toBeTypeOf('string')
     // Strip the shadow-root template; what remains is the host's light-DOM children.
-    const lightChildren = stripDSDTemplates(shellMatch![1])
+    const lightChildren = stripDSDTemplates(shellInner as string)
     expect(lightChildren).toContain('<caribou-auth-required')
   })
 
@@ -128,7 +130,9 @@ describe.each(ROUTES)('SSR slot composition: %s', (route) => {
       /<script type="application\/json" id="__litro_data__">([^<]+)<\/script>/,
     )
     expect(match, 'response should contain __litro_data__').not.toBeNull()
-    const data = JSON.parse(match![1]) as { kind: string }
+    const json = match?.[1]
+    expect(json, '__litro_data__ capture group must be present').toBeTypeOf('string')
+    const data = JSON.parse(json as string) as { kind: string }
     expect(data.kind).toBe('auth-required')
   })
 })
