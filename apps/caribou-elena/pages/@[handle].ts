@@ -1,4 +1,4 @@
-import { html } from '@elenajs/core'
+import { html, unsafeHTML } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRequestURL, getRouterParams } from 'h3'
@@ -7,6 +7,8 @@ import {
   fetchAccountByHandle, fetchAccountStatuses,
 } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
+import { getServerNowMs } from '../server/lib/server-now.js'
+import { renderPopulatedListMount } from '../server/lib/render-populated-list.js'
 import type { ProfilePageData, ShellInfo } from '../server/lib/page-data-types.js'
 import './components/caribou-app-shell.js'
 import './components/caribou-profile.js'
@@ -26,13 +28,14 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   const origin = getRequestURL(event).origin
   const resolution = await resolveInstanceForRoute(event, { handle }, { storage: getStorage(), origin })
   const shell: ShellInfo = { instance: resolution.instance }
+  const serverNowMs = getServerNowMs()
   // /@me is auth-required (Plan 3 design §8.8): the user's own profile is
   // gated by the access token that lives only in localStorage, so the server
   // never performs a public lookup for `me`. Render a placeholder; the client
   // swap (HandlePage.connectedCallback) hydrates the real profile from the
   // active userKey, mirroring /home.
-  if (handle === 'me') return { kind: 'auth-required', shell, handle } as HandlePageData
-  if (!resolution.instance) return { kind: 'auth-required', shell, handle } as HandlePageData
+  if (handle === 'me') return { kind: 'auth-required', shell, handle, serverNowMs } as HandlePageData
+  if (!resolution.instance) return { kind: 'auth-required', shell, handle, serverNowMs } as HandlePageData
   const query = getQuery(event)
   const tab = parseTab(query.tab)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
@@ -44,9 +47,13 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
       maxId,
     })
     const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', account, statuses, nextMaxId, tab, shell, handle } as HandlePageData
+    const populatedListHtml = await renderPopulatedListMount({
+      items: statuses.map((s) => ({ status: s, variant: 'timeline' as const })),
+      serverNowMs,
+    })
+    return { kind: 'ok', account, statuses, nextMaxId, tab, shell, handle, serverNowMs, populatedListHtml } as HandlePageData
   } catch (err) {
-    return { kind: 'error', message: String(err), shell, handle } as HandlePageData
+    return { kind: 'error', message: String(err), shell, handle, serverNowMs } as HandlePageData
   }
 })
 
@@ -118,7 +125,7 @@ export default class HandlePage extends LitroPage {
     }
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-profile handle="${data.handle}" tab="${data.tab}"></caribou-profile>
+        <caribou-profile handle="${data.handle}" tab="${data.tab}">${unsafeHTML(data.populatedListHtml)}</caribou-profile>
       </caribou-app-shell>
     `
   }

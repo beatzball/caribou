@@ -14,6 +14,12 @@ vi.mock('../../server/lib/mastodon-public.js', () => ({
 vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
+vi.mock('../../server/lib/server-now.js', () => ({
+  getServerNowMs: () => 1_000_000,
+}))
+vi.mock('../../server/lib/render-populated-list.js', () => ({
+  renderPopulatedListMount: async () => '<caribou-list-mount></caribou-list-mount>',
+}))
 vi.mock('h3', async () => {
   const actual = await vi.importActual<typeof H3>('h3')
   return {
@@ -58,6 +64,8 @@ describe('/@[handle] pageData', () => {
       account: { id: '42' },
       tab: 'posts',
       nextMaxId: '99',
+      serverNowMs: 1_000_000,
+      populatedListHtml: '<caribou-list-mount></caribou-list-mount>',
     })
   })
 
