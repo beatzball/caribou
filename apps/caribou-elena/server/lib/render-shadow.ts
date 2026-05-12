@@ -30,6 +30,24 @@ interface ElenaCtorStatics {
 
 type ElenaInstance = HTMLElement & { render: () => unknown }
 
+export interface AttrsAndProps {
+  attrs?: Record<string, string | null | undefined>
+  props?: Record<string, unknown>
+}
+
+type RenderArg =
+  | Record<string, string | null | undefined>
+  | AttrsAndProps
+
+function isAttrsAndProps(arg: RenderArg): arg is AttrsAndProps {
+  if (typeof arg !== 'object' || arg === null) return false
+  const keys = Object.keys(arg)
+  // Detection rule: explicit new form iff every enumerable key is one of
+  // {attrs, props}. Empty objects are treated as new form (vacuously
+  // true — both interpretations produce the same empty output).
+  return keys.every((k) => k === 'attrs' || k === 'props')
+}
+
 function getClass(tagName: string): (new () => ElenaInstance) | null {
   const ce = (globalThis as { customElements?: CustomElementRegistry }).customElements
   return (ce?.get(tagName) as (new () => ElenaInstance) | undefined) ?? null
@@ -84,21 +102,44 @@ function flattenStyles(styles: ElenaCtorStatics['styles']): string {
  * Render a registered Elena shadow-DOM component to its DSD HTML string.
  *
  * @param tagName  Custom-element tag (must be defined in `customElements`).
- * @param props    Public attribute/property bag. Non-null entries are
- *                 (a) assigned to the instance before `render()` runs, and
- *                 (b) reflected as host-element attributes in the output.
- *                 Pass `null`/`undefined` to omit a slot.
+ * @param arg      Public attribute/property bag. Can be:
+ *                 1. New form: `{ attrs?: {...}, props?: {...} }` — attrs are
+ *                    reflected as host attributes AND assigned to the instance;
+ *                    props are assigned to the instance only.
+ *                 2. Legacy form: `Record<string, string|null|undefined>` —
+ *                    treated as attrs (reflected and assigned).
+ *                 Non-null entries are assigned to the instance before
+ *                 `render()` runs. Pass `null`/`undefined` to omit a slot.
  */
 export async function renderShadowComponentToString(
   tagName: string,
-  props: Record<string, string | null | undefined>,
+  arg: RenderArg = {},
 ): Promise<string> {
   const Cls = getClass(tagName)
   if (!Cls) {
     throw new Error(`renderShadowComponentToString: unknown tag "${tagName}" — did the component module load?`)
   }
 
+  let attrs: Record<string, string | null | undefined>
+  let props: Record<string, unknown>
+  if (isAttrsAndProps(arg)) {
+    attrs = arg.attrs ?? {}
+    props = arg.props ?? {}
+  } else {
+    attrs = arg
+    props = {}
+  }
+
   const instance = new Cls()
+
+  // Assign attrs to the instance (so render() sees them as properties)
+  // AND reflect them as host attributes in the output.
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null) continue
+    ;(instance as unknown as Record<string, unknown>)[k] = v
+  }
+
+  // Assign props to the instance ONLY (no attribute reflection).
   for (const [k, v] of Object.entries(props)) {
     if (v == null) continue
     ;(instance as unknown as Record<string, unknown>)[k] = v
@@ -109,13 +150,13 @@ export async function renderShadowComponentToString(
 
   const stylesText = flattenStyles((Cls as unknown as ElenaCtorStatics).styles)
 
-  const attrs = Object.entries(props)
+  const attrEntries = Object.entries(attrs)
     .filter(([, v]) => v != null && v !== '')
     .map(([k, v]) => ` ${k}="${escAttr(v)}"`)
     .join('')
 
   return (
-    `<${tagName}${attrs}>` +
+    `<${tagName}${attrEntries}>` +
     `<template shadowrootmode="open">` +
     `<style id="${SENTINEL_ID}">${stylesText}</style>` +
     inner +
