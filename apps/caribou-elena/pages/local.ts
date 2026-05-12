@@ -1,10 +1,12 @@
-import { html } from '@elenajs/core'
+import { html, unsafeHTML } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRequestURL } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
+import { getServerNowMs } from '../server/lib/server-now.js'
+import { renderPopulatedListMount } from '../server/lib/render-populated-list.js'
 import type { TimelinePageData, ShellInfo } from '../server/lib/page-data-types.js'
 import './components/caribou-app-shell.js'
 import './components/caribou-timeline.js'
@@ -16,7 +18,8 @@ export const pageData = definePageData<LocalPageData>(async (event) => {
   const origin = getRequestURL(event).origin
   const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage(), origin })
   const shell: ShellInfo = { instance: resolution.instance }
-  if (!resolution.instance) return { kind: 'auth-required', shell }
+  const serverNowMs = getServerNowMs()
+  if (!resolution.instance) return { kind: 'auth-required', shell, serverNowMs }
   const query = getQuery(event)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
@@ -24,9 +27,13 @@ export const pageData = definePageData<LocalPageData>(async (event) => {
       instance: resolution.instance, kind: 'local', maxId,
     })
     const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', statuses, nextMaxId, shell }
+    const populatedListHtml = await renderPopulatedListMount({
+      items: statuses.map((s) => ({ status: s, variant: 'timeline' as const })),
+      serverNowMs,
+    })
+    return { kind: 'ok', statuses, nextMaxId, shell, serverNowMs, populatedListHtml }
   } catch (err) {
-    return { kind: 'error', message: String(err), shell }
+    return { kind: 'error', message: String(err), shell, serverNowMs }
   }
 })
 
@@ -65,7 +72,7 @@ export default class LocalPage extends LitroPage {
     }
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-timeline kind="local"></caribou-timeline>
+        <caribou-timeline kind="local">${unsafeHTML(data.populatedListHtml)}</caribou-timeline>
       </caribou-app-shell>
     `
   }
