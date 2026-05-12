@@ -114,3 +114,26 @@ describe('renderPopulatedListMount — depth + mixed variants', () => {
     expect(html).toContain('variant="descendant"')
   })
 })
+
+describe('renderPopulatedListMount — byte-equality + sanitization', () => {
+  it('returns byte-equal output for identical inputs', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [
+      { status: mkStatus('a'), variant: 'timeline' as const },
+      { status: mkStatus('b'), variant: 'timeline' as const },
+    ]
+    const a = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    const b = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    expect(a).toBe(b)
+  })
+
+  it('strips script tags from status content (sanitization at the card layer)', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const malicious = mkStatus('x', '<p>safe</p><script>alert(1)</script>')
+    const items = [{ status: malicious, variant: 'timeline' as const }]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    expect(html).toContain('safe')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('alert(1)')
+  })
+})
