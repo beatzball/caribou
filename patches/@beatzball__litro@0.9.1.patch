@@ -1,3 +1,84 @@
+diff --git a/dist/adapter/elena/index.js b/dist/adapter/elena/index.js
+index 1c90aa6908d442e63371df6c46dd47dc8127729a..34ae9fd9491f916c2ec3225af804c5d06594563f 100644
+--- a/dist/adapter/elena/index.js
++++ b/dist/adapter/elena/index.js
+@@ -141,6 +141,16 @@ const ENTITIES = {
+ function decodeEntities(s) {
+     return s.replace(/&(?:amp|lt|gt|quot|#39);/g, m => ENTITIES[m] || m);
+ }
++/** Sentinel id used by adoption-suppression contracts in DSD-aware Elena bases. */
++const DSD_SENTINEL_STYLE_ID = 'caribou-dsd-style';
++/**
++ * Flatten a component's `static styles` field to a single string for DSD inlining.
++ */
++function flattenStyles(styles) {
++    if (styles == null) return '';
++    const list = Array.isArray(styles) ? styles : [styles];
++    return list.filter((s) => typeof s === 'string').join('\n');
++}
+ /** Regex to find custom element tags (tags containing a hyphen). */
+ const CE_TAG_RE = /<([a-z][a-z0-9]*-[a-z0-9-]*)([^>]*)(?:\/>|>([\s\S]*?)<\/\1>)/gi;
+ /** Parse attributes from an HTML attribute string, decoding HTML entities. */
+@@ -163,23 +173,33 @@ function parseAttrs(attrStr) {
+  */
+ function expandNestedCEs(html, ceMap, depth = 0) {
+     if (depth > 10)
+-        return html; // Guard against infinite recursion.
++        return html;
+     return html.replace(CE_TAG_RE, (match, tag, attrStr, childContent) => {
+-        // Skip already-expanded CEs (have hydrated attribute from a prior pass).
+         if (attrStr && /\bhydrated\b/.test(attrStr))
+             return match;
+         const ComponentClass = ceMap.get(tag);
+         if (!ComponentClass)
+-            return match; // Not registered — leave as-is.
+-        // First expand any nested CEs in the children (bottom-up).
++            return match;
+         const expandedChildren = childContent
+             ? expandNestedCEs(childContent, ceMap, depth + 1)
+             : undefined;
+         const attrs = parseAttrs(attrStr || '');
++        const shadow = ComponentClass.shadow;
++        if (shadow === 'open' || shadow === 'closed') {
++            const innerHTML = renderComponent(ComponentClass, attrs, undefined, undefined);
++            const expandedInner = expandNestedCEs(innerHTML, ceMap, depth + 1);
++            const styles = flattenStyles(ComponentClass.styles);
++            const dsd =
++                `<template shadowrootmode="${shadow}">` +
++                `<style id="${DSD_SENTINEL_STYLE_ID}">${styles}</style>` +
++                expandedInner +
++                `</template>`;
++            const lightChildren = expandedChildren ?? '';
++            return `<${tag}${attrStr || ''} hydrated>${dsd}${lightChildren}</${tag}>`;
++        }
+         const innerHTML = renderComponent(ComponentClass, attrs, undefined, expandedChildren);
+         if (!innerHTML)
+             return match;
+-        // Then expand any nested CEs in this component's rendered output.
+         const expanded = expandNestedCEs(innerHTML, ceMap, depth + 1);
+         return `<${tag}${attrStr || ''} hydrated>${expanded}</${tag}>`;
+     });
+@@ -205,9 +225,19 @@ async function* renderElenaPage(tag, serverData) {
+         throw new Error(`[litro:elena] Component <${tag}> not found in registry. ` +
+             `Registered: ${[...ceMap.keys()].join(', ')}`);
+     }
++    const shadow = ComponentClass.shadow;
+     const innerHTML = renderComponent(ComponentClass, {}, serverData);
+-    // Expand any nested custom elements in the render output.
+     const expanded = expandNestedCEs(innerHTML, ceMap);
++    if (shadow === 'open' || shadow === 'closed') {
++        const styles = flattenStyles(ComponentClass.styles);
++        const dsd =
++            `<template shadowrootmode="${shadow}">` +
++            `<style id="${DSD_SENTINEL_STYLE_ID}">${styles}</style>` +
++            expanded +
++            `</template>`;
++        yield `<${tag} hydrated>${dsd}</${tag}>`;
++        return;
++    }
+     yield `<${tag} hydrated>${expanded}</${tag}>`;
+ }
+ export const elenaAdapter = {
 diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
 index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6eaa9bff8ce564633904fc9a8c00bdf8be3e55a2 100644
 --- a/dist/plugins/path-to-route.js
@@ -34,6 +115,88 @@ index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6eaa9bff8ce564633904fc9a8c00bdf8
  }
  /**
   * Returns true if a transformed route segment is a catch-all.
+diff --git a/src/adapter/elena/index.ts b/src/adapter/elena/index.ts
+index 9d1c54a5efbd5056782155e047656e6b19d6a7c3..b088987ce9ae4828e2bb92185d67d7ec3d16ced7 100644
+--- a/src/adapter/elena/index.ts
++++ b/src/adapter/elena/index.ts
+@@ -143,6 +143,21 @@ function decodeEntities(s: string): string {
+   return s.replace(/&(?:amp|lt|gt|quot|#39);/g, m => ENTITIES[m] || m);
+ }
+ 
++/** Sentinel id used by adoption-suppression contracts in DSD-aware Elena bases. */
++const DSD_SENTINEL_STYLE_ID = 'caribou-dsd-style';
++
++/**
++ * Flatten a component's `static styles` field to a single string for DSD inlining.
++ * Accepts string | string[] | (string | CSSStyleSheet)[]. CSSStyleSheet entries
++ * are skipped — no constructable-stylesheet platform on the SSR side. Empty
++ * string is a valid return value; callers still emit the sentinel <style> element.
++ */
++function flattenStyles(styles: unknown): string {
++  if (styles == null) return '';
++  const list = Array.isArray(styles) ? styles : [styles];
++  return list.filter((s): s is string => typeof s === 'string').join('\n');
++}
++
+ /** Regex to find custom element tags (tags containing a hyphen). */
+ const CE_TAG_RE = /<([a-z][a-z0-9]*-[a-z0-9-]*)([^>]*)(?:\/>|>([\s\S]*?)<\/\1>)/gi;
+ 
+@@ -172,14 +187,32 @@ function expandNestedCEs(html: string, ceMap: Map<string, Function>, depth = 0):
+     if (attrStr && /\bhydrated\b/.test(attrStr)) return match;
+     const ComponentClass = ceMap.get(tag);
+     if (!ComponentClass) return match; // Not registered — leave as-is.
+-    // First expand any nested CEs in the children (bottom-up).
++    // Expand any nested CEs in the children (bottom-up) — used by both branches.
+     const expandedChildren = childContent
+       ? expandNestedCEs(childContent, ceMap, depth + 1)
+       : undefined;
+     const attrs = parseAttrs(attrStr || '');
++    const shadow = (ComponentClass as unknown as { shadow?: 'open' | 'closed' }).shadow;
++    if (shadow === 'open' || shadow === 'closed') {
++      // Shadow-DOM component → emit Declarative Shadow DOM and preserve the
++      // host's original light-DOM children so the browser composes <slot>
++      // natively. Do NOT pass children as instance.innerHTML — slot composition
++      // is the contract; reading this.innerHTML in a shadow render() is incoherent.
++      const innerHTML = renderComponent(ComponentClass, attrs, undefined, undefined);
++      const expandedInner = expandNestedCEs(innerHTML, ceMap, depth + 1);
++      const styles = flattenStyles((ComponentClass as unknown as { styles?: unknown }).styles);
++      const dsd =
++        `<template shadowrootmode="${shadow}">` +
++        `<style id="${DSD_SENTINEL_STYLE_ID}">${styles}</style>` +
++        expandedInner +
++        `</template>`;
++      const lightChildren = expandedChildren ?? '';
++      return `<${tag}${attrStr || ''} hydrated>${dsd}${lightChildren}</${tag}>`;
++    }
++    // Light-DOM component → existing behavior: render template replaces children,
++    // original children pass through as instance.innerHTML for wrapper components.
+     const innerHTML = renderComponent(ComponentClass, attrs, undefined, expandedChildren);
+     if (!innerHTML) return match;
+-    // Then expand any nested CEs in this component's rendered output.
+     const expanded = expandNestedCEs(innerHTML, ceMap, depth + 1);
+     return `<${tag}${attrStr || ''} hydrated>${expanded}</${tag}>`;
+   });
+@@ -215,9 +248,19 @@ async function* renderElenaPage(
+     );
+   }
+ 
++  const shadow = (ComponentClass as unknown as { shadow?: 'open' | 'closed' }).shadow;
+   const innerHTML = renderComponent(ComponentClass, {}, serverData);
+-  // Expand any nested custom elements in the render output.
+   const expanded = expandNestedCEs(innerHTML, ceMap);
++  if (shadow === 'open' || shadow === 'closed') {
++    const styles = flattenStyles((ComponentClass as unknown as { styles?: unknown }).styles);
++    const dsd =
++      `<template shadowrootmode="${shadow}">` +
++      `<style id="${DSD_SENTINEL_STYLE_ID}">${styles}</style>` +
++      expanded +
++      `</template>`;
++    yield `<${tag} hydrated>${dsd}</${tag}>`;
++    return;
++  }
+   yield `<${tag} hydrated>${expanded}</${tag}>`;
+ }
+ 
 diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
 index 1eda380860b8900f201db9f07e3a36f785a6bd73..952725e1e0cba6711c0bba32be522b1fe3e243dd 100644
 --- a/src/plugins/path-to-route.ts
