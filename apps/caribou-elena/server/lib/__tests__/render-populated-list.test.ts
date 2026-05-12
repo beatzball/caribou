@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { JSDOM } from 'jsdom'
 
+function mkStatus(id: string, content = `<p>${id}</p>`): import('masto').mastodon.v1.Status {
+  return {
+    id,
+    content,
+    account: { id: '1', acct: 'u', username: 'u', displayName: 'U', avatar: '', avatarStatic: '' },
+    createdAt: '2026-05-11T07:00:00Z',
+    inReplyToId: null,
+  } as unknown as import('masto').mastodon.v1.Status
+}
+
 beforeAll(() => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>')
   ;(globalThis as unknown as { window: typeof dom.window }).window = dom.window
@@ -25,5 +35,46 @@ describe('renderPopulatedListMount — empty', () => {
     expect(html).toContain('<ul')
     expect(html).toContain('</ul>')
     expect(html).not.toContain('<li')
+  })
+})
+
+describe('renderPopulatedListMount — N timeline items', () => {
+  it('emits one <li data-key> per item in declared order', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [
+      { status: mkStatus('a'), variant: 'timeline' as const },
+      { status: mkStatus('b'), variant: 'timeline' as const },
+      { status: mkStatus('c'), variant: 'timeline' as const },
+    ]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    expect(html).toContain('<li data-key="a">')
+    expect(html).toContain('<li data-key="b">')
+    expect(html).toContain('<li data-key="c">')
+    expect(html.indexOf('data-key="a"')).toBeLessThan(html.indexOf('data-key="b"'))
+    expect(html.indexOf('data-key="b"')).toBeLessThan(html.indexOf('data-key="c"'))
+  })
+
+  it('reflects variant + data-rendered-at on every card host', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [
+      { status: mkStatus('a'), variant: 'timeline' as const },
+      { status: mkStatus('b'), variant: 'timeline' as const },
+    ]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    // variant appears on both the host element and the inner <article>,
+    // so with 2 items we expect 4 total matches.
+    const matches = html.match(/variant="timeline"/g) ?? []
+    expect(matches.length).toBe(4)
+    const rendered = html.match(/data-rendered-at="1700000000000"/g) ?? []
+    expect(rendered.length).toBe(2)
+  })
+
+  it('embeds each card via a DSD template', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [{ status: mkStatus('a'), variant: 'timeline' as const }]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    // One mount DSD + one card DSD = two shadowrootmode="open" templates.
+    const matches = html.match(/<template shadowrootmode="open">/g) ?? []
+    expect(matches.length).toBe(2)
   })
 })
