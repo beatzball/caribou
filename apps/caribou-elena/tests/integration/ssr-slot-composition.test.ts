@@ -64,6 +64,37 @@ afterAll(() => {
   if (server && !server.killed) server.kill('SIGTERM')
 })
 
+/**
+ * Strip every `<template shadowrootmode="…">…</template>` block, counting
+ * nested `<template>` opens so a non-greedy regex doesn't bail at the first
+ * inner `</template>` and leave shadow content masquerading as light DOM.
+ * Returns the input with all DSD subtrees removed, leaving only true light DOM.
+ */
+function stripDSDTemplates(html: string): string {
+  const opener = /<template shadowrootmode="[^"]*">/
+  let result = html
+  while (true) {
+    const m = opener.exec(result)
+    if (!m) return result
+    const start = m.index
+    let depth = 1
+    let scan = start + m[0].length
+    while (depth > 0 && scan < result.length) {
+      const nextOpen = result.indexOf('<template', scan)
+      const nextClose = result.indexOf('</template>', scan)
+      if (nextClose === -1) return result // Malformed input; bail.
+      if (nextOpen !== -1 && nextOpen < nextClose) {
+        depth++
+        scan = nextOpen + '<template'.length
+      } else {
+        depth--
+        scan = nextClose + '</template>'.length
+      }
+    }
+    result = result.slice(0, start) + result.slice(scan)
+  }
+}
+
 const ROUTES = ['/local', '/public', '/home', '/@me'] as const
 
 describe.each(ROUTES)('SSR slot composition: %s', (route) => {
@@ -83,18 +114,12 @@ describe.each(ROUTES)('SSR slot composition: %s', (route) => {
     const shellMatch = body.match(/<caribou-app-shell\b[^>]*>([\s\S]*?)<\/caribou-app-shell>/)
     expect(shellMatch, 'response should contain <caribou-app-shell>').not.toBeNull()
     // Strip the shadow-root template; what remains is the host's light-DOM children.
-    const lightChildren = shellMatch![1].replace(
-      /<template shadowrootmode="[^"]*">[\s\S]*?<\/template>/g,
-      '',
-    )
+    const lightChildren = stripDSDTemplates(shellMatch![1])
     expect(lightChildren).toContain('<caribou-auth-required')
   })
 
   it('has no literal <slot></slot> outside a <template shadowrootmode>', () => {
-    const stripped = body.replace(
-      /<template shadowrootmode="[^"]*">[\s\S]*?<\/template>/g,
-      '',
-    )
+    const stripped = stripDSDTemplates(body)
     expect(stripped).not.toMatch(/<slot(?:\s[^>]*)?><\/slot>/)
   })
 
