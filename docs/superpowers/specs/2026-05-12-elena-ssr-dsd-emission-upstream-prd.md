@@ -113,10 +113,20 @@ No consumer code should need to change. Snapshot tests that assert on the litera
 
 ## Browser compatibility
 
-DSD is supported natively in Chromium 90+, Safari 16.4+, Firefox 123+ (all current at the time of this PRD). For consumers targeting older browsers, a small polyfill (the `<template>` walker described in the WHATWG proposal) is well-documented; Litro's `getHeadScripts` could expose an opt-in flag (`needsDSDPolyfill`) — currently set to `false` on Elena's adapter.
+DSD is supported natively in Chromium 90+, Safari 16.4+, Firefox 123+ (all current at the time of this PRD).
+
+## Required companion changes in the same upstream PR
+
+1. **Flip `elenaAdapter.needsDSDPolyfill`.** Today `packages/framework/src/adapter/elena/index.ts` declares `needsDSDPolyfill: false` with a comment claiming Elena uses light-DOM SSR. After this change Elena emits DSD for any shadow-DOM component, so the flag is now a lie — and `runtime/create-page-handler.ts` reads it to decide whether to ship a polyfill. Options:
+   - Flip to `true` unconditionally. Smallest diff; ships polyfill on every Elena page even when no shadow-DOM component is mounted. Acceptable byte cost (the polyfill is ~200 bytes).
+   - Compute it lazily from the registry: `needsDSDPolyfill` becomes a getter that returns `true` iff any registered class has `static shadow`. More precise; slightly more code.
+   - Leave at `false` and accept that consumers targeting <Chromium-90 / <Safari-16.4 / <Firefox-123 render unstyled. Tracks today's behavior for users who already wrote their Elena app assuming light-DOM SSR. Honest, but trades correctness for inertia.
+
+   The Caribou patch leaves it `false` because Caribou targets only modern browsers; the upstream PR must pick deliberately and document the choice.
+
+2. **Update `README.md` adapter table.** The current text describes Elena SSR as "light DOM" exclusively ("Streaming SSR — Declarative Shadow DOM (Lit/FAST) or light DOM (Elena)"). After this fix Elena emits DSD for any component declaring `static shadow`. The README needs an entry like "Declarative Shadow DOM for `static shadow = 'open'|'closed'` components, light DOM otherwise."
 
 ## Out of scope (for this upstream PR)
 
 - The `caribou-dsd-style` literal sentinel id — adjustable per maintainer preference.
 - Refactoring the adapter's internal helpers (`renderComponent`, `expandNestedCEs`) into a cleaner shape. The fix is intentionally minimal-diff for review safety.
-- DSD polyfill emission. The adapter's `needsDSDPolyfill: false` flag stays as-is.
