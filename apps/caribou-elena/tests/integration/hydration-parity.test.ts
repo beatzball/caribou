@@ -58,3 +58,46 @@ describe('§12.6 hydration parity — SSR ↔ pre-hydration client render byte-e
     })
   }
 })
+
+describe('§12.6 hydration parity — populated card + helper', () => {
+  beforeAll(async () => {
+    await import('../../pages/components/caribou-status-card.js')
+  })
+
+  const FIXTURE_STATUS = {
+    id: 'fx',
+    content: '<p>fixture</p>',
+    account: { id: '1', acct: 'u', username: 'u', displayName: 'U', avatar: '', avatarStatic: '' },
+    createdAt: '2026-05-11T07:00:00Z',
+    inReplyToId: null,
+  } as unknown as import('masto').mastodon.v1.Status
+
+  it('caribou-status-card with status (via { attrs, props } form) is byte-equal', async () => {
+    const { renderShadowComponentToString } =
+      await import('../../server/lib/render-shadow.js')
+    const a = await renderShadowComponentToString('caribou-status-card', {
+      attrs: { variant: 'timeline', 'data-rendered-at': '1700000000000' },
+      props: { status: FIXTURE_STATUS },
+    })
+    const b = await renderShadowComponentToString('caribou-status-card', {
+      attrs: { variant: 'timeline', 'data-rendered-at': '1700000000000' },
+      props: { status: FIXTURE_STATUS },
+    })
+    expect(a).toBe(b)
+    expect(a).toContain('variant="timeline"')
+    expect(a).toContain('data-rendered-at="1700000000000"')
+    expect(a).not.toContain('status="')
+  })
+
+  it('renderPopulatedListMount is byte-equal across invocations', async () => {
+    const { renderPopulatedListMount } =
+      await import('../../server/lib/render-populated-list.js')
+    const items = [
+      { status: FIXTURE_STATUS, variant: 'timeline' as const },
+      { status: { ...FIXTURE_STATUS, id: 'fy', content: '<p>two</p>' } as typeof FIXTURE_STATUS, variant: 'timeline' as const },
+    ]
+    const a = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    const b = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    expect(a).toBe(b)
+  })
+})
