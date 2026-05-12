@@ -4,8 +4,8 @@ export interface ShellInfo {
   instance: string | null
 }
 
-export type AuthRequired = { kind: 'auth-required' }
-export type Failed       = { kind: 'error'; message: string }
+export type AuthRequired = { kind: 'auth-required'; serverNowMs: number }
+export type Failed       = { kind: 'error'; message: string; serverNowMs: number }
 
 export type TimelinePageData =
   | AuthRequired
@@ -14,6 +14,8 @@ export type TimelinePageData =
       kind: 'ok'
       statuses: Status[]
       nextMaxId: string | null
+      serverNowMs: number
+      populatedListHtml: string
     }
 
 export type ProfilePageData =
@@ -25,6 +27,8 @@ export type ProfilePageData =
       statuses: Status[]
       nextMaxId: string | null
       tab: 'posts' | 'replies' | 'media'
+      serverNowMs: number
+      populatedListHtml: string
     }
 
 export type ThreadPageData =
@@ -35,6 +39,8 @@ export type ThreadPageData =
       focused: Status
       ancestors: Status[]
       descendants: Status[]
+      serverNowMs: number
+      populatedListHtml: string
     }
 
 export type AuthRequiredOnlyPageData = AuthRequired
