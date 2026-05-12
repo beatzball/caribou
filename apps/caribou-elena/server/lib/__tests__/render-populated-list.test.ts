@@ -78,3 +78,39 @@ describe('renderPopulatedListMount — N timeline items', () => {
     expect(matches.length).toBe(2)
   })
 })
+
+describe('renderPopulatedListMount — depth + mixed variants', () => {
+  it('descendant with depth emits data-depth and margin-inline-start on the <li>', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [
+      { status: mkStatus('d1'), variant: 'descendant' as const, depth: 2 },
+    ]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    expect(html).toContain('data-depth="2"')
+    expect(html).toContain('style="margin-inline-start:calc(var(--space-4)*2)"')
+  })
+
+  it('ancestor and focused items have no data-depth on the <li>', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [
+      { status: mkStatus('a1'), variant: 'ancestor' as const },
+      { status: mkStatus('f1'), variant: 'focused' as const },
+    ]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    // No data-depth attribute on any <li>.
+    expect(html).not.toMatch(/<li[^>]*data-depth=/)
+  })
+
+  it('mixed variants emit cards with correct variant attribute per item', async () => {
+    const { renderPopulatedListMount } = await import('../render-populated-list.js')
+    const items = [
+      { status: mkStatus('a1'), variant: 'ancestor' as const },
+      { status: mkStatus('f1'), variant: 'focused' as const },
+      { status: mkStatus('d1'), variant: 'descendant' as const, depth: 1 },
+    ]
+    const html = await renderPopulatedListMount({ items, serverNowMs: 1700000000000 })
+    expect(html).toContain('variant="ancestor"')
+    expect(html).toContain('variant="focused"')
+    expect(html).toContain('variant="descendant"')
+  })
+})

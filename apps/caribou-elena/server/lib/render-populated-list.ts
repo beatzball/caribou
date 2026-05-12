@@ -51,10 +51,13 @@ export async function renderPopulatedListMount(
 }
 
 function buildLi(item: PopulatedListItem, cardHtml: string): string {
-  const key = item.status.id
-  // Empty-case bootstrap: only the data-key is required. Depth / style
-  // are added in Task 7.
-  return `<li data-key="${escapeAttr(key)}">${cardHtml}</li>`
+  const key = escapeAttr(item.status.id)
+  const isDescendantWithDepth = item.variant === 'descendant' && item.depth != null
+  if (isDescendantWithDepth) {
+    const depth = String(item.depth)
+    return `<li data-key="${key}" data-depth="${depth}" style="margin-inline-start:calc(var(--space-4)*${depth})">${cardHtml}</li>`
+  }
+  return `<li data-key="${key}">${cardHtml}</li>`
 }
 
 function escapeAttr(v: string): string {
