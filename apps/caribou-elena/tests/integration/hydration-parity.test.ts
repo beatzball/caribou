@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { JSDOM } from 'jsdom'
+import type { mastodon } from 'masto'
 
 beforeAll(() => {
   const dom = new JSDOM('<!doctype html><html><body></body></html>')
@@ -70,7 +71,7 @@ describe('§12.6 hydration parity — populated card + helper', () => {
     account: { id: '1', acct: 'u', username: 'u', displayName: 'U', avatar: '', avatarStatic: '' },
     createdAt: '2026-05-11T07:00:00Z',
     inReplyToId: null,
-  } as unknown as import('masto').mastodon.v1.Status
+  } as unknown as mastodon.v1.Status
 
   it('caribou-status-card with status (via { attrs, props } form) is byte-equal', async () => {
     const { renderShadowComponentToString } =

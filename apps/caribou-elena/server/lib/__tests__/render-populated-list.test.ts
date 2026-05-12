@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { JSDOM } from 'jsdom'
+import type { mastodon } from 'masto'
 
-function mkStatus(id: string, content = `<p>${id}</p>`): import('masto').mastodon.v1.Status {
+function mkStatus(id: string, content = `<p>${id}</p>`): mastodon.v1.Status {
   return {
     id,
     content,
     account: { id: '1', acct: 'u', username: 'u', displayName: 'U', avatar: '', avatarStatic: '' },
     createdAt: '2026-05-11T07:00:00Z',
     inReplyToId: null,
-  } as unknown as import('masto').mastodon.v1.Status
+  } as unknown as mastodon.v1.Status
 }
 
 beforeAll(() => {
