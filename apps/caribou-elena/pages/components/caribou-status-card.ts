@@ -101,9 +101,16 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
   // deterministic (no Date.now() drift between server and client). After
   // the first microtask we flip to the relative form.
   private _hydrated = false
+  private _firstHydratedRenderDone = false
+  private _initialNowMs: number | null = null
 
   override connectedCallback() {
     super.connectedCallback?.()
+    const renderedAt = this.dataset.renderedAt
+    if (renderedAt) {
+      const parsed = Number(renderedAt)
+      if (Number.isFinite(parsed)) this._initialNowMs = parsed
+    }
     queueMicrotask(() => {
       this._hydrated = true
       this.requestUpdate?.()
@@ -156,7 +163,11 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
     const display = s.reblog ?? s
     const safe = DOMPurify.sanitize(display.content ?? '', PURIFY_OPTS)
     const dt = display.createdAt
-    const relLabel = this._hydrated ? formatRelativeTime(dt) : absoluteLabel(dt)
+    const nowMs = this._hydrated && !this._firstHydratedRenderDone && this._initialNowMs != null
+      ? this._initialNowMs
+      : Date.now()
+    if (this._hydrated) this._firstHydratedRenderDone = true
+    const relLabel = this._hydrated ? formatRelativeTime(dt, nowMs) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
     // Permalink: anchor on the timestamp, not the whole article — wrapping the
     // <article> would put the post-content links (hashtags, mentions, external
