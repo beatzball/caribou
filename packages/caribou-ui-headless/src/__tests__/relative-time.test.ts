@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { formatRelativeTime } from '../relative-time.js'
 
-const NOW = new Date('2026-04-28T12:00:00Z')
+const NOW = new Date('2026-04-28T12:00:00Z').getTime()
 
 describe('formatRelativeTime', () => {
   it.each([
@@ -25,5 +25,24 @@ describe('formatRelativeTime', () => {
     const out = formatRelativeTime(new Date().toISOString())
     expect(typeof out).toBe('string')
     expect(out.length).toBeGreaterThan(0)
+  })
+})
+
+describe('formatRelativeTime — explicit nowMs', () => {
+  it('uses the provided nowMs instead of Date.now()', () => {
+    const created = '2026-05-11T07:00:00Z'
+    // "now" is 5 minutes after creation
+    const nowMs = new Date('2026-05-11T07:05:00Z').getTime()
+    const result = formatRelativeTime(created, nowMs)
+    expect(result).toBe('5m')
+  })
+
+  it('falls back to Date.now() when nowMs is omitted', () => {
+    // We can't assert exact text without freezing the clock, but we can
+    // assert the function still returns a non-empty string with the
+    // legacy single-argument call.
+    const created = new Date(Date.now() - 60_000).toISOString() // 1 minute ago
+    const result = formatRelativeTime(created)
+    expect(result.length).toBeGreaterThan(0)
   })
 })

@@ -11,9 +11,9 @@
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-export function formatRelativeTime(iso: string, now: Date = new Date()): string {
+export function formatRelativeTime(iso: string, nowMs?: number): string {
   const t = new Date(iso).getTime()
-  const n = now.getTime()
+  const n = nowMs ?? Date.now()
   const deltaSec = Math.max(0, Math.floor((n - t) / 1000))
 
   if (deltaSec < 30) return 'just now'
@@ -22,7 +22,8 @@ export function formatRelativeTime(iso: string, now: Date = new Date()): string 
   if (deltaSec < 86_400 * 7) return `${Math.floor(deltaSec / 86_400)}d`
 
   const d = new Date(iso)
-  const sameYear = d.getUTCFullYear() === now.getUTCFullYear()
+  const nowDate = new Date(n)
+  const sameYear = d.getUTCFullYear() === nowDate.getUTCFullYear()
   const month = MONTHS[d.getUTCMonth()]
   return sameYear
     ? `${month} ${d.getUTCDate()}`
