@@ -79,6 +79,97 @@ index 1c90aa6908d442e63371df6c46dd47dc8127729a..34ae9fd9491f916c2ec3225af804c5d0
      yield `<${tag} hydrated>${expanded}</${tag}>`;
  }
  export const elenaAdapter = {
+diff --git a/dist/adapter/elena/runtime/LitroLink.js b/dist/adapter/elena/runtime/LitroLink.js
+index b663152868509f5713d6a2e8f6c0b17006333a98..f6f91d4a72b2d2fb5180f86bc7388836b287ffb8 100644
+--- a/dist/adapter/elena/runtime/LitroLink.js
++++ b/dist/adapter/elena/runtime/LitroLink.js
+@@ -1,42 +1,47 @@
+ /**
+  * LitroLink (Elena) — <litro-link>
+  *
+- * Elena implementation of the SPA navigation link. Mirrors the Lit/FAST
+- * version's behavior:
++ * Composite SPA-navigation wrapper. Author writes:
++ *   <litro-link><a href="/path">Label</a></litro-link>
+  *
+- * 1. Light DOM with an inner <a> for progressive enhancement
+- * 2. Capture-phase click handler on the host element
+- * 3. Intercepts same-origin, modifier-free left clicks on internal paths
+- * 4. Dynamic import of litro-router (client-only)
+- *
+- * Elena uses static props for reactive attributes and render() for the
+- * inner <a> element. Since Elena renders to light DOM, the <a> is directly
+- * in the document tree — no shadow root.
++ * No render, no shadow, no styles. Capture-phase click handler walks
++ * composedPath to find the inner <a> and routes via LitroRouter when
++ * the anchor is an internal same-origin path with no target / modifier.
+  */
+-import { Elena, html } from '@elenajs/core';
++import { Elena } from '@elenajs/core';
+ export class LitroLink extends Elena(HTMLElement) {
+     constructor() {
+         super(...arguments);
+-        this.href = '';
+-        this.target = '';
+-        this.rel = '';
+         this._clickHandler = (e) => {
+-            if (this.target)
++            if (e.button !== 0)
+                 return;
+             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+                 return;
+-            if (!this.href.startsWith('/'))
++            if (e.defaultPrevented)
++                return;
++            const path = e.composedPath();
++            let anchor;
++            for (const node of path) {
++                if (node === this)
++                    break;
++                if (node instanceof HTMLAnchorElement) {
++                    anchor = node;
++                    break;
++                }
++            }
++            if (!anchor)
++                return;
++            if (anchor.target)
++                return;
++            const href = anchor.getAttribute('href');
++            if (!href || !href.startsWith('/'))
+                 return;
+             e.preventDefault();
+-            void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(this.href));
++            void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href));
+         };
+     }
+     static { this.tagName = 'litro-link'; }
+-    static { this.props = ['href', 'target', 'rel']; }
+     connectedCallback() {
+-        // Register capture-phase click handler BEFORE super.connectedCallback()
+-        // so it is active immediately on SSR'd elements (before Elena's
+-        // hydration logic runs).
+         this.addEventListener('click', this._clickHandler, true);
+         if (typeof super.connectedCallback === 'function') {
+             super.connectedCallback();
+@@ -48,16 +53,5 @@ export class LitroLink extends Elena(HTMLElement) {
+             super.disconnectedCallback();
+         }
+     }
+-    render() {
+-        // Elena is light DOM — <slot> has no meaning without shadow DOM.
+-        // Use this.text (Elena's built-in property that captures the element's
+-        // text content before hydration) to render the link text.
+-        return html `<a
+-      href="${this.href}"
+-      target="${this.target}"
+-      rel="${this.rel}"
+-    >${this.text}</a>`;
+-    }
+ }
+ LitroLink.define();
+-//# sourceMappingURL=LitroLink.js.map
+\ No newline at end of file
 diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
 index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6eaa9bff8ce564633904fc9a8c00bdf8be3e55a2 100644
 --- a/dist/plugins/path-to-route.js
@@ -197,6 +288,108 @@ index 9d1c54a5efbd5056782155e047656e6b19d6a7c3..b088987ce9ae4828e2bb92185d67d7ec
    yield `<${tag} hydrated>${expanded}</${tag}>`;
  }
  
+diff --git a/src/adapter/elena/runtime/LitroLink.ts b/src/adapter/elena/runtime/LitroLink.ts
+index ae408aa0bbe7ca94e4144a212afb7e153a749787..ff1f845c94841d021fa4fdfe867440ea2df84782 100644
+--- a/src/adapter/elena/runtime/LitroLink.ts
++++ b/src/adapter/elena/runtime/LitroLink.ts
+@@ -1,46 +1,57 @@
+ /**
+  * LitroLink (Elena) — <litro-link>
+  *
+- * Elena implementation of the SPA navigation link. Mirrors the Lit/FAST
+- * version's behavior:
++ * Composite SPA-navigation wrapper. Author writes:
+  *
+- * 1. Light DOM with an inner <a> for progressive enhancement
+- * 2. Capture-phase click handler on the host element
+- * 3. Intercepts same-origin, modifier-free left clicks on internal paths
+- * 4. Dynamic import of litro-router (client-only)
++ *   <litro-link><a href="/path">Label</a></litro-link>
+  *
+- * Elena uses static props for reactive attributes and render() for the
+- * inner <a> element. Since Elena renders to light DOM, the <a> is directly
+- * in the document tree — no shadow root.
++ * This element has no render(), no shadow root, no styles, no props.
++ * Children pass through to the parent's tree (the author-supplied <a>
++ * stays in light DOM relative to whatever shadow root encloses it, so
++ * link-hint tools / screen readers / focus traversal see it normally).
++ *
++ * On click, the host's capture-phase handler walks composedPath to find
++ * the inner <a>. If the anchor is an internal same-origin path with no
++ * `target` attribute and the click has no modifier keys, the default is
++ * prevented and the URL is routed via LitroRouter.go(). Otherwise the
++ * click passes through (Cmd-click for new tab, middle-click, external
++ * links, fragments, downloads all behave like a plain <a>).
+  */
+ 
+-import { Elena, html } from '@elenajs/core';
++import { Elena } from '@elenajs/core';
+ 
+ export class LitroLink extends Elena(HTMLElement) {
+   static tagName = 'litro-link';
+-  static props = ['href', 'target', 'rel'];
+-
+-  href = '';
+-  target = '';
+-  rel = '';
++  // No shadow, no styles, no props, no render() — Elena's _applyRender
++  // no-ops when render() returns undefined (see the LitroOutlet precedent).
+ 
+   private _clickHandler = (e: MouseEvent): void => {
+-    if (this.target) return;
++    if (e.button !== 0) return;
+     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+-    if (!this.href.startsWith('/')) return;
++    if (e.defaultPrevented) return;
++
++    const path = e.composedPath();
++    let anchor: HTMLAnchorElement | undefined;
++    for (const node of path) {
++      if (node === this) break;
++      if (node instanceof HTMLAnchorElement) {
++        anchor = node;
++        break;
++      }
++    }
++    if (!anchor) return;
++    if (anchor.target) return;
++    const href = anchor.getAttribute('href');
++    if (!href || !href.startsWith('/')) return;
+ 
+     e.preventDefault();
+     void import('@beatzball/litro-router').then(({ LitroRouter }) =>
+-      LitroRouter.go(this.href),
++      LitroRouter.go(href),
+     );
+   };
+ 
+   override connectedCallback(): void {
+-    // Register capture-phase click handler BEFORE super.connectedCallback()
+-    // so it is active immediately on SSR'd elements (before Elena's
+-    // hydration logic runs).
+     this.addEventListener('click', this._clickHandler, true);
+-
+     if (typeof super.connectedCallback === 'function') {
+       super.connectedCallback();
+     }
+@@ -52,17 +63,6 @@ export class LitroLink extends Elena(HTMLElement) {
+       super.disconnectedCallback();
+     }
+   }
+-
+-  render() {
+-    // Elena is light DOM — <slot> has no meaning without shadow DOM.
+-    // Use this.text (Elena's built-in property that captures the element's
+-    // text content before hydration) to render the link text.
+-    return html`<a
+-      href="${this.href}"
+-      target="${this.target}"
+-      rel="${this.rel}"
+-    >${this.text}</a>`;
+-  }
+ }
+ 
+ LitroLink.define();
 diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
 index 1eda380860b8900f201db9f07e3a36f785a6bd73..952725e1e0cba6711c0bba32be522b1fe3e243dd 100644
 --- a/src/plugins/path-to-route.ts
