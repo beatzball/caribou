@@ -1,10 +1,14 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { LitroRouter } from '@beatzball/litro-router'
 
-// Mock @beatzball/litro-router so we can spy on go() without real router state.
-const goSpy = vi.fn()
-vi.mock('@beatzball/litro-router', () => ({
-  LitroRouter: { go: goSpy },
-}))
+// Spy on the real LitroRouter.go (rather than vi.mock'ing the module).
+// vi.mock doesn't intercept dynamic imports made from inside node_modules
+// because Vitest's transformer skips node_modules by default — the click
+// handler's `import('@beatzball/litro-router')` inside the patched LitroLink
+// would otherwise get the real module while the test holds a different
+// (mocked) reference. vi.spyOn replaces the static method on the real class
+// so both static and dynamic imports observe the same spied callable.
+const goSpy = vi.spyOn(LitroRouter, 'go').mockImplementation(() => {})
 
 beforeAll(async () => {
   // Side-effect import — triggers LitroLink.define().
@@ -21,10 +25,13 @@ afterEach(() => {
 })
 
 async function flush() {
-  // Two microtasks: one for the dynamic-import promise resolution, one for
-  // the .then() callback that calls LitroRouter.go.
+  // Drain microtasks after a click so the click handler's
+  // `void import(...).then(...)` chain runs to completion: one tick for the
+  // dynamic-import promise, one for the .then() callback. A small setTimeout
+  // covers any extra microtask hops added by Vitest's module loader.
   await Promise.resolve()
   await Promise.resolve()
+  await new Promise((r) => setTimeout(r, 0))
 }
 
 describe('<litro-link> composite click handler', () => {
