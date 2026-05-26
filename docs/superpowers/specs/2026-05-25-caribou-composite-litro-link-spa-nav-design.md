@@ -29,7 +29,7 @@ In scope:
 
 - Replace the Elena `LitroLink` upstream with a composite (no-render / no-shadow) click-intercepting wrapper. Delivered via `pnpm patch @beatzball/litro@0.9.1` (extending the same `patches/@beatzball__litro@0.9.1.patch` that already carries PR #22's DSD-emission hunks and the pre-existing path-to-route hunks).
 - Wrap nine plain `<a href>` in five Caribou shell files + ~5 blog-page anchors with `<litro-link>`. CSS keeps targeting `<a>` (no retargeting); add a single `litro-link { display: contents }` rule per consumer's shadow CSS so the wrapper is layout-invisible.
-- Rename `pages/index.ts`'s tagName from `page-home` to `page-landing` to fix the SPA-nav collision.
+- Rename `pages/index.ts`'s tagName from `page-home` to `page-index` to fix the SPA-nav collision.
 - New unit test for composite `LitroLink` behavior. Update existing component tests to query inner `<a>` (essentially reverting to pre-phase-4.2 shape with `<litro-link>` wrapper). Update PR #22's SSR integration test assertion to match the new shape.
 - One-page upstream PRD describing the Composite rewrite. The phase-4.2 PRD (which described shadow+slot) is superseded.
 
@@ -158,21 +158,21 @@ For light-DOM consumers (`caribou-auth-required`, retry links): no CSS change ne
 `apps/caribou-elena/pages/index.ts` (one-line edit):
 
 ```ts
-static override tagName = 'page-landing'  // was 'page-home'
+static override tagName = 'page-index'  // was 'page-home'
 ```
 
 Litro's page scanner reads `static tagName` from the source file (see `routes.generated.ts` and `server/stubs/page-manifest.ts` for how `componentTag` flows through). On next build:
 
-- `routes.generated.ts` `/` route → `component: "page-landing"` (was `"page-home"`)
+- `routes.generated.ts` `/` route → `component: "page-index"` (was `"page-home"`)
 - `server/stubs/page-manifest.ts` regenerates accordingly
 
 Now `/` and `/home` use distinct component tags. Each page module's class registers under its own tagName. SPA nav between them creates the right element class for each route. Both `/` (landing) and `/home` (shell + auth-required) work in SSR and via SPA nav, server-side and client-side, consistently.
 
 The `pages/home.ts` `static override tagName = 'page-home'` is unchanged.
 
-### 5.1 Why `page-landing` for `/`
+### 5.1 Why `page-index` for `/`
 
-`page-landing` describes what the route actually renders (`<caribou-landing>`). `page-home` is reserved for the authenticated-home shell at `/home`. Naming the route-element after its semantic content rather than its URL avoids future collisions if `/home` and `/landing` ever diverge further.
+`page-index` describes what the route actually renders (`<caribou-landing>`). `page-home` is reserved for the authenticated-home shell at `/home`. Naming the route-element after its semantic content rather than its URL avoids future collisions if `/home` and `/landing` ever diverge further.
 
 ## 6. Patch surface
 

@@ -4,7 +4,7 @@
 
 **Goal:** Land SPA nav for every shell link in Caribou using a composite `<litro-link>` wrapper that intercepts clicks via composedPath while keeping the actual `<a href>` in light DOM at each call site. Also fix the pre-existing `pages/home.ts` / `pages/index.ts` tagName collision that breaks SPA nav between `/home` and `/`.
 
-**Architecture:** Two coupled changes — (1) replace upstream Elena `LitroLink` (in `patches/@beatzball__litro@0.9.1.patch`) with a no-render / no-shadow click-intercepting wrapper; (2) wrap each shell `<a href>` + each blog text-link with `<litro-link>` and rename `pages/index.ts`'s `tagName` from `page-home` to `page-landing`. SSR adapter does not need to register `<litro-link>` server-side — pass-through is correct for the composite shape.
+**Architecture:** Two coupled changes — (1) replace upstream Elena `LitroLink` (in `patches/@beatzball__litro@0.9.1.patch`) with a no-render / no-shadow click-intercepting wrapper; (2) wrap each shell `<a href>` + each blog text-link with `<litro-link>` and rename `pages/index.ts`'s `tagName` from `page-home` to `page-index`. SSR adapter does not need to register `<litro-link>` server-side — pass-through is correct for the composite shape.
 
 **Tech Stack:** TypeScript, pnpm patch, Vitest (happy-dom), Playwright chromium.
 
@@ -18,7 +18,7 @@
 - `patches/@beatzball__litro@0.9.1.patch` — two new hunks: `src/adapter/elena/runtime/LitroLink.ts` and `dist/adapter/elena/runtime/LitroLink.js` (composite rewrite). The pre-existing four hunks (PR #22's `adapter/elena/index.{ts,js}` + `plugins/path-to-route.{ts,js}`) stay untouched. Patch ends with 6 `diff --git` headers.
 
 **Modified (Caribou source):**
-- `apps/caribou-elena/pages/index.ts` — change `static override tagName` from `'page-home'` to `'page-landing'`.
+- `apps/caribou-elena/pages/index.ts` — change `static override tagName` from `'page-home'` to `'page-index'`.
 - `apps/caribou-elena/pages/components/caribou-nav-rail.ts` — wrap 4 anchors in `<litro-link>`; add `litro-link { display: contents }` to the shadow CSS.
 - `apps/caribou-elena/pages/components/caribou-right-rail.ts` — wrap Privacy/About in `<litro-link>`; add `litro-link { display: contents }` to the shadow CSS.
 - `apps/caribou-elena/pages/components/caribou-auth-required.ts` — wrap Sign-in `<a>` in `<litro-link>`.
@@ -571,7 +571,7 @@ Edit `apps/caribou-elena/pages/index.ts` line 6. Change:
 to:
 
 ```ts
-  static override tagName = 'page-landing'
+  static override tagName = 'page-index'
 ```
 
 (Single-line change; rest of file unchanged.)
@@ -757,12 +757,12 @@ SPA-navigate via LitroRouter.go; the <a> stays in light DOM so link
 hints and screen readers see it.
 
 pages/index.ts's static tagName changes from 'page-home' to
-'page-landing' so / and /home no longer collide in the custom
+'page-index' so / and /home no longer collide in the custom
 element registry. Elena's defineElement is first-define-wins; pre-
 rename, whichever page module imported first claimed 'page-home',
 masking the bug client-side and producing wrong SSR output for one
 of the two routes. Build will regenerate routes.generated.ts +
-server/stubs/page-manifest.ts with componentTag: 'page-landing' for
+server/stubs/page-manifest.ts with componentTag: 'page-index' for
 the / route."
 ```
 
@@ -778,7 +778,7 @@ the / route."
 pnpm --filter caribou-elena build
 ```
 
-Expected: build succeeds. `routes.generated.ts` and `server/stubs/page-manifest.ts` regenerate; `/` route now maps to `componentTag: 'page-landing'`.
+Expected: build succeeds. `routes.generated.ts` and `server/stubs/page-manifest.ts` regenerate; `/` route now maps to `componentTag: 'page-index'`.
 
 - [ ] **Step 2: Confirm generated route shape**
 
@@ -787,7 +787,7 @@ grep -A 4 '"path": "/"' apps/caribou-elena/server/stubs/page-manifest.ts | head 
 grep -B 1 -A 4 'path: "/"' apps/caribou-elena/routes.generated.ts | head -8
 ```
 
-Expected: both show `componentTag` (or `component`) `'page-landing'` for `/` and `'page-home'` for `/home`. If either still shows `'page-home'` for `/`, the source change in Task 3 Step 1 didn't take — re-check `pages/index.ts:6`.
+Expected: both show `componentTag` (or `component`) `'page-index'` for `/` and `'page-home'` for `/home`. If either still shows `'page-home'` for `/`, the source change in Task 3 Step 1 didn't take — re-check `pages/index.ts:6`.
 
 - [ ] **Step 3: Run integration test**
 
@@ -905,7 +905,7 @@ wait 2>/dev/null
 
 Expected per route: `litro-link count ≥ 7` (4 nav-rail + 2 right-rail + 1 auth-required/retry on every route except `/` which has caribou-landing's picker instead of auth-required) and `internal <a> not inside litro-link: 0`.
 
-For `/` specifically: confirm the response contains `<page-landing>` (NOT `<page-home>`) and the inner `<caribou-landing>` text "Caribou" appears in an `<h1>`.
+For `/` specifically: confirm the response contains `<page-index>` (NOT `<page-home>`) and the inner `<caribou-landing>` text "Caribou" appears in an `<h1>`.
 
 ```bash
 PORT=4154 node apps/caribou-elena/dist/server/server/index.mjs > /tmp/srv-smoke2.log 2>&1 &
@@ -918,7 +918,7 @@ kill $SERVER_PID 2>/dev/null
 wait 2>/dev/null
 ```
 
-Expected: `/` shows `<page-landing` and `<h1 …>Caribou</h1>`; `/home` shows `<page-home`.
+Expected: `/` shows `<page-index` and `<h1 …>Caribou</h1>`; `/home` shows `<page-home`.
 
 - [ ] **Step 2: Browser-level smoke (optional but recommended)**
 
@@ -941,7 +941,7 @@ Create `.changeset/composite-litro-link-spa-nav.md`:
 
 Wrap every shell `<a href>` (nav-rail Home/Local/Public/Profile, right-rail Privacy/About, auth-required Sign-in, per-route Retry, blog navigation) in a composite `<litro-link>`. Clicks now SPA-navigate via `LitroRouter.go(href)` instead of triggering full document reloads. The `<a>` stays in light DOM at each call site so link-hint extensions, screen readers, and keyboard focus traversal see anchors normally.
 
-Also renames `pages/index.ts`'s component tagName from `page-home` to `page-landing`, fixing a pre-existing collision with `pages/home.ts` that caused SSR for `/` to render the auth-required shell instead of the landing picker, and broke SPA nav from `/home` to `/`.
+Also renames `pages/index.ts`'s component tagName from `page-home` to `page-index`, fixing a pre-existing collision with `pages/home.ts` that caused SSR for `/` to render the auth-required shell instead of the landing picker, and broke SPA nav from `/home` to `/`.
 
 Depends on a `pnpm patch` of `@beatzball/litro@0.9.1` that rewrites Elena's `LitroLink` to the composite shape (no render, no shadow). Upstream PRD at `docs/superpowers/specs/2026-05-25-litro-link-composite-upstream-prd.md`.
 
@@ -1082,6 +1082,6 @@ No spec sections missing from the plan.
 - `<litro-link>` tag name consistent across HTML, CSS selectors, test queries, regex matchers.
 - `composedPath` used the same way in the patch source and the unit test (event must be `composed: true` for synthetic dispatch).
 - `LitroRouter.go(href)` signature consistent between LitroLink source and test mock.
-- `page-landing` tag name used consistently in Task 3 Step 1, smoke checks (Task 6 Step 1).
+- `page-index` tag name used consistently in Task 3 Step 1, smoke checks (Task 6 Step 1).
 - Patch hunk count (6 `diff --git` headers) consistent between Task 2 Step 5 and spec §6.
 - `display: contents` rule placement consistent between spec §4.2 and Task 3 Steps 2A/3A.
