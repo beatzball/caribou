@@ -171,7 +171,7 @@ index b663152868509f5713d6a2e8f6c0b17006333a98..f6f91d4a72b2d2fb5180f86bc7388836
 -//# sourceMappingURL=LitroLink.js.map
 \ No newline at end of file
 diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
-index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6eaa9bff8ce564633904fc9a8c00bdf8be3e55a2 100644
+index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6550a2a4471a86c45a6c6a690134b1513880b3ad 100644
 --- a/dist/plugins/path-to-route.js
 +++ b/dist/plugins/path-to-route.js
 @@ -33,10 +33,13 @@ function transformSegment(segment) {
@@ -206,6 +206,31 @@ index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..6eaa9bff8ce564633904fc9a8c00bdf8
  }
  /**
   * Returns true if a transformed route segment is a catch-all.
+@@ -129,12 +132,13 @@ export function fileToRoute(filePath, pagesDir) {
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -159,7 +163,7 @@ export function fileToComponentTag(filePath, pagesDir) {
+         .filter(Boolean);
+     // Handle the root index case: ['index'] → 'home'
+     if (cleaned.length === 1 && cleaned[0] === 'index') {
+-        return 'page-home';
++        return 'page-index';
+     }
+     // Remove trailing 'index' segments (blog/index → blog)
+     while (cleaned.length > 1 && cleaned[cleaned.length - 1] === 'index') {
 diff --git a/src/adapter/elena/index.ts b/src/adapter/elena/index.ts
 index 9d1c54a5efbd5056782155e047656e6b19d6a7c3..b088987ce9ae4828e2bb92185d67d7ec3d16ced7 100644
 --- a/src/adapter/elena/index.ts
@@ -391,7 +416,7 @@ index ae408aa0bbe7ca94e4144a212afb7e153a749787..ff1f845c94841d021fa4fdfe867440ea
  
  LitroLink.define();
 diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
-index 1eda380860b8900f201db9f07e3a36f785a6bd73..952725e1e0cba6711c0bba32be522b1fe3e243dd 100644
+index 1eda380860b8900f201db9f07e3a36f785a6bd73..dffe9e6e4f8ca7eb9ca4db7460a4e76ff75285c0 100644
 --- a/src/plugins/path-to-route.ts
 +++ b/src/plugins/path-to-route.ts
 @@ -22,9 +22,15 @@ import type { LitroRoute } from '../types/route.js';
@@ -447,3 +472,28 @@ index 1eda380860b8900f201db9f07e3a36f785a6bd73..952725e1e0cba6711c0bba32be522b1f
  }
  
  /**
+@@ -149,12 +163,13 @@ export function fileToRoute(filePath: string, pagesDir: string): LitroRoute {
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -184,7 +199,7 @@ export function fileToComponentTag(filePath: string, pagesDir: string): string {
+ 
+   // Handle the root index case: ['index'] → 'home'
+   if (cleaned.length === 1 && cleaned[0] === 'index') {
+-    return 'page-home';
++    return 'page-index';
+   }
+ 
+   // Remove trailing 'index' segments (blog/index → blog)

@@ -28,7 +28,7 @@ test('submitting the picker POSTs /api/signin/start and follows the redirect', a
   )
   await page.goto('/')
   // Wait for Litro's SSR-mount cleanup before interacting with the form.
-  // During the brief window where both the SSR and client <page-landing>
+  // During the brief window where both the SSR and client <page-index>
   // coexist, fill() and click() can land on different mounts — fill goes
   // to the SSR'd input that's about to be removed, click hits the surviving
   // client's empty input, and the picker's `if (!server) return` guard

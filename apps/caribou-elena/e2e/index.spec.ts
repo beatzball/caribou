@@ -12,8 +12,8 @@ test('__litro_data__ is injected into HTML', async ({ request }) => {
   expect(body).toContain('__litro_data__');
 });
 
-test('page-landing is visible after hydration', async ({ page }) => {
+test('page-index is visible after hydration', async ({ page }) => {
   await page.goto('/');
-  await page.waitForSelector('page-landing');
-  await expect(page.locator('page-landing')).toBeVisible();
+  await page.waitForSelector('page-index');
+  await expect(page.locator('page-index')).toBeVisible();
 });
