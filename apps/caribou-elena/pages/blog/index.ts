@@ -9,11 +9,11 @@ export class BlogPage extends Elena(HTMLElement) {
         <h1>Blog</h1>
         <p>Choose a post:</p>
         <ul>
-          <li><litro-link href="/blog/hello-world">Hello World</litro-link></li>
-          <li><litro-link href="/blog/getting-started">Getting Started</litro-link></li>
-          <li><litro-link href="/blog/about-litro">About Litro</litro-link></li>
+          <li><litro-link><a href="/blog/hello-world">Hello World</a></litro-link></li>
+          <li><litro-link><a href="/blog/getting-started">Getting Started</a></litro-link></li>
+          <li><litro-link><a href="/blog/about-litro">About Litro</a></litro-link></li>
         </ul>
-        <litro-link href="/">\u2190 Back Home</litro-link>
+        <litro-link><a href="/">\u2190 Back Home</a></litro-link>
       </main>
     `;
   }

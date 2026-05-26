@@ -43,9 +43,9 @@ export class BlogPostPage extends LitroPage {
       <article>
         <h1>${data?.title ?? 'Loading\u2026'}</h1>
         <p>${data?.content ?? ''}</p>
-        <litro-link href="/blog">\u2190 Back to Blog</litro-link>
+        <litro-link><a href="/blog">\u2190 Back to Blog</a></litro-link>
         \u00a0|\u00a0
-        <litro-link href="/">\u2190 Home</litro-link>
+        <litro-link><a href="/">\u2190 Home</a></litro-link>
       </article>
     `;
   }
