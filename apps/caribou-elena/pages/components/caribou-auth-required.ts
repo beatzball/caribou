@@ -12,7 +12,7 @@ export class CaribouAuthRequired extends Elena(HTMLElement) {
         <h1 class="text-2xl font-semibold mb-3">Sign in to continue</h1>
         <p class="fg-1">
           ${this.label}
-          <a href="/" class="text-accent underline">Sign in</a>
+          <litro-link><a href="/" class="text-accent underline">Sign in</a></litro-link>
           to view it.
         </p>
       </article>

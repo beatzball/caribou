@@ -58,7 +58,7 @@ export default class PublicPage extends LitroPage {
       return html`
         <caribou-app-shell instance="${inst}">
           <article class="p-4 fg-muted" role="alert">
-            Couldn't load /public. <a href="/public" class="text-accent underline">Retry</a>
+            Couldn't load /public. <litro-link><a href="/public" class="text-accent underline">Retry</a></litro-link>
           </article>
         </caribou-app-shell>
       `

@@ -58,7 +58,7 @@ export default class LocalPage extends LitroPage {
       return html`
         <caribou-app-shell instance="${inst}">
           <article class="p-4 fg-muted" role="alert">
-            Couldn't load /local. <a href="/local" class="text-accent underline">Retry</a>
+            Couldn't load /local. <litro-link><a href="/local" class="text-accent underline">Retry</a></litro-link>
           </article>
         </caribou-app-shell>
       `

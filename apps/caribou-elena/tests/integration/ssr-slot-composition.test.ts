@@ -135,4 +135,23 @@ describe.each(ROUTES)('SSR slot composition: %s', (route) => {
     const data = JSON.parse(json as string) as { kind: string }
     expect(data.kind).toBe('auth-required')
   })
+
+  it('every shell <a href="/…"> is wrapped in <litro-link>', () => {
+    const lightDOM = stripDSDTemplates(body)
+    // Match internal-path hrefs: starts with `/`, allows bare `/` (Sign-in
+    // link), allows `/path` or `/path#fragment`, rejects fragment-only `#x`.
+    const anchorMatches = [...lightDOM.matchAll(/<a\s[^>]*href="(\/(?:[^"#][^"]*)?)"[^>]*>/g)]
+    expect(anchorMatches.length, 'response should contain at least one internal-link <a>').toBeGreaterThan(0)
+    for (const m of anchorMatches) {
+      const idx = m.index ?? 0
+      const before = lightDOM.slice(Math.max(0, idx - 400), idx)
+      // Confirm an unclosed <litro-link> opens before this <a> within ~400 chars.
+      const lastOpen = before.lastIndexOf('<litro-link')
+      const lastClose = before.lastIndexOf('</litro-link>')
+      expect(
+        lastOpen,
+        `internal <a href="${m[1]}"> at offset ${idx} must be inside a <litro-link>`,
+      ).toBeGreaterThan(lastClose)
+    }
+  })
 })

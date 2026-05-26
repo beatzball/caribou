@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest'
 beforeAll(async () => { await import('../caribou-auth-required.js') })
 
 describe('caribou-auth-required', () => {
-  it('renders sign-in CTA copy and link to /', async () => {
+  it('renders sign-in CTA copy and link to / wrapped in <litro-link>', async () => {
     document.body.innerHTML = ''
     const el = document.createElement('caribou-auth-required') as HTMLElement & { label: string }
     el.label = '/home shows your personal timeline.'
@@ -14,6 +14,7 @@ describe('caribou-auth-required', () => {
     const link = el.querySelector<HTMLAnchorElement>('a[href="/"]')
     expect(link).not.toBeNull()
     expect(link!.textContent).toContain('Sign in')
+    expect(link!.closest('litro-link')).toBeTruthy()
   })
 
   it('uses light DOM (no shadowRoot)', async () => {

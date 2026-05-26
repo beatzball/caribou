@@ -10,6 +10,7 @@ const RIGHT_RAIL_CSS = `
   .card  { background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); margin-bottom: var(--space-3); }
   .card a { color: var(--fg-1); text-decoration: none; }
   .card a:hover { color: var(--accent); }
+  litro-link { display: contents; }
   .links { list-style: none; margin: 0; padding: 0; }
   .links a { display: block; padding: var(--space-2) 0; }
   .signed-in { color: var(--fg-1); margin-top: var(--space-2); }
@@ -36,8 +37,8 @@ export class CaribouRightRail extends CaribouElena(HTMLElement) {
       </div>
       <div class="card">
         <ul class="links">
-          <li><a href="/privacy">Privacy</a></li>
-          <li><a href="/about">About</a></li>
+          <li><litro-link><a href="/privacy">Privacy</a></litro-link></li>
+          <li><litro-link><a href="/about">About</a></litro-link></li>
         </ul>
         ${inst
           ? html`<div class="signed-in">Signed in to <strong>${inst}</strong> ·

@@ -5,14 +5,18 @@ beforeAll(async () => {
 })
 
 describe('<caribou-right-rail>', () => {
-  it('renders about card + privacy/about links', async () => {
+  it('renders about card + privacy/about links wrapped in <litro-link>', async () => {
     document.body.innerHTML = ''
     const el = document.createElement('caribou-right-rail')
     document.body.appendChild(el)
     await Promise.resolve()
     expect(el.shadowRoot!.textContent).toContain('Caribou')
-    expect(el.shadowRoot!.querySelector('a[href="/privacy"]')).toBeTruthy()
-    expect(el.shadowRoot!.querySelector('a[href="/about"]')).toBeTruthy()
+    const privacy = el.shadowRoot!.querySelector('a[href="/privacy"]')
+    const about = el.shadowRoot!.querySelector('a[href="/about"]')
+    expect(privacy).toBeTruthy()
+    expect(privacy?.closest('litro-link')).toBeTruthy()
+    expect(about).toBeTruthy()
+    expect(about?.closest('litro-link')).toBeTruthy()
   })
 
   it('renders signed-in indicator when instance prop is set', async () => {

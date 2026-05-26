@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@beatzball/litro@0.9.1':
-    hash: 083475803520b36122cfe5afdc774112b6edd723254e25c16adb6865550acc38
+    hash: 9ddbd335bc820d6970eaa643af043430277537c594097a2cc1ff98c6b7d0efd5
     path: patches/@beatzball__litro@0.9.1.patch
 
 importers:
@@ -45,7 +45,7 @@ importers:
         version: link:../../packages/caribou-ui-headless
       '@beatzball/litro':
         specifier: latest
-        version: 0.9.1(patch_hash=083475803520b36122cfe5afdc774112b6edd723254e25c16adb6865550acc38)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)
+        version: 0.9.1(patch_hash=9ddbd335bc820d6970eaa643af043430277537c594097a2cc1ff98c6b7d0efd5)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)
       '@beatzball/litro-router':
         specifier: ^0.1.8
         version: 0.1.8
@@ -4276,7 +4276,7 @@ snapshots:
 
   '@beatzball/litro-router@0.1.8': {}
 
-  '@beatzball/litro@0.9.1(patch_hash=083475803520b36122cfe5afdc774112b6edd723254e25c16adb6865550acc38)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)':
+  '@beatzball/litro@0.9.1(patch_hash=9ddbd335bc820d6970eaa643af043430277537c594097a2cc1ff98c6b7d0efd5)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(terser@5.46.1)(typescript@5.9.3)':
     dependencies:
       '@beatzball/litro-router': 0.1.8
       '@lit-labs/ssr': 3.3.1

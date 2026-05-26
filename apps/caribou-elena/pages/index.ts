@@ -3,7 +3,7 @@ import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import './components/caribou-landing.js'
 
 export default class HomePage extends LitroPage {
-  static override tagName = 'page-home'
+  static override tagName = 'page-index'
 
   override render() {
     return html`
