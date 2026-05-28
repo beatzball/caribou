@@ -1,6 +1,7 @@
 import { html } from '@elenajs/core'
 import { CaribouElena } from './elena-shadow.js'
 import { ICONS } from './_icons.js'
+import './caribou-signout-form.js'
 
 type ElenaTemplate = ReturnType<typeof html>
 
@@ -70,11 +71,13 @@ export class CaribouNavRail extends CaribouElena(HTMLElement) {
             ? html`<litro-link><a href="${it.href}" aria-current="page"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a></litro-link>`
             : html`<litro-link><a href="${it.href}"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a></litro-link>`
         })}
-        <form class="signout-form" action="/api/signout" method="post">
-          <button type="submit" class="signout-btn">
-            <span class="icon">${ICONS.logOut}</span><span class="label">Sign out</span>
-          </button>
-        </form>
+        <caribou-signout-form>
+          <form action="/api/signout" method="post" class="signout-form">
+            <button type="submit" class="signout-btn">
+              <span class="icon">${ICONS.logOut}</span><span class="label">Sign out</span>
+            </button>
+          </form>
+        </caribou-signout-form>
       </nav>
     `
   }
