@@ -1,6 +1,7 @@
 import { html } from '@elenajs/core'
 import { CaribouElena } from './elena-shadow.js'
 import { PACKAGE_VERSION } from '../../server/build-meta.generated.js'
+import './caribou-signout-form.js'
 
 const APP_NAME = 'Caribou'
 const REPO_URL = 'https://github.com/beatzball/caribou'
@@ -42,9 +43,11 @@ export class CaribouRightRail extends CaribouElena(HTMLElement) {
         </ul>
         ${inst
           ? html`<div class="signed-in">Signed in to <strong>${inst}</strong> ·
-                   <form action="/api/signout" method="post" style="display:inline;">
-                     <button type="submit" class="signout-btn">Sign out</button>
-                   </form>
+                   <caribou-signout-form>
+                     <form action="/api/signout" method="post" style="display:inline;">
+                       <button type="submit" class="signout-btn">Sign out</button>
+                     </form>
+                   </caribou-signout-form>
                  </div>`
           : html``}
       </div>
