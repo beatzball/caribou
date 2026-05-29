@@ -3,6 +3,7 @@ import { createPageHandler } from '@beatzball/litro/runtime/create-page-handler.
 import { routes, pageModules } from '#litro/page-manifest';
 import { TOKENS_HEAD } from '../lib/tokens-head.js';
 import { UNO_HEAD } from '../lib/uno-head.js';
+import { BASE_HEAD } from '../lib/base-head.js';
 import { matchRoute } from '../lib/match-route.js';
 
 export default defineEventHandler(async (event) => {
@@ -34,7 +35,7 @@ export default defineEventHandler(async (event) => {
     // the shell would ship zero stylesheet references and first paint
     // would be unstyled. Order matters: tokens before utilities so
     // `var(--…)` is defined when the utility resolves it.
-    routeMeta: { head: TOKENS_HEAD + UNO_HEAD },
+    routeMeta: { head: TOKENS_HEAD + UNO_HEAD + BASE_HEAD },
   });
   return handler(event);
 });
