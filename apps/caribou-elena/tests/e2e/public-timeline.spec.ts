@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type BrowserContext } from '@playwright/test'
 
 // Hits the real fosstodon.org via the server's SSR pageData fetch (no
 // browser-level interception is possible because the fetch is in the
@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test'
 // uptime; run locally to verify the cookie-only public-timeline path.
 test.skip(!!process.env.CI, 'Hits real upstream; skip in CI')
 
-async function withInstanceCookie(context: import('@playwright/test').BrowserContext) {
+async function withInstanceCookie(context: BrowserContext) {
   await context.addCookies([
     {
       name: 'caribou.instance',

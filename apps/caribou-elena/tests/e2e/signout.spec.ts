@@ -1,9 +1,6 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 
-async function setupSignedIn(
-  page: import('@playwright/test').Page,
-  context: import('@playwright/test').BrowserContext,
-) {
+async function setupSignedIn(page: Page, context: BrowserContext) {
   await context.addCookies([
     {
       name: 'caribou.instance',
