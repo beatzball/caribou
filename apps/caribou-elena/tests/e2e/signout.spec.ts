@@ -16,6 +16,8 @@ async function setupSignedIn(
     },
   ])
   await page.addInitScript(() => {
+    if (localStorage.getItem('__caribou_test_seeded')) return
+    localStorage.setItem('__caribou_test_seeded', '1')
     localStorage.setItem('caribou.activeUserKey', '"beatzball@fosstodon.org"')
     localStorage.setItem(
       'caribou.users',
@@ -31,7 +33,7 @@ async function setupSignedIn(
   )
 }
 
-test('signout clears localStorage and preserves the instance cookie', async ({ page, context }) => {
+test('signout clears localStorage, preserves the instance cookie, and redirects to /', async ({ page, context }) => {
   await setupSignedIn(page, context)
 
   await page.goto('/home')
@@ -39,15 +41,16 @@ test('signout clears localStorage and preserves the instance cookie', async ({ p
   const signOut = page.locator('caribou-nav-rail').locator('button.signout-btn').first()
   await signOut.waitFor({ state: 'visible' })
 
-  const signoutResponse = page.waitForResponse(
-    (r) => r.url().endsWith('/api/signout') && r.status() === 204,
-  )
-  await signOut.click()
-  await signoutResponse
+  await Promise.all([
+    page.waitForURL('**/', { timeout: 5000 }),
+    signOut.click(),
+  ])
 
   const cookies = await context.cookies()
   expect(cookies.find((c) => c.name === 'caribou.instance')?.value).toBe('fosstodon.org')
 
   const afterActive = await page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))
   expect(afterActive).toBe('null')
+
+  await expect(page.locator('caribou-landing')).toHaveCount(1)
 })

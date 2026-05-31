@@ -3,17 +3,24 @@ import { removeActiveUser } from '@beatzball/caribou-state'
 
 /**
  * Composite signout wrapper. Same shape as the patched <litro-link>:
- * no render, no shadow — consumer provides the <form>, this element only
- * adds a synchronous submit listener that calls removeActiveUser() before
- * the native form POST proceeds. Progressive enhancement: no-JS users
- * still get a working server-side signout.
+ * no render, no shadow — consumer provides the <form>, this element
+ * intercepts the submit, clears client session state, fires the POST
+ * via fetch, then hard-reloads at `/` so SSR re-renders the landing
+ * with no stale timeline / signed-in chrome in the DOM.
  */
 export class CaribouSignoutForm extends Elena(HTMLElement) {
   static override tagName = 'caribou-signout-form'
 
-  private onSubmit = (_e: SubmitEvent) => {
+  private onSubmit = (e: SubmitEvent) => {
+    e.preventDefault()
+    const form = e.currentTarget as HTMLFormElement
+    const action = form.action || '/api/signout'
     removeActiveUser()
-    // Native form POST proceeds to /api/signout.
+    void fetch(action, { method: 'POST', credentials: 'same-origin' })
+      .catch(() => {})
+      .finally(() => {
+        location.replace('/')
+      })
   }
 
   override connectedCallback() {

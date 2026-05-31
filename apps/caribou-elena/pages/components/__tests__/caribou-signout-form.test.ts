@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, addUserSession, type UserSession,
@@ -48,8 +48,9 @@ describe('<caribou-signout-form>', () => {
     expect(activeUserKey.value).toBe(key)
     expect(localStorage.getItem('caribou.activeUserKey')).toBe(JSON.stringify(key))
 
-    // Build the wrapper imperatively so the form child is already present
-    // when the element is connected (connectedCallback fires on appendChild).
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    vi.spyOn(location, 'replace').mockImplementation(() => {})
+
     const wrapper = document.createElement('caribou-signout-form')
     const form = document.createElement('form')
     form.setAttribute('action', '/api/signout')
@@ -61,26 +62,34 @@ describe('<caribou-signout-form>', () => {
     document.body.appendChild(wrapper)
     await Promise.resolve()
 
-    // requestSubmit() fires the submit event AND triggers form submission
-    // (which the prototype stub above no-ops). The submit event listener
-    // runs synchronously so removeActiveUser() lands before we assert.
     form.requestSubmit()
 
     expect(activeUserKey.value).toBeNull()
     expect(localStorage.getItem('caribou.activeUserKey')).toBe('null')
   })
 
-  it('does not preventDefault — the native form POST proceeds', async () => {
+  it('preventDefaults the native POST and fires a fetch instead', async () => {
     addUserSession(sampleSession())
-    document.body.innerHTML = `
-      <caribou-signout-form>
-        <form action="/api/signout" method="post"><button type="submit">x</button></form>
-      </caribou-signout-form>
-    `
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    const replaceSpy = vi.spyOn(location, 'replace').mockImplementation(() => {})
+
+    const wrapper = document.createElement('caribou-signout-form')
+    const form = document.createElement('form')
+    form.setAttribute('action', '/api/signout')
+    form.setAttribute('method', 'post')
+    const btn = document.createElement('button')
+    btn.type = 'submit'
+    form.appendChild(btn)
+    wrapper.appendChild(form)
+    document.body.appendChild(wrapper)
     await Promise.resolve()
-    const form = document.querySelector<HTMLFormElement>('form[action="/api/signout"]')!
+
     const submitEvent = new SubmitEvent('submit', { bubbles: true, cancelable: true })
     form.dispatchEvent(submitEvent)
-    expect(submitEvent.defaultPrevented).toBe(false)
+    expect(submitEvent.defaultPrevented).toBe(true)
+    expect(fetchSpy).toHaveBeenCalledWith(expect.stringMatching(/\/api\/signout$/), expect.objectContaining({ method: 'POST' }))
+
+    await new Promise((r) => setTimeout(r, 0))
+    expect(replaceSpy).toHaveBeenCalledWith('/')
   })
 })
