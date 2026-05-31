@@ -1,4 +1,6 @@
 import { html } from '@elenajs/core'
+import { effect } from '@preact/signals-core'
+import { activeUserKey } from '@beatzball/caribou-state'
 import { CaribouElena } from './elena-shadow.js'
 import { PACKAGE_VERSION } from '../../server/build-meta.generated.js'
 import './caribou-signout-form.js'
@@ -14,9 +16,14 @@ const RIGHT_RAIL_CSS = `
   litro-link { display: contents; }
   .links { list-style: none; margin: 0; padding: 0; }
   .links a { display: block; padding: var(--space-2) 0; }
-  .signed-in { color: var(--fg-1); margin-top: var(--space-2); }
-  .signed-in strong { color: var(--fg-0); }
+  .session { color: var(--fg-1); margin-top: var(--space-2); }
+  .session strong { color: var(--fg-0); }
   .signout-btn { background: transparent; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; }
+  /* SSR default: signed-in chrome visible. Hydration sets [signed-out]
+     when localStorage has no active session, flipping to the passive
+     "Browsing X" variant. */
+  :host([signed-out]) .signed-in { display: none; }
+  :host(:not([signed-out])) .browsing { display: none; }
   [aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; padding: var(--space-1) 0; }
 `
 
@@ -27,6 +34,22 @@ export class CaribouRightRail extends CaribouElena(HTMLElement) {
   static override props = [{ name: 'instance', reflect: true }]
 
   instance: string = ''
+  private _unsubscribe?: () => void
+
+  override connectedCallback() {
+    super.connectedCallback?.()
+    if (typeof window === 'undefined') return
+    this._unsubscribe = effect(() => {
+      if (activeUserKey.value === null) this.setAttribute('signed-out', '')
+      else this.removeAttribute('signed-out')
+    })
+  }
+
+  override disconnectedCallback() {
+    this._unsubscribe?.()
+    this._unsubscribe = undefined
+    super.disconnectedCallback?.()
+  }
 
   override render() {
     const inst = this.instance
@@ -42,13 +65,14 @@ export class CaribouRightRail extends CaribouElena(HTMLElement) {
           <li><litro-link><a href="/about">About</a></litro-link></li>
         </ul>
         ${inst
-          ? html`<div class="signed-in">Signed in to <strong>${inst}</strong> ·
+          ? html`<div class="session signed-in">Signed in to <strong>${inst}</strong> ·
                    <caribou-signout-form>
                      <form action="/api/signout" method="post" style="display:inline;">
                        <button type="submit" class="signout-btn">Sign out</button>
                      </form>
                    </caribou-signout-form>
-                 </div>`
+                 </div>
+                 <div class="session browsing">Browsing <strong>${inst}</strong></div>`
           : html``}
       </div>
       <div class="card">
