@@ -1,7 +1,6 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
-import { getRequestURL } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { getStorage } from '../server/lib/storage.js'
 import type { ShellInfo } from '../server/lib/page-data-types.js'
@@ -10,8 +9,7 @@ import './components/caribou-app-shell.js'
 export interface PrivacyData { shell: ShellInfo }
 
 export const pageData = definePageData<PrivacyData>(async (event) => {
-  const origin = getRequestURL(event).origin
-  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage(), origin })
+  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
   return { shell: { instance: resolution.instance } }
 })
 

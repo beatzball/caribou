@@ -1,7 +1,7 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
-import { getQuery, getRequestURL } from 'h3'
+import { getQuery } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
@@ -13,8 +13,7 @@ import './components/caribou-auth-required.js'
 export type LocalPageData = TimelinePageData & { shell: ShellInfo }
 
 export const pageData = definePageData<LocalPageData>(async (event) => {
-  const origin = getRequestURL(event).origin
-  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage(), origin })
+  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
   const shell: ShellInfo = { instance: resolution.instance }
   if (!resolution.instance) return { kind: 'auth-required', shell }
   const query = getQuery(event)

@@ -1,7 +1,7 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
-import { getQuery, getRequestURL, getRouterParams } from 'h3'
+import { getQuery, getRouterParams } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import {
   fetchAccountByHandle, fetchAccountStatuses,
@@ -23,8 +23,7 @@ export type HandlePageData = ProfilePageData & { shell: ShellInfo; handle: strin
 export const pageData = definePageData<HandlePageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string }
   const handle = String(params.handle ?? '')
-  const origin = getRequestURL(event).origin
-  const resolution = await resolveInstanceForRoute(event, { handle }, { storage: getStorage(), origin })
+  const resolution = await resolveInstanceForRoute(event, { handle }, { storage: getStorage() })
   const shell: ShellInfo = { instance: resolution.instance }
   // /@me is auth-required (Plan 3 design §8.8): the user's own profile is
   // gated by the access token that lives only in localStorage, so the server
