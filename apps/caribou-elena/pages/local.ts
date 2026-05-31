@@ -32,15 +32,6 @@ export const pageData = definePageData<LocalPageData>(async (event) => {
 export default class LocalPage extends LitroPage {
   static override tagName = 'page-local'
 
-  override updated() {
-    const data = this.serverData as LocalPageData | null
-    if (!data || data.kind !== 'ok') return
-    const tl = this.querySelector<HTMLElement & { initial?: unknown }>('caribou-timeline')
-    if (tl && tl.initial === undefined) {
-      tl.initial = { statuses: data.statuses, nextMaxId: data.nextMaxId }
-    }
-  }
-
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null } }) as LocalPageData
     const inst = data.shell.instance ?? ''
@@ -62,9 +53,10 @@ export default class LocalPage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    const initial = JSON.stringify({ statuses: data.statuses, nextMaxId: data.nextMaxId })
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-timeline kind="local"></caribou-timeline>
+        <caribou-timeline kind="local" initial="${initial}"></caribou-timeline>
       </caribou-app-shell>
     `
   }

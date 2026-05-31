@@ -32,15 +32,6 @@ export const pageData = definePageData<PublicPageData>(async (event) => {
 export default class PublicPage extends LitroPage {
   static override tagName = 'page-public'
 
-  override updated() {
-    const data = this.serverData as PublicPageData | null
-    if (!data || data.kind !== 'ok') return
-    const tl = this.querySelector<HTMLElement & { initial?: unknown }>('caribou-timeline')
-    if (tl && tl.initial === undefined) {
-      tl.initial = { statuses: data.statuses, nextMaxId: data.nextMaxId }
-    }
-  }
-
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null } }) as PublicPageData
     const inst = data.shell.instance ?? ''
@@ -62,9 +53,10 @@ export default class PublicPage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    const initial = JSON.stringify({ statuses: data.statuses, nextMaxId: data.nextMaxId })
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-timeline kind="public"></caribou-timeline>
+        <caribou-timeline kind="public" initial="${initial}"></caribou-timeline>
       </caribou-app-shell>
     `
   }
