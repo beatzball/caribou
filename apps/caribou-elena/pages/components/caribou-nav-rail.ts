@@ -1,6 +1,9 @@
 import { html } from '@elenajs/core'
+import { effect } from '@preact/signals-core'
+import { activeUserKey } from '@beatzball/caribou-state'
 import { CaribouElena } from './elena-shadow.js'
 import { ICONS } from './_icons.js'
+import './caribou-signout-form.js'
 
 type ElenaTemplate = ReturnType<typeof html>
 
@@ -22,6 +25,7 @@ const NAV_RAIL_CSS = `
   a[aria-current="page"] { background: var(--bg-2); color: var(--fg-0); }
   litro-link { display: contents; }
   .signout-form { display: contents; }
+  :host([signed-out]) caribou-signout-form { display: none; }
   .icon { width: 20px; height: 20px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
   .icon svg { width: 20px; height: 20px; }
 
@@ -59,6 +63,22 @@ export class CaribouNavRail extends CaribouElena(HTMLElement) {
   static override props = [{ name: 'current', reflect: true }]
 
   current: string = ''
+  private _unsubscribe?: () => void
+
+  override connectedCallback() {
+    super.connectedCallback?.()
+    if (typeof window === 'undefined') return
+    this._unsubscribe = effect(() => {
+      if (activeUserKey.value === null) this.setAttribute('signed-out', '')
+      else this.removeAttribute('signed-out')
+    })
+  }
+
+  override disconnectedCallback() {
+    this._unsubscribe?.()
+    this._unsubscribe = undefined
+    super.disconnectedCallback?.()
+  }
 
   override render() {
     const active = this.current || (typeof window !== 'undefined' ? window.location.pathname : '/')
@@ -70,11 +90,13 @@ export class CaribouNavRail extends CaribouElena(HTMLElement) {
             ? html`<litro-link><a href="${it.href}" aria-current="page"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a></litro-link>`
             : html`<litro-link><a href="${it.href}"><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a></litro-link>`
         })}
-        <form class="signout-form" action="/api/signout" method="post">
-          <button type="submit" class="signout-btn">
-            <span class="icon">${ICONS.logOut}</span><span class="label">Sign out</span>
-          </button>
-        </form>
+        <caribou-signout-form>
+          <form action="/api/signout" method="post" class="signout-form">
+            <button type="submit" class="signout-btn">
+              <span class="icon">${ICONS.logOut}</span><span class="label">Sign out</span>
+            </button>
+          </form>
+        </caribou-signout-form>
       </nav>
     `
   }

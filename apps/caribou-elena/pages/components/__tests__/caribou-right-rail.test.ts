@@ -1,7 +1,15 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
+import { activeUserKey, users } from '@beatzball/caribou-state'
+import { toUserKey } from '@beatzball/caribou-auth'
 
 beforeAll(async () => {
   await import('../caribou-right-rail.js')
+})
+
+beforeEach(() => {
+  users.value = new Map()
+  activeUserKey.value = null
+  document.body.innerHTML = ''
 })
 
 describe('<caribou-right-rail>', () => {
@@ -37,6 +45,25 @@ describe('<caribou-right-rail>', () => {
     document.body.appendChild(el)
     await Promise.resolve()
     expect(el.shadowRoot!.textContent).not.toContain('Signed in to')
+  })
+
+  it('reflects [signed-out] attribute based on activeUserKey signal', async () => {
+    const el = document.createElement('caribou-right-rail') as HTMLElement & { instance: string }
+    document.body.appendChild(el)
+    el.instance = 'mastodon.social'
+    await Promise.resolve()
+    // Default (no active session): signed-out attribute present.
+    expect(el.hasAttribute('signed-out')).toBe(true)
+
+    // Set an active session: signed-out attribute is removed.
+    activeUserKey.value = toUserKey('alice', 'mastodon.social')
+    await Promise.resolve()
+    expect(el.hasAttribute('signed-out')).toBe(false)
+
+    // Clear the session: signed-out attribute returns.
+    activeUserKey.value = null
+    await Promise.resolve()
+    expect(el.hasAttribute('signed-out')).toBe(true)
   })
 
   it('renders three disabled slots with aria-disabled and Coming soon tooltip', async () => {

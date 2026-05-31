@@ -16,15 +16,15 @@ function mockEvent(cookies: Record<string, string>): H3Event {
   } as unknown as H3Event & { _headers: Map<string, string[]> }
 }
 
-const REGISTERED: Record<string, unknown> = {
-  'apps:mastodon.social:https://caribou.local': { client_id: 'x' },
-}
+const REGISTERED_KEYS = [
+  'apps:mastodon.social:https://caribou.local',
+]
 const storage = {
-  async getItem<T>(key: string): Promise<T | null> {
-    return (REGISTERED[key] as T | undefined) ?? null
+  async getKeys(prefix?: string): Promise<string[]> {
+    return prefix ? REGISTERED_KEYS.filter((k) => k.startsWith(prefix)) : REGISTERED_KEYS
   },
 }
-const deps = { storage, origin: 'https://caribou.local' }
+const deps = { storage }
 
 describe('getInstance — SSRF amplification mitigation', () => {
   it('returns the hostname when cookie is registered', async () => {
@@ -75,6 +75,17 @@ describe('getInstance — SSRF amplification mitigation', () => {
   it('rejects empty cookie value', async () => {
     const event = mockEvent({ 'caribou.instance': '' })
     expect(await getInstance(event, deps)).toBeUndefined()
+  })
+
+  it('accepts a hostname registered under a different origin (dev port changes)', async () => {
+    const storageMultiOrigin = {
+      async getKeys(prefix?: string): Promise<string[]> {
+        const keys = ['apps:fosstodon.org:http://localhost:3001']
+        return prefix ? keys.filter((k) => k.startsWith(prefix)) : keys
+      },
+    }
+    const event = mockEvent({ 'caribou.instance': 'fosstodon.org' })
+    expect(await getInstance(event, { storage: storageMultiOrigin })).toBe('fosstodon.org')
   })
 })
 

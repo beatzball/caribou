@@ -1,7 +1,6 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
-import { getRequestURL } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { getStorage } from '../server/lib/storage.js'
 import type { ShellInfo } from '../server/lib/page-data-types.js'
@@ -15,8 +14,7 @@ export interface HomeData {
 }
 
 export const pageData = definePageData<HomeData>(async (event) => {
-  const origin = getRequestURL(event).origin
-  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage(), origin })
+  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
   return { kind: 'auth-required', shell: { instance: resolution.instance } }
 })
 

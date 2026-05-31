@@ -1,7 +1,7 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
-import { getRequestURL, getRouterParams } from 'h3'
+import { getRouterParams } from 'h3'
 import { getInstance } from '../../server/lib/instance-cookie.js'
 import {
   fetchStatus, fetchThreadContext,
@@ -39,8 +39,7 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
   // any non-trivial id-mapping case) breaks that assumption. Following
   // Elk's `/{home-instance}/@{user}@{host}/{home-id}` model — Caribou
   // ties the home instance to the cookie instead of the URL.
-  const origin = getRequestURL(event).origin
-  const cookieHost = await getInstance(event, { storage: getStorage(), origin })
+  const cookieHost = await getInstance(event, { storage: getStorage() })
   const shell: ShellInfo = { instance: cookieHost ?? null }
   if (!cookieHost) {
     return { kind: 'auth-required', shell, statusId, handle } as StatusPageData
