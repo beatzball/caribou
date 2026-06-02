@@ -1,6 +1,6 @@
 {
   "name": "@beatzball/elena-morph-spec",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "description": "Behavioral spec for @elenajs/core's morphContent vs custom-element children. Designed to run unchanged inside Elena's own repo so a maintainer can lift the file directly.",
   "type": "module",
