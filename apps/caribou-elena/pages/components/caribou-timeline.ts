@@ -180,13 +180,20 @@ export class CaribouTimeline extends Elena(HTMLElement) {
         </div>
       `
     }
-    if (this.loading && this.statuses.length === 0) {
+    // SSR and pre-hydration: `this.statuses` is still [] because the
+    // reactive effect hasn't fired yet, but `this.initial.statuses` has
+    // the server-fetched data. Fall back to it for the empty-state and
+    // nextHref checks so the structural shell renders consistently.
+    const fallback = this.initial?.statuses ?? []
+    const displayCount = this.statuses.length > 0 ? this.statuses.length : fallback.length
+    if (this.loading && displayCount === 0) {
       return html`<div style="padding:var(--space-4);color:var(--fg-muted);">Loading your timeline…</div>`
     }
-    if (this.statuses.length === 0) {
+    if (displayCount === 0) {
       return html`<div style="padding:var(--space-4);color:var(--fg-muted);">No posts yet.</div>`
     }
-    const last = this.statuses[this.statuses.length - 1]
+    const lastList = this.statuses.length > 0 ? this.statuses : fallback
+    const last = lastList[lastList.length - 1]
     const nextHref = last ? this.buildNextHref(last.id) : null
     return html`
       <div>

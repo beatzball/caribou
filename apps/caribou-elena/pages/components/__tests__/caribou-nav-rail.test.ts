@@ -1,7 +1,14 @@
-import { describe, it, expect, beforeAll } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest'
+import { activeUserKey, users } from '@beatzball/caribou-state'
+import { toUserKey } from '@beatzball/caribou-auth'
 
 beforeAll(async () => {
   await import('../caribou-nav-rail.js')
+})
+
+beforeEach(() => {
+  users.value = new Map()
+  activeUserKey.value = null
 })
 
 describe('<caribou-nav-rail>', () => {
@@ -37,6 +44,22 @@ describe('<caribou-nav-rail>', () => {
     await Promise.resolve()
     const active = el.shadowRoot!.querySelector('a[aria-current="page"]')
     expect(active?.getAttribute('href')).toBe('/@me')
+  })
+
+  it('reflects [signed-out] attribute based on activeUserKey signal', async () => {
+    document.body.innerHTML = ''
+    const el = document.createElement('caribou-nav-rail')
+    document.body.appendChild(el)
+    await Promise.resolve()
+    expect(el.hasAttribute('signed-out')).toBe(true)
+
+    activeUserKey.value = toUserKey('alice', 'mastodon.social')
+    await Promise.resolve()
+    expect(el.hasAttribute('signed-out')).toBe(false)
+
+    activeUserKey.value = null
+    await Promise.resolve()
+    expect(el.hasAttribute('signed-out')).toBe(true)
   })
 
   it('renders sign-out as a POST form to /api/signout (not a link)', async () => {

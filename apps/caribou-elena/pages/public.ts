@@ -1,7 +1,7 @@
 import { html } from '@elenajs/core'
 import { LitroPage } from '@beatzball/litro/adapter/elena/page'
 import { definePageData } from '@beatzball/litro'
-import { getQuery, getRequestURL } from 'h3'
+import { getQuery } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
@@ -13,8 +13,7 @@ import './components/caribou-auth-required.js'
 export type PublicPageData = TimelinePageData & { shell: ShellInfo }
 
 export const pageData = definePageData<PublicPageData>(async (event) => {
-  const origin = getRequestURL(event).origin
-  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage(), origin })
+  const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
   const shell: ShellInfo = { instance: resolution.instance }
   if (!resolution.instance) return { kind: 'auth-required', shell }
   const query = getQuery(event)
@@ -32,15 +31,6 @@ export const pageData = definePageData<PublicPageData>(async (event) => {
 
 export default class PublicPage extends LitroPage {
   static override tagName = 'page-public'
-
-  override updated() {
-    const data = this.serverData as PublicPageData | null
-    if (!data || data.kind !== 'ok') return
-    const tl = this.querySelector<HTMLElement & { initial?: unknown }>('caribou-timeline')
-    if (tl && tl.initial === undefined) {
-      tl.initial = { statuses: data.statuses, nextMaxId: data.nextMaxId }
-    }
-  }
 
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null } }) as PublicPageData
@@ -63,9 +53,10 @@ export default class PublicPage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    const initial = JSON.stringify({ statuses: data.statuses, nextMaxId: data.nextMaxId })
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-timeline kind="public"></caribou-timeline>
+        <caribou-timeline kind="public" initial="${initial}"></caribou-timeline>
       </caribou-app-shell>
     `
   }

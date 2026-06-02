@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import { resolveInstanceForRoute } from '../resolve-instance.js'
 
-const REGISTERED: Record<string, unknown> = {
-  'apps:mastodon.social:https://caribou.local': { client_id: 'x' },
-  'apps:fosstodon.org:https://caribou.local':  { client_id: 'y' },
+const REGISTERED_KEYS = [
+  'apps:mastodon.social:https://caribou.local',
+  'apps:fosstodon.org:https://caribou.local',
+]
+const storage = {
+  async getKeys(prefix?: string): Promise<string[]> {
+    return prefix ? REGISTERED_KEYS.filter((k) => k.startsWith(prefix)) : REGISTERED_KEYS
+  },
 }
-const storage = { async getItem<T>(k: string): Promise<T | null> { return (REGISTERED[k] as T | undefined) ?? null } }
-const deps = { storage, origin: 'https://caribou.local' }
+const deps = { storage }
 
 function mkEvent(cookies: Record<string, string>) {
   return {
