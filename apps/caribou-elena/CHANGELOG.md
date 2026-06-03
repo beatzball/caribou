@@ -1,5 +1,38 @@
 # caribou-elena
 
+## 0.1.1
+
+### Patch Changes
+
+- [#23](https://github.com/beatzball/caribou/pull/23) [`bfb8307`](https://github.com/beatzball/caribou/commit/bfb83071166824e7982992897d9dfc489572ff3a) Thanks [@beatzball](https://github.com/beatzball)! - Wrap every shell `<a href>` (nav-rail Home/Local/Public/Profile, right-rail Privacy/About, auth-required Sign-in, per-route Retry, blog navigation) in a composite `<litro-link>`. Clicks now SPA-navigate via `LitroRouter.go(href)` instead of triggering full document reloads. The `<a>` stays in light DOM at each call site so link-hint extensions, screen readers, and keyboard focus traversal see anchors normally.
+
+  Also fixes a pre-existing tagName collision between `/` (landing) and `/home` (auth shell): Litro's path-to-route conversion used to map both `pages/index.ts` and `pages/home.ts` to `componentTag: 'page-home'` (via a special case `index → home`). Elena's `defineElement` is first-define-wins, so the silent collision bound both routes to whichever page module imported first. The Litro patch changes the special case to `index → index` so `pages/index.ts` derives `page-index` while `pages/home.ts` keeps `page-home`. `/` and `/home` now SSR distinct components and SPA-nav between them works.
+
+  Depends on a `pnpm patch` of `@beatzball/litro@0.9.1` that rewrites Elena's `LitroLink` to a composite (no-render / no-shadow) shape and tweaks `fileToComponentTag`. Upstream PRD at `docs/superpowers/specs/2026-05-25-litro-link-composite-upstream-prd.md`.
+
+  GitHub external link, signout POST form, and shadow-DOM component DSD emission from PR #22 are unchanged.
+
+- [#22](https://github.com/beatzball/caribou/pull/22) [`d18dfc6`](https://github.com/beatzball/caribou/commit/d18dfc630b6169919b78622df44ade952c8b61a6) Thanks [@beatzball](https://github.com/beatzball)! - Patch `@beatzball/litro@0.9.1` so the Elena SSR adapter emits Declarative Shadow DOM for shadow-DOM custom elements and preserves the host's original light-DOM children for native `<slot>` composition. Previously the adapter emitted the host's render template as light-DOM children and dropped the page's slotted content, leaving a literal `<slot></slot>` in the response and an empty pre-hydration shell on every cross-route navigation. The patch lives in `patches/@beatzball__litro@0.9.1.patch`; the same fix is queued for upstream submission (see `docs/superpowers/specs/2026-05-12-elena-ssr-dsd-emission-upstream-prd.md`).
+
+  User-visible: pre-hydration HTML for `/local`, `/public`, `/home`, `/@me`, profile, and thread routes now shows the route's actual content (or `<caribou-auth-required>` placeholder) instead of a bare shell. Plan 3 §12.6's byte-equal hydration parity guarantee becomes operative in production rather than just in the isolated helper.
+
+- [#19](https://github.com/beatzball/caribou/pull/19) [`4fb1e61`](https://github.com/beatzball/caribou/commit/4fb1e61edd8961ad9c1f87f05cc157fa44ed1034) Thanks [@beatzball](https://github.com/beatzball)! - Switch `<caribou-timeline>`, `<caribou-profile>`, and `<caribou-thread>` to render via `<caribou-list-mount>` + `reconcileKeyedList` (both from `@beatzball/caribou-ui-headless`). The mount provides a shadow-DOM container that's morph-opaque (Elena's `morphContent` would otherwise wipe `<li>` children when the host's template emits the wrapping `<ul>` empty); the helper diffs the mount's inner `<ul>` by `status.id`. Cards keep object identity across polls, `loadMore`, and `applyNewPosts` — `caribou-status-card.status` no longer fires the setter on surviving cards, eliminating the avoidable card-internal re-renders that contributed to avatar flicker and lost scroll position under load.
+
+  Pure refactor; no user-facing UI changes. Plan 3 §11.1a deferred follow-up.
+
+- [#24](https://github.com/beatzball/caribou/pull/24) [`0424963`](https://github.com/beatzball/caribou/commit/0424963ea05c8ca89e4f94c3a647118b2055b3c2) Thanks [@beatzball](https://github.com/beatzball)! - Fix the signout-state inversion bug and the post-signout UX. Before: clicking sign out cleared the `caribou.instance` cookie (server-side) but left `localStorage.caribou.activeUserKey` untouched (client-side); the page didn't refresh; the right-rail kept showing "Signed in to fosstodon.org · Sign out". Result was inverted from intent — `/local` and `/public` showed auth-required (cookie gone) while `/home` and `/@me` still rendered real content (stale localStorage swap), and the shell chrome lied about session state.
+  - Server (`server/routes/api/signout.post.ts`) no longer calls `clearInstance`. The `caribou.instance` cookie is a non-sensitive hostname preference and persists across sessions, so `/local` and `/public` keep working post-signout.
+  - New `<caribou-signout-form>` composite wrapper (light-DOM, no render, no shadow — same shape as `<litro-link>`) preventDefaults the native POST, calls `removeActiveUser()` from `@beatzball/caribou-state`, fires `/api/signout` via fetch, then `location.replace('/')` so the user lands on the landing/picker with a clean SSR render — no stale timeline or signed-in chrome left in the DOM. Wired into both nav-rail and right-rail signout forms.
+  - Both shell rails now subscribe to the `activeUserKey` signal on connect and reflect a `signed-out` attribute on the host. Shadow CSS gates the visible chrome: nav-rail hides `<caribou-signout-form>`; right-rail swaps "Signed in to X · Sign out" for a passive "Browsing X" label. SSR default is the signed-in chrome (the common case for users with the cookie); hydration may downgrade.
+  - New `base-head.ts` injects a global `litro-link { display: contents }` rule into every SSR'd page's `<head>`, removing the per-consumer footgun where light-DOM consumers (auth-required, retry, blog) silently lacked the layout-invisible declaration that shadow-DOM consumers had inline.
+  - `getInstance()` now looks up the OAuth-app registry by hostname only (`apps:${host}:`), not hostname+origin. Same SSRF amplification mitigation (cookie hostname must be in the registry before any server-side fetch fires), but stops invalidating across origin changes (dev port swaps, prod redeploys). With this, `/local` and `/public` render their feeds from the cookie alone — no need to keep an active session — which is the intended "Caribou remembers your chosen instance" behavior.
+  - `/local` and `/public` pass SSR-fetched statuses to `<caribou-timeline>` via an `initial` attribute (JSON-stringified). The previous `updated()` hook fired after children had already created their stores without initial data, and Elena SSR doesn't fire `connectedCallback`/`updated()` at all — so the timeline silently rendered "No posts yet." even when serverData had 20 statuses. Elena's SSR JSON-parses object-typed attrs, so the prop is populated on both SSR (used as a render-time fallback for the shell structure) and client hydration (used by `connectedCallback` when seeding the timeline store).
+
+  E2E covers the post-signout state: cookie persists, localStorage cleared, browser lands on `/`. Additional local-only e2e (`public-timeline.spec.ts`, skipped in CI) verifies `/local` and `/public` render actual status cards from the cookie-instance.
+
+- Updated dependencies [[`4fb1e61`](https://github.com/beatzball/caribou/commit/4fb1e61edd8961ad9c1f87f05cc157fa44ed1034)]:
+  - @beatzball/caribou-ui-headless@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
