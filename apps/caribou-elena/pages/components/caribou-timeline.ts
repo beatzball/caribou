@@ -6,6 +6,7 @@ import {
 } from '@beatzball/caribou-state'
 import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
 import { CaribouListMount } from './caribou-list-mount.js'
+import { renderStatusLiList } from './_render-status-li.js'
 import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 
@@ -195,10 +196,15 @@ export class CaribouTimeline extends Elena(HTMLElement) {
     const lastList = this.statuses.length > 0 ? this.statuses : fallback
     const last = lastList[lastList.length - 1]
     const nextHref = last ? this.buildNextHref(last.id) : null
+    // Pre-render <li> children for SSR so the list-mount's DSD shadow
+    // arrives populated. Once the effect populates `this.statuses` and
+    // the reconciler walks the SSR'd `<li data-key>` children, it just
+    // rebinds each card.status — no rebuild.
+    const items = renderStatusLiList(lastList)
     return html`
       <div>
         <caribou-new-posts-banner></caribou-new-posts-banner>
-        <caribou-list-mount></caribou-list-mount>
+        <caribou-list-mount items="${items}"></caribou-list-mount>
         ${nextHref
           ? html`<a href="${nextHref}" rel="next" data-sentinel
                    style="display:block;padding:var(--space-4);color:var(--fg-muted);text-align:center;">Older posts →</a>`

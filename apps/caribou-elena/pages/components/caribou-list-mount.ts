@@ -10,10 +10,16 @@ export class CaribouListMount extends Elena(HTMLElement) {
   static override tagName = 'caribou-list-mount'
   static override shadow = 'open' as const
   static override styles = STYLES
+  // `items` is a pre-rendered HTML string for the initial <li> children.
+  // String prop avoids JSON-stringifying a large array through HTML attribute
+  // encoding twice; the caller's renderStatusLiList already produces the
+  // final markup.
+  static override props = [{ name: 'items', reflect: false }]
+
+  items: string = ''
 
   override render() {
-    const itemsHtml = this.getAttribute('initial-items-html') ?? ''
-    return html`<ul>${itemsHtml ? unsafeHTML(itemsHtml) : html``}</ul>`
+    return html`<ul>${this.items ? unsafeHTML(this.items) : html``}</ul>`
   }
 
   get mountUl(): HTMLUListElement {

@@ -19,17 +19,17 @@ describe('<caribou-list-mount> (Elena)', () => {
     expect(el.mountUl).toBe(el.shadowRoot!.querySelector('ul'))
   })
 
-  it('renders an empty shadow <ul> when initial-items-html is unset', async () => {
+  it('renders an empty shadow <ul> when items is unset', async () => {
     const el = document.createElement('caribou-list-mount') as CaribouListMount
     document.body.appendChild(el)
     await Promise.resolve()
     expect(el.shadowRoot!.querySelector('ul')!.children.length).toBe(0)
   })
 
-  it('renders initial-items-html children into the shadow <ul>', async () => {
+  it('renders items children into the shadow <ul>', async () => {
     const el = document.createElement('caribou-list-mount') as CaribouListMount
     el.setAttribute(
-      'initial-items-html',
+      'items',
       '<li data-key="a"><span>A</span></li><li data-key="b"><span>B</span></li>',
     )
     document.body.appendChild(el)
