@@ -5,7 +5,7 @@ import {
   activeClient, createTimelineStore, startPolling, type TimelineStore,
 } from '@beatzball/caribou-state'
 import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
-import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
+import { CaribouListMount } from './caribou-list-mount.js'
 import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 

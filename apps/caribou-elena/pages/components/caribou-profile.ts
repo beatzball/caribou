@@ -6,7 +6,7 @@ import {
   type ProfileStore, type ProfileTab,
 } from '@beatzball/caribou-state'
 import { createIntersectionObserver, reconcileKeyedList } from '@beatzball/caribou-ui-headless'
-import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
+import { CaribouListMount } from './caribou-list-mount.js'
 import './caribou-profile-header.js'
 import './caribou-profile-tabs.js'
 import './caribou-status-card.js'

@@ -3,7 +3,7 @@ import { effect } from '@preact/signals-core'
 import type { Status, CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { activeClient, createThreadStore, type ThreadStore } from '@beatzball/caribou-state'
 import { reconcileKeyedList } from '@beatzball/caribou-ui-headless'
-import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
+import { CaribouListMount } from './caribou-list-mount.js'
 import './caribou-status-card.js'
 
 const THREAD_CSS = `
