@@ -19,9 +19,16 @@ export const pageData = definePageData<PublicPageData>(async (event) => {
   const query = getQuery(event)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
-    const statuses = await fetchPublicTimeline({
+    const raw = await fetchPublicTimeline({
       instance: resolution.instance, kind: 'public', maxId,
     })
+    // Dynamic import keeps jsdom out of the client bundle (see local.ts).
+    const { sanitize } = await import('../server/lib/sanitize.js')
+    const statuses = raw.map((s) => ({
+      ...s,
+      content: sanitize(s.content ?? ''),
+      ...(s.reblog ? { reblog: { ...s.reblog, content: sanitize(s.reblog.content ?? '') } } : {}),
+    }))
     const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
     return { kind: 'ok', statuses, nextMaxId, shell }
   } catch (err) {

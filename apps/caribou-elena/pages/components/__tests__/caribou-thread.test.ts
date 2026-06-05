@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
-import type { CaribouListMount } from '@beatzball/caribou-ui-headless'
+import type { CaribouListMount } from '../caribou-list-mount.js'
 
 beforeAll(async () => { await import('../caribou-thread.js') })
 

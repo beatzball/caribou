@@ -19,9 +19,20 @@ export const pageData = definePageData<LocalPageData>(async (event) => {
   const query = getQuery(event)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
-    const statuses = await fetchPublicTimeline({
+    const raw = await fetchPublicTimeline({
       instance: resolution.instance, kind: 'local', maxId,
     })
+    // Pre-sanitize at the SSR boundary so the JS-disabled user sees clean
+    // markup and the SSR shim doesn't have to run DOMPurify (it has no window).
+    // Dynamic import keeps the jsdom-backed sanitizer out of the client
+    // bundle — the fetcher never runs on the client, so the chunk is never
+    // loaded there.
+    const { sanitize } = await import('../server/lib/sanitize.js')
+    const statuses = raw.map((s) => ({
+      ...s,
+      content: sanitize(s.content ?? ''),
+      ...(s.reblog ? { reblog: { ...s.reblog, content: sanitize(s.reblog.content ?? '') } } : {}),
+    }))
     const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
     return { kind: 'ok', statuses, nextMaxId, shell }
   } catch (err) {
