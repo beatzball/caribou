@@ -154,7 +154,14 @@ export class CaribouStatusCard extends Elena(HTMLElement) {
     // timeline". Render the inner content as the body, prepend a small
     // attribution row that names the booster.
     const display = s.reblog ?? s
-    const safe = DOMPurify.sanitize(display.content ?? '', PURIFY_OPTS)
+    // SSR: the pageData fetchers pre-sanitize via the jsdom-backed server
+    // sanitizer (see pages/local.ts, public.ts), and DOMPurify isn't
+    // initialized in the SSR shim (no window). Trust the pre-sanitized
+    // content server-side; re-sanitize client-side as defense-in-depth
+    // for poll-fetched content.
+    const safe = typeof window !== 'undefined'
+      ? DOMPurify.sanitize(display.content ?? '', PURIFY_OPTS)
+      : (display.content ?? '')
     const dt = display.createdAt
     const relLabel = this._hydrated ? formatRelativeTime(dt) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
