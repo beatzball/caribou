@@ -60,6 +60,30 @@ describe('renderStatusLi', () => {
       .replace(/&amp;/g, '&')
     expect(JSON.parse(raw)).toEqual(s)
   })
+
+  it('omits variant and data-status-id by default (timeline output unchanged)', () => {
+    const html = renderStatusLi(baseStatus)
+    expect(html).not.toContain('variant=')
+    expect(html).not.toContain('data-status-id=')
+  })
+
+  it('emits variant and data-status-id when requested (profile/thread cards)', () => {
+    const html = renderStatusLi(baseStatus, { variant: 'timeline', statusId: true })
+    expect(html).toMatch(
+      /^<li data-key="99"><caribou-status-card variant="timeline" data-status-id="99" status=".*"><\/caribou-status-card><\/li>$/,
+    )
+  })
+
+  it('escapes HTML-special characters in the variant attribute', () => {
+    const html = renderStatusLi(baseStatus, { variant: 'a"b<c', statusId: false })
+    expect(html).toContain('variant="a&quot;b&lt;c"')
+  })
+
+  it('emits data-status-id matching the escaped key', () => {
+    const s = { ...baseStatus, id: 'a"b' } as mastodon.v1.Status
+    const html = renderStatusLi(s, { variant: 'timeline', statusId: true })
+    expect(html).toContain('data-status-id="a&quot;b"')
+  })
 })
 
 describe('renderStatusLiList', () => {

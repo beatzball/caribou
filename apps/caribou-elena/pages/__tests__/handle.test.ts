@@ -61,6 +61,32 @@ describe('/@[handle] pageData', () => {
     })
   })
 
+  it('pre-sanitizes status content and account.note at the SSR boundary', async () => {
+    vi.mocked(resolveInstanceForRoute).mockResolvedValue({
+      instance: 'mastodon.social', source: 'cookie',
+    })
+    vi.mocked(fetchAccountByHandle).mockResolvedValue(
+      { id: '42', note: '<p>bio</p><script>alert(1)</script>' } as Awaited<ReturnType<typeof fetchAccountByHandle>>,
+    )
+    vi.mocked(fetchAccountStatuses).mockResolvedValue(
+      [{ id: '99', content: '<p>hi</p><script>alert(2)</script>' }] as Awaited<ReturnType<typeof fetchAccountStatuses>>,
+    )
+    const event = {
+      context: { params: { handle: 'alice@example.social' } },
+      url: '/@alice@example.social',
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
+    const { pageData } = await import('../@[handle].js')
+    const result = await pageData.fetcher(event) as Extract<
+      Awaited<ReturnType<typeof HandlePage.pageData.fetcher>>,
+      { kind: 'ok' }
+    >
+    expect(result.kind).toBe('ok')
+    expect(result.account.note).toContain('<p>bio</p>')
+    expect(result.account.note).not.toContain('<script>')
+    expect(result.statuses[0]!.content).toContain('<p>hi</p>')
+    expect(result.statuses[0]!.content).not.toContain('<script>')
+  })
+
   it('passes tab=media to fetchAccountStatuses when tab=media', async () => {
     vi.mocked(resolveInstanceForRoute).mockResolvedValue({
       instance: 'mastodon.social', source: 'cookie',

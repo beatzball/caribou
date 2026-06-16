@@ -36,6 +36,39 @@ describe('<caribou-profile>', () => {
     expect(mount).toBeTruthy()
     expect(mount!.mountUl.querySelectorAll('caribou-status-card').length).toBe(1)
   })
+
+  it('seeds the list-mount with SSR items carrying variant + data-status-id', async () => {
+    const el = document.createElement('caribou-profile') as HTMLElement & {
+      handle: string; tab: string; initial: unknown
+    }
+    el.handle = '@alice@example.social'
+    el.tab = 'posts'
+    el.initial = { account: ACCOUNT, statuses: [STATUS], nextMaxId: null, tab: 'posts' }
+    document.body.appendChild(el)
+    await flush()
+    await flush()
+    // The list-mount must arrive pre-seeded so SSR paints cards on first
+    // paint (no empty-list flash). The serialized <li>/card must match the
+    // keyed reconciler's create() output exactly to avoid a hydration diff.
+    const items = el.querySelector('caribou-list-mount')!.getAttribute('items') ?? ''
+    expect(items).toContain('data-key="210"')
+    expect(items).toContain('variant="timeline"')
+    expect(items).toContain('data-status-id="210"')
+  })
+
+  it('passes account to the header via attribute so the header SSR-paints', async () => {
+    const el = document.createElement('caribou-profile') as HTMLElement & {
+      handle: string; tab: string; initial: unknown
+    }
+    el.handle = '@alice@example.social'
+    el.tab = 'posts'
+    el.initial = { account: ACCOUNT, statuses: [STATUS], nextMaxId: null, tab: 'posts' }
+    document.body.appendChild(el)
+    await flush()
+    await flush()
+    const header = el.querySelector('caribou-profile-header')!
+    expect(header.getAttribute('account')).toContain('"id":"42"')
+  })
 })
 
 describe('<caribou-profile> — keyed reconciliation', () => {

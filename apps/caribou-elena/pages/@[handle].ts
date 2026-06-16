@@ -37,13 +37,24 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
     const account = await fetchAccountByHandle(handle, { instance: resolution.instance })
-    const statuses = await fetchAccountStatuses(account.id, {
+    const rawStatuses = await fetchAccountStatuses(account.id, {
       instance: resolution.instance,
       tab,
       maxId,
     })
+    // Pre-sanitize at the SSR boundary: the status cards and profile header
+    // now render this markup server-side, where DOMPurify can't run (no
+    // window). Dynamic import keeps the jsdom-backed sanitizer out of the
+    // client bundle — the fetcher never runs on the client. Mirrors local.ts.
+    const { sanitize } = await import('../server/lib/sanitize.js')
+    const safeAccount = { ...account, note: sanitize(account.note ?? '') }
+    const statuses = rawStatuses.map((s) => ({
+      ...s,
+      content: sanitize(s.content ?? ''),
+      ...(s.reblog ? { reblog: { ...s.reblog, content: sanitize(s.reblog.content ?? '') } } : {}),
+    }))
     const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', account, statuses, nextMaxId, tab, shell, handle } as HandlePageData
+    return { kind: 'ok', account: safeAccount, statuses, nextMaxId, tab, shell, handle } as HandlePageData
   } catch (err) {
     return { kind: 'error', message: String(err), shell, handle } as HandlePageData
   }
@@ -80,19 +91,6 @@ export default class HandlePage extends LitroPage {
     shell.replaceChildren(real)
   }
 
-  override updated() {
-    const data = this.serverData as HandlePageData | null
-    if (!data || data.kind !== 'ok') return
-    const profile = this.querySelector<HTMLElement & { initial?: unknown }>('caribou-profile')
-    if (!profile || profile.initial !== undefined) return
-    profile.initial = {
-      account: data.account,
-      statuses: data.statuses,
-      nextMaxId: data.nextMaxId,
-      tab: data.tab,
-    }
-  }
-
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null }, handle: '' }) as HandlePageData
     const inst = data.shell.instance ?? ''
@@ -115,9 +113,19 @@ export default class HandlePage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    // Seed the profile via the `initial` attribute (object-typed prop →
+    // Elena JSON-parses it at SSR and on hydration), so the component
+    // SSR-paints the header + status cards instead of flashing "Loading…".
+    // Mirrors local.ts's `<caribou-timeline initial=...>`.
+    const initial = JSON.stringify({
+      account: data.account,
+      statuses: data.statuses,
+      nextMaxId: data.nextMaxId,
+      tab: data.tab,
+    })
     return html`
       <caribou-app-shell instance="${inst}">
-        <caribou-profile handle="${data.handle}" tab="${data.tab}"></caribou-profile>
+        <caribou-profile handle="${data.handle}" tab="${data.tab}" initial="${initial}"></caribou-profile>
       </caribou-app-shell>
     `
   }
