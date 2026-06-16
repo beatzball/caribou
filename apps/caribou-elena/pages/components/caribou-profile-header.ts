@@ -18,13 +18,38 @@ export class CaribouProfileHeader extends Elena(HTMLElement) {
   static override tagName = 'caribou-profile-header'
   static override shadow = 'open' as const
   static override styles = HEADER_CSS
+  // String default makes Elena treat `account` as a string-typed attribute,
+  // so it does NOT auto-JSON.parse the slot. That matters because the parent
+  // (<caribou-profile>) renders this element through its own Elena template:
+  // an object-typed prop would have Elena parse the attribute, and during a
+  // template instantiation the slot momentarily holds Elena's placeholder
+  // marker — parsing it throws a console warning. We accept the SSR seed as a
+  // JSON string and parse it ourselves (resolveAccount), tolerating the
+  // transient marker. Tests still set `.account` to an Account object directly;
+  // resolveAccount handles both shapes. Mirrors <caribou-list-mount>'s string
+  // `items` prop.
   static override props = [{ name: 'account', reflect: false }]
-  account: Account | null = null
+  account: Account | string = ''
+
+  private resolveAccount(): Account | null {
+    const a = this.account
+    if (!a) return null
+    if (typeof a === 'string') {
+      try { return JSON.parse(a) as Account } catch { return null }
+    }
+    return a
+  }
 
   override render() {
-    const a = this.account
+    const a = this.resolveAccount()
     if (!a) return html``
-    const safe = DOMPurify.sanitize(a.note ?? '', PURIFY_OPTS) as unknown as string
+    // SSR pre-sanitizes account.note at the data boundary (see @[handle].ts),
+    // and DOMPurify isn't initialized in the SSR shim (no window). Trust the
+    // pre-sanitized note server-side; re-sanitize client-side as defense in
+    // depth. Mirrors caribou-status-card.
+    const safe = typeof window !== 'undefined'
+      ? (DOMPurify.sanitize(a.note ?? '', PURIFY_OPTS) as unknown as string)
+      : (a.note ?? '')
     const headerImg = a.headerStatic || a.header
     return html`
       <div class="banner" style="${headerImg ? `background-image:url(${headerImg});background-size:cover;` : ''}"></div>

@@ -11,6 +11,7 @@ import type { CaribouListMount } from './caribou-list-mount.js'
 import './caribou-profile-header.js'
 import './caribou-profile-tabs.js'
 import './caribou-status-card.js'
+import { renderStatusLiList } from './_render-status-li.js'
 
 interface ProfileInitial {
   account: Account
@@ -77,13 +78,11 @@ export class CaribouProfile extends Elena(HTMLElement) {
   }
 
   override updated() {
-    // Elena's template engine only interpolates plain `attr=`; object props
-    // on child components must be assigned imperatively. Mirrors timeline.
-    const header = this.querySelector<HTMLElement & { account?: Account | null }>(
-      'caribou-profile-header',
-    )
-    if (header && header.account !== this.account) header.account = this.account
-
+    // The header's account is handed off via the `account` attribute in
+    // render() (a JSON string the header parses itself), so it SSR-paints and
+    // hydrates without an imperative binding. Elena's morph skips unchanged
+    // attribute slots, so a tab swap with the same account does not re-set the
+    // attribute — no header re-render, no avatar refetch.
     if (!this.listEl) {
       const mount = this.querySelector<CaribouListMount>('caribou-list-mount')
       this.listEl = mount?.mountUl ?? null
@@ -143,17 +142,26 @@ export class CaribouProfile extends Elena(HTMLElement) {
   }
 
   override render() {
-    if (!this.account) {
+    // SSR and pre-hydration: connectedCallback (which sets `this.account`
+    // and wires the reactive effect) is skipped on the server, so fall back
+    // to `this.initial` — seeded via the `initial` attribute on the page —
+    // for the account and statuses. Mirrors caribou-timeline.
+    const account = this.account ?? this.initial?.account ?? null
+    if (!account) {
       return html`<div style="padding:var(--space-4);color:var(--fg-muted);">Loading…</div>`
     }
-    const last = this.statuses[this.statuses.length - 1]
-    const nextHref = last && this.store?.hasMore.value
-      ? this.buildNextHref(last.id)
-      : null
+    const statuses = this.statuses.length > 0 ? this.statuses : (this.initial?.statuses ?? [])
+    const last = statuses[statuses.length - 1]
+    const hasMore = this.store ? this.store.hasMore.value : this.initial?.nextMaxId != null
+    const nextHref = last && hasMore ? this.buildNextHref(last.id) : null
+    // Pre-render <li> children for SSR so the list-mount's DSD shadow arrives
+    // populated. variant + data-status-id match the reconciler's create()
+    // output so hydration rebinds in place rather than rebuilding.
+    const items = renderStatusLiList(statuses, { variant: 'timeline', statusId: true })
     return html`
-      <caribou-profile-header></caribou-profile-header>
+      <caribou-profile-header account="${JSON.stringify(account)}"></caribou-profile-header>
       <caribou-profile-tabs handle="${this.handle}" tab="${this.tab}"></caribou-profile-tabs>
-      <caribou-list-mount></caribou-list-mount>
+      <caribou-list-mount items="${items}"></caribou-list-mount>
       ${nextHref
         ? html`<a href="${nextHref}" rel="next" data-sentinel
                  style="display:block;padding:var(--space-4);color:var(--fg-muted);text-align:center;">Older posts →</a>`
