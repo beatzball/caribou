@@ -47,9 +47,14 @@ jobs:
       - run: pnpm --filter caribou-elena exec playwright install --with-deps chromium firefox webkit
       - run: pnpm build
       - run: pnpm test:e2e
+      - run: pnpm --filter caribou-app test:e2e
       - if: failure()
         uses: actions/upload-artifact@v4
-        with: { name: playwright-report, path: apps/caribou-elena/playwright-report }
+        with:
+          name: playwright-report
+          path: |
+            apps/caribou-elena/playwright-report
+            apps/caribou/playwright-report
 
   changeset-check:
     # Skip on the bot-authored release PR, which legitimately consumes all
@@ -77,24 +82,33 @@ jobs:
   smoke-image:
     runs-on: ubuntu-latest
     needs: checks
+    # Both apps are probed until caribou-app takes over the deploy:
+    # caribou-elena is what Coolify builds today, caribou-app is what it
+    # will build next.
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - { name: caribou-elena, dockerfile: apps/caribou-elena/Dockerfile }
+          - { name: caribou-app,   dockerfile: apps/caribou/Dockerfile }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - uses: docker/setup-buildx-action@v3
-      - name: Build caribou-elena image
+      - name: Build ${{ matrix.app.name }} image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: apps/caribou-elena/Dockerfile
+          file: ${{ matrix.app.dockerfile }}
           load: true
-          tags: caribou-elena:ci
+          tags: ${{ matrix.app.name }}:ci
           build-args: |
             GIT_SHA=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.app.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app.name }}
       - name: Run container
-        run: docker run -d --rm -p 3000:3000 --name caribou-smoke caribou-elena:ci
+        run: docker run -d --rm -p 3000:3000 --name caribou-smoke ${{ matrix.app.name }}:ci
       - name: Probe container
         env:
           CARIBOU_BASE_URL: http://localhost:3000
