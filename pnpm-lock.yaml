@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@beatzball/litro@0.17.2':
-    hash: 6340e74ee22aaf77909ed4cd1e66d8169914dc40a295ca65b8fdcc550598217a
+    hash: 7e7079f393f811ceb0fd6e41d7e6de09c81e508f2c133d89b560fc7b7bcfc827
     path: patches/@beatzball__litro@0.17.2.patch
   '@beatzball/litro@0.9.1':
     hash: 9ddbd335bc820d6970eaa643af043430277537c594097a2cc1ff98c6b7d0efd5
@@ -48,7 +48,7 @@ importers:
         version: link:../../packages/caribou-ui-headless
       '@beatzball/litro':
         specifier: 0.17.2
-        version: 0.17.2(patch_hash=6340e74ee22aaf77909ed4cd1e66d8169914dc40a295ca65b8fdcc550598217a)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(tsx@4.21.0)(typescript@5.9.3)
+        version: 0.17.2(patch_hash=7e7079f393f811ceb0fd6e41d7e6de09c81e508f2c133d89b560fc7b7bcfc827)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(tsx@4.21.0)(typescript@5.9.3)
       '@beatzball/litro-router':
         specifier: 0.3.1
         version: 0.3.1
@@ -4894,7 +4894,7 @@ snapshots:
 
   '@beatzball/litro-router@0.3.1': {}
 
-  '@beatzball/litro@0.17.2(patch_hash=6340e74ee22aaf77909ed4cd1e66d8169914dc40a295ca65b8fdcc550598217a)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(tsx@4.21.0)(typescript@5.9.3)':
+  '@beatzball/litro@0.17.2(patch_hash=7e7079f393f811ceb0fd6e41d7e6de09c81e508f2c133d89b560fc7b7bcfc827)(@elenajs/core@1.0.0)(@elenajs/ssr@1.0.0-alpha.10(@elenajs/core@1.0.0))(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(tsx@4.21.0)(typescript@5.9.3)':
     dependencies:
       '@beatzball/litro-router': 0.3.1
       '@lit-labs/ssr': 3.3.1
