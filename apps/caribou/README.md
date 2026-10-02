@@ -92,3 +92,31 @@ sanitizer) through a dynamic `import()` inside it.
   `tests/integration/_ssr.ts`.
 - A test that sends a `Cookie` header to a spawned server also needs the node
   environment — happy-dom strips that header from `fetch`.
+
+### Real-upstream e2e specs
+
+`public-timeline.spec.ts` and `no-js-public-timeline.spec.ts` load `/local` and
+`/public` with a `caribou.instance=fosstodon.org` cookie, and the server
+fetches the real timeline from that instance. They are skipped when `CI` is
+set. Locally they need one thing the other specs do not.
+
+The server trusts the instance cookie only when its storage holds an OAuth app
+registration for that host — any key under `apps:fosstodon.org:`. A fresh
+checkout has none, so the pages render the sign-in placeholder and every one
+of these specs fails with "no `caribou-status-card`". Seed a registration in a
+storage directory of its own, so a real one in `.data/` is left alone, and
+start the server on it. From `apps/caribou`:
+
+```
+pnpm build
+mkdir -p .data/e2e/apps/fosstodon.org
+echo '{"client_id":"e2e","client_secret":"e2e","vapid_key":"e2e","registered_at":1}' \
+  > .data/e2e/apps/fosstodon.org/e2e-seed
+PORT=4312 STORAGE_DIR=.data/e2e node dist/server/server/index.mjs &
+E2E_BASE_URL=http://localhost:4312 pnpm test:e2e
+```
+
+`.data/` is ignored by git. The seed only opens the cookie gate; the specs
+never sign in, so the dummy credentials are never sent anywhere.
+`tests/integration/ssr-list-paint.test.ts` covers the same path in vitest: it
+starts its own server and seeds its own storage, and needs only the build.
