@@ -1,5 +1,11 @@
 # @beatzball/caribou-ui-headless
 
+## 0.2.2
+
+### Patch Changes
+
+- [#32](https://github.com/beatzball/caribou/pull/32) [`11ffdf8`](https://github.com/beatzball/caribou/commit/11ffdf867b0dbfdb685b3e50d8fe89beabc1ef56) Thanks [@beatzball](https://github.com/beatzball)! - Drop the unused `@elenajs/core` dev dependency.
+
 ## 0.2.1
 
 ### Patch Changes
