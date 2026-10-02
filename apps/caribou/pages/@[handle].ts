@@ -1,8 +1,9 @@
 import { html, css } from 'lit'
-import { customElement } from 'lit/decorators.js'
+import { customElement, state } from 'lit/decorators.js'
 import { LitroPage, pageReset } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRouterParams } from 'h3'
+import { activeUserKey } from '@beatzball/caribou-state'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import {
   fetchAccountByHandle, fetchAccountStatuses,
@@ -11,6 +12,7 @@ import { getStorage } from '../server/lib/storage.js'
 import type { ProfilePageData, ShellInfo } from '../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
+import '../components/caribou-profile.js'
 
 type Tab = 'posts' | 'replies' | 'media'
 
@@ -60,9 +62,31 @@ export class HandlePage extends LitroPage {
     article { padding: 1rem; color: var(--fg-muted); }
   `]
 
+  // On /@me: the signed-in user and the tab from the address bar. The server
+  // knows neither, so both are read after the first update; the first render
+  // is the placeholder the server sent.
+  @state() private me: { userKey: string; tab: Tab } | null = null
+
+  protected override firstUpdated() {
+    const data = this.serverData as HandlePageData | null
+    if (data?.handle !== 'me') return
+    const userKey = activeUserKey.value
+    if (!userKey) return
+    this.me = { userKey, tab: parseTab(new URLSearchParams(window.location.search).get('tab')) }
+  }
+
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null }, handle: '' }) as HandlePageData
     const inst = data.shell.instance ?? ''
+    if (data.kind === 'auth-required' && this.me) {
+      // No `initial`: the profile looks the account up through the signed-in
+      // client, which holds the token the server never sees.
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <caribou-profile handle=${this.me.userKey} tab=${this.me.tab}></caribou-profile>
+        </caribou-app-shell>
+      `
+    }
     if (data.kind === 'auth-required') {
       const label = data.handle === 'me'
         ? 'Your profile shows posts from your signed-in account. It requires a Mastodon access token, which Caribou keeps on your device.'
@@ -82,7 +106,11 @@ export class HandlePage extends LitroPage {
         </caribou-app-shell>
       `
     }
-    return html`<caribou-app-shell instance=${inst}></caribou-app-shell>`
+    return html`
+      <caribou-app-shell instance=${inst}>
+        <caribou-profile handle=${data.handle} tab=${data.tab} .initial=${data}></caribou-profile>
+      </caribou-app-shell>
+    `
   }
 }
 

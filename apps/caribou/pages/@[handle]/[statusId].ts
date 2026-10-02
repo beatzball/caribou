@@ -11,6 +11,7 @@ import { getStorage } from '../../server/lib/storage.js'
 import type { ThreadPageData, ShellInfo } from '../../server/lib/page-data-types.js'
 import '../../components/caribou-app-shell.js'
 import '../../components/caribou-auth-required.js'
+import '../../components/caribou-thread.js'
 
 export type StatusPageData = ThreadPageData & {
   shell: ShellInfo
@@ -95,7 +96,11 @@ export class HandleStatusPage extends LitroPage {
         </caribou-app-shell>
       `
     }
-    return html`<caribou-app-shell instance=${inst}></caribou-app-shell>`
+    return html`
+      <caribou-app-shell instance=${inst}>
+        <caribou-thread statusid=${data.statusId} .initial=${data}></caribou-thread>
+      </caribou-app-shell>
+    `
   }
 }
 
