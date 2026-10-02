@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type * as H3 from 'h3'
 import type * as LocalPageModule from '../../pages/local.js'
+import type { CaribouTimeline } from '../../components/caribou-timeline.js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../../server/lib/mastodon-public.js'
 
@@ -147,7 +148,7 @@ describe('<page-local> render', () => {
       account: { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' },
     }] as unknown as Fetched
     const el = await mount({ kind: 'ok', statuses, nextMaxId: '5', shell: { instance: 'example.social' } })
-    const timeline = el.shadowRoot!.querySelector('caribou-timeline')!
+    const timeline = el.shadowRoot!.querySelector<CaribouTimeline>('caribou-timeline')!
     expect(timeline.getAttribute('kind')).toBe('local')
     expect(timeline.hasAttribute('initial')).toBe(false)
     expect(timeline.initial).toMatchObject({ statuses, nextMaxId: '5' })

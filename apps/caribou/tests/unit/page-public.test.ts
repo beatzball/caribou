@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type * as H3 from 'h3'
 import type * as PublicPageModule from '../../pages/public.js'
+import type { CaribouTimeline } from '../../components/caribou-timeline.js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import { fetchPublicTimeline } from '../../server/lib/mastodon-public.js'
 
@@ -90,7 +91,7 @@ describe('<page-public> render', () => {
 
   it('renders a public timeline seeded with the server data', async () => {
     const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell: { instance: 'example.social' } })
-    const timeline = el.shadowRoot!.querySelector('caribou-timeline')!
+    const timeline = el.shadowRoot!.querySelector<CaribouTimeline>('caribou-timeline')!
     expect(timeline.getAttribute('kind')).toBe('public')
     expect(timeline.initial).toMatchObject({ statuses: [], nextMaxId: null })
   })
