@@ -84,6 +84,10 @@ sanitizer) through a dynamic `import()` inside it.
   When the element sets state in `firstUpdated`, one await is not enough: it
   resolves `false` before the second render. Loop instead:
   `while (!(await el.updateComplete)) {}`.
+- Put every `${child}` binding inside an element. happy-dom drops a child
+  binding that sits at the top level of a template, with no error, so
+  ``html`<ul>…</ul>${more}` `` renders no `more` in a component test. Browsers
+  and SSR are fine; wrap it: ``html`<div><ul>…</ul>${more}</div>` ``.
 - SSR: put `// @vitest-environment node` on the first line and use `ssr()` from
   `tests/integration/_ssr.ts`.
 - A test that sends a `Cookie` header to a spawned server also needs the node
