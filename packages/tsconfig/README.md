@@ -7,7 +7,7 @@
 Three configs ship: `base.json` (strict, ES2022, NodeNext modules — what
 every other config extends), `library.json` (adds `composite: true`,
 `declaration: true` for publishable packages), and `app.json` (adds DOM
-libs and JSX settings for `apps/caribou-elena`). Each workspace package
+libs and JSX settings for `apps/caribou`). Each workspace package
 extends one of these via `"extends": "@beatzball/caribou-tsconfig/library.json"`
 in its `tsconfig.json`. There's no code, no tests, no public API — the
 JSON files *are* the package.

@@ -15,7 +15,7 @@ framework, no auth, no domain types" land here.
 ## Position in the stack
 
 - **Depends on:** nothing — DOM globals only
-- **Depended on by:** `apps/caribou-elena/pages/components/*` (the
+- **Depended on by:** `apps/caribou/components/*` (the
   status-card uses `formatRelativeTime`; the timeline uses
   `createIntersectionObserver` for infinite-scroll triggers)
 - **Boundary it owns:** code that's small, generic, and would otherwise

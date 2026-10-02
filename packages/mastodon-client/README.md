@@ -21,7 +21,7 @@ package, not against `masto` directly.
 
 - **Depends on:** `masto`, `@beatzball/caribou-auth` (UserKey)
 - **Depended on by:** `@beatzball/caribou-state` (every store), the SSR
-  routes in `apps/caribou-elena/server/`
+  routes in `apps/caribou/server/`
 - **Boundary it owns:** all network I/O against a Mastodon instance
   *for an authenticated user*. Public/unauthenticated SSR fetches go
   through the server-side `mastodon-public` lib, not this package.
@@ -127,5 +127,5 @@ to raw fetch tractable without rewriting the client.
 
 - `packages/state/src/users.ts` — wires `SessionSource` from the
   active-user signal
-- `apps/caribou-elena/server/lib/mastodon-public.ts` — the
+- `apps/caribou/server/lib/mastodon-public.ts` — the
   unauthenticated counterpart for SSR

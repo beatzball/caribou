@@ -4,6 +4,6 @@
     { "path": "./packages/auth" },
     { "path": "./packages/mastodon-client" },
     { "path": "./packages/state" },
-    { "path": "./apps/caribou-elena" }
+    { "path": "./apps/caribou" }
   ]
 }

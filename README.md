@@ -1,10 +1,10 @@
 # Caribou
 
-A Mastodon client built on Litro + Elena. Ships to caribou.quest.
+A Mastodon client built on Litro + Lit. Ships to caribou.quest.
 
 ## Monorepo layout
 
-- `apps/caribou-elena` — the primary Caribou app (Elena adapter, SSR).
+- `apps/caribou` — the Caribou app (Litro with the Lit adapter, SSR). See its README for conventions.
 - `packages/*` — shared workspace packages (tsconfig, eslint config, and future framework-agnostic Mastodon/auth/state code).
 
 ## Prerequisites
