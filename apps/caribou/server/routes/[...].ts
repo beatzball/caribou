@@ -1,0 +1,38 @@
+import { defineEventHandler, setResponseHeader, getRequestURL } from 'h3';
+import { createPageHandler } from '@beatzball/litro/runtime/create-page-handler.js';
+import { routes, pageModules } from '#litro/page-manifest';
+import { TOKENS_HEAD } from '../lib/tokens-head.js';
+import { BASE_HEAD } from '../lib/base-head.js';
+import { matchRoute } from '../lib/match-route.js';
+
+export default defineEventHandler(async (event) => {
+  const pathname = getRequestURL(event).pathname;
+  const result = matchRoute(routes, pathname);
+
+  if (!result) {
+    setResponseHeader(event, 'content-type', 'text/html; charset=utf-8');
+    return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8" /><title>404</title></head>
+<body><h1>404 — Not Found</h1><p>No page matched <code>${pathname}</code>.</p></body>
+</html>`;
+  }
+
+  const { route: matched, params } = result;
+
+  // Populate route params (e.g. slug from /blog/:slug) on the event context
+  // so pageData fetchers can access them via event.context.params.
+  event.context.params = { ...event.context.params, ...params };
+
+  const handler = createPageHandler({
+    route: matched,
+    pageModule: pageModules[matched.filePath],
+    // `routeMeta.head` is appended into every page's <head> by Litro's
+    // shell builder. We inline two stylesheets here:
+    //   • TOKENS_HEAD — design-token CSS variables (`var(--bg-0)` etc.).
+    //     Custom properties inherit through shadow roots, so every
+    //     component's `static styles` can use them.
+    //   • BASE_HEAD   — document-level rules that no shadow root owns.
+    routeMeta: { head: TOKENS_HEAD + BASE_HEAD },
+  });
+  return handler(event);
+});

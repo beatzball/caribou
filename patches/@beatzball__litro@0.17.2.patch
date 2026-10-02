@@ -1,0 +1,110 @@
+diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
+index 7cf543105c44ec347dd4cb1d5545d06e5f60dff1..9632bb6881caeb0f8e30062b71392bf01ba1d2b4 100644
+--- a/dist/plugins/path-to-route.js
++++ b/dist/plugins/path-to-route.js
+@@ -33,10 +33,13 @@ function transformSegment(segment) {
+     if (optionalMatch) {
+         return `:${optionalMatch[1]}?`;
+     }
+-    // Dynamic: [param] → :param
+-    const dynamicMatch = segment.match(/^\[(.+)\]$/);
++    // Dynamic with optional prefix/suffix: pre[param]suf → pre:paramsuf
++    // (Mastodon-style URLs need pages/@[handle]/[statusId].ts — Nuxt and
++    // SvelteKit also allow this.)
++    const dynamicMatch = segment.match(/^([^\[\]]*)\[([^\[\]]+)\]([^\[\]]*)$/);
+     if (dynamicMatch) {
+-        return `:${dynamicMatch[1]}`;
++        const [, prefix, param, suffix] = dynamicMatch;
++        return `${prefix}:${param}${suffix}`;
+     }
+     // index → '' (stripped by the caller)
+     if (segment === 'index') {
+@@ -49,7 +52,7 @@ function transformSegment(segment) {
+  * or is a catch-all (contains '(.*)').
+  */
+ function isSegmentDynamic(transformed) {
+-    return transformed.startsWith(':');
++    return /:[A-Za-z_]/.test(transformed);
+ }
+ /**
+  * Returns true if a transformed route segment is a catch-all.
+@@ -129,12 +132,13 @@ export function fileToRoute(filePath, pagesDir) {
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -159,7 +163,7 @@ export function fileToComponentTag(filePath, pagesDir) {
+         .filter(Boolean);
+     // Handle the root index case: ['index'] → 'home'
+     if (cleaned.length === 1 && cleaned[0] === 'index') {
+-        return 'page-home';
++        return 'page-index';
+     }
+     // Remove trailing 'index' segments (blog/index → blog)
+     while (cleaned.length > 1 && cleaned[cleaned.length - 1] === 'index') {
+diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
+index 1eda380860b8900f201db9f07e3a36f785a6bd73..20a69ae9a7f4af14bccbefad54f3621ce8731263 100644
+--- a/src/plugins/path-to-route.ts
++++ b/src/plugins/path-to-route.ts
+@@ -39,10 +39,13 @@ function transformSegment(segment: string): string {
+     return `:${optionalMatch[1]}?`;
+   }
+ 
+-  // Dynamic: [param] → :param
+-  const dynamicMatch = segment.match(/^\[(.+)\]$/);
++  // Dynamic with optional prefix/suffix: pre[param]suf → pre:paramsuf
++  // (Mastodon-style URLs need pages/@[handle]/[statusId].ts — Nuxt and
++  // SvelteKit also allow this.)
++  const dynamicMatch = segment.match(/^([^\[\]]*)\[([^\[\]]+)\]([^\[\]]*)$/);
+   if (dynamicMatch) {
+-    return `:${dynamicMatch[1]}`;
++    const [, prefix, param, suffix] = dynamicMatch;
++    return `${prefix}:${param}${suffix}`;
+   }
+ 
+   // index → '' (stripped by the caller)
+@@ -58,7 +61,7 @@ function transformSegment(segment: string): string {
+  * or is a catch-all (contains '(.*)').
+  */
+ function isSegmentDynamic(transformed: string): boolean {
+-  return transformed.startsWith(':');
++  return /:[A-Za-z_]/.test(transformed);
+ }
+ 
+ /**
+@@ -149,12 +152,13 @@ export function fileToRoute(filePath: string, pagesDir: string): LitroRoute {
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -184,7 +188,7 @@ export function fileToComponentTag(filePath: string, pagesDir: string): string {
+ 
+   // Handle the root index case: ['index'] → 'home'
+   if (cleaned.length === 1 && cleaned[0] === 'index') {
+-    return 'page-home';
++    return 'page-index';
+   }
+ 
+   // Remove trailing 'index' segments (blog/index → blog)
