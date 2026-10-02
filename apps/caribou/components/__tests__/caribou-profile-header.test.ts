@@ -43,6 +43,24 @@ describe('<caribou-profile-header>', () => {
     expect(p.hasAttribute('onclick')).toBe(false)
   })
 
+  // Hydration compares the bio against the server's HTML by digest, so the
+  // render that adopts a server-made shadow root must print the note as the
+  // server did. Every later render sanitizes.
+  it('trusts the note only for the render that adopts a server-made shadow root', async () => {
+    const el = document.createElement('caribou-profile-header') as CaribouProfileHeader
+    el.attachShadow({ mode: 'open' })
+    el.account = { ...ACCOUNT, note: '<p data-from-server="">bio</p>' }
+    document.body.appendChild(el)
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('.bio p')?.hasAttribute('data-from-server')).toBe(true)
+
+    el.account = { ...ACCOUNT, note: '<p onclick="alert(1)">next</p>' }
+    await el.updateComplete
+    const p = el.shadowRoot!.querySelector('.bio p')!
+    expect(p.textContent).toBe('next')
+    expect(p.hasAttribute('onclick')).toBe(false)
+  })
+
   it('paints the banner image only when the account has one', async () => {
     const plain = await mount(ACCOUNT)
     expect(plain.shadowRoot!.querySelector('.banner')?.getAttribute('style')).toBeNull()
