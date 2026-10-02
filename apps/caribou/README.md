@@ -53,6 +53,12 @@ no `window`. So `render()` must not read `window`, `location`, `localStorage`,
 the clock, or any state the server did not have. Read those in `firstUpdated()`
 (or later) into a `@state()` field and let the element render again.
 
+**Test for the server with `typeof window === 'undefined'`, not `isServer`.**
+Vitest loads `lit` under Node's `node` export condition, so Lit's `isServer`
+is `true` in a happy-dom component test even though a DOM exists. A guard on
+`isServer` would switch the code off in the tests that cover it. `typeof
+window` is right in all three places: the server, the browser and happy-dom.
+
 **A page mounts twice on a full page load.** The router hydrates the
 server-rendered element, builds a second one off-screen, then swaps them and
 sets `data-litro-settled` on `<litro-outlet>`. Both run their lifecycle, so
