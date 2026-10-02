@@ -200,7 +200,19 @@ describe('<caribou-profile> — pagination', () => {
     const el = await mount({ tab: 'replies', initial: { ...initialOf([STATUS, status('209')], '209'), tab: 'replies' } })
     const next = el.shadowRoot!.querySelector<HTMLAnchorElement>('a[rel="next"][data-sentinel]')!
     expect(next.textContent).toBe('Older posts →')
-    expect(next.getAttribute('href')).toContain('tab=replies&max_id=209')
+    expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=replies&max_id=209')
+  })
+
+  it('keeps the tabs and the next-page link on /@me for the own profile', async () => {
+    const el = document.createElement('caribou-profile') as CaribouProfile
+    el.handle = 'alice@example.social'
+    el.linkHandle = 'me'
+    el.initial = initialOf([STATUS], '210')
+    document.body.appendChild(el)
+    await flush()
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('caribou-profile-tabs')!.getAttribute('handle')).toBe('me')
+    expect(el.shadowRoot!.querySelector('a[rel="next"]')!.getAttribute('href')).toBe('/@me?tab=posts&max_id=210')
   })
 
   it('renders no "Older posts" link when the server found no next page', async () => {
@@ -223,7 +235,7 @@ describe('<caribou-profile> — pagination', () => {
     expect(list).toHaveBeenCalledWith('42', { tab: 'posts', maxId: '210' })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210', '209', '208'])
     expect(el.shadowRoot!.querySelector('a[data-sentinel]')).toBe(next)
-    expect(next.getAttribute('href')).toContain('max_id=208')
+    expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=208')
     // The store owns pagination now; a click must not also load a new page.
     const click = new MouseEvent('click', { bubbles: true, cancelable: true })
     next.dispatchEvent(click)

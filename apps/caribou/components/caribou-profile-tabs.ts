@@ -15,13 +15,17 @@ export class CaribouProfileTabs extends LitElement {
     a[aria-current="page"] { color: var(--fg-0); border-bottom-color: var(--accent); }
   `
 
+  // The handle segment of the profile route: `alice@example.social`, or `me`.
+  // The route is `/@:handle`, so the page hands it over without the `@`; a
+  // handle that still carries one is accepted too.
   @property({ reflect: true }) handle = ''
   @property({ reflect: true }) tab: ProfileTabName = 'posts'
 
   override render() {
+    const base = `/@${this.handle.replace(/^@/, '')}`
     return html`
       <nav>
-        ${TABS.map((t) => html`<a href=${`/${this.handle}?tab=${t}`}
+        ${TABS.map((t) => html`<a href=${`${base}?tab=${t}`}
           aria-current=${t === this.tab ? 'page' : nothing} @click=${spaClick}>${t}</a>`)}
       </nav>
     `

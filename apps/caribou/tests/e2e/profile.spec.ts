@@ -108,6 +108,30 @@ test.describe('/@me — own profile', () => {
     expect(queries.length).toBeGreaterThan(0)
     expect(queries.every((q) => q.includes('only_media=true'))).toBe(true)
   })
+
+  test('signed in: the tabs stay on /@me and switch the list', async ({ page }) => {
+    await signIn(page)
+    await page.route('**/api/v1/accounts/lookup*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACCOUNT) }))
+    await page.route('**/api/v1/accounts/a1/statuses*', (route) => {
+      const u = new URL(route.request().url())
+      const body = u.searchParams.get('max_id') ? []
+        : u.searchParams.get('only_media') ? [makeStatus('m1', '<p>media post</p>')]
+        : [makeStatus('s1', '<p>plain post</p>')]
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+    })
+    await page.goto('/@me')
+    await settled(page)
+    await expect(page.getByText('plain post')).toBeVisible()
+    const hrefs = await page.locator('caribou-profile-tabs a').evaluateAll((as) => as.map((a) => a.getAttribute('href')))
+    expect(hrefs).toEqual(['/@me?tab=posts', '/@me?tab=replies', '/@me?tab=media'])
+
+    await page.locator('caribou-profile-tabs a', { hasText: 'media' }).click()
+    await expect(page.getByText('media post')).toBeVisible()
+    await expect(page.locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('media')
+    expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe('/@me?tab=media')
+    await expect(page.locator('litro-outlet > *')).toHaveCount(1)
+  })
 })
 
 test.describe('/@handle — states that need no upstream', () => {
@@ -151,8 +175,43 @@ test.describe('/@handle — server-rendered profile (real upstream)', () => {
       await page.goto(PROFILE)
       const next = page.locator('caribou-profile a[rel="next"][data-sentinel]')
       await expect(next).toBeVisible()
-      expect(await next.getAttribute('href')).toMatch(/\?tab=posts&max_id=\d+$/)
+      expect(await next.getAttribute('href')).toMatch(/^\/@kev@fosstodon\.org\?tab=posts&max_id=\d+$/)
     })
+
+    test('"Older posts" loads the next page', async ({ page }) => {
+      await page.goto(PROFILE)
+      const firstId = await page.locator('caribou-profile caribou-status-card').first().getAttribute('data-status-id')
+      await page.locator('caribou-profile a[rel="next"]').click()
+      await expect(page).toHaveURL(/\/@kev@fosstodon\.org\?tab=posts&max_id=\d+$/)
+      await expect(page.locator('caribou-profile-header .handle')).toHaveText('@kev')
+      const nextFirstId = await page.locator('caribou-profile caribou-status-card').first().getAttribute('data-status-id')
+      expect(nextFirstId).not.toBeNull()
+      expect(nextFirstId).not.toBe(firstId)
+    })
+
+    test('a tab is a link to the same profile with that tab selected', async ({ page }) => {
+      await page.goto(PROFILE)
+      await page.locator('caribou-profile-tabs a', { hasText: 'replies' }).click()
+      await expect(page).toHaveURL(/\/@kev@fosstodon\.org\?tab=replies$/)
+      await expect(page.locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('replies')
+      await expect(page.locator('caribou-profile-header .handle')).toHaveText('@kev')
+      expect(await page.locator('caribou-profile caribou-status-card').count()).toBeGreaterThan(0)
+    })
+  })
+
+  test('a tab click swaps the list without a full page load', async ({ page }) => {
+    const errors = trackErrors(page)
+    await page.goto(PROFILE)
+    await settled(page)
+    await page.evaluate(() => { (window as unknown as { __sameDocument: boolean }).__sameDocument = true })
+    await page.locator('caribou-profile-tabs a', { hasText: 'replies' }).click()
+    await expect(page).toHaveURL(/\/@kev@fosstodon\.org\?tab=replies$/)
+    await expect(page.locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('replies')
+    await expect(page.locator('litro-outlet > *')).toHaveCount(1)
+    await expect(page.locator('caribou-profile-header .handle')).toHaveText('@kev')
+    expect(await page.locator('caribou-profile caribou-status-card').count()).toBeGreaterThan(0)
+    expect(await page.evaluate(() => (window as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true)
+    expect(errors).toEqual([])
   })
 
   test('hydrates without an error and keeps the server-rendered cards', async ({ page }) => {

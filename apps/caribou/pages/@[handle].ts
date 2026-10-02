@@ -83,7 +83,7 @@ export class HandlePage extends LitroPage {
       // client, which holds the token the server never sees.
       return html`
         <caribou-app-shell instance=${inst}>
-          <caribou-profile handle=${this.me.userKey} tab=${this.me.tab}></caribou-profile>
+          <caribou-profile handle=${this.me.userKey} link-handle="me" tab=${this.me.tab}></caribou-profile>
         </caribou-app-shell>
       `
     }

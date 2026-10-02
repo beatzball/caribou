@@ -56,7 +56,7 @@ describe('caribou-profile-header SSR', () => {
 
 describe('caribou-profile-tabs SSR', () => {
   it('server-renders real anchors that work without JavaScript', async () => {
-    const out = strip(await ssr(html`<caribou-profile-tabs handle="@alice@example.social" tab="media"></caribou-profile-tabs>`))
+    const out = strip(await ssr(html`<caribou-profile-tabs handle="alice@example.social" tab="media"></caribou-profile-tabs>`))
     expect(out).toContain('<a href="/@alice@example.social?tab=posts"')
     expect(out).toContain('<a href="/@alice@example.social?tab=replies"')
     expect(out).toMatch(/<a href="\/@alice@example\.social\?tab=media"\s+aria-current="page"/)
@@ -94,7 +94,7 @@ describe('caribou-profile SSR', () => {
 
   it('links to the next page for readers without JavaScript', async () => {
     const out = await render(INITIAL)
-    expect(out).toMatch(/<a href="[^"]*\?tab=posts&amp;max_id=209"\s+rel="next"\s+data-sentinel[^>]*>Older posts →<\/a>/)
+    expect(out).toMatch(/<a href="\/@alice@example\.social\?tab=posts&amp;max_id=209"\s+rel="next"\s+data-sentinel[^>]*>Older posts →<\/a>/)
   })
 
   it('renders no next-page link on the last page', async () => {
@@ -129,6 +129,17 @@ describe('/@[handle] page SSR', () => {
     expect(out.match(/<caribou-status-card\s/g)).toHaveLength(2)
     expect(out).toContain('<p>post 210</p>')
     expect(out).not.toContain('Loading…')
+  })
+
+  // The route hands over the handle without its `@`; every link the server
+  // prints must put it back, or a reader without JavaScript lands on a 404.
+  it('prints tab links and the next-page link that match the /@:handle route', async () => {
+    const out = await render({ kind: 'ok', ...INITIAL, shell, handle: 'alice@example.social' })
+    for (const tab of ['posts', 'replies', 'media']) {
+      expect(out).toContain(`<a href="/@alice@example.social?tab=${tab}"`)
+    }
+    expect(out).toContain('<a href="/@alice@example.social?tab=posts&amp;max_id=209"')
+    expect(out).not.toMatch(/href="\/alice@example\.social/)
   })
 
   it('renders the sign-in placeholder for /@me', async () => {

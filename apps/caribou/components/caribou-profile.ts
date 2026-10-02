@@ -36,6 +36,10 @@ export class CaribouProfile extends LitElement {
 
   @property({ reflect: true }) handle = ''
   @property({ reflect: true }) tab: ProfileTab = 'posts'
+  // The handle segment the links use, when it is not `handle`. On /@me the
+  // account is looked up by the signed-in user's handle, but the tabs and the
+  // next-page link must stay on /@me.
+  @property({ attribute: 'link-handle' }) linkHandle = ''
   // The first page, fetched by the server. With it the element renders the
   // whole profile on the server and makes no request of its own on mount.
   // Without it (the /@me case) the element looks the account up through the
@@ -149,7 +153,8 @@ export class CaribouProfile extends LitElement {
     const statuses = this.live ? this.statuses : (this.initial?.statuses ?? [])
     const hasMore = this.live ? this.hasMore : this.initial?.nextMaxId != null
     const last = statuses[statuses.length - 1]
-    const nextHref = last && hasMore ? `/${this.handle}?tab=${this.tab}&max_id=${last.id}` : null
+    const linkHandle = (this.linkHandle || this.handle).replace(/^@/, '')
+    const nextHref = last && hasMore ? `/@${linkHandle}?tab=${this.tab}&max_id=${last.id}` : null
     // `repeat` keys each row by status id, so a new page or a reordered list
     // moves the existing cards instead of rebuilding them — a card that is
     // rebuilt fetches its avatar again.
@@ -159,7 +164,7 @@ export class CaribouProfile extends LitElement {
     // and the component tests would never see the link.
     return html`
       <caribou-profile-header .account=${account}></caribou-profile-header>
-      <caribou-profile-tabs handle=${this.handle} tab=${this.tab}></caribou-profile-tabs>
+      <caribou-profile-tabs handle=${linkHandle} tab=${this.tab}></caribou-profile-tabs>
       <div class="posts">
         <ul>
           ${repeat(statuses, (s) => s.id, (s) => html`<li
