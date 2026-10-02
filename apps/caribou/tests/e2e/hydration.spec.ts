@@ -20,6 +20,9 @@ interface ServerPageAtSwap {
 // element that hydrates keeps every node the server sent. So each route says
 // which elements the client may add after hydration, and nothing else may
 // change. `/?error=denied` adds the alert: the server never has the code.
+//
+// With no instance cookie and no session the three timeline routes render
+// their auth-required placeholder, so they need no upstream and add nothing.
 const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/', adds: [] },
   { route: '/?error=denied', adds: ['caribou-error-banner > div'] },
@@ -27,6 +30,9 @@ const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/privacy', adds: [] },
   { route: '/blog', adds: [] },
   { route: '/blog/hello-world', adds: [] },
+  { route: '/home', adds: [] },
+  { route: '/local', adds: [] },
+  { route: '/public', adds: [] },
 ]
 
 function collectErrors(page: Page): string[] {
@@ -98,6 +104,28 @@ for (const { route, adds } of ROUTES) {
     expect(errors).toEqual([])
   })
 }
+
+// The server does not know the request path, so the nav rail renders no
+// active item; it marks one from `location` after its first update.
+test('the nav rail marks the active item with aria-current after hydration', async ({ page, request }) => {
+  const body = await (await request.get('/local')).text()
+  expect(body).not.toMatch(/<a [^>]*aria-current=/)
+
+  await page.goto('/local')
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  const localNav = page.locator('page-local caribou-nav-rail')
+  await expect(localNav.getByRole('link', { name: 'Local' })).toHaveAttribute('aria-current', 'page')
+  await expect(localNav.locator('a[aria-current]')).toHaveCount(1)
+
+  // The mark follows a client-side navigation. The old and the new page
+  // share the outlet for a moment, so scope to the page that is expected.
+  await localNav.getByRole('link', { name: 'Public' }).click()
+  await expect(page).toHaveURL(/\/public$/)
+  const publicNav = page.locator('page-public caribou-nav-rail')
+  await expect(publicNav.getByRole('link', { name: 'Public' })).toHaveAttribute('aria-current', 'page')
+  await expect(publicNav.locator('a[aria-current]')).toHaveCount(1)
+  await expect(page.locator('litro-outlet > *')).toHaveCount(1)
+})
 
 // During a client-side navigation the router holds the old and the new page
 // in the outlet for a moment, so these tests scope their locators to the page
