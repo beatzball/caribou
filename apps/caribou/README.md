@@ -30,8 +30,10 @@ off; both are required for Lit's decorators.
 **A page's tag comes from its file path**, not from the class: `pages/about.ts`
 must register `page-about`, `pages/@[handle]/[statusId].ts` must register
 `page-handle-statusid`. The build prints the tag for each route in
-`routes.generated.ts`. `pages/index.ts` is `page-index` — a patch on
-`@beatzball/litro` renames it from `page-home`, which `pages/home.ts` owns.
+`routes.generated.ts`. Two rules come from a patch on `@beatzball/litro`
+(`patches/`), until Litro has them upstream: `pages/index.ts` is `page-index`,
+not `page-home`, which `pages/home.ts` owns; and a bracket may follow a
+prefix, so `pages/@[handle].ts` is the route `/@:handle`.
 
 **Every element has a shadow root, so styles live in the element.** A rule in
 the document stylesheet does not reach inside one. Write `static styles` with
@@ -79,6 +81,9 @@ sanitizer) through a dynamic `import()` inside it.
 
 - Component: happy-dom. Create the element, append it, `await el.updateComplete`,
   query `el.shadowRoot`.
+  When the element sets state in `firstUpdated`, one await is not enough: it
+  resolves `false` before the second render. Loop instead:
+  `while (!(await el.updateComplete)) {}`.
 - SSR: put `// @vitest-environment node` on the first line and use `ssr()` from
   `tests/integration/_ssr.ts`.
 - A test that sends a `Cookie` header to a spawned server also needs the node
