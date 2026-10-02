@@ -199,6 +199,23 @@ test.describe('/@handle — server-rendered profile (real upstream)', () => {
     })
   })
 
+  // A reader who only browses has JavaScript but no session, so the store
+  // has no client to page with. The link must stay and still work.
+  test('"Older posts" still works with JavaScript and no session', async ({ page }) => {
+    await page.goto(PROFILE)
+    await settled(page)
+    const firstId = await page.locator('caribou-profile caribou-status-card').first().getAttribute('data-status-id')
+    const next = page.locator('caribou-profile a[rel="next"]')
+    await next.scrollIntoViewIfNeeded()
+    // Give the observer time to report the link; it must not remove it.
+    await page.waitForTimeout(500)
+    await expect(next).toBeVisible()
+    await next.click()
+    await expect(page).toHaveURL(/\/@kev@fosstodon\.org\?tab=posts&max_id=\d+$/)
+    await expect(page.locator('caribou-profile caribou-status-card').first()).not.toHaveAttribute('data-status-id', firstId!)
+    expect(await page.locator('caribou-profile caribou-status-card').count()).toBeGreaterThan(0)
+  })
+
   test('a tab click swaps the list without a full page load', async ({ page }) => {
     const errors = trackErrors(page)
     await page.goto(PROFILE)

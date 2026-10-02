@@ -179,20 +179,34 @@ describe('<caribou-profile> — keyed list', () => {
 
 describe('<caribou-profile> — pagination', () => {
   type IoCallback = (entries: Partial<IntersectionObserverEntry>[]) => void
+  interface FakeObserver { callback: IoCallback; targets: Element[]; observeCalls: number }
 
-  function stubIntersectionObserver() {
-    const observers: { callback: IoCallback; targets: Element[]; disconnected: boolean }[] = []
+  function stubIntersectionObserver(): FakeObserver[] {
+    const observers: FakeObserver[] = []
     vi.stubGlobal('IntersectionObserver', class {
-      private record: (typeof observers)[number]
+      private record: FakeObserver
       constructor(callback: IoCallback) {
-        this.record = { callback, targets: [], disconnected: false }
+        this.record = { callback, targets: [], observeCalls: 0 }
         observers.push(this.record)
       }
-      observe(el: Element) { this.record.targets.push(el) }
-      disconnect() { this.record.disconnected = true }
+      observe(el: Element) { this.record.targets.push(el); this.record.observeCalls += 1 }
+      disconnect() { this.record.targets = [] }
     })
     return observers
   }
+
+  // The observer that watches the link right now, if there is one.
+  function watching(observers: FakeObserver[], link: Element | null): FakeObserver | undefined {
+    return observers.find((o) => link !== null && o.targets.includes(link))
+  }
+
+  function clickIsPrevented(link: Element): boolean {
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    link.dispatchEvent(click)
+    return click.defaultPrevented
+  }
+
+  const sentinelOf = (el: CaribouProfile) => el.shadowRoot!.querySelector<HTMLAnchorElement>('a[data-sentinel]')
 
   afterEach(() => { vi.unstubAllGlobals() })
 
@@ -220,57 +234,141 @@ describe('<caribou-profile> — pagination', () => {
     expect(el.shadowRoot!.querySelector('a[rel="next"]')).toBeNull()
   })
 
-  it('loads the next page when the link scrolls into view, then moves the link on', async () => {
+  it('signed in: loads the next page when the link scrolls into view, then moves the link on', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
     const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209'), status('208')])
     const el = await mount({ initial: initialOf([STATUS], '210') })
-    const next = el.shadowRoot!.querySelector<HTMLAnchorElement>('a[data-sentinel]')!
-    expect(observers.at(-1)!.targets).toEqual([next])
+    const next = sentinelOf(el)!
+    const observer = watching(observers, next)!
+    expect(observer).toBeDefined()
+    // In-place paging owns the link; a click must not also load a new page.
+    expect(clickIsPrevented(next)).toBe(true)
 
-    observers.at(-1)!.callback([{ isIntersecting: true, target: next }])
+    observer.callback([{ isIntersecting: true, target: next }])
     await flush()
     await el.updateComplete
 
     expect(list).toHaveBeenCalledWith('42', { tab: 'posts', maxId: '210' })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210', '209', '208'])
-    expect(el.shadowRoot!.querySelector('a[data-sentinel]')).toBe(next)
+    expect(sentinelOf(el)).toBe(next)
     expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=208')
-    // The store owns pagination now; a click must not also load a new page.
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
-    next.dispatchEvent(click)
-    expect(click.defaultPrevented).toBe(true)
   })
 
-  it('removes the link when the next page is empty', async () => {
+  // An observer reports a target only when its state changes. A short page
+  // can leave the link in view, so the element asks for a fresh report.
+  it('signed in: observes the link again after each page', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209')])
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    const observer = watching(observers, next)!
+    expect(observer.observeCalls).toBe(1)
+    observer.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(observer.observeCalls).toBe(2)
+    expect(observer.targets).toEqual([next])
+  })
+
+  // The profile shows no error state, so the link stays in view after a
+  // failed load. A fresh report would retry the failing request without end.
+  it('signed in: does not observe again after a failed load', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockRejectedValue(new Error('429'))
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    const observer = watching(observers, next)!
+    observer.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(observer.observeCalls).toBe(1)
+    expect(sentinelOf(el)).toBe(next)
+  })
+
+  it('signed in: does not start a second load while one is running', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209')])
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    const observer = watching(observers, next)!
+    observer.callback([{ isIntersecting: true, target: next }])
+    observer.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
+  it('signed in: removes the link when the next page is empty', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
     vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
     const el = await mount({ initial: initialOf([STATUS], '210') })
-    const next = el.shadowRoot!.querySelector('a[data-sentinel]')!
-    observers.at(-1)!.callback([{ isIntersecting: true, target: next }])
+    const next = sentinelOf(el)!
+    watching(observers, next)!.callback([{ isIntersecting: true, target: next }])
     await flush()
     await el.updateComplete
-    expect(el.shadowRoot!.querySelector('a[data-sentinel]')).toBeNull()
-    expect(observers.at(-1)!.disconnected).toBe(true)
+    expect(sentinelOf(el)).toBeNull()
+    expect(observers.every((o) => o.targets.length === 0)).toBe(true)
   })
 
-  it('leaves the link alone until it scrolls into view', async () => {
+  it('signed in: ignores a report that the link is out of view', async () => {
     const observers = stubIntersectionObserver()
-    signIn()
+    const client = signIn()
+    const list = vi.spyOn(client, 'fetchAccountStatuses')
     const el = await mount({ initial: initialOf([STATUS], '210') })
-    const next = el.shadowRoot!.querySelector('a[data-sentinel]')!
-    observers.at(-1)!.callback([{ isIntersecting: false, target: next }])
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
-    next.dispatchEvent(click)
-    expect(click.defaultPrevented).toBe(false)
+    const next = sentinelOf(el)!
+    watching(observers, next)!.callback([{ isIntersecting: false, target: next }])
+    await flush()
+    expect(list).not.toHaveBeenCalled()
   })
 
   it('stops observing when it leaves the document', async () => {
     const observers = stubIntersectionObserver()
     signIn()
     const el = await mount({ initial: initialOf([STATUS], '210') })
+    expect(watching(observers, sentinelOf(el))).toBeDefined()
     el.remove()
-    expect(observers.at(-1)!.disconnected).toBe(true)
+    expect(observers.every((o) => o.targets.length === 0)).toBe(true)
+  })
+
+  // A reader with no session still has JavaScript. A store with no client
+  // fetches nothing and reports the end of the list, so taking the link over
+  // would remove the only way to older posts.
+  it('no session: keeps "Older posts" a plain link to the next server page', async () => {
+    const observers = stubIntersectionObserver()
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    // Whatever watches the link gets told it is in view.
+    for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+
+    expect(sentinelOf(el)).toBe(next)
+    expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=210')
+    expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210'])
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+  })
+
+  it('takes the link over on sign-in and hands it back on sign-out', async () => {
+    const observers = stubIntersectionObserver()
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    expect(watching(observers, next)).toBeUndefined()
+
+    signIn()
+    await el.updateComplete
+    expect(watching(observers, next)).toBeDefined()
+    expect(clickIsPrevented(next)).toBe(true)
+
+    activeUserKey.value = null
+    await el.updateComplete
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    expect(sentinelOf(el)).toBe(next)
   })
 })

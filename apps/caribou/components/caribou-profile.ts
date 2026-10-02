@@ -53,26 +53,32 @@ export class CaribouProfile extends LitElement {
   @state() private account: Account | null = null
   @state() private statuses: Status[] = []
   @state() private hasMore = false
+  // False while nobody is signed in on this device (a reader who browses a
+  // public profile). The store then has no client and cannot fetch a page
+  // in place.
+  @state() private canFetch = false
 
   private store: ProfileStore | null = null
   private dispose: (() => void) | null = null
   private io: CaribouIntersectionObserver | null = null
-  private observed: Element | null = null
-  // True once the sentinel has scrolled into view and the store has taken
-  // over pagination. Until then the anchor is a plain link.
-  private paging = false
+  private observedSentinel: Element | null = null
+  private loadingOlder = false
 
   override connectedCallback() {
     super.connectedCallback()
-    if (this.store) this.bind()
+    // Re-attach after a move in the DOM. On the first connect there is no
+    // store yet — `firstUpdated` makes it.
+    if (this.store && !this.dispose) {
+      this.bind()
+      this.requestUpdate()
+    }
   }
 
   override disconnectedCallback() {
     this.dispose?.()
     this.dispose = null
     this.io?.disconnect()
-    this.io = null
-    this.observed = null
+    this.observedSentinel = null
     super.disconnectedCallback()
   }
 
@@ -109,7 +115,6 @@ export class CaribouProfile extends LitElement {
 
   private bind() {
     const store = this.store!
-    this.dispose?.()
     this.dispose = effect(() => {
       const next = store.statuses.value
       // The store derives `statuses` from the shared status cache, and every
@@ -118,33 +123,52 @@ export class CaribouProfile extends LitElement {
       // list changes. Assigning it would re-render the whole profile.
       if (!sameItems(next, this.statuses)) this.statuses = next
       this.hasMore = store.hasMore.value
+      this.canFetch = activeClient.value !== null
     })
     this.live = true
   }
 
   protected override updated() {
-    const sentinel = this.renderRoot.querySelector('a[data-sentinel]')
-    if (sentinel === this.observed) return
+    // The "Older posts" anchor is the no-JS pagination link. With JS and a
+    // signed-in client it is also the infinite-scroll sentinel: when it
+    // scrolls into view the next page loads in place. Without a client it
+    // stays a plain link to the next server-rendered page — hijacking it
+    // would fetch nothing, read that as the end of the profile, and remove
+    // the only way to older posts.
+    const sentinel = this.canFetch ? this.renderRoot.querySelector('a[data-sentinel]') : null
+    if (sentinel === this.observedSentinel) return
+    this.observedSentinel = sentinel
     this.io?.disconnect()
-    this.io = null
-    this.observed = null
-    this.paging = false
-    if (!sentinel || !this.store) return
-    this.observed = sentinel
-    // The anchor is the no-JavaScript pagination link. With JavaScript it
-    // doubles as the infinite-scroll sentinel: when it scrolls into view the
-    // store loads the next page and render() moves the href on to the page
-    // after that. When the store runs out, render() drops the anchor.
-    this.io = createIntersectionObserver((entry) => {
-      if (!entry.isIntersecting) return
-      this.paging = true
-      void this.store?.loadMore()
-    })
+    if (!sentinel) return
+    this.io ??= createIntersectionObserver(this.onSentinelIntersect)
     this.io.observe(sentinel)
   }
 
+  private onSentinelIntersect = async (entry: IntersectionObserverEntry) => {
+    if (!entry.isIntersecting || this.loadingOlder) return
+    this.loadingOlder = true
+    try {
+      await this.store?.loadMore()
+      await this.updateComplete
+    } finally {
+      this.loadingOlder = false
+    }
+    // A short page can leave the anchor in view, and an observer reports a
+    // target only when its state changes. Observe again to get a fresh
+    // report and keep loading until the anchor leaves the viewport or the
+    // profile ends (the anchor is then no longer rendered). Not after a
+    // failed load: the profile shows no error state, so the anchor stays in
+    // view and a fresh report would retry the failing request without end.
+    if (this.store?.error.value) return
+    if (this.io && this.observedSentinel?.isConnected) {
+      this.io.disconnect()
+      this.io.observe(this.observedSentinel)
+    }
+  }
+
   private onSentinelClick = (e: Event) => {
-    if (this.paging) e.preventDefault()
+    // In-place paging owns the anchor; otherwise let the browser follow it.
+    if (this.canFetch) e.preventDefault()
   }
 
   override render() {
