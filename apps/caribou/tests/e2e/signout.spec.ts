@@ -1,8 +1,9 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 
-// Where the signed-in user starts. Any page inside the app shell works: the
-// sign-out button lives in the nav rail.
-const START_PATH = '/about'
+// Where the signed-in user starts: the home timeline, as in real use. Any
+// page inside the app shell works — the sign-out button lives in the nav
+// rail — but /home also has a live timeline to tear down on sign-out.
+const START_PATH = '/home'
 
 const INSTANCE = 'example.social'
 const USER_KEY = `alice@${INSTANCE}`
