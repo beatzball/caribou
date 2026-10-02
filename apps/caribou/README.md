@@ -30,8 +30,10 @@ off; both are required for Lit's decorators.
 **A page's tag comes from its file path**, not from the class: `pages/about.ts`
 must register `page-about`, `pages/@[handle]/[statusId].ts` must register
 `page-handle-statusid`. The build prints the tag for each route in
-`routes.generated.ts`. `pages/index.ts` is `page-index` — a patch on
-`@beatzball/litro` renames it from `page-home`, which `pages/home.ts` owns.
+`routes.generated.ts`. Two rules come from a patch on `@beatzball/litro`
+(`patches/`), until Litro has them upstream: `pages/index.ts` is `page-index`,
+not `page-home`, which `pages/home.ts` owns; and a bracket may follow a
+prefix, so `pages/@[handle].ts` is the route `/@:handle`.
 
 **Every element has a shadow root, so styles live in the element.** A rule in
 the document stylesheet does not reach inside one. Write `static styles` with
@@ -53,6 +55,12 @@ no `window`. So `render()` must not read `window`, `location`, `localStorage`,
 the clock, or any state the server did not have. Read those in `firstUpdated()`
 (or later) into a `@state()` field and let the element render again.
 
+**Test for the server with `typeof window === 'undefined'`, not `isServer`.**
+Vitest loads `lit` under Node's `node` export condition, so Lit's `isServer`
+is `true` in a happy-dom component test even though a DOM exists. A guard on
+`isServer` would switch the code off in the tests that cover it. `typeof
+window` is right in all three places: the server, the browser and happy-dom.
+
 **A page mounts twice on a full page load.** The router hydrates the
 server-rendered element, builds a second one off-screen, then swaps them and
 sets `data-litro-settled` on `<litro-outlet>`. Both run their lifecycle, so
@@ -73,6 +81,9 @@ sanitizer) through a dynamic `import()` inside it.
 
 - Component: happy-dom. Create the element, append it, `await el.updateComplete`,
   query `el.shadowRoot`.
+  When the element sets state in `firstUpdated`, one await is not enough: it
+  resolves `false` before the second render. Loop instead:
+  `while (!(await el.updateComplete)) {}`.
 - SSR: put `// @vitest-environment node` on the first line and use `ssr()` from
   `tests/integration/_ssr.ts`.
 - A test that sends a `Cookie` header to a spawned server also needs the node
