@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 
 // The router hydrates the server-rendered page, builds a second one, then
 // swaps them. Until the swap, the visible page is not the live one.
@@ -82,11 +83,19 @@ test.describe('/@handle/id — server-rendered thread (real upstream)', () => {
       if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text())
     })
     await withInstanceCookie(context)
-    await page.goto(await threadPath(page))
-    const before = await page.locator('caribou-thread caribou-status-card').evaluateAll(
+    const path = await threadPath(page)
+    await watchServerPage(page, 'article[data-variant]')
+    await page.goto(path)
+    // Before the swap the outlet can hold two pages; read the one on screen.
+    const before = await livePage(page).locator('caribou-thread caribou-status-card').evaluateAll(
       (cards) => cards.map((c) => `${c.getAttribute('variant')}:${c.getAttribute('data-id')}`),
     )
     await settled(page)
+    // Every card the server sent was hydrated in place: the <article> in each
+    // card's shadow root is the same node, there is no second copy, and no
+    // element is left waiting for its parent.
+    const report = await serverPageReport(page)
+    expect(report).toEqual({ sent: before.length, atSwap: before.length, sameNodes: true, deferred: [] })
     const after = await page.locator('caribou-thread caribou-status-card').evaluateAll(
       (cards) => cards.map((c) => `${c.getAttribute('variant')}:${c.getAttribute('data-id')}`),
     )

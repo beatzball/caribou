@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 
 const ACCOUNT = {
   id: 'a1', username: 'alice', acct: 'alice', display_name: 'Alice Example',
@@ -18,6 +19,10 @@ function makeStatus(id: string, content = `<p>post ${id}</p>`) {
     favourited: false, reblogged: false, bookmarked: false, language: 'en',
   }
 }
+
+// The <article> inside each status card's shadow root: there only when the
+// card itself has been rendered.
+const CARD_BODY = 'article[data-variant]'
 
 // The router hydrates the server-rendered page, builds a second one, then
 // swaps them. Until the swap, the visible page is not the live one.
@@ -51,11 +56,16 @@ function trackErrors(page: Page): string[] {
 test.describe('/@me — own profile', () => {
   test('signed out: shows the sign-in placeholder, before and after the router settles', async ({ page }) => {
     const errors = trackErrors(page)
+    await watchServerPage(page, 'article.auth-required-placeholder')
     await page.goto('/@me')
-    await expect(page.getByText(/Your profile shows posts from your signed-in account/)).toBeVisible()
+    // Before the swap the outlet can hold the server-rendered page and the
+    // router's next one, each with its own placeholder.
+    await expect(livePage(page).getByText(/Your profile shows posts from your signed-in account/)).toBeVisible()
     await settled(page)
     await expect(page.getByText(/Your profile shows posts from your signed-in account/)).toBeVisible()
     await expect(page.locator('caribou-profile')).toHaveCount(0)
+    // The server's placeholder was hydrated, not rendered a second time.
+    expect(await serverPageReport(page)).toEqual({ sent: 1, atSwap: 1, sameNodes: true, deferred: [] })
     expect(errors).toEqual([])
   })
 
@@ -223,7 +233,9 @@ test.describe('/@handle — server-rendered profile (real upstream)', () => {
     await page.evaluate(() => { (window as unknown as { __sameDocument: boolean }).__sameDocument = true })
     await page.locator('caribou-profile-tabs a', { hasText: 'replies' }).click()
     await expect(page).toHaveURL(/\/@kev@fosstodon\.org\?tab=replies$/)
-    await expect(page.locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('replies')
+    // The old page (posts) and the next one (replies) share the outlet for a
+    // moment; follow the one the reader sees.
+    await expect(livePage(page).locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('replies')
     await expect(page.locator('litro-outlet > *')).toHaveCount(1)
     await expect(page.locator('caribou-profile-header .handle')).toHaveText('@kev')
     expect(await page.locator('caribou-profile caribou-status-card').count()).toBeGreaterThan(0)
@@ -233,9 +245,15 @@ test.describe('/@handle — server-rendered profile (real upstream)', () => {
 
   test('hydrates without an error and keeps the server-rendered cards', async ({ page }) => {
     const errors = trackErrors(page)
+    await watchServerPage(page, CARD_BODY)
     await page.goto(PROFILE)
-    const firstId = await page.locator('caribou-profile caribou-status-card').first().getAttribute('data-status-id')
+    const firstId = await livePage(page).locator('caribou-profile caribou-status-card').first().getAttribute('data-status-id')
     await settled(page)
+    // Every card the server sent was hydrated in place: the same nodes, no
+    // second copy, and no element left waiting for its parent.
+    const report = await serverPageReport(page)
+    expect(report?.sent).toBeGreaterThan(0)
+    expect(report).toEqual({ sent: report!.sent, atSwap: report!.sent, sameNodes: true, deferred: [] })
     await expect(page.locator('caribou-profile-header .handle')).toHaveText('@kev')
     await expect(page.locator('caribou-profile caribou-status-card').first()).toHaveAttribute('data-status-id', firstId!)
     expect(await page.locator('caribou-profile caribou-status-card').count()).toBeGreaterThan(0)
