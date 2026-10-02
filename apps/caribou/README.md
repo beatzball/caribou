@@ -55,6 +55,17 @@ no `window`. So `render()` must not read `window`, `location`, `localStorage`,
 the clock, or any state the server did not have. Read those in `firstUpdated()`
 (or later) into a `@state()` field and let the element render again.
 
+**`app.ts` stays a two-line bootstrap.** LitElement looks for Lit's hydration
+support once, when its own module runs. Importing the support on the first
+line is not enough: the bundler moves LitElement into a shared chunk, the
+entry imports that chunk statically, and a static import runs before the body
+of the module that imports it. LitElement then runs first, is never patched,
+and every server-rendered element renders a second copy of itself beside the
+server's markup instead of hydrating it — with no error. So `app.ts` imports
+only the support and loads the rest (`app-main.ts`) with a dynamic `import()`.
+Put new client start-up code in `app-main.ts`, never in `app.ts`.
+`tests/e2e/hydration-bootstrap.spec.ts` guards this.
+
 **Test for the server with `typeof window === 'undefined'`, not `isServer`.**
 Vitest loads `lit` under Node's `node` export condition, so Lit's `isServer`
 is `true` in a happy-dom component test even though a DOM exists. A guard on

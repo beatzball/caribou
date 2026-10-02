@@ -1,50 +1,19 @@
-// Design tokens are inlined server-side via `server/lib/tokens-head.ts`
-// so `var(--bg-0)` et al. resolve on first paint (Vite otherwise extracts
-// a tokens.css import into a stylesheet the SSR shell never links to).
-
-// CRITICAL: must be first — patches LitElement before any component is loaded.
+// The client entry. It installs Lit's hydration support, then loads the app.
+//
+// LitElement looks for the hydration support exactly once: when its own
+// module runs. If it finds none, it is never patched, and every
+// server-rendered element renders a second copy of itself next to its server
+// markup instead of hydrating it.
+//
+// So the support must run before the module that defines LitElement, and a
+// first-line import does not guarantee that. The bundler moves LitElement
+// into a shared chunk, the entry imports that chunk statically, and a static
+// import runs before the body of the module that imports it — the body is
+// where the support ends up.
+//
+// The dynamic import below is the guarantee: nothing this file loads
+// statically can reach LitElement, so the app, and LitElement with it, runs
+// only after this file's body has run. Do not add a static import here.
 import '@lit-labs/ssr-client/lit-element-hydrate-support.js'
 
-// Client runtime: router outlet and link custom elements.
-import '@beatzball/litro/runtime/LitroOutlet.js'
-import '@beatzball/litro/runtime/LitroLink.js'
-
-import { loadFromStorage, removeActiveUser } from '@beatzball/caribou-state'
-import { routes } from './routes.generated.js'
-
-// Hydrate session from localStorage before any component reads it.
-if (typeof window !== 'undefined') {
-  loadFromStorage()
-  // Global 401 interceptor: if any mastodon-client call hits 401, the client
-  // calls session.onUnauthorized(). Our session source (see `session-source.ts`
-  // wiring in createTimelineStore's clientSource) calls removeActiveUser and
-  // navigates to /?error=unauthorized.
-  //
-  // More than one timeline can be alive during a route swap, and each one
-  // fires `caribou:unauthorized` when its fetch hits 401. Calling
-  // `location.replace` from the second listener interrupts the navigation
-  // started by the first, which Chromium reports as `net::ERR_ABORTED` (and
-  // Playwright's `waitForURL` surfaces as a test failure). Guard with a
-  // one-shot flag so only the first unauthorized event triggers the redirect.
-  let unauthorizedHandled = false
-  window.addEventListener('caribou:unauthorized', () => {
-    if (unauthorizedHandled) return
-    unauthorizedHandled = true
-    removeActiveUser()
-    // Signal the error via sessionStorage instead of `?error=` on the
-    // replace target. Firefox + webkit race the query param between
-    // `location.replace` and navigation commit (firefox sometimes drops
-    // it entirely; webkit observes the banner's post-load URL cleanup).
-    // sessionStorage survives the same-tab navigation atomically and is
-    // browser-agnostic.
-    try { sessionStorage.setItem('caribou.error', 'unauthorized') } catch { /* ignore */ }
-    location.replace('/')
-  })
-}
-
-const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null
-if (outlet) {
-  outlet.routes = routes
-} else {
-  console.warn('[litro] <litro-outlet> not found — router will not start.')
-}
+void import('./app-main.js')
