@@ -51,6 +51,10 @@ export class CaribouTimeline extends LitElement {
   @state() private errorMsg: string | null = null
   @state() private hasMore = true
   @state() private newPostsCount = 0
+  // False while nobody is signed in on this device (browsing /local or
+  // /public with the instance cookie only). The store then has no client
+  // and cannot fetch a page in place.
+  @state() private canFetch = false
 
   private store: TimelineStore | null = null
   private disposeBindings: (() => void) | null = null
@@ -108,6 +112,7 @@ export class CaribouTimeline extends LitElement {
       this.errorMsg = store.error.value?.message ?? null
       this.hasMore = store.hasMore.value
       this.newPostsCount = store.newPostsCount.value
+      this.canFetch = activeClient.value !== null
     })
     if (this.kind === 'home') {
       this.stopPolling = startPolling({
@@ -118,10 +123,13 @@ export class CaribouTimeline extends LitElement {
   }
 
   protected override updated() {
-    // The "Older posts" anchor is the no-JS pagination link. With JS it is
-    // also the infinite-scroll sentinel: when it scrolls into view the next
-    // page loads in place.
-    const sentinel = this.renderRoot.querySelector('a[data-sentinel]')
+    // The "Older posts" anchor is the no-JS pagination link. With JS and a
+    // signed-in client it is also the infinite-scroll sentinel: when it
+    // scrolls into view the next page loads in place. Without a client it
+    // stays a plain link to the next server-rendered page — hijacking it
+    // would fetch nothing, read that as the end of the timeline, and remove
+    // the only way to older posts.
+    const sentinel = this.canFetch ? this.renderRoot.querySelector('a[data-sentinel]') : null
     if (sentinel === this.observedSentinel) return
     this.observedSentinel = sentinel
     this.io?.disconnect()
@@ -149,7 +157,10 @@ export class CaribouTimeline extends LitElement {
     }
   }
 
-  private onSentinelClick = (e: Event) => { e.preventDefault() }
+  private onSentinelClick = (e: Event) => {
+    // In-place paging owns the anchor; otherwise let the browser follow it.
+    if (this.canFetch) e.preventDefault()
+  }
 
   private onApplyNewPosts = () => { this.store?.applyNewPosts() }
 

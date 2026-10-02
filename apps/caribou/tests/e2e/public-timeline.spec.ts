@@ -116,6 +116,31 @@ test('/local shows painted cards on every frame while JavaScript takes over', as
   expect(Math.min(...samples)).toBeGreaterThan(0)
 })
 
+test('/local keeps a working Older posts link when no user is signed in', async ({ page, context }) => {
+  await withInstanceCookie(context)
+  await page.goto('/local')
+  await settled(page)
+  const cardIds = () => page.locator('caribou-status-card').evaluateAll(
+    (cards) => cards.map((c) => (c as HTMLElement).dataset.statusId),
+  )
+  const firstPage = await cardIds()
+
+  // With no signed-in client the timeline cannot fetch in place. Scrolling
+  // the link into view must not make it vanish…
+  const older = page.locator('page-local a[data-sentinel]')
+  await older.scrollIntoViewIfNeeded()
+  await page.waitForTimeout(500)
+  await expect(older).toBeVisible()
+
+  // …and a click loads the next server-rendered page.
+  await older.click()
+  await expect(page).toHaveURL(/\/local\?max_id=/)
+  await settled(page)
+  const secondPage = await cardIds()
+  expect(secondPage.length).toBeGreaterThan(0)
+  for (const id of secondPage) expect(firstPage).not.toContain(id)
+})
+
 test('nav rail goes from /local to /public without a full page load', async ({ page, context }) => {
   await withInstanceCookie(context)
   const errors = collectErrors(page)

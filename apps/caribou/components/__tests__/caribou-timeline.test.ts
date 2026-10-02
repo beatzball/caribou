@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { statusCache, type TimelineStore } from '@beatzball/caribou-state'
+import { activeUserKey, statusCache, users, type TimelineStore } from '@beatzball/caribou-state'
 import '../caribou-timeline.js'
 import type { CaribouTimeline, TimelineInitial, TimelineKind } from '../caribou-timeline.js'
 import { CaribouStatusCard } from '../caribou-status-card.js'
@@ -23,6 +23,17 @@ const asStatuses = (xs: Fixture[]) => xs as unknown as Parameters<TimelineStore[
 // A signal behind the store's read-only type is writable; tests drive the
 // loading and error states through it.
 type Writable<T> = { value: T }
+
+// Gives the store a client, as a signed-in browser has. No test lets that
+// client reach the network: the paging tests replace `store.loadMore`.
+function signIn() {
+  const userKey = 'alice@example.social' as NonNullable<typeof activeUserKey.value>
+  users.value = new Map([[userKey, {
+    userKey, server: 'example.social', token: 'TOKEN', vapidKey: '', createdAt: 1,
+    account: {} as never,
+  }]])
+  activeUserKey.value = userKey
+}
 
 const storeOf = (tl: CaribouTimeline) => (tl as unknown as { store: TimelineStore }).store
 
@@ -76,6 +87,8 @@ beforeEach(() => {
 })
 afterEach(() => {
   document.body.replaceChildren()
+  activeUserKey.value = null
+  users.value = new Map()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -361,61 +374,117 @@ describe('<caribou-timeline> — older posts', () => {
     expect(sentinel(tl)).toBeNull()
   })
 
-  it('swallows the click so the browser does not leave the page', async () => {
-    const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
-    sentinel(tl)!.dispatchEvent(click)
-    expect(click.defaultPrevented).toBe(true)
-  })
+  describe('signed in: the link pages in place', () => {
+    beforeEach(() => { signIn() })
 
-  it('loads the next page when the link scrolls into view', async () => {
-    const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
-    const io = FakeIntersectionObserver.instances.at(-1)!
-    expect([...io.targets]).toEqual([sentinel(tl)])
-    const loadMore = vi.spyOn(storeOf(tl), 'loadMore')
-
-    io.fire(false)
-    expect(loadMore).not.toHaveBeenCalled()
-    io.fire(true)
-    expect(loadMore).toHaveBeenCalledTimes(1)
-  })
-
-  it('removes the link and stops observing when the timeline ends', async () => {
-    const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
-    const io = FakeIntersectionObserver.instances.at(-1)!
-    // No client → the next page is empty → end of the timeline.
-    io.fire(true)
-    await new Promise((r) => setTimeout(r, 0))
-    await settle(tl)
-    expect(sentinel(tl)).toBeNull()
-    expect(io.targets.size).toBe(0)
-    expect(listItems(tl)).toHaveLength(1)
-  })
-
-  it('observes the link again after a page loads, so a short page keeps loading', async () => {
-    const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
-    const io = FakeIntersectionObserver.instances.at(-1)!
-    const link = sentinel(tl)!
-    const store = storeOf(tl)
-    vi.spyOn(store, 'loadMore').mockImplementation(async () => {
-      store._testOnlyPrepend(asStatuses([mkStatus('older')]))
-      store.applyNewPosts()
+    it('swallows the click so the browser does not leave the page', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+      sentinel(tl)!.dispatchEvent(click)
+      expect(click.defaultPrevented).toBe(true)
     })
-    expect(io.observeCalls).toBe(1)
 
-    io.fire(true)
-    await new Promise((r) => setTimeout(r, 0))
-    await settle(tl)
+    it('loads the next page when the link scrolls into view', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      expect([...io.targets]).toEqual([sentinel(tl)])
+      const loadMore = vi.spyOn(storeOf(tl), 'loadMore').mockResolvedValue()
 
-    expect(sentinel(tl)).toBe(link)
-    expect(io.observeCalls).toBe(2)
-    expect([...io.targets]).toEqual([link])
+      io.fire(false)
+      expect(loadMore).not.toHaveBeenCalled()
+      io.fire(true)
+      expect(loadMore).toHaveBeenCalledTimes(1)
+    })
+
+    it('removes the link and stops observing when the timeline ends', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      // What the store does when the next page comes back empty.
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => {
+        (store.hasMore as Writable<boolean>).value = false
+      })
+      io.fire(true)
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(sentinel(tl)).toBeNull()
+      expect(io.targets.size).toBe(0)
+      expect(listItems(tl)).toHaveLength(1)
+    })
+
+    it('observes the link again after a page loads, so a short page keeps loading', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const link = sentinel(tl)!
+      const store = storeOf(tl)
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => {
+        store._testOnlyPrepend(asStatuses([mkStatus('older')]))
+        store.applyNewPosts()
+      })
+      expect(io.observeCalls).toBe(1)
+
+      io.fire(true)
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+
+      expect(sentinel(tl)).toBe(link)
+      expect(io.observeCalls).toBe(2)
+      expect([...io.targets]).toEqual([link])
+    })
+
+    it('stops observing when disconnected', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      tl.remove()
+      expect(io.targets.size).toBe(0)
+    })
+
+    it('hands the link back to the browser when the user signs out', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      activeUserKey.value = null
+      await settle(tl)
+      expect(io.targets.size).toBe(0)
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+      sentinel(tl)!.dispatchEvent(click)
+      expect(click.defaultPrevented).toBe(false)
+    })
   })
 
-  it('stops observing when disconnected', async () => {
-    const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
-    const io = FakeIntersectionObserver.instances.at(-1)!
-    tl.remove()
-    expect(io.targets.size).toBe(0)
+  // Browsing /local or /public with the instance cookie only. The store has
+  // no client, so in-place paging would fetch nothing, read that as the end
+  // of the timeline, and remove the link. It must stay a real link to the
+  // next server-rendered page.
+  describe('no signed-in client: the link stays a plain link', () => {
+    it('does not watch the link for scrolling', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      expect(sentinel(tl)).not.toBeNull()
+      const observed = FakeIntersectionObserver.instances.flatMap((io) => [...io.targets])
+      expect(observed).toEqual([])
+    })
+
+    it('lets the browser follow the click', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const loadMore = vi.spyOn(storeOf(tl), 'loadMore')
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+      sentinel(tl)!.dispatchEvent(click)
+      expect(click.defaultPrevented).toBe(false)
+      expect(loadMore).not.toHaveBeenCalled()
+    })
+
+    it('keeps the link after the page settles', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0'), mkStatus('s1')], 's1'))
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(sentinel(tl)!.getAttribute('href')).toBe('?max_id=s1')
+    })
+
+    it('starts paging in place once a user is signed in', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      signIn()
+      await settle(tl)
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      expect([...io.targets]).toEqual([sentinel(tl)])
+    })
   })
 })
