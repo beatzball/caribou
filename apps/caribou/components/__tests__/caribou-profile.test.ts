@@ -229,6 +229,13 @@ describe('<caribou-profile> — pagination', () => {
     expect(el.shadowRoot!.querySelector('a[rel="next"]')!.getAttribute('href')).toBe('/@me?tab=posts&max_id=210')
   })
 
+  // Some non-Mastodon bridges mint ids with `/`, `:` or `&` in them.
+  it('encodes the status id in the next-page link', async () => {
+    const el = await mount({ initial: initialOf([status('odd:id/1&x')], 'odd:id/1&x') })
+    expect(el.shadowRoot!.querySelector('a[rel="next"]')!.getAttribute('href'))
+      .toBe('/@alice@example.social?tab=posts&max_id=odd%3Aid%2F1%26x')
+  })
+
   it('renders no "Older posts" link when the server found no next page', async () => {
     const el = await mount({ initial: initialOf([STATUS], null) })
     expect(el.shadowRoot!.querySelector('a[rel="next"]')).toBeNull()

@@ -178,7 +178,9 @@ export class CaribouProfile extends LitElement {
     const hasMore = this.live ? this.hasMore : this.initial?.nextMaxId != null
     const last = statuses[statuses.length - 1]
     const linkHandle = (this.linkHandle || this.handle).replace(/^@/, '')
-    const nextHref = last && hasMore ? `/@${linkHandle}?tab=${this.tab}&max_id=${last.id}` : null
+    const nextHref = last && hasMore
+      ? `/@${linkHandle}?tab=${this.tab}&max_id=${encodeURIComponent(last.id)}`
+      : null
     // `repeat` keys each row by status id, so a new page or a reordered list
     // moves the existing cards instead of rebuilding them — a card that is
     // rebuilt fetches its avatar again.
