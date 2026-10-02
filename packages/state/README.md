@@ -20,7 +20,7 @@ propagates without coordination.
 ## Position in the stack
 
 - **Depends on:** `@beatzball/caribou-auth` (UserKey), `@beatzball/caribou-mastodon-client` (CaribouClient + errors), `@preact/signals-core`, `masto`
-- **Depended on by:** `apps/caribou-elena` (every page) — no other package
+- **Depended on by:** `apps/caribou` (every page) — no other package
   consumes it
 - **Boundary it owns:** the in-memory shape of a logged-in session.
   Network, retries, and dedup are the client's job; rendering is the app's
@@ -174,7 +174,7 @@ it changed.
 
 ## See also
 
-- `apps/caribou-elena` — every page mounts these stores
+- `apps/caribou` — every page mounts these stores
 - `packages/mastodon-client` — the `CaribouClient` interface this
   package consumes
 - `docs/superpowers/specs/2026-04-21-caribou-v1-design.md` §12 — SSR

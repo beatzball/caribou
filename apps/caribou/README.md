@@ -1,8 +1,7 @@
 # caribou-app
 
 The Caribou web app: [Litro](https://github.com/beatzball/litro) with the Lit
-adapter. It replaces `apps/caribou-elena`, which stays in the tree, unchanged,
-until this app reaches parity and takes over the deploy.
+adapter.
 
 ```
 pnpm --filter caribou-app dev        # dev server

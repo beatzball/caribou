@@ -18,8 +18,8 @@ custom properties, so the theme switch propagates everywhere.
 ## Position in the stack
 
 - **Depends on:** `unocss` (peer-style — only needed at build time for the preset's types)
-- **Depended on by:** `apps/caribou-elena` (imports `tokens.css` once
-  in the root layout; `uno.config.ts` uses `presetCaribou()`)
+- **Depended on by:** `apps/caribou` (inlines `tokens.css` into every
+  page's `<head>` at build time). No app uses `presetCaribou()` now.
 - **Boundary it owns:** the names and values of the design system.
   Components consume tokens via classes; they never hardcode hex codes
   or pixel values.
@@ -84,6 +84,6 @@ until a second consumer appears.
 
 ## See also
 
-- `apps/caribou-elena/uno.config.ts` — the only current consumer
+- `apps/caribou/scripts/write-tokens-head.mjs` — the only current consumer
 - The variable list and theme switching is documented inline in
   `tokens.css`; no separate spec.

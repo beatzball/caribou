@@ -18,7 +18,7 @@ that's the same regardless of who runs it.
 
 - **Depends on:** nothing — only browser globals (`crypto`, `URL`, `URLSearchParams`)
 - **Depended on by:** `@beatzball/caribou-mastodon-client` (UserKey type),
-  `@beatzball/caribou-state` (UserKey + isUserKey), `apps/caribou-elena`
+  `@beatzball/caribou-state` (UserKey + isUserKey), `apps/caribou`
   (signin flow uses every export)
 - **Boundary it owns:** the deterministic, network-free pieces of OAuth.
   No fetch calls, no storage, no side effects beyond `crypto.getRandomValues`.
@@ -84,6 +84,6 @@ it elsewhere would mean re-deriving that contract from scratch.
 
 ## See also
 
-- `apps/caribou-elena/server/api/oauth/*` — the SSR routes that
+- `apps/caribou/server/routes/api/signin/*` — the SSR routes that
   pair with this package (token exchange, app registration)
 - `packages/state/src/users.ts` — consumes `UserKey` for session storage
