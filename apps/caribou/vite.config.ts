@@ -51,15 +51,6 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist/client',
-    // No `<link rel="modulepreload">` for a route's chunks. Vite's preload
-    // helper adds those tags and then calls `import()` for the same files;
-    // in Firefox that pair sometimes leaves one request with no response —
-    // it never reaches the server — and the page module never loads, so the
-    // route never becomes interactive. Measured in Playwright's Firefox:
-    // between 1 in 30 and 1 in 400 full page loads with preload on, 0 in
-    // 1000 with it off. The cost is one extra round trip per import level
-    // on a route's first visit.
-    modulePreload: false,
     rollupOptions: {
       input: 'app.ts',
       output: {
