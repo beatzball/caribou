@@ -1,19 +1,27 @@
-import { defineEventHandler, setResponseHeader, getRequestURL } from 'h3';
+import { defineEventHandler, setResponseHeader, setResponseStatus, getRequestURL } from 'h3';
 import { createPageHandler } from '@beatzball/litro/runtime/create-page-handler.js';
 import { routes, pageModules } from '#litro/page-manifest';
 import { TOKENS_HEAD } from '../lib/tokens-head.js';
 import { BASE_HEAD } from '../lib/base-head.js';
 import { matchRoute } from '../lib/match-route.js';
 
+// The path is echoed into the page. A URL pathname is percent-encoded, but
+// not every client encodes, so escape it rather than trust that.
+const escapeHtml = (text: string): string =>
+  text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
 export default defineEventHandler(async (event) => {
   const pathname = getRequestURL(event).pathname;
   const result = matchRoute(routes, pathname);
 
   if (!result) {
+    // A page that says 404 must also answer 404: a crawler, a link checker
+    // or a fetch() reads the status, not the heading.
+    setResponseStatus(event, 404);
     setResponseHeader(event, 'content-type', 'text/html; charset=utf-8');
     return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8" /><title>404</title></head>
-<body><h1>404 — Not Found</h1><p>No page matched <code>${pathname}</code>.</p></body>
+<body><h1>404 — Not Found</h1><p>No page matched <code>${escapeHtml(pathname)}</code>.</p></body>
 </html>`;
   }
 
