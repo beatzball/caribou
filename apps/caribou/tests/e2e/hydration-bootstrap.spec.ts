@@ -75,3 +75,38 @@ test('the server-rendered page is hydrated, not rendered a second time', async (
   })
   expect(errors).toEqual([])
 })
+
+// The cheaper check, from the same bug. Lit's hydration support patches
+// LitElement once, when LitElement's module runs; one thing it adds is
+// `defer-hydration` to `observedAttributes`, and every subclass inherits it.
+// So a class without it proves the support ran too late, however the page
+// looks. A check on the `defer-hydration` attribute itself cannot do that:
+// the attribute leaves with the discarded server markup on a broken build.
+test('every custom element on the page has the hydration support patched in', async ({ page }) => {
+  await page.goto('/about')
+  await page.waitForSelector('litro-outlet[data-litro-settled]', { state: 'attached' })
+
+  const unpatched = await page.evaluate(() => {
+    const names = new Set<string>()
+    const walk = (root: ParentNode) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.localName.includes('-')) names.add(el.localName)
+        if (el.shadowRoot) walk(el.shadowRoot)
+      }
+    }
+    walk(document)
+    return [...names].filter((name) => {
+      const ctor = customElements.get(name) as (CustomElementConstructor & { observedAttributes?: string[] }) | undefined
+      // An undefined element has no class to inspect; a class without
+      // `elementProperties` is not a LitElement and has nothing to patch.
+      if (!ctor || !('elementProperties' in ctor)) return false
+      return !(ctor.observedAttributes ?? []).includes('defer-hydration')
+    })
+  })
+
+  expect(unpatched).toEqual([])
+  // The check must have looked at something: the page and the shell at least.
+  const litElements = await page.evaluate(() =>
+    ['page-about', 'caribou-app-shell'].filter((n) => 'elementProperties' in (customElements.get(n) ?? {})))
+  expect(litElements).toEqual(['page-about', 'caribou-app-shell'])
+})
