@@ -1,5 +1,13 @@
 # caribou-app
 
+## 0.2.1
+
+### Patch Changes
+
+- [#36](https://github.com/beatzball/caribou/pull/36) [`ac3f091`](https://github.com/beatzball/caribou/commit/ac3f091b5ece96ed609495480c8ad931652a9915) Thanks [@beatzball](https://github.com/beatzball)! - The hydration e2e spec also checks that every Lit element class on the page carries the hydration support (`defer-hydration` in `observedAttributes`), which names the unpatched classes when the bootstrap breaks.
+
+- [#35](https://github.com/beatzball/caribou/pull/35) [`ecd77b8`](https://github.com/beatzball/caribou/commit/ecd77b8a14ee4205e6348213cd136f46cc47206c) Thanks [@beatzball](https://github.com/beatzball)! - An unmatched path now answers with status 404, not 200. The 404 page is unchanged; the path it echoes is HTML-escaped.
+
 ## 0.2.0
 
 ### Minor Changes
