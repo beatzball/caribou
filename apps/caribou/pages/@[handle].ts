@@ -108,7 +108,7 @@ export class HandlePage extends LitroPage {
     }
     return html`
       <caribou-app-shell instance=${inst}>
-        <caribou-profile handle=${data.handle} tab=${data.tab} .initial=${data}></caribou-profile>
+        <caribou-profile handle=${data.handle} tab=${data.tab} instance=${inst} .initial=${data}></caribou-profile>
       </caribou-app-shell>
     `
   }

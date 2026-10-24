@@ -4,7 +4,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
 import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, createAccountCache, createProfileStore,
+  activeClient, activeUser, createAccountCache, createProfileStore,
   type ProfileStore, type ProfileTab,
 } from '@beatzball/caribou-state'
 import { createIntersectionObserver, type CaribouIntersectionObserver } from '@beatzball/caribou-ui-headless'
@@ -40,6 +40,11 @@ export class CaribouProfile extends LitElement {
   // account is looked up by the signed-in user's handle, but the tabs and the
   // next-page link must stay on /@me.
   @property({ attribute: 'link-handle' }) linkHandle = ''
+  // The host the server fetched `initial` from. Account and status ids are
+  // minted per instance, so the signed-in client can page this profile in
+  // place only when it talks to that same host. Empty on /@me, where the
+  // account is looked up through the client itself and the ids match.
+  @property() instance = ''
   // The first page, fetched by the server. With it the element renders the
   // whole profile on the server and makes no request of its own on mount.
   // Without it (the /@me case) the element looks the account up through the
@@ -54,8 +59,9 @@ export class CaribouProfile extends LitElement {
   @state() private statuses: Status[] = []
   @state() private hasMore = false
   // False while nobody is signed in on this device (a reader who browses a
-  // public profile). The store then has no client and cannot fetch a page
-  // in place.
+  // public profile), or while the signed-in client's server is not the
+  // instance the page came from. In both cases the store cannot fetch a
+  // valid page in place.
   @state() private canFetch = false
 
   private store: ProfileStore | null = null
@@ -123,9 +129,15 @@ export class CaribouProfile extends LitElement {
       // list changes. Assigning it would re-render the whole profile.
       if (!sameItems(next, this.statuses)) this.statuses = next
       this.hasMore = store.hasMore.value
-      this.canFetch = activeClient.value !== null
+      this.canFetch = activeClient.value !== null && this.sameInstance(activeUser.value?.server)
     })
     this.live = true
+  }
+
+  // Hosts are case-insensitive; `server` is a bare host, like `instance`.
+  private sameInstance(server: string | undefined): boolean {
+    if (!this.instance) return true
+    return server !== undefined && server.toLowerCase() === this.instance.toLowerCase()
   }
 
   protected override updated() {
@@ -134,7 +146,9 @@ export class CaribouProfile extends LitElement {
     // scrolls into view the next page loads in place. Without a client it
     // stays a plain link to the next server-rendered page — hijacking it
     // would fetch nothing, read that as the end of the profile, and remove
-    // the only way to older posts.
+    // the only way to older posts. With a client on another instance it
+    // stays a link too: the ids in `initial` mean nothing to that client,
+    // so paging in place would show another account's posts or a 404.
     const sentinel = this.canFetch ? this.renderRoot.querySelector('a[data-sentinel]') : null
     if (sentinel === this.observedSentinel) return
     this.observedSentinel = sentinel
