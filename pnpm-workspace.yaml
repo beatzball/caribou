@@ -3,7 +3,7 @@ packages:
   - packages/*
 
 patchedDependencies:
-  '@beatzball/litro@0.17.2': patches/@beatzball__litro@0.17.2.patch
+  '@beatzball/litro@0.17.4': patches/@beatzball__litro@0.17.4.patch
 
 peerDependencyRules:
   ignoreMissing:
