@@ -1,51 +1,90 @@
 import { defineConfig, type Plugin } from 'vite';
 
-// Client-bundle stub for `unstorage` and `unstorage/drivers/fs`.
+// Client-bundle stubs for server-only modules.
 //
-// Why this exists: page modules export `pageData = definePageData(fetcher)`
-// whose fetcher transitively imports `server/lib/storage.ts` (for the SSRF
-// registry check on the `caribou.instance` cookie). Vite/Rollup statically
-// analyze the page module for the client bundle and pull `unstorage`'s
-// filesystem driver into the client chunk graph. That driver imports
-// `node:fs` / `node:path` named bindings (`dirname`, `resolve`) which Vite's
-// browser-external shim does not provide, so the client build fails.
+// Why this exists: page modules export `pageData = definePageData(fetcher)`,
+// and Vite/Rollup statically analyze the page module for the client bundle.
+// Litro only invokes `pageData.fetcher` on the server, so the client never
+// reaches the code inside it — but the analyzer does not know that, and
+// follows every import the fetcher makes:
 //
-// Litro only invokes `pageData.fetcher` on the server; the client never
-// reaches the code that would call into `unstorage`. This plugin satisfies
-// the static analyzer with a no-op surface and throws loudly at runtime if
-// any client code path somehow does reach it.
+// - `unstorage` / `unstorage/drivers/fs` (via `server/lib/storage.ts`, for
+//   the SSRF registry check on the `caribou.instance` cookie). The fs driver
+//   imports `node:fs` / `node:path` named bindings (`dirname`, `resolve`)
+//   which Vite's browser-external shim does not provide, so without a stub
+//   the client build fails outright.
+// - `server/lib/sanitize.ts` (DOMPurify over jsdom). The pages reach it with
+//   a dynamic `import()`, which keeps it out of the client's static graph,
+//   so the browser never downloads it — but Vite still emits it as a lazy
+//   chunk, `dist/client/assets/sanitize-*.js`, 2.7 MB of jsdom that ships
+//   in the image for nothing and prints a page of "externalized for browser
+//   compatibility" warnings on every build.
 //
-// The Nitro/server build does not consult this Vite config, so the server
-// continues to receive the real `unstorage`.
-function unstorageClientStubPlugin(): Plugin {
-  const VIRTUAL_ID = '\0caribou:unstorage-client-stub';
-  const STUB_SOURCE = `
+// Each stub satisfies the static analyzer with the module's export surface
+// and throws loudly at runtime if any client code path somehow reaches it.
+//
+// The Nitro/server build is a separate Rollup run that does not consult this
+// Vite config, and vitest reads `vitest.config.ts`, not this file — so the
+// server and the unit tests keep the real modules.
+interface StubRule {
+  /** Which import ids this stub replaces. */
+  matches: (id: string) => boolean;
+  /** The virtual module id; must start with `\0` so other plugins skip it. */
+  virtualId: string;
+  /** JavaScript source of the stub module. */
+  source: string;
+}
+
+const NOT_IN_BROWSER = (what: string) => `
 function notInBrowser() {
   throw new Error(
-    '[caribou] unstorage is server-only and must not be invoked in the browser bundle.'
+    '[caribou] ${what} is server-only and must not be invoked in the browser bundle.'
   );
 }
+`;
+
+const STUB_RULES: StubRule[] = [
+  {
+    matches: (id) => id === 'unstorage' || id.startsWith('unstorage/drivers/'),
+    virtualId: '\0caribou:unstorage-client-stub',
+    source: `${NOT_IN_BROWSER('unstorage')}
 export function createStorage() { return notInBrowser(); }
 const fsDriver = () => notInBrowser();
 export default fsDriver;
-`;
+`,
+  },
+  {
+    // Matches the relative specifier the pages write (`../server/lib/
+    // sanitize.js`) as well as the resolved absolute path, in either
+    // extension.
+    matches: (id) => /(^|\/)server\/lib\/sanitize\.(js|ts)$/.test(id),
+    virtualId: '\0caribou:sanitize-client-stub',
+    source: `${NOT_IN_BROWSER('sanitize')}
+export function sanitize() { return notInBrowser(); }
+export function sanitizeStatus() { return notInBrowser(); }
+export function sanitizeAccount() { return notInBrowser(); }
+`,
+  },
+];
+
+function serverOnlyClientStubPlugin(rules: StubRule[]): Plugin {
   return {
-    name: 'caribou:unstorage-client-stub',
+    name: 'caribou:server-only-client-stub',
     enforce: 'pre',
     resolveId(id) {
-      if (id === 'unstorage' || id.startsWith('unstorage/drivers/')) {
-        return VIRTUAL_ID;
-      }
+      const rule = rules.find((r) => r.matches(id));
+      if (rule) return rule.virtualId;
     },
     load(id) {
-      if (id === VIRTUAL_ID) return STUB_SOURCE;
+      const rule = rules.find((r) => r.virtualId === id);
+      if (rule) return rule.source;
     },
   };
 }
 
 export default defineConfig({
   base: '/_litro/',
-  plugins: [unstorageClientStubPlugin()],
+  plugins: [serverOnlyClientStubPlugin(STUB_RULES)],
   resolve: {
     conditions: ['browser', 'module', 'import', 'default'],
   },
