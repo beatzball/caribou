@@ -142,6 +142,13 @@ describe('/@[handle] page SSR', () => {
     expect(out).not.toMatch(/href="\/alice@example\.social/)
   })
 
+  // The client needs the host the page came from to decide whether it may
+  // page in place; a bare handle resolved through the cookie carries no host.
+  it('tells caribou-profile which instance the page came from', async () => {
+    const out = await render({ kind: 'ok', ...INITIAL, shell, handle: 'alice' })
+    expect(out).toMatch(/<caribou-profile[^>]*\sinstance="example\.social"/)
+  })
+
   it('renders the sign-in placeholder for /@me', async () => {
     const out = await render({ kind: 'auth-required', shell, handle: 'me' })
     expect(out).toContain('Your profile shows posts from your signed-in account.')
