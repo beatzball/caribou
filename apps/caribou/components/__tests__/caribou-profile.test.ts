@@ -30,11 +30,12 @@ function initialOf(statuses: Status[], nextMaxId: string | null = null): Profile
 // One macrotask: lets the store's async work and the renders it causes finish.
 const flush = () => new Promise<void>((r) => setTimeout(r, 0))
 
-async function mount(props: Partial<Pick<CaribouProfile, 'handle' | 'tab' | 'initial'>>): Promise<CaribouProfile> {
+async function mount(props: Partial<Pick<CaribouProfile, 'handle' | 'tab' | 'initial' | 'instance'>>): Promise<CaribouProfile> {
   const el = document.createElement('caribou-profile') as CaribouProfile
   el.handle = props.handle ?? 'alice@example.social'
   if (props.tab) el.tab = props.tab
   if (props.initial) el.initial = props.initial
+  if (props.instance) el.instance = props.instance
   document.body.appendChild(el)
   await flush()
   await el.updateComplete
@@ -359,6 +360,69 @@ describe('<caribou-profile> — pagination', () => {
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210'])
     expect(watching(observers, next)).toBeUndefined()
     expect(clickIsPrevented(next)).toBe(false)
+  })
+
+  // The server fetched the page from `instance`, and its account and status
+  // ids belong to that host. A client on another host would page a different
+  // account — or a 404 — so the link must stay a link to the next server page.
+  it('signed in on another instance: keeps "Older posts" a plain link', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    const list = vi.spyOn(client, 'fetchAccountStatuses')
+    const el = await mount({ instance: 'other.host', initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    expect(list).not.toHaveBeenCalled()
+    expect(sentinelOf(el)).toBe(next)
+    expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=210')
+  })
+
+  it('signed in on the same instance: pages in place, whatever the case of the host', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209')])
+    const el = await mount({ instance: 'Example.Social', initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    const observer = watching(observers, next)!
+    expect(observer).toBeDefined()
+    expect(clickIsPrevented(next)).toBe(true)
+    observer.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(list).toHaveBeenCalledWith('42', { tab: 'posts', maxId: '210' })
+    expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210', '209'])
+  })
+
+  // On /@me the page sets no instance: the account was looked up through the
+  // signed-in client, so its ids are the client's own.
+  it('signed in, no instance given: pages in place', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    expect(el.instance).toBe('')
+    const next = sentinelOf(el)!
+    expect(watching(observers, next)).toBeDefined()
+    expect(clickIsPrevented(next)).toBe(true)
+  })
+
+  it('hands the link back when the instance changes to another host', async () => {
+    const observers = stubIntersectionObserver()
+    signIn()
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    expect(watching(observers, next)).toBeDefined()
+
+    el.instance = 'other.host'
+    await el.updateComplete
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    expect(sentinelOf(el)).toBe(next)
   })
 
   it('takes the link over on sign-in and hands it back on sign-out', async () => {
