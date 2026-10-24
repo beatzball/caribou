@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing } from 'lit'
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
@@ -129,15 +129,26 @@ export class CaribouProfile extends LitElement {
       // list changes. Assigning it would re-render the whole profile.
       if (!sameItems(next, this.statuses)) this.statuses = next
       this.hasMore = store.hasMore.value
-      this.canFetch = activeClient.value !== null && this.sameInstance(activeUser.value?.server)
+      this.syncCanFetch()
     })
     this.live = true
+  }
+
+  private syncCanFetch() {
+    this.canFetch = activeClient.value !== null && this.sameInstance(activeUser.value?.server)
   }
 
   // Hosts are case-insensitive; `server` is a bare host, like `instance`.
   private sameInstance(server: string | undefined): boolean {
     if (!this.instance) return true
     return server !== undefined && server.toLowerCase() === this.instance.toLowerCase()
+  }
+
+  protected override willUpdate(changed: PropertyValues<this>) {
+    // The effect in bind() recomputes `canFetch` when a signal changes, but
+    // `instance` is a Lit property, not a signal. A new instance must have
+    // the same effect without waiting for the next sign-in or sign-out.
+    if (changed.has('instance') && this.live) this.syncCanFetch()
   }
 
   protected override updated() {

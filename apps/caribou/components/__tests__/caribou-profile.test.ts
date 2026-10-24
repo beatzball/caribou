@@ -411,6 +411,20 @@ describe('<caribou-profile> — pagination', () => {
     expect(clickIsPrevented(next)).toBe(true)
   })
 
+  it('hands the link back when the instance changes to another host', async () => {
+    const observers = stubIntersectionObserver()
+    signIn()
+    const el = await mount({ initial: initialOf([STATUS], '210') })
+    const next = sentinelOf(el)!
+    expect(watching(observers, next)).toBeDefined()
+
+    el.instance = 'other.host'
+    await el.updateComplete
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    expect(sentinelOf(el)).toBe(next)
+  })
+
   it('takes the link over on sign-in and hands it back on sign-out', async () => {
     const observers = stubIntersectionObserver()
     const el = await mount({ initial: initialOf([STATUS], '210') })
