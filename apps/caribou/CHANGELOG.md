@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.2.3
+
+### Patch Changes
+
+- [#42](https://github.com/beatzball/caribou/pull/42) [`f8af434`](https://github.com/beatzball/caribou/commit/f8af43442f123455f009ff9dd9c7f608ea5d94fa) Thanks [@beatzball](https://github.com/beatzball)! - Bump `@beatzball/litro` to 0.17.4. Litro now maps `pages/@[handle].ts` to `/@:handle` itself, so the local patch keeps only the change that makes `pages/index.ts` register `page-index` instead of `page-home`.
+
 ## 0.2.2
 
 ### Patch Changes
