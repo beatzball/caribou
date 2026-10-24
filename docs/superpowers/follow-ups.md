@@ -116,28 +116,17 @@ Surfaced during Plan 3 local QA, 2026-05-06.
 
 ## upstream
 
-### Drop the @beatzball/litro path-to-route patch when upstream ships the fix
+### Drop the @beatzball/litro `page-index` patch when upstream ships the fix
 
-`patches/@beatzball__litro@0.9.1.patch` extends Litro's `transformSegment`
-to support prefix/suffix on bracketed dynamic segments. Without it,
-`pages/@[handle]/[statusId].ts` is emitted as `/@[handle]/:statusId`
-(literal `[handle]`) and every `/@user` URL 404s. The fix is a
-two-line regex change:
+`patches/@beatzball__litro@0.17.4.patch` makes the root `pages/index.ts`
+derive `page-index` instead of `page-home`, so it does not collide with
+`pages/home.ts`. Litro 0.17.4 only reports that collision as a build
+error. When a Litro release changes the root tag: bump
+`apps/caribou/package.json`, drop the patch from `pnpm-workspace.yaml`
+and `patches/`, and check `/` and `/home` in `routes.generated.ts`.
 
-  - dynamic regex: `/^\[(.+)\]$/`
-    →                `/^([^\[\]]*)\[([^\[\]]+)\]([^\[\]]*)$/`
-    (allows pre/suf around brackets, e.g. `@[handle]` → `@:handle`)
-  - `isSegmentDynamic`: `transformed.startsWith(':')`
-    →                    `/:[A-Za-z_]/.test(transformed)`
-    (prefixed `@:handle` is still dynamic)
-
-File the upstream PR (Nuxt and SvelteKit both support this naming
-convention; cite for parity). When a Litro release ships the fix:
-bump `apps/caribou-elena/package.json`, drop the patch from
-`pnpm-workspace.yaml` and `patches/`, regenerate, verify routes via
-`server/lib/__tests__/match-route.test.ts`.
-
-Surfaced during Plan 3 local QA, 2026-05-06.
+The prefix-route hunk (`pages/@[handle].ts` → `/@:handle`) shipped
+upstream in Litro 0.17.4 and is gone from the patch.
 
 ## elena-app
 

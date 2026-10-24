@@ -5,9 +5,9 @@ settings:
   excludeLinksFromLockfile: false
 
 patchedDependencies:
-  '@beatzball/litro@0.17.2':
-    hash: 7e7079f393f811ceb0fd6e41d7e6de09c81e508f2c133d89b560fc7b7bcfc827
-    path: patches/@beatzball__litro@0.17.2.patch
+  '@beatzball/litro@0.17.4':
+    hash: 0bd417b90a2db0725dd119fd354c6bdecd4c41a49e8c648c6bce3be1e6db8d6b
+    path: patches/@beatzball__litro@0.17.4.patch
 
 importers:
 
@@ -44,8 +44,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/caribou-ui-headless
       '@beatzball/litro':
-        specifier: 0.17.2
-        version: 0.17.2(patch_hash=7e7079f393f811ceb0fd6e41d7e6de09c81e508f2c133d89b560fc7b7bcfc827)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)
+        specifier: 0.17.4
+        version: 0.17.4(patch_hash=0bd417b90a2db0725dd119fd354c6bdecd4c41a49e8c648c6bce3be1e6db8d6b)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)
       '@beatzball/litro-router':
         specifier: 0.3.1
         version: 0.3.1
@@ -307,8 +307,8 @@ packages:
   '@beatzball/litro-router@0.3.1':
     resolution: {integrity: sha512-2UJIhVU+3oJxFCxO3lbJTlBzHSdS6IzvOnjnXvn5tLYe6vAaratpujBrNO0ZRMvhqXgA2RJHjw5ZrfbfZ9tpbA==}
 
-  '@beatzball/litro@0.17.2':
-    resolution: {integrity: sha512-E4/K0HD8KkyvG2mthAQjfy4bEkTMBOHe7TlYs/0OjaWm1/KvfN8ssumzBNz+HFUkkaFoG6x036LAK2qww9yMQQ==}
+  '@beatzball/litro@0.17.4':
+    resolution: {integrity: sha512-WvL3cHCL04gk1dokhZwCRmmMNIr82+G2fegLrUQg5fXKkdUcScdtxIx+/TUzhNiDrkzn3GAgucO+EjknvpFXsg==}
     hasBin: true
     peerDependencies:
       '@elenajs/core': ^1.0.0
@@ -4256,7 +4256,7 @@ snapshots:
 
   '@beatzball/litro-router@0.3.1': {}
 
-  '@beatzball/litro@0.17.2(patch_hash=7e7079f393f811ceb0fd6e41d7e6de09c81e508f2c133d89b560fc7b7bcfc827)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)':
+  '@beatzball/litro@0.17.4(patch_hash=0bd417b90a2db0725dd119fd354c6bdecd4c41a49e8c648c6bce3be1e6db8d6b)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)':
     dependencies:
       '@beatzball/litro-router': 0.3.1
       '@lit-labs/ssr': 3.3.1

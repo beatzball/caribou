@@ -12,10 +12,10 @@ const route = (over: Partial<LitroRoute> & Pick<LitroRoute, 'path'>): LitroRoute
 
 describe('matchRoute — Mastodon-style /@handle URLs', () => {
   // Regression for the Litro page-scanner bug where the @[handle] segment
-  // was emitted as the literal `@[handle]` instead of `@:handle`. Without
-  // the patches/@beatzball__litro@0.9.1.patch fix, the manifest produces
-  // /@[handle]/:statusId and Nitro's matcher treats `[handle]` as a
-  // character class — breaking every /@user URL. See follow-ups.md.
+  // was emitted as the literal `@[handle]` instead of `@:handle`. Litro
+  // 0.17.4 fixed it upstream; before that, the manifest produced
+  // /@[handle]/:statusId and Nitro's matcher treated `[handle]` as a
+  // character class — breaking every /@user URL.
   const handleRoute = route({
     path: '/@:handle',
     isDynamic: true,

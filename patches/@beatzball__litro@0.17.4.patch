@@ -1,0 +1,58 @@
+diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
+index 0ffb55b6a3269933700d1ed07e0c2737f7f045f0..f9ce21f407b9fc6c22684b6c7d76d762040e3a0d 100644
+--- a/dist/plugins/path-to-route.js
++++ b/dist/plugins/path-to-route.js
+@@ -239,12 +239,13 @@ export function fileToRoute(filePath, pagesDir) {
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -271,7 +272,7 @@ export function fileToComponentTag(filePath, pagesDir) {
+         .filter(Boolean);
+     // Handle the root index case: ['index'] → 'home'
+     if (cleaned.length === 1 && cleaned[0] === 'index') {
+-        return 'page-home';
++        return 'page-index';
+     }
+     // Remove trailing 'index' segments (blog/index → blog)
+     while (cleaned.length > 1 && cleaned[cleaned.length - 1] === 'index') {
+diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
+index d97adb8200d50c14c89dbe8b7c450f16d329009d..5665d67380877aa6af91027b394dc678c246ff79 100644
+--- a/src/plugins/path-to-route.ts
++++ b/src/plugins/path-to-route.ts
+@@ -296,12 +296,13 @@ export function fileToRoute(filePath: string, pagesDir: string): LitroRoute {
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -333,7 +334,7 @@ export function fileToComponentTag(filePath: string, pagesDir: string): string {
+ 
+   // Handle the root index case: ['index'] → 'home'
+   if (cleaned.length === 1 && cleaned[0] === 'index') {
+-    return 'page-home';
++    return 'page-index';
+   }
+ 
+   // Remove trailing 'index' segments (blog/index → blog)

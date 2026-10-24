@@ -29,10 +29,10 @@ off; both are required for Lit's decorators.
 **A page's tag comes from its file path**, not from the class: `pages/about.ts`
 must register `page-about`, `pages/@[handle]/[statusId].ts` must register
 `page-handle-statusid`. The build prints the tag for each route in
-`routes.generated.ts`. Two rules come from a patch on `@beatzball/litro`
-(`patches/`), until Litro has them upstream: `pages/index.ts` is `page-index`,
-not `page-home`, which `pages/home.ts` owns; and a bracket may follow a
-prefix, so `pages/@[handle].ts` is the route `/@:handle`.
+`routes.generated.ts`. A bracket may follow a prefix, so `pages/@[handle].ts`
+is the route `/@:handle`. One rule comes from a patch on `@beatzball/litro`
+(`patches/`), until Litro has it upstream: `pages/index.ts` is `page-index`,
+not `page-home`, which `pages/home.ts` owns.
 
 **Every element has a shadow root, so styles live in the element.** A rule in
 the document stylesheet does not reach inside one. Write `static styles` with
