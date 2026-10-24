@@ -1,5 +1,21 @@
 # caribou-app
 
+## 0.2.2
+
+### Patch Changes
+
+- [#39](https://github.com/beatzball/caribou/pull/39) [`c37daa3`](https://github.com/beatzball/caribou/commit/c37daa34b1f7dd072eab8b20f56cd73d30cf021c) Thanks [@beatzball](https://github.com/beatzball)! - Keep "Older posts" a plain link on a profile from another instance. The server fetches `/@alice@other.host` from `other.host`, so its account and status ids belong to that host. A client signed in elsewhere paged them against its own server and got another account's posts or a 404. `<caribou-profile>` now takes an `instance` attribute from the page and pages in place only when the signed-in client's server is that host; otherwise the link leads to the next server-rendered page, as it does without JavaScript.
+
+- [#40](https://github.com/beatzball/caribou/pull/40) [`788968e`](https://github.com/beatzball/caribou/commit/788968ea37ce6ded5f61c44572a58bbfdba67bba) Thanks [@beatzball](https://github.com/beatzball)! - Keep the server-only sanitizer out of the client bundle. The pages reach
+  `server/lib/sanitize.ts` with a dynamic `import()`, so the browser never
+  downloaded it, but Vite still emitted the jsdom-backed module as a 2.7 MB
+  lazy chunk in `dist/client/assets`. The client build now resolves it to a
+  throwing stub, the same way it already stubs `unstorage`; the server and the
+  unit tests keep the real module.
+- Updated dependencies [[`23d7908`](https://github.com/beatzball/caribou/commit/23d7908bd1a7c62015f33c4e2047185fb2ed4b08), [`23d7908`](https://github.com/beatzball/caribou/commit/23d7908bd1a7c62015f33c4e2047185fb2ed4b08)]:
+  - @beatzball/caribou-ui-headless@0.2.3
+  - @beatzball/caribou-design-tokens@0.1.1
+
 ## 0.2.1
 
 ### Patch Changes

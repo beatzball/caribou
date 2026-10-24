@@ -1,5 +1,11 @@
 # @beatzball/caribou-ui-headless
 
+## 0.2.3
+
+### Patch Changes
+
+- [#38](https://github.com/beatzball/caribou/pull/38) [`23d7908`](https://github.com/beatzball/caribou/commit/23d7908bd1a7c62015f33c4e2047185fb2ed4b08) Thanks [@beatzball](https://github.com/beatzball)! - Remove `reconcileKeyedList` and its tests. Nothing calls it since the app moved to Lit, whose `repeat` directive keys list children itself.
+
 ## 0.2.2
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @beatzball/caribou-design-tokens
 
+## 0.1.1
+
+### Patch Changes
+
+- [#38](https://github.com/beatzball/caribou/pull/38) [`23d7908`](https://github.com/beatzball/caribou/commit/23d7908bd1a7c62015f33c4e2047185fb2ed4b08) Thanks [@beatzball](https://github.com/beatzball)! - Remove the `presetCaribou` UnoCSS preset, its `./uno-preset` export and the `unocss` dev dependency. The Lit app has no utility classes; every element styles itself with `static styles` against the token variables, so the package now ships `tokens.css` alone.
+
 ## 0.1.0
 
 ### Minor Changes
