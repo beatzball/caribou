@@ -25,7 +25,11 @@ import { defineConfig, type Plugin } from 'vite';
 //
 // The Nitro/server build is a separate Rollup run that does not consult this
 // Vite config, and vitest reads `vitest.config.ts`, not this file — so the
-// server and the unit tests keep the real modules.
+// server and the unit tests keep the real modules. `litro dev` does load this
+// file (`server/middleware/vite-dev.ts` creates an in-process Vite server
+// from it), but that server only serves the browser's module graph; SSR and
+// the `pageData` fetchers run from Nitro's own bundle, so they also keep the
+// real modules in dev.
 interface StubRule {
   /** Which import ids this stub replaces. */
   matches: (id: string) => boolean;
