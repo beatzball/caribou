@@ -17,6 +17,8 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      playwright: ${{ steps.pw.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -25,6 +27,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # e2e runs in the Playwright image for this exact version. Read from the
+      # lockfile so a Playwright upgrade can never leave the image behind.
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(grep -m1 -oP '^  playwright@\K[0-9.]+(?=:)' pnpm-lock.yaml)" >> "$GITHUB_OUTPUT"
       - name: Generate Litro routes + page manifest
         run: pnpm --filter caribou-app build
       - name: Compute affected filter
@@ -50,6 +57,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: checks
+    # The image ships the browsers and their system packages, so the job skips
+    # `playwright install --with-deps`. Its apt step once stalled for 36 min
+    # on a slow Ubuntu mirror.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.checks.outputs.playwright }}-noble
+      options: --ipc=host
+    env:
+      # Firefox refuses to start as root when HOME belongs to another user.
+      HOME: /root
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -57,22 +73,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - name: Resolve Playwright version
-        id: pw
-        run: echo "version=$(grep -m1 -oP '^  playwright@\K[0-9.]+(?=:)' pnpm-lock.yaml)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        id: pw-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-      - name: Install browsers
-        if: steps.pw-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 5
-        run: pnpm --filter caribou-app exec playwright install --with-deps chromium firefox webkit
-      - name: Install browser system dependencies
-        if: steps.pw-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 5
-        run: pnpm --filter caribou-app exec playwright install-deps chromium firefox webkit
       - run: pnpm build
       - run: pnpm test:e2e
       - if: failure()
