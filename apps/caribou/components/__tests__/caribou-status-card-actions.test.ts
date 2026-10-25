@@ -116,19 +116,62 @@ describe('<caribou-status-card> action bar', () => {
     expect(button(el, 'favourite').hasAttribute('title')).toBe(false)
   })
 
-  it('favourite click flips the button at once and calls the client', async () => {
+  it('favourite click flips the button before the server answers, then shows its count', async () => {
     signIn()
     const s = post()
     cacheStatus(s)
+    let answer!: (v: Status) => void
     const favourite = vi.spyOn(activeClient.value!, 'favourite')
-      .mockResolvedValue(post({ favourited: true, favouritesCount: 4 }))
+      .mockImplementation(() => new Promise<Status>((res) => { answer = res }))
     const el = await mount(s)
     button(el, 'favourite').click()
     await el.updateComplete
     expect(favourite).toHaveBeenCalledWith('7')
+    // Still pending: this is the optimistic state.
     expect(button(el, 'favourite').getAttribute('aria-pressed')).toBe('true')
     expect(button(el, 'favourite').getAttribute('aria-label')).toBe('Unfavourite')
     expect(button(el, 'favourite').textContent?.trim()).toBe('4')
+
+    answer(post({ favourited: true, favouritesCount: 9 }))
+    await vi.waitFor(() => expect(button(el, 'favourite').textContent?.trim()).toBe('9'))
+    expect(button(el, 'favourite').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('describes each button with its count, and the sign-in hint when signed out', async () => {
+    const el = await mount(post({ repliesCount: 1, favouritesCount: 0 }))
+    const desc = (cls: string) => {
+      const id = button(el, cls).getAttribute('aria-describedby')
+      return id ? el.shadowRoot!.getElementById(id)?.textContent : null
+    }
+    expect(desc('reply')).toBe('1 reply. Sign in to reply')
+    expect(desc('boost')).toBe('2 boosts. Sign in to boost')
+    expect(desc('favourite')).toBe('0 favourites. Sign in to favourite')
+    expect(desc('bookmark')).toBe('Sign in to bookmark')
+    signIn()
+    await el.updateComplete
+    expect(desc('favourite')).toBe('0 favourites')
+    expect(button(el, 'bookmark').hasAttribute('aria-describedby')).toBe(false)
+  })
+
+  it('decides again when the instance property changes', async () => {
+    signIn('example.social')
+    const el = await mount(post(), 'other.example')
+    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    el.instance = 'example.social'
+    await el.updateComplete
+    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false')
+  })
+
+  it("decides again when the shell's instance changes", async () => {
+    signIn('example.social')
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    render(html`<caribou-app-shell instance="other.example"><caribou-status-card .status=${post()}></caribou-status-card></caribou-app-shell>`, host)
+    const el = host.querySelector('caribou-status-card') as CaribouStatusCard
+    while (!(await el.updateComplete)) { /* settle */ }
+    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    host.querySelector('caribou-app-shell')!.setAttribute('instance', 'example.social')
+    await vi.waitFor(() => expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false'))
   })
 
   it('shows cache updates even when the parent keeps the old .status object', async () => {
