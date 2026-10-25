@@ -57,8 +57,13 @@ async function type(el: CaribouComposeDialog, text: string) {
   await settle(el)
 }
 
+// The real <button> inside a shared control's shadow root.
+function inner(host: Element): HTMLButtonElement {
+  return host.shadowRoot!.querySelector('button')!
+}
+
 function postButton(el: CaribouComposeDialog) {
-  return $<HTMLButtonElement>(el, 'button.post')!
+  return inner($(el, 'caribou-button.post')!)
 }
 
 async function compose(el: CaribouComposeDialog, inReplyTo?: mastodon.v1.Status) {
@@ -168,22 +173,40 @@ describe('caribou-compose-dialog', () => {
     signIn()
     const el = await mount()
     await compose(el)
-    const cw = $<HTMLButtonElement>(el, '[data-action="toggle-cw"]')!
+    const cwHost = $(el, 'caribou-icon-button[data-action="toggle-cw"]')!
+    const cw = inner(cwHost)
     expect(cw.getAttribute('aria-label')).toBe('Content warning')
     expect(cw.title).toBe('Content warning')
     expect(cw.getAttribute('aria-pressed')).toBe('false')
-    expect(cw.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true')
-    const file = $<HTMLInputElement>(el, 'input[type="file"]')!
-    expect(file.getAttribute('aria-label')).toBe('Add images or video')
-    const pick = file.closest('label')!
+    const pick = inner($(el, 'caribou-icon-button[data-action="add-media"]')!)
+    expect(pick.getAttribute('aria-label')).toBe('Add images or video')
     expect(pick.title).toBe('Add images or video')
-    expect(pick.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true')
+    // Not a toggle, so no pressed state at all.
+    expect(pick.hasAttribute('aria-pressed')).toBe(false)
     // Icons only: no stray text that would read as part of the name.
     expect(cw.textContent!.trim()).toBe('')
     expect(pick.textContent!.trim()).toBe('')
     cw.click()
     await settle(el)
     expect(cw.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('the add-media button opens the file picker, and is disabled when full', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'uploadMedia').mockReturnValue(new Promise(() => {}))
+    const el = await mount()
+    await compose(el)
+    const host = $<HTMLElement & { disabled: boolean }>(el, '[data-action="add-media"]')!
+    const file = $<HTMLInputElement>(el, 'input[type="file"]')!
+    const open = vi.spyOn(file, 'click').mockImplementation(() => {})
+    inner(host).click()
+    expect(open).toHaveBeenCalledOnce()
+    Object.defineProperty(file, 'files', { value: ['a', 'b'].map((n) => new File(['x'], `${n}.png`, { type: 'image/png' })), configurable: true })
+    file.dispatchEvent(new Event('change'))
+    await settle(el)
+    expect(host.disabled).toBe(true)
+    host.click()
+    expect(open).toHaveBeenCalledOnce()
   })
 
   it('reply mode shows the post, prefills mentions without yourself and inherits visibility', async () => {
@@ -378,6 +401,12 @@ describe('caribou-compose-dialog', () => {
       const ta = $<HTMLTextAreaElement>(el, 'textarea')!
       expect(ta.readOnly).toBe(true)
       expect($<HTMLSelectElement>(el, 'select')!.disabled).toBe(true)
+      // Busy, not disabled: focus stays on the Post button while it sends.
+      const post = postButton(el)
+      expect(post.disabled).toBe(false)
+      expect(post.getAttribute('aria-busy')).toBe('true')
+      expect(post.getAttribute('aria-disabled')).toBe('true')
+      expect($(el, 'caribou-button.post')!.textContent!.trim()).toBe('Posting…')
       input(ta, 'late edit')
       await settle(el)
       fail(new Error('nope'))
