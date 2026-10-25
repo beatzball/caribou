@@ -114,10 +114,11 @@ export class CaribouComposeDialog extends LitElement {
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
-  // The server renders nothing; the dialog appears after the first client
-  // update so both renders stay equal.
+  // Nothing is rendered until the first open: the server has no session,
+  // so its render and the first client render are both empty, and a page
+  // where nobody composes never builds the form.
   @state() private ready = false
-  @state() private open = false
+  private open = false
   @state() private draft: ComposeDraft = emptyDraft()
   @state() private replyTo: mastodon.v1.Status | null = null
   @state() private pending: PendingMedia[] = []
@@ -126,9 +127,11 @@ export class CaribouComposeDialog extends LitElement {
 
   @query('dialog') private dialogEl?: HTMLDialogElement
   @query('textarea') private textareaEl?: HTMLTextAreaElement
+  @query('select') private selectEl?: HTMLSelectElement
 
   private draftKey: DraftSlot = 'new'
   private returnFocus: HTMLElement | null = null
+  private showPending = false
 
   override connectedCallback() {
     super.connectedCallback()
@@ -146,13 +149,17 @@ export class CaribouComposeDialog extends LitElement {
     super.disconnectedCallback()
   }
 
-  protected override firstUpdated() {
-    this.ready = true
-  }
-
   protected override updated() {
-    if (this.open && this.dialogEl && !this.dialogEl.open) {
-      this.dialogEl.showModal()
+    // Set after render: a `selected` binding on options built inside a new
+    // <select> is not applied reliably in every DOM.
+    if (this.selectEl && this.selectEl.value !== this.draft.visibility) {
+      this.selectEl.value = this.draft.visibility
+    }
+    // A one-shot flag, not `open`: the browser fires `close` a task after
+    // close(), and an update in between must not open the dialog again.
+    if (this.showPending && this.dialogEl) {
+      this.showPending = false
+      if (!this.dialogEl.open) this.dialogEl.showModal()
       const ta = this.textareaEl
       if (ta) {
         ta.focus()
@@ -202,6 +209,8 @@ export class CaribouComposeDialog extends LitElement {
       : emptyDraft())
     this.pending = []
     this.open = true
+    this.showPending = true
+    this.ready = true
     void fetchLimits(client, user.server).then((l) => { this.limits = l })
   }
 
@@ -400,7 +409,7 @@ export class CaribouComposeDialog extends LitElement {
             <label class="visually-hidden" for="compose-visibility">Visibility</label>
             <select id="compose-visibility" name="visibility"
               @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as mastodon.v1.StatusVisibility })}>
-              ${VISIBILITIES.map((v) => html`<option value=${v.value} ?selected=${v.value === d.visibility}>${v.label}</option>`)}
+              ${VISIBILITIES.map((v) => html`<option value=${v.value}>${v.label}</option>`)}
             </select>
             <span class="spacer"></span>
             <span class="count" ?data-over=${over} aria-live="polite"

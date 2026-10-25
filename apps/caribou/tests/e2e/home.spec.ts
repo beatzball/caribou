@@ -196,7 +196,7 @@ test('/home surfaces a "new posts" banner when polling finds newer statuses', as
   // After applying, both the pre-existing post and the newer post should be present.
   await expect(page.getByText('first post')).toBeVisible()
   await expect(page.locator('caribou-status-card')).toHaveText([/newer post/, /first post/])
-  await expect(page.getByRole('button', { name: /new post/i })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /\d+ new posts?/i })).toHaveCount(0)
 })
 
 test('/home does not re-fetch avatar images when polling discovers new posts', async ({ page }) => {

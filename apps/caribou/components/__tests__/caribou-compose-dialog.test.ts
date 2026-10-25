@@ -87,7 +87,7 @@ describe('caribou-compose-dialog', () => {
   it('opens on caribou:compose when signed in, and focuses the text field', async () => {
     signIn()
     const el = await mount()
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($(el, 'dialog')).toBeNull()
     await compose(el)
     expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
     expect($(el, 'h2')!.textContent).toBe('New post')
@@ -97,10 +97,10 @@ describe('caribou-compose-dialog', () => {
   it('does nothing when signed out', async () => {
     const el = await mount()
     await compose(el)
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true, composed: true }))
     await settle(el)
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
   })
 
   it('opens on the n key, but not while typing in a text field', async () => {
@@ -110,10 +110,10 @@ describe('caribou-compose-dialog', () => {
     document.body.appendChild(input)
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true, composed: true }))
     await settle(el)
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', ctrlKey: true, bubbles: true }))
     await settle(el)
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', bubbles: true, composed: true }))
     await settle(el)
     expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
@@ -124,7 +124,7 @@ describe('caribou-compose-dialog', () => {
     const a = await mount()
     const b = await mount()
     await compose(b)
-    expect($<HTMLDialogElement>(a, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(a, 'dialog')?.open ?? false).toBe(false)
     expect($<HTMLDialogElement>(b, 'dialog')!.open).toBe(true)
   })
 
@@ -189,7 +189,7 @@ describe('caribou-compose-dialog', () => {
     expect(loadDraft(KEY, 'new')?.text).toBe('half written')
     $<HTMLButtonElement>(el, '[data-action="cancel"]')!.click()
     await settle(el)
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
     await compose(el)
     expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('half written')
   })
@@ -217,7 +217,7 @@ describe('caribou-compose-dialog', () => {
       status: '@bob@example.net hi', visibility: 'private', inReplyToId: '42',
     })
     expect(create.mock.calls[0]![1]?.idempotencyKey).toEqual(expect.any(String))
-    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
     expect(loadDraft(KEY, 'reply:42')).toBeNull()
     expect(statusCache.value.has('new')).toBe(true)
     expect(toasts).toEqual([{ kind: 'info', message: 'Reply posted' }])
