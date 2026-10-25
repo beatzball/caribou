@@ -24,6 +24,20 @@ describe('countChars', () => {
     expect(countChars('hey @bob')).toBe(8)
   })
 
+  it('counts grapheme clusters: a family or a flag is one character', () => {
+    expect(countChars('👨‍👩‍👧')).toBe(1)
+    expect(countChars('🇯🇵!')).toBe(2)
+    expect(countChars('e\u0301')).toBe(1)
+    expect(countChars('ok', '👨‍👩‍👧')).toBe(3)
+  })
+
+  it('does not count trailing punctuation or an unbalanced ) as part of a link', () => {
+    expect(countChars('see https://example.social/a.')).toBe(4 + 23 + 1)
+    expect(countChars('https://example.social/a?!')).toBe(23 + 2)
+    expect(countChars('(https://example.social/a)')).toBe(1 + 23 + 1)
+    expect(countChars('https://en.wikipedia.org/wiki/Foo_(bar)')).toBe(23)
+  })
+
   it('adds the spoiler text', () => {
     expect(countChars('abc', 'cw')).toBe(5)
   })

@@ -6,14 +6,15 @@ import {
 } from '@beatzball/caribou-state'
 import '../caribou-compose-dialog.js'
 import type { CaribouComposeDialog } from '../caribou-compose-dialog.js'
+import { MediaProcessingTimeout } from '@beatzball/caribou-mastodon-client'
 
 const ME = { id: 'a1', username: 'alice', acct: 'alice', displayName: 'Alice' }
 const KEY = 'alice@example.social'
 
-function signIn(): NonNullable<typeof activeClient.value> {
+function signIn(account: object = ME, userKey = KEY): NonNullable<typeof activeClient.value> {
   addUserSession({
-    userKey: KEY, server: 'example.social', token: 'TOKEN',
-    vapidKey: '', account: ME, createdAt: 1,
+    userKey, server: 'example.social', token: 'TOKEN',
+    vapidKey: '', account, createdAt: 1,
   } as unknown as UserSession)
   const client = activeClient.value!
   vi.spyOn(client, 'fetchInstance').mockResolvedValue({
@@ -288,5 +289,194 @@ describe('caribou-compose-dialog', () => {
     await settle(el)
     expect(update).toHaveBeenCalledWith('m9', { description: 'a cat' })
     expect(loadDraft(KEY, 'new')?.media[0]?.description).toBe('a cat')
+  })
+
+  describe('review fixes', () => {
+    function enter(target: Element, init: KeyboardEventInit = {}) {
+      const e = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true, ...init })
+      target.dispatchEvent(e)
+      return e
+    }
+
+    function input(target: HTMLInputElement | HTMLTextAreaElement, value: string) {
+      target.value = value
+      target.dispatchEvent(new Event('input'))
+    }
+
+    function draftWithMedia() {
+      saveDraft(KEY, 'new', emptyDraft({
+        text: 'pic',
+        media: [{ id: 'm9', type: 'image', url: 'u', previewUrl: null, description: '' }],
+      }))
+    }
+
+    it('plain Enter in the CW or alt-text field does not submit', async () => {
+      const client = signIn()
+      const create = vi.spyOn(client, 'createStatus')
+      draftWithMedia()
+      const el = await mount()
+      await compose(el)
+      $<HTMLButtonElement>(el, '[data-action="toggle-cw"]')!.click()
+      await settle(el)
+      expect(enter($(el, '#compose-cw')!).defaultPrevented).toBe(true)
+      expect(enter($(el, '[data-media="m9"] input')!).defaultPrevented).toBe(true)
+      // A newline in the post text stays a newline.
+      expect(enter($(el, 'textarea')!).defaultPrevented).toBe(false)
+      await settle(el)
+      expect(create).not.toHaveBeenCalled()
+    })
+
+    it('an account switch while open closes the dialog and keeps the draft with the first account', async () => {
+      const client = signIn()
+      const create = vi.spyOn(client, 'createStatus')
+      const el = await mount()
+      await compose(el)
+      await type(el, 'alice text')
+      const ta = $<HTMLTextAreaElement>(el, 'textarea')!
+      signIn({ ...ME, id: 'b1', acct: 'bob' }, 'bob@example.social')
+      await settle(el)
+      expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+      input(ta, 'typed after the switch')
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      expect(loadDraft(KEY, 'new')?.text).toBe('alice text')
+      expect(loadDraft('bob@example.social', 'new')).toBeNull()
+      expect(create).not.toHaveBeenCalled()
+    })
+
+    it('the editor is read-only while posting, and a late edit is not kept', async () => {
+      const client = signIn()
+      let fail!: (e: Error) => void
+      vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((_r, j) => { fail = j }))
+      const el = await mount()
+      await compose(el)
+      await type(el, 'sent text')
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      const ta = $<HTMLTextAreaElement>(el, 'textarea')!
+      expect(ta.readOnly).toBe(true)
+      expect($<HTMLSelectElement>(el, 'select')!.disabled).toBe(true)
+      input(ta, 'late edit')
+      await settle(el)
+      fail(new Error('nope'))
+      await settle(el)
+      expect(ta.readOnly).toBe(false)
+      expect(loadDraft(KEY, 'new')?.text).toBe('sent text')
+    })
+
+    it('saves alt text typed but not committed before posting', async () => {
+      const client = signIn()
+      const calls: string[] = []
+      vi.spyOn(client, 'updateMedia').mockImplementation(async () => {
+        calls.push('updateMedia')
+        return {} as mastodon.v1.MediaAttachment
+      })
+      vi.spyOn(client, 'createStatus').mockImplementation(async () => {
+        calls.push('createStatus')
+        return { id: 'p', account: ME } as unknown as mastodon.v1.Status
+      })
+      draftWithMedia()
+      const el = await mount()
+      await compose(el)
+      const alt = $<HTMLInputElement>(el, '[data-media="m9"] input')!
+      input(alt, 'a cat')
+      enter(alt, { ctrlKey: true })
+      await settle(el)
+      expect(calls).toEqual(['updateMedia', 'createStatus'])
+      expect(client.updateMedia).toHaveBeenCalledWith('m9', { description: 'a cat' })
+    })
+
+    it('does not post when the alt text cannot be saved', async () => {
+      const client = signIn()
+      vi.spyOn(client, 'updateMedia').mockRejectedValue(new Error('down'))
+      const create = vi.spyOn(client, 'createStatus')
+      draftWithMedia()
+      const el = await mount()
+      await compose(el)
+      input($<HTMLInputElement>(el, '[data-media="m9"] input')!, 'a cat')
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      expect(create).not.toHaveBeenCalled()
+      expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
+      expect(toasts).toEqual([{ kind: 'error', message: 'Could not save the alt text: down' }])
+    })
+
+    it('starts from the account’s default visibility', async () => {
+      signIn({ ...ME, source: { privacy: 'unlisted' } })
+      const el = await mount()
+      await compose(el)
+      expect($<HTMLSelectElement>(el, 'select')!.value).toBe('unlisted')
+      $<HTMLButtonElement>(el, '[data-action="cancel"]')!.click()
+      await settle(el)
+      await compose(el, parent({ visibility: 'public' }))
+      expect($<HTMLSelectElement>(el, 'select')!.value).toBe('unlisted')
+    })
+
+    it('announces crossing the limit, not every keystroke', async () => {
+      signIn()
+      const el = await mount()
+      await compose(el)
+      expect($(el, '.count')!.hasAttribute('aria-live')).toBe(false)
+      const live = $(el, '[data-limit-status]')!
+      expect(live.getAttribute('aria-live')).toBe('polite')
+      await type(el, 'short')
+      expect(live.textContent).toBe('')
+      await type(el, 'x'.repeat(21))
+      expect(live.textContent).toBe('Over the character limit')
+    })
+
+    it('retry after a processing timeout waits again instead of re-uploading', async () => {
+      const client = signIn()
+      const upload = vi.spyOn(client, 'uploadMedia').mockRejectedValue(new MediaProcessingTimeout('m5'))
+      const wait = vi.spyOn(client, 'waitForMedia').mockResolvedValue(
+        { id: 'm5', type: 'video', url: 'https://example.social/m5.mp4', previewUrl: null, description: null } as unknown as mastodon.v1.MediaAttachment)
+      const el = await mount()
+      await compose(el)
+      const file = $<HTMLInputElement>(el, 'input[type="file"]')!
+      Object.defineProperty(file, 'files', { value: [new File(['x'], 'v.mp4', { type: 'video/mp4' })], configurable: true })
+      file.dispatchEvent(new Event('change'))
+      await settle(el)
+      $<HTMLButtonElement>(el, '[data-action="retry-media"]')!.click()
+      await settle(el)
+      expect(upload).toHaveBeenCalledOnce()
+      expect(wait).toHaveBeenCalledWith('m5')
+      expect(loadDraft(KEY, 'new')?.media.map((m) => m.id)).toEqual(['m5'])
+    })
+
+    it('a double Ctrl+Enter or double click posts once', async () => {
+      const client = signIn()
+      let done!: (s: mastodon.v1.Status) => void
+      const create = vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((r) => { done = r }))
+      const el = await mount()
+      await compose(el)
+      await type(el, 'once')
+      const ta = $<HTMLTextAreaElement>(el, 'textarea')!
+      enter(ta, { ctrlKey: true })
+      enter(ta, { ctrlKey: true })
+      postButton(el).click()
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      done({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      await settle(el)
+      expect(create).toHaveBeenCalledOnce()
+    })
+
+    it('a failed post retried sends the same idempotency key', async () => {
+      const client = signIn()
+      const create = vi.spyOn(client, 'createStatus')
+        .mockRejectedValueOnce(new Error('timeout'))
+        .mockResolvedValueOnce({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      const el = await mount()
+      await compose(el)
+      await type(el, 'retry me')
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      expect(create).toHaveBeenCalledTimes(2)
+      const [first, second] = create.mock.calls.map((c) => c[1]?.idempotencyKey)
+      expect(first).toEqual(expect.any(String))
+      expect(second).toBe(first)
+    })
   })
 })

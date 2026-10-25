@@ -172,6 +172,23 @@ test('a failed post keeps the dialog open with the draft', async ({ page }) => {
   await expect(dialog.getByRole('textbox', { name: 'Post text' })).toHaveValue('keep this')
 })
 
+test('plain Enter in the content warning field does not publish', async ({ page }) => {
+  await seedSession(page)
+  const posted = await mockApi(page)
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await dialog.getByRole('textbox', { name: 'Post text' }).fill('body')
+  await dialog.getByRole('button', { name: 'CW' }).click()
+  const cw = dialog.getByRole('textbox', { name: 'Content warning' })
+  await cw.fill('spoiler')
+  await cw.press('Enter')
+  // Give a stray submit time to reach the network.
+  await page.waitForTimeout(300)
+  expect(posted).toHaveLength(0)
+  await expect(dialog).toBeVisible()
+})
+
 test('signed out: no New post button and n does nothing', async ({ page }) => {
   await page.route('**/a.png', (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))

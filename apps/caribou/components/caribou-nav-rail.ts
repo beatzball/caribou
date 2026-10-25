@@ -111,7 +111,7 @@ export class CaribouNavRail extends LitElement {
           return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing} @click=${spaClick}
             ><span class="icon">${it.icon}</span><span class="label">${it.label}</span></a>`
         })}
-        <button type="button" class="compose-btn" @click=${openCompose}
+        <button type="button" class="compose-btn" aria-label="New post" @click=${openCompose}
           ><span class="icon">${PEN_ICON}</span><span class="label">New post</span></button>
         <caribou-signout-form>
           <form action="/api/signout" method="post" class="signout-form">

@@ -1,12 +1,13 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, query, state } from 'lit/decorators.js'
+import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser,
+  activeClient, activeUser, activeUserKey,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
-  type ComposeDraft, type DraftMedia, type DraftSlot,
+  type ComposeDraft, type DraftMedia, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { MediaProcessingTimeout, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import { countChars, plainText, replyMentions, replyVisibility } from './_compose-text.js'
 
@@ -43,6 +44,20 @@ interface PendingMedia {
   previewUrl: string
   description: string
   state: 'uploading' | 'failed'
+  // Set when the upload worked but processing outlasted the wait: a retry
+  // waits on this id instead of uploading the file again.
+  mediaId?: string
+}
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+// The account's own default, when the stored session came from
+// verify_credentials and so carries `source`.
+function defaultVisibility(user: UserSession): mastodon.v1.StatusVisibility {
+  const privacy = (user.account as Partial<mastodon.v1.AccountCredentials>).source?.privacy
+  return privacy && ['public', 'unlisted', 'private', 'direct'].includes(privacy) ? privacy : 'public'
 }
 
 const VISIBILITIES: { value: mastodon.v1.StatusVisibility; label: string }[] = [
@@ -132,12 +147,27 @@ export class CaribouComposeDialog extends LitElement {
   private draftKey: DraftSlot = 'new'
   private returnFocus: HTMLElement | null = null
   private showPending = false
+  // The account the dialog was opened for. Every read and write goes
+  // through it, so a sign-out or an account switch while the dialog is
+  // open can never save the draft under, or post as, another account.
+  private client: CaribouClient | null = null
+  // Alt text the server has, per media id, and the save still in flight.
+  private syncedAlt = new Map<string, string>()
+  private altSaves = new Map<string, Promise<void>>()
+  private unwatchUser?: () => void
 
   override connectedCallback() {
     super.connectedCallback()
     mounted.push(this)
     window.addEventListener('caribou:compose', this.onCompose)
     window.addEventListener('keydown', this.onKeydown)
+    this.unwatchUser = effect(() => {
+      const key = activeUserKey.value
+      if (this.open && this.client && key !== this.client.userKey) {
+        this.close()
+        toast('info', 'Your draft is saved for the account you started it with.')
+      }
+    })
   }
 
   override disconnectedCallback() {
@@ -145,6 +175,8 @@ export class CaribouComposeDialog extends LitElement {
     if (i >= 0) mounted.splice(i, 1)
     window.removeEventListener('caribou:compose', this.onCompose)
     window.removeEventListener('keydown', this.onKeydown)
+    this.unwatchUser?.()
+    this.unwatchUser = undefined
     for (const p of this.pending) URL.revokeObjectURL(p.previewUrl)
     super.disconnectedCallback()
   }
@@ -196,17 +228,21 @@ export class CaribouComposeDialog extends LitElement {
     const active = document.activeElement
     this.returnFocus = active instanceof HTMLElement ? deepActive(active) : null
 
+    this.client = client
+    this.syncedAlt = new Map()
+    this.altSaves = new Map()
     this.draftKey = draftSlot(inReplyTo?.id)
     this.replyTo = inReplyTo
+    const visibility = defaultVisibility(user)
     this.draft = loadDraft(client.userKey, this.draftKey) ?? (inReplyTo
       ? emptyDraft({
         text: replyMentions(inReplyTo, user.account.acct),
-        visibility: replyVisibility(inReplyTo.visibility, 'public'),
+        visibility: replyVisibility(inReplyTo.visibility, visibility),
         inReplyToId: inReplyTo.id,
         cw: inReplyTo.spoilerText !== '',
         spoilerText: inReplyTo.spoilerText,
       })
-      : emptyDraft())
+      : emptyDraft({ visibility }))
     this.pending = []
     this.open = true
     this.showPending = true
@@ -222,6 +258,7 @@ export class CaribouComposeDialog extends LitElement {
   // is already stored, so closing loses nothing.
   private onClose = () => {
     this.open = false
+    this.client = null
     for (const p of this.pending) URL.revokeObjectURL(p.previewUrl)
     this.pending = []
     const target = this.returnFocus
@@ -230,9 +267,11 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   private patchDraft(patch: Partial<ComposeDraft>) {
+    // The editor is read-only while posting; a late event must not change
+    // the draft that is being sent, or be cleared with it.
+    if (this.posting || !this.client) return
     this.draft = { ...this.draft, ...patch }
-    const client = activeClient.value
-    if (client) saveDraft(client.userKey, this.draftKey, this.draft)
+    saveDraft(this.client.userKey, this.draftKey, this.draft)
   }
 
   private get count(): number {
@@ -246,16 +285,26 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   private async submit() {
-    const client = activeClient.value
+    const client = this.client
     if (!client || !this.canPost) return
+    if (activeUserKey.value !== client.userKey) return
     this.posting = true
     try {
+      // Alt text is saved on `change`, which a quick Post or Ctrl+Enter in
+      // the alt field can beat. Every description must be on the server
+      // before the post that shows it.
+      try {
+        await Promise.all(this.draft.media.map((m) => this.saveAlt(m.id, m.description)))
+      } catch (err) {
+        toast('error', `Could not save the alt text: ${errorText(err)}`)
+        return
+      }
       await postDraft(client, this.draftKey, this.draft)
       this.draft = emptyDraft()
       this.close()
       toast('info', this.replyTo ? 'Reply posted' : 'Post published')
     } catch (err) {
-      toast('error', `Could not post: ${err instanceof Error ? err.message : String(err)}`)
+      toast('error', `Could not post: ${errorText(err)}`)
     } finally {
       this.posting = false
     }
@@ -267,9 +316,14 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   private onFormKeydown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    if (e.key !== 'Enter') return
+    if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       void this.submit()
+    } else if (e.composedPath()[0] instanceof HTMLInputElement) {
+      // A plain Enter in a one-line field would submit the form, and so
+      // publish the post. Only Ctrl/Cmd+Enter or the Post button may.
+      e.preventDefault()
     }
   }
 
@@ -283,7 +337,7 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   private async upload(file: File, retry?: PendingMedia) {
-    const client = activeClient.value
+    const client = this.client
     if (!client) return
     const item: PendingMedia = retry
       ? { ...retry, state: 'uploading' }
@@ -292,7 +346,11 @@ export class CaribouComposeDialog extends LitElement {
       ? this.pending.map((p) => p.localId === item.localId ? item : p)
       : [...this.pending, item]
     try {
-      const m = await client.uploadMedia(file, item.description ? { description: item.description } : {})
+      const m = item.mediaId
+        ? await client.waitForMedia(item.mediaId)
+        : await client.uploadMedia(file, item.description ? { description: item.description } : {})
+      // A late answer for a dialog closed, or reopened, meanwhile.
+      if (client !== this.client) return
       // The item may have been removed, or the dialog closed, meanwhile.
       const current = this.pending.find((p) => p.localId === item.localId)
       if (!current) return
@@ -302,23 +360,37 @@ export class CaribouComposeDialog extends LitElement {
         id: m.id, type: m.type, url: m.url ?? '', previewUrl: m.previewUrl ?? null,
         description: current.description,
       }
+      this.syncedAlt.set(m.id, m.description ?? '')
       this.patchDraft({ media: [...this.draft.media, media] })
       // Alt text typed while the file was uploading.
-      if (current.description && current.description !== (m.description ?? '')) {
-        void this.saveDescription(media.id, current.description)
-      }
+      this.saveAltOrToast(media.id, current.description)
     } catch (err) {
-      this.pending = this.pending.map((p) => p.localId === item.localId ? { ...p, state: 'failed' } : p)
-      toast('error', `Upload failed: ${err instanceof Error ? err.message : String(err)}`)
+      const mediaId = err instanceof MediaProcessingTimeout ? err.mediaId : item.mediaId
+      this.pending = this.pending.map((p) => p.localId === item.localId
+        ? { ...p, state: 'failed', ...(mediaId ? { mediaId } : {}) } : p)
+      toast('error', `Upload failed: ${errorText(err)}`)
     }
   }
 
-  private async saveDescription(id: string, description: string) {
-    try {
-      await activeClient.value?.updateMedia(id, { description })
-    } catch (err) {
-      toast('error', `Could not save the description: ${err instanceof Error ? err.message : String(err)}`)
-    }
+  // Saves are chained per id, so they land in order, and one that matches
+  // what the server already has sends nothing.
+  private saveAlt(id: string, description: string): Promise<void> {
+    const client = this.client
+    if (!client) return Promise.resolve()
+    const prev = this.altSaves.get(id) ?? Promise.resolve()
+    const next = prev.catch(() => {}).then(async () => {
+      if ((this.syncedAlt.get(id) ?? '') === description) return
+      await client.updateMedia(id, { description })
+      this.syncedAlt.set(id, description)
+    })
+    this.altSaves.set(id, next)
+    return next
+  }
+
+  private saveAltOrToast(id: string, description: string) {
+    this.saveAlt(id, description).catch((err: unknown) => {
+      toast('error', `Could not save the alt text: ${errorText(err)}`)
+    })
   }
 
   private removeMedia(id: string) {
@@ -339,6 +411,7 @@ export class CaribouComposeDialog extends LitElement {
     const mediaCount = d.media.length + this.pending.length
     const full = mediaCount >= this.limits.maxMedia
     const title = this.replyTo ? 'Reply' : 'New post'
+    const busy = this.posting
     return html`
       <dialog aria-labelledby="compose-title" @close=${this.onClose}>
         <form @submit=${this.onSubmit} @keydown=${this.onFormKeydown}>
@@ -355,12 +428,12 @@ export class CaribouComposeDialog extends LitElement {
           ${d.cw ? html`
             <label class="visually-hidden" for="compose-cw">Content warning</label>
             <input id="compose-cw" type="text" name="spoiler" placeholder="Content warning"
-              .value=${d.spoilerText}
+              ?readonly=${busy} .value=${d.spoilerText}
               @input=${(e: Event) => this.patchDraft({ spoilerText: (e.target as HTMLInputElement).value })}>
           ` : nothing}
           <label class="visually-hidden" for="compose-text">Post text</label>
           <textarea id="compose-text" name="status" placeholder="What’s on your mind?"
-            .value=${d.text}
+            ?readonly=${busy} .value=${d.text}
             @input=${(e: Event) => this.patchDraft({ text: (e.target as HTMLTextAreaElement).value })}></textarea>
           ${mediaCount > 0 ? html`
             <ul class="media" aria-label="Attachments">
@@ -370,13 +443,13 @@ export class CaribouComposeDialog extends LitElement {
                     ? html`<img src=${m.previewUrl ?? m.url} alt="">`
                     : html`<div class="file">${m.type}</div>`}
                   <input type="text" placeholder="Describe for people who can’t see it"
-                    aria-label="Alt text" .value=${m.description}
+                    aria-label="Alt text" ?readonly=${busy} .value=${m.description}
                     @input=${(e: Event) => this.patchDraft({
                       media: this.draft.media.map((x) => x.id === m.id
                         ? { ...x, description: (e.target as HTMLInputElement).value } : x),
                     })}
-                    @change=${(e: Event) => void this.saveDescription(m.id, (e.target as HTMLInputElement).value)}>
-                  <button type="button" data-action="remove-media" @click=${() => this.removeMedia(m.id)}>Remove</button>
+                    @change=${(e: Event) => this.saveAltOrToast(m.id, (e.target as HTMLInputElement).value)}>
+                  <button type="button" data-action="remove-media" ?disabled=${busy} @click=${() => this.removeMedia(m.id)}>Remove</button>
                 </li>`)}
               ${this.pending.map((p) => html`
                 <li data-pending=${p.localId}>
@@ -399,21 +472,23 @@ export class CaribouComposeDialog extends LitElement {
                 </li>`)}
             </ul>` : nothing}
           <div class="toolbar">
-            <label class="pick" aria-disabled=${full ? 'true' : 'false'}>
+            <label class="pick" aria-disabled=${full || busy ? 'true' : 'false'}>
               Add media
               <input class="visually-hidden" type="file" multiple accept=${this.limits.accept}
-                ?disabled=${full} @change=${this.onFiles}>
+                ?disabled=${full || busy} @change=${this.onFiles}>
             </label>
-            <button type="button" data-action="toggle-cw" aria-pressed=${d.cw ? 'true' : 'false'}
+            <button type="button" data-action="toggle-cw" aria-pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
               @click=${() => this.patchDraft({ cw: !d.cw })}>CW</button>
             <label class="visually-hidden" for="compose-visibility">Visibility</label>
-            <select id="compose-visibility" name="visibility"
+            <select id="compose-visibility" name="visibility" ?disabled=${busy}
               @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as mastodon.v1.StatusVisibility })}>
               ${VISIBILITIES.map((v) => html`<option value=${v.value}>${v.label}</option>`)}
             </select>
             <span class="spacer"></span>
-            <span class="count" ?data-over=${over} aria-live="polite"
+            <span class="count" ?data-over=${over}
               aria-label=${`${this.limits.maxChars - count} characters left`}>${this.limits.maxChars - count}</span>
+            <!-- Announces only when the limit is crossed, not every keystroke. -->
+            <span class="visually-hidden" aria-live="polite" data-limit-status>${over ? 'Over the character limit' : ''}</span>
             <button type="submit" class="post" ?disabled=${!this.canPost}>
               ${this.posting ? 'Posting…' : this.replyTo ? 'Reply' : 'Post'}
             </button>

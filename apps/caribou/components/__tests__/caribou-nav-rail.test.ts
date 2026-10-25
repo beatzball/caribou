@@ -166,4 +166,10 @@ describe('caribou-nav-rail', () => {
     activeUserKey.value = null
     expect(el.hasAttribute('can-compose')).toBe(false)
   })
+
+  it('names the New post button even where its label is hidden', async () => {
+    const el = await mount()
+    const btn = el.shadowRoot!.querySelector('button.compose-btn')!
+    expect(btn.getAttribute('aria-label')).toBe('New post')
+  })
 })
