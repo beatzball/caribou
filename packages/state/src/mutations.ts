@@ -34,8 +34,9 @@ export interface MutationOpts {
 }
 
 // One write per action per post at a time. A second click while the first
-// is in flight is dropped: queuing it would race the first response, and
-// the button already shows the state the user asked for.
+// is in flight is dropped, so a quick favourite-then-undo leaves the post
+// favourited; the user clicks again once the button settles. Queuing the
+// last intent would fix that, at the cost of ordering two writes.
 const inflight = new Set<string>()
 
 /** Test-only — clears the in-flight guard between tests. */
@@ -65,38 +66,39 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   const client = (opts.clientSource ?? (() => activeClient.value))()
   if (!client) return
 
-  const spec = SPECS[action]
+  const { flag, count } = SPECS[action]
   const before = statusCache.value.get(id) ?? findWrapped(id) ?? target
-  const wasOn = before[spec.flag] === true
-  const method = wasOn ? spec.off : spec.on
-  const undo: Partial<Status> = { [spec.flag]: wasOn }
-  const optimistic: Partial<Status> = { [spec.flag]: !wasOn }
-  if (spec.count) {
-    undo[spec.count] = before[spec.count]
-    optimistic[spec.count] = Math.max(0, before[spec.count] + (wasOn ? -1 : 1))
-  }
+  const wasOn = before[flag] === true
+  const method = wasOn ? SPECS[action].off : SPECS[action].on
+  const delta = wasOn ? -1 : 1
 
+  // Every write below changes only this action's flag and count, and each
+  // starts from the post as the cache holds it at that moment. A poll, a
+  // page load or another action may write the same post while the request
+  // is out; their fields must survive this one finishing.
   inflight.add(key)
-  patchPost(id, optimistic)
+  writePost(id, (post) => shift(post, flag, !wasOn, count, delta))
   try {
     const fresh = await client[method](id)
-    // Another action on the same post may still be in flight. Its
-    // optimistic value is newer than what this response carries.
-    const keep: Partial<Status> = {}
-    for (const [other, s] of Object.entries(SPECS) as [StatusAction, ActionSpec][]) {
-      if (other === action || !inflight.has(`${other}:${id}`)) continue
-      const current = statusCache.value.get(id) ?? findWrapped(id)
-      if (!current) continue
-      keep[s.flag] = current[s.flag]
-      if (s.count) keep[s.count] = current[s.count]
-    }
-    replacePost({ ...fresh, ...keep })
+    writePost(id, (post) => ({
+      ...post,
+      [flag]: fresh[flag],
+      ...(count ? { [count]: fresh[count] } : {}),
+    }))
   } catch {
-    patchPost(id, undo)
+    // Undo only what this click did. If the flag no longer holds the
+    // optimistic value, a newer write already set it from the server.
+    writePost(id, (post) => post[flag] === !wasOn ? shift(post, flag, wasOn, count, -delta) : post)
     toast(`Could not ${VERBS[method]} this post. Try again.`)
   } finally {
     inflight.delete(key)
   }
+}
+
+function shift(post: Status, flag: Flag, on: boolean, count: Count | null, delta: number): Status {
+  const next = { ...post, [flag]: on }
+  if (count) next[count] = Math.max(0, (post[count] ?? 0) + delta)
+  return next
 }
 
 function findWrapped(id: string): Status | undefined {
@@ -104,14 +106,6 @@ function findWrapped(id: string): Status | undefined {
     if (s.reblog?.id === id) return s.reblog
   }
   return undefined
-}
-
-function patchPost(id: string, patch: Partial<Status>): void {
-  writePost(id, (post) => ({ ...post, ...patch }))
-}
-
-function replacePost(post: Status): void {
-  writePost(post.id, () => post)
 }
 
 // The post and every wrapper that boosts it change in one cache write, so

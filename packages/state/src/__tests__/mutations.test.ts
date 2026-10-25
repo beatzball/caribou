@@ -48,7 +48,7 @@ afterEach(() => { window.removeEventListener('caribou:toast', onToast) })
 const get = (id: string) => statusCache.value.get(id)!
 
 describe('toggleFavourite', () => {
-  it('flips the flag and count at once, then caches the server status', async () => {
+  it('flips the flag and count at once, then takes the server flag and count', async () => {
     cacheStatus(makeStatus('1', { favouritesCount: 4 }))
     const d = deferred<Status>()
     const favourite = vi.fn(() => d.promise)
@@ -61,7 +61,8 @@ describe('toggleFavourite', () => {
     d.resolve(makeStatus('1', { favourited: true, favouritesCount: 7, content: '<p>fresh</p>' }))
     await p
     expect(get('1').favouritesCount).toBe(7)
-    expect(get('1').content).toBe('<p>fresh</p>')
+    // Other fields stay as cached; only this action's fields come across.
+    expect(get('1').content).toBe('<p>1</p>')
     expect(toasts).toHaveLength(0)
   })
 
@@ -239,6 +240,52 @@ describe('two actions on one post', () => {
     expect(get('1').favouritesCount).toBe(1)
     fav.resolve(makeStatus('1', { favourited: true, favouritesCount: 1, reblogged: true, reblogsCount: 1 }))
     await p1
+  })
+})
+
+describe('cache writes during the request', () => {
+  it('rollback keeps a newer cache write and undoes only the delta', async () => {
+    cacheStatus(makeStatus('1', { favouritesCount: 2 }))
+    const d = deferred<Status>()
+    const p = toggleFavourite(get('1'), { clientSource: () => fakeClient({ favourite: () => d.promise }) })
+    // A poll lands mid-request: new content, and someone else favourited too.
+    cacheStatus({ ...get('1'), content: '<p>edited</p>', favouritesCount: 6 })
+    d.reject(new Error('500'))
+    await p
+    expect(get('1').content).toBe('<p>edited</p>')
+    expect(get('1').favourited).toBe(false)
+    expect(get('1').favouritesCount).toBe(5)
+  })
+
+  it('rollback leaves a flag that no longer holds the optimistic value', async () => {
+    cacheStatus(makeStatus('1', { favouritesCount: 2 }))
+    const d = deferred<Status>()
+    const p = toggleFavourite(get('1'), { clientSource: () => fakeClient({ favourite: () => d.promise }) })
+    // The server's own state arrived first and says not favourited.
+    cacheStatus(makeStatus('1', { favouritesCount: 2 }))
+    d.reject(new Error('timeout'))
+    await p
+    expect(get('1').favourited).toBe(false)
+    expect(get('1').favouritesCount).toBe(2)
+  })
+
+  it('success merges only its own flag and count onto the current post', async () => {
+    cacheStatus(makeStatus('1'))
+    const fav = deferred<Status>()
+    const bm = deferred<Status>()
+    const client = fakeClient({ favourite: () => fav.promise, bookmark: () => bm.promise })
+    const p1 = toggleFavourite(get('1'), { clientSource: () => client })
+    const p2 = toggleBookmark(get('1'), { clientSource: () => client })
+
+    fav.resolve(makeStatus('1', { favourited: true, favouritesCount: 1 }))
+    await p1
+    // The bookmark response was made before the favourite landed.
+    bm.resolve(makeStatus('1', { bookmarked: true, favourited: false, favouritesCount: 0, content: '<p>old</p>' }))
+    await p2
+    expect(get('1').favourited).toBe(true)
+    expect(get('1').favouritesCount).toBe(1)
+    expect(get('1').bookmarked).toBe(true)
+    expect(get('1').content).toBe('<p>1</p>')
   })
 })
 
