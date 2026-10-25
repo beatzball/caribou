@@ -445,6 +445,37 @@ describe('<caribou-profile> — pagination', () => {
     expect(clickIsPrevented(next)).toBe(true)
   })
 
+  // /@me: the account was looked up by a session on example.social, so its
+  // id means nothing to a session on another server. After a switch the
+  // link must go back to being a plain link, never page that id in place.
+  it('/@me: hands the link back after a switch to a session on another server', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([STATUS])
+    const el = await mount({ handle: '@alice@example.social' })
+    await flush()
+    await el.updateComplete
+    const next = sentinelOf(el)!
+    expect(watching(observers, next)).toBeDefined()
+
+    const list = batch(() => {
+      addUserSession({
+        userKey: 'bob@two.example', server: 'two.example', token: 'TOKEN-2',
+        vapidKey: '', account: { ...ACCOUNT, id: '77' }, createdAt: 2,
+      } as unknown as UserSession)
+      vi.spyOn(activeClient.value!, 'lookupAccount').mockRejectedValue(new Error('not found'))
+      return vi.spyOn(activeClient.value!, 'fetchAccountStatuses').mockResolvedValue([])
+    })
+    await el.updateComplete
+    for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    expect(list).not.toHaveBeenCalled()
+  })
+
   it('hands the link back when the instance changes to another host', async () => {
     const observers = stubIntersectionObserver()
     // The header looks the account up on the reader's server once the
