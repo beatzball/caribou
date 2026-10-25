@@ -46,14 +46,29 @@ export interface CaribouClient {
   /** Resolves once the server has processed the file and it has a `url`. */
   uploadMedia(file: Blob, opts?: UploadMediaOpts): Promise<mastodon.v1.MediaAttachment>
   fetchMedia(id: string): Promise<mastodon.v1.MediaAttachment>
+  /** Polls an uploaded attachment until it has a `url`. */
+  waitForMedia(id: string, opts?: WaitForMediaOpts): Promise<mastodon.v1.MediaAttachment>
   updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
   fetchInstance(): Promise<mastodon.v2.Instance>
 }
 
-export interface UploadMediaOpts {
-  description?: string
+export interface WaitForMediaOpts {
   pollIntervalMs?: number
   timeoutMs?: number
+}
+
+export interface UploadMediaOpts extends WaitForMediaOpts {
+  description?: string
+}
+
+// The upload itself succeeded; only the server's processing outlasted the
+// wait. `mediaId` lets a retry go back to waiting instead of uploading again.
+export class MediaProcessingTimeout extends CaribouError {
+  readonly mediaId: string
+  constructor(mediaId: string) {
+    super('server_error', 'media processing timed out')
+    this.mediaId = mediaId
+  }
 }
 
 export interface CreateStatusInput {
@@ -93,6 +108,19 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       const norm = normalizeError(err)
       if (norm.code === 'unauthorized') session.onUnauthorized()
       throw norm
+    }
+  }
+
+  // Video can take minutes to transcode on a busy server.
+  async function waitForMedia(
+    id: string, { pollIntervalMs = 1000, timeoutMs = 5 * 60_000 }: WaitForMediaOpts = {},
+  ): Promise<mastodon.v1.MediaAttachment> {
+    const deadline = Date.now() + timeoutMs
+    for (;;) {
+      if (Date.now() >= deadline) throw new MediaProcessingTimeout(id)
+      await new Promise((r) => setTimeout(r, pollIntervalMs))
+      const media = await run(`media:${id}`, (c) => c.v1.media.$select(id).fetch())
+      if (media.url) return media
     }
   }
 
@@ -187,26 +215,17 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       return write((c) => c.v1.statuses.create(body, meta))
     },
     async uploadMedia(file, opts = {}) {
-      const { pollIntervalMs = 1000, timeoutMs = 60_000 } = opts
       // Large files come back 202 with `url: null` while the server
       // transcodes them. masto can wait for that itself, but its wait is
       // not routed through run(), so a 401 mid-wait would skip onUnauthorized.
-      let media = await write((c) => c.v2.media.create({
+      const media = await write((c) => c.v2.media.create({
         file,
         ...(opts.description ? { description: opts.description } : {}),
         skipPolling: true,
       }))
-      const deadline = Date.now() + timeoutMs
-      while (!media.url) {
-        if (Date.now() >= deadline) {
-          throw new CaribouError('server_error', 'media processing timed out')
-        }
-        await new Promise((r) => setTimeout(r, pollIntervalMs))
-        const id = media.id
-        media = await run(`media:${id}`, (c) => c.v1.media.$select(id).fetch())
-      }
-      return media
+      return media.url ? media : waitForMedia(media.id, opts)
     },
+    waitForMedia,
     async fetchMedia(id) {
       return run(`media:${id}`, (c) => c.v1.media.$select(id).fetch())
     },

@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
-import { createCaribouClient } from '../create-client.js'
+import { createCaribouClient, MediaProcessingTimeout } from '../create-client.js'
 import { server } from './fixtures/server.js'
 import { handlers } from './fixtures/handlers.js'
 import { makeStatus } from './fixtures/status.js'
@@ -129,7 +129,31 @@ describe('CaribouClient.uploadMedia', () => {
     )
     const c = createCaribouClient(userKey, sessionSource())
     await expect(c.uploadMedia(new Blob(['x']), { pollIntervalMs: 1, timeoutMs: 10 }))
-      .rejects.toMatchObject({ code: 'server_error' })
+      .rejects.toMatchObject({ code: 'server_error', mediaId: 'm3' })
+  })
+
+  it('waitForMedia resumes after a timeout without uploading again', async () => {
+    let uploads = 0
+    let polls = 0
+    server.use(
+      http.post('https://fosstodon.org/api/v2/media', () => {
+        uploads += 1
+        return HttpResponse.json(media('m4', null), { status: 202 })
+      }),
+      http.get('https://fosstodon.org/api/v1/media/m4', () => {
+        polls += 1
+        return polls < 4
+          ? HttpResponse.json(media('m4', null), { status: 206 })
+          : HttpResponse.json(media('m4', 'https://fosstodon.org/m4.png'))
+      }),
+    )
+    const c = createCaribouClient(userKey, sessionSource())
+    const err = await c.uploadMedia(new Blob(['x']), { pollIntervalMs: 1, timeoutMs: 1 })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(MediaProcessingTimeout)
+    const m = await c.waitForMedia((err as MediaProcessingTimeout).mediaId, { pollIntervalMs: 1 })
+    expect(m.url).toBe('https://fosstodon.org/m4.png')
+    expect(uploads).toBe(1)
   })
 })
 
