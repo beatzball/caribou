@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.2.4
+
+### Patch Changes
+
+- [#44](https://github.com/beatzball/caribou/pull/44) [`fce40c5`](https://github.com/beatzball/caribou/commit/fce40c5668f7ab00414d0f1e686b1f3f1b50496d) Thanks [@beatzball](https://github.com/beatzball)! - Raise the `vite` floor to `^8.1.6` to match litro 0.17.4, which raised its own floor for security advisories. The live SSR thread test now picks a post that really is a reply with a visible parent, instead of the newest entry on the replies tab. The litro patch's comments now say the root index maps to `page-index`; the patched code is unchanged.
+
 ## 0.2.3
 
 ### Patch Changes
