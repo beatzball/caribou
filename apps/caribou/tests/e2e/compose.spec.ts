@@ -207,9 +207,21 @@ test('the content warning icon button opens the warning field', async ({ page })
   const box = await toggle.boundingBox()
   expect(box!.width).toBeGreaterThanOrEqual(24)
   expect(box!.height).toBeGreaterThanOrEqual(24)
-  // The media picker is reachable by name, so Tab and Enter reach it.
-  await expect(dialog.getByLabel('Add images or video')).toBeEnabled()
 })
+
+for (const key of ['Enter', 'Space']) {
+  test(`${key} on the focused media picker opens the file chooser`, async ({ page }) => {
+    await seedSession(page)
+    await mockApi(page)
+    await gotoSettled(page, '/home')
+    await page.keyboard.press('n')
+    const picker = page.getByRole('dialog', { name: 'New post' }).getByLabel('Add images or video')
+    await picker.focus()
+    const chooser = page.waitForEvent('filechooser')
+    await page.keyboard.press(key)
+    await chooser
+  })
+}
 
 test('signed out: no New post button and n does nothing', async ({ page }) => {
   await page.route('**/a.png', (route) =>

@@ -131,17 +131,19 @@ export class CaribouComposeDialog extends LitElement {
       padding: var(--space-2) var(--space-3); border: 1px solid var(--border);
       background: var(--bg-1); color: var(--fg-0);
     }
-    .toolbar button, .pick { min-block-size: 2.25rem; }
+    .toolbar button, .toolbar select, .pick { min-block-size: 2.25rem; }
     .icon {
       display: inline-flex; align-items: center; justify-content: center;
       min-inline-size: 2.25rem; padding: 0; font-size: 1.25em;
     }
     @media (pointer: coarse) {
-      .toolbar button, .pick { min-block-size: 44px; }
+      .toolbar button, .toolbar select, .pick { min-block-size: 44px; }
       .icon { min-inline-size: 44px; }
     }
     button:focus-visible, .pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
     button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+    /* An accent ring on an accent fill would not show. */
+    button[aria-pressed="true"]:focus-visible { outline-color: var(--fg-0); }
     button.post { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .pick[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
