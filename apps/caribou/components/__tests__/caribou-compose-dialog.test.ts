@@ -443,6 +443,75 @@ describe('caribou-compose-dialog', () => {
       expect(loadDraft(KEY, 'new')?.media.map((m) => m.id)).toEqual(['m5'])
     })
 
+    it('a post that lands after the dialog moved on leaves the new draft alone', async () => {
+      const client = signIn()
+      let done!: (s: mastodon.v1.Status) => void
+      vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((r) => { done = r }))
+      const el = await mount()
+      await compose(el)
+      await type(el, 'alice text')
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      signIn({ ...ME, id: 'b1', acct: 'bob' }, 'bob@example.social')
+      await settle(el)
+      await compose(el)
+      await type(el, 'bob text')
+      done({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      await settle(el)
+      expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
+      expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('bob text')
+      expect(loadDraft('bob@example.social', 'new')?.text).toBe('bob text')
+      expect(toasts).toContainEqual({ kind: 'info', message: 'Post published' })
+    })
+
+    it('a post that lands after the same account closed and reopened the dialog leaves it open', async () => {
+      const client = signIn()
+      let done!: (s: mastodon.v1.Status) => void
+      vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((r) => { done = r }))
+      const el = await mount()
+      await compose(el)
+      await type(el, 'first')
+      $<HTMLFormElement>(el, 'form')!.requestSubmit()
+      await settle(el)
+      $<HTMLDialogElement>(el, 'dialog')!.close()
+      await settle(el)
+      await compose(el, parent())
+      expect($<HTMLTextAreaElement>(el, 'textarea')!.readOnly).toBe(false)
+      done({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      await settle(el)
+      expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
+      expect(loadDraft(KEY, 'new')).toBeNull()
+    })
+
+    it('plain Enter on the file picker is not blocked', async () => {
+      signIn()
+      const el = await mount()
+      await compose(el)
+      expect(enter($(el, 'input[type="file"]')!).defaultPrevented).toBe(false)
+    })
+
+    it('retry after an upload error uploads again instead of polling a dead id', async () => {
+      const client = signIn()
+      const upload = vi.spyOn(client, 'uploadMedia')
+        .mockRejectedValueOnce(new MediaProcessingTimeout('m5'))
+        .mockResolvedValueOnce({ id: 'm6', type: 'video', url: 'https://example.social/m6.mp4', previewUrl: null, description: null } as unknown as mastodon.v1.MediaAttachment)
+      const wait = vi.spyOn(client, 'waitForMedia').mockRejectedValue(new Error('gone'))
+      const el = await mount()
+      await compose(el)
+      const file = $<HTMLInputElement>(el, 'input[type="file"]')!
+      Object.defineProperty(file, 'files', { value: [new File(['x'], 'v.mp4', { type: 'video/mp4' })], configurable: true })
+      file.dispatchEvent(new Event('change'))
+      await settle(el)
+      $<HTMLButtonElement>(el, '[data-action="retry-media"]')!.click()
+      await settle(el)
+      expect(wait).toHaveBeenCalledOnce()
+      $<HTMLButtonElement>(el, '[data-action="retry-media"]')!.click()
+      await settle(el)
+      expect(wait).toHaveBeenCalledOnce()
+      expect(upload).toHaveBeenCalledTimes(2)
+      expect(loadDraft(KEY, 'new')?.media.map((m) => m.id)).toEqual(['m6'])
+    })
+
     it('a double Ctrl+Enter or double click posts once', async () => {
       const client = signIn()
       let done!: (s: mastodon.v1.Status) => void

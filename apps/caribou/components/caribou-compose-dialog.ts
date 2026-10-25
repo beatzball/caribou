@@ -38,6 +38,14 @@ function fetchLimits(client: CaribouClient, server: string): Promise<Limits> {
 
 // An item still being uploaded lives only here; it joins the stored draft
 // once the server has it.
+// Fields where a plain Enter would submit the form. Not a file picker,
+// where Enter opens the file chooser.
+const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'tel', 'password', 'number'])
+
+function isTextInput(t: EventTarget | undefined): boolean {
+  return t instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(t.type)
+}
+
 interface PendingMedia {
   localId: string
   file: File
@@ -138,6 +146,9 @@ export class CaribouComposeDialog extends LitElement {
   @state() private replyTo: mastodon.v1.Status | null = null
   @state() private pending: PendingMedia[] = []
   @state() private posting = false
+  // Counts openings, so a post that finishes after its dialog closed knows
+  // it no longer owns the dialog.
+  private session = 0
   @state() private limits: Limits = DEFAULT_LIMITS
 
   @query('dialog') private dialogEl?: HTMLDialogElement
@@ -229,6 +240,8 @@ export class CaribouComposeDialog extends LitElement {
     this.returnFocus = active instanceof HTMLElement ? deepActive(active) : null
 
     this.client = client
+    this.session += 1
+    this.posting = false
     this.syncedAlt = new Map()
     this.altSaves = new Map()
     this.draftKey = draftSlot(inReplyTo?.id)
@@ -288,6 +301,8 @@ export class CaribouComposeDialog extends LitElement {
     const client = this.client
     if (!client || !this.canPost) return
     if (activeUserKey.value !== client.userKey) return
+    const done = this.replyTo ? 'Reply posted' : 'Post published'
+    const session = this.session
     this.posting = true
     try {
       // Alt text is saved on `change`, which a quick Post or Ctrl+Enter in
@@ -300,13 +315,19 @@ export class CaribouComposeDialog extends LitElement {
         return
       }
       await postDraft(client, this.draftKey, this.draft)
+      // The dialog was closed, and maybe reopened for another draft, while
+      // this post was in flight. That draft is not ours to clear.
+      if (client !== this.client || session !== this.session) {
+        toast('info', done)
+        return
+      }
       this.draft = emptyDraft()
       this.close()
-      toast('info', this.replyTo ? 'Reply posted' : 'Post published')
+      toast('info', done)
     } catch (err) {
       toast('error', `Could not post: ${errorText(err)}`)
     } finally {
-      this.posting = false
+      if (session === this.session) this.posting = false
     }
   }
 
@@ -320,7 +341,7 @@ export class CaribouComposeDialog extends LitElement {
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       void this.submit()
-    } else if (e.composedPath()[0] instanceof HTMLInputElement) {
+    } else if (isTextInput(e.composedPath()[0])) {
       // A plain Enter in a one-line field would submit the form, and so
       // publish the post. Only Ctrl/Cmd+Enter or the Post button may.
       e.preventDefault()
@@ -365,9 +386,14 @@ export class CaribouComposeDialog extends LitElement {
       // Alt text typed while the file was uploading.
       this.saveAltOrToast(media.id, current.description)
     } catch (err) {
-      const mediaId = err instanceof MediaProcessingTimeout ? err.mediaId : item.mediaId
-      this.pending = this.pending.map((p) => p.localId === item.localId
-        ? { ...p, state: 'failed', ...(mediaId ? { mediaId } : {}) } : p)
+      // Only a timeout leaves a usable upload behind. After any other
+      // failure the id may be dead, so Retry uploads the file again.
+      const mediaId = err instanceof MediaProcessingTimeout ? err.mediaId : undefined
+      this.pending = this.pending.map((p) => {
+        if (p.localId !== item.localId) return p
+        const { mediaId: _stale, ...rest } = p
+        return { ...rest, state: 'failed', ...(mediaId ? { mediaId } : {}) }
+      })
       toast('error', `Upload failed: ${errorText(err)}`)
     }
   }
