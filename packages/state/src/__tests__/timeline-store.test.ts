@@ -30,6 +30,9 @@ function fakeClient(impl?: FetchImpl): FakeClient {
     unreblog: unused as CaribouClient['unreblog'],
     bookmark: unused as CaribouClient['bookmark'],
     unbookmark: unused as CaribouClient['unbookmark'],
+    fetchRelationships: unused as CaribouClient['fetchRelationships'],
+    follow: unused as CaribouClient['follow'],
+    unfollow: unused as CaribouClient['unfollow'],
   }
 }
 

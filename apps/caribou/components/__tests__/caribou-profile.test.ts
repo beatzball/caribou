@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Signal } from '@preact/signals-core'
+import { batch, type Signal } from '@preact/signals-core'
 import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, cacheStatus, users,
@@ -63,6 +63,12 @@ afterEach(() => {
 })
 
 describe('<caribou-profile>', () => {
+  it('hands the instance to the header, which needs it to follow across instances', async () => {
+    const el = await mount({ instance: 'example.social', initial: initialOf([STATUS]) })
+    const header = el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!
+    expect(header.instance).toBe('example.social')
+  })
+
   it('mounts header + tabs + status list when initial is provided', async () => {
     const el = await mount({ tab: 'media', initial: { ...initialOf([STATUS]), tab: 'media' } })
     const root = el.shadowRoot!
@@ -122,6 +128,31 @@ describe('<caribou-profile> — without initial (own profile)', () => {
     expect(list).toHaveBeenCalledWith('42', { tab: 'replies', maxId: undefined })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['5', '4'])
     expect(el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!.account).toBe(ACCOUNT)
+  })
+
+  // The account's id belongs to the server that looked it up. The header
+  // needs that host to tell when another session is active, whose server
+  // would read the same id as a different account.
+  it('hands the header the server that looked the account up, and keeps it after a session switch', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
+    const el = await mount({ handle: '@alice@example.social' })
+    await flush()
+    await el.updateComplete
+    const header = el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!
+    expect(header.instance).toBe('example.social')
+
+    // `batch` holds the header's reaction back until the new client is stubbed.
+    batch(() => {
+      addUserSession({
+        userKey: 'bob@two.example', server: 'two.example', token: 'TOKEN-2',
+        vapidKey: '', account: { ...ACCOUNT, id: '77' }, createdAt: 2,
+      } as unknown as UserSession)
+      vi.spyOn(activeClient.value!, 'lookupAccount').mockRejectedValue(new Error('not found'))
+    })
+    await el.updateComplete
+    expect(header.instance).toBe('example.social')
   })
 
   it('does not fetch when the server already sent the first page', async () => {
@@ -369,6 +400,9 @@ describe('<caribou-profile> — pagination', () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
     const list = vi.spyOn(client, 'fetchAccountStatuses')
+    // The header looks the account up on the reader's server for its follow
+    // button; keep that off the network.
+    vi.spyOn(client, 'lookupAccount').mockRejectedValue(new Error('not found'))
     const el = await mount({ instance: 'other.host', initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
@@ -411,9 +445,42 @@ describe('<caribou-profile> — pagination', () => {
     expect(clickIsPrevented(next)).toBe(true)
   })
 
+  // /@me: the account was looked up by a session on example.social, so its
+  // id means nothing to a session on another server. After a switch the
+  // link must go back to being a plain link, never page that id in place.
+  it('/@me: hands the link back after a switch to a session on another server', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([STATUS])
+    const el = await mount({ handle: '@alice@example.social' })
+    await flush()
+    await el.updateComplete
+    const next = sentinelOf(el)!
+    expect(watching(observers, next)).toBeDefined()
+
+    const list = batch(() => {
+      addUserSession({
+        userKey: 'bob@two.example', server: 'two.example', token: 'TOKEN-2',
+        vapidKey: '', account: { ...ACCOUNT, id: '77' }, createdAt: 2,
+      } as unknown as UserSession)
+      vi.spyOn(activeClient.value!, 'lookupAccount').mockRejectedValue(new Error('not found'))
+      return vi.spyOn(activeClient.value!, 'fetchAccountStatuses').mockResolvedValue([])
+    })
+    await el.updateComplete
+    for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    expect(list).not.toHaveBeenCalled()
+  })
+
   it('hands the link back when the instance changes to another host', async () => {
     const observers = stubIntersectionObserver()
-    signIn()
+    // The header looks the account up on the reader's server once the
+    // instance differs; keep that off the network.
+    vi.spyOn(signIn(), 'lookupAccount').mockRejectedValue(new Error('not found'))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     expect(watching(observers, next)).toBeDefined()

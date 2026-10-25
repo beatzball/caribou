@@ -58,6 +58,11 @@ export class CaribouProfile extends LitElement {
   @state() private account: Account | null = null
   @state() private statuses: Status[] = []
   @state() private hasMore = false
+  // On /@me: the server of the session that looked the account up, which is
+  // the host the account's ids belong to. Paging and the header's follow
+  // button both need it after the reader switches to a session on another
+  // server.
+  @state() private accountServer = ''
   // False while nobody is signed in on this device (a reader who browses a
   // public profile), or while the signed-in client's server is not the
   // instance the page came from. In both cases the store cannot fetch a
@@ -106,8 +111,10 @@ export class CaribouProfile extends LitElement {
         initial: { statuses: this.initial.statuses, nextMaxId: this.initial.nextMaxId },
       })
     } else {
+      const server = activeUser.value?.server ?? ''
       const cache = createAccountCache(clientSource)
       account = await cache.lookup(this.handle.replace(/^@/, ''))
+      this.accountServer = server
       if (account) {
         store = createProfileStore(account.id, this.tab, { clientSource })
         await store.load()
@@ -139,16 +146,22 @@ export class CaribouProfile extends LitElement {
   }
 
   // Hosts are case-insensitive; `server` is a bare host, like `instance`.
+  // On /@me there is no `instance`; the account's ids belong to the server
+  // of the session that looked it up, and a session on another server must
+  // not page them.
   private sameInstance(server: string | undefined): boolean {
-    if (!this.instance) return true
-    return server !== undefined && server.toLowerCase() === this.instance.toLowerCase()
+    const host = this.instance || this.accountServer
+    if (!host) return true
+    return server !== undefined && server.toLowerCase() === host.toLowerCase()
   }
 
-  protected override willUpdate(changed: PropertyValues<this>) {
+  // Untyped: `accountServer` is private, so it is not a key of `this`.
+  protected override willUpdate(changed: PropertyValues) {
     // The effect in bind() recomputes `canFetch` when a signal changes, but
-    // `instance` is a Lit property, not a signal. A new instance must have
-    // the same effect without waiting for the next sign-in or sign-out.
-    if (changed.has('instance') && this.live) this.syncCanFetch()
+    // `instance` and `accountServer` are Lit fields, not signals. A new host
+    // must have the same effect without waiting for the next sign-in or
+    // sign-out.
+    if ((changed.has('instance') || changed.has('accountServer')) && this.live) this.syncCanFetch()
   }
 
   protected override updated() {
@@ -170,7 +183,9 @@ export class CaribouProfile extends LitElement {
   }
 
   private onSentinelIntersect = async (entry: IntersectionObserverEntry) => {
-    if (!entry.isIntersecting || this.loadingOlder) return
+    // `canFetch` can turn false between a report and this handler, after a
+    // switch to a session on another server: then the anchor is a link again.
+    if (!entry.isIntersecting || this.loadingOlder || !this.canFetch) return
     this.loadingOlder = true
     try {
       await this.store?.loadMore()
@@ -214,7 +229,7 @@ export class CaribouProfile extends LitElement {
     // happy-dom's parser drops a child binding that has no parent element,
     // and the component tests would never see the link.
     return html`
-      <caribou-profile-header .account=${account}></caribou-profile-header>
+      <caribou-profile-header .account=${account} instance=${this.instance || this.accountServer}></caribou-profile-header>
       <caribou-profile-tabs handle=${linkHandle} tab=${this.tab}></caribou-profile-tabs>
       <div class="posts">
         <ul>
