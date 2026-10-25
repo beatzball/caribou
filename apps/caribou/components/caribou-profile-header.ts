@@ -101,6 +101,11 @@ export class CaribouProfileHeader extends LitElement {
     this.bind()
   }
 
+  // Two triggers, one job. The effect in bind() re-resolves when the session
+  // changes, but `account` and `instance` are Lit properties, not signals, so
+  // the effect never sees them change; this re-resolves for those. Before
+  // the first update bind() has not run, and its effect does the first
+  // resolve itself.
   protected override willUpdate(changed: PropertyValues<this>) {
     if (this.hasUpdated && (changed.has('account') || changed.has('instance'))) {
       void this.resolveTarget(activeUser.value)
@@ -166,7 +171,8 @@ export class CaribouProfileHeader extends LitElement {
     const label = state === 'following'
       ? html`<span class="idle">Following</span><span class="hover">Unfollow</span>`
       : state === 'requested' ? 'Requested' : 'Follow'
-    return html`<div class="actions">
+    // A live region, so a screen reader hears the new label after a click.
+    return html`<div class="actions" aria-live="polite">
       <button type="button" class="follow" data-state=${state} @click=${this.onFollowClick}>${label}</button>
     </div>`
   }

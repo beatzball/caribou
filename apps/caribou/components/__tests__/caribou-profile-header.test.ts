@@ -149,6 +149,7 @@ describe('<caribou-profile-header> follow button', () => {
     expect(fetchRel).toHaveBeenCalledWith(['42'])
     expect(button(el)?.textContent).toBe('Follow')
     expect(button(el)?.dataset.state).toBe('follow')
+    expect(button(el)!.parentElement?.getAttribute('aria-live')).toBe('polite')
 
     button(el)!.click()
     await el.updateComplete
