@@ -6,9 +6,17 @@ on:
   push:
     branches: [main]
 
+# A new push to a PR branch makes the run before it worthless, so cancel it.
+# Runs on main deploy, so each gets its own group and is never cancelled or
+# replaced by a later push.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -35,7 +43,12 @@ jobs:
         with: { name: coverage, path: '**/coverage/**' }
 
   e2e:
+    # The release PR only bumps versions and changelogs. Its merge to main
+    # runs e2e again before deploy, so running it on the PR too buys nothing.
+    # A skipped job still satisfies the required check.
+    if: github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: checks
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +57,22 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter caribou-app exec playwright install --with-deps chromium firefox webkit
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(grep -m1 -oP '^  playwright@\K[0-9.]+(?=:)' pnpm-lock.yaml)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - name: Install browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        run: pnpm --filter caribou-app exec playwright install --with-deps chromium firefox webkit
+      - name: Install browser system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        timeout-minutes: 5
+        run: pnpm --filter caribou-app exec playwright install-deps chromium firefox webkit
       - run: pnpm build
       - run: pnpm test:e2e
       - if: failure()
@@ -57,6 +85,7 @@ jobs:
     # no changesets" as a hard error, which is the whole point of that PR.
     if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -74,8 +103,13 @@ jobs:
   # that does `readFileSync(require.resolve('@workspace/pkg/file'))` at init
   # works locally but throws MODULE_NOT_FOUND in the runtime image, which
   # ships only `dist/`.
+  #
+  # Skipped on the release PR for the same reason as e2e: main runs it again
+  # before deploy, and deploy needs it.
   smoke-image:
+    if: github.head_ref != 'changeset-release/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: checks
     steps:
       - uses: actions/checkout@v4
@@ -113,6 +147,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [checks, e2e, smoke-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Trigger Coolify deploy
         run: |
@@ -124,6 +159,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [deploy]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
