@@ -187,4 +187,21 @@ describe('loadActiveAccount', () => {
     expect(activeUser.value?.account).toBeNull()
     fetchSpy.mockRestore()
   })
+
+  it('drops a late answer when the session was replaced while it loaded', async () => {
+    let answer!: (r: Response) => void
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise((r) => { answer = r }))
+    addUserSession(bareSession())
+    const loading = loadActiveAccount()
+    removeActiveUser()
+    addUserSession({ ...bareSession(), token: 'TOKEN-2' })
+    answer(new Response(
+      JSON.stringify({ id: 'old', username: 'beatzball', acct: 'beatzball' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    await loading
+    expect(activeUser.value?.token).toBe('TOKEN-2')
+    expect(activeUser.value?.account).toBeNull()
+    fetchSpy.mockRestore()
+  })
 })

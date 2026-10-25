@@ -80,8 +80,10 @@ export async function loadActiveAccount(): Promise<void> {
   } catch {
     return
   }
+  // Store it only on the session that asked: after a sign-out and a new
+  // sign-in under the same key, the entry is a new session with a new token.
   const current = users.value.get(user.userKey)
-  if (!current || current.account) return
+  if (!current || current.account || current.token !== user.token) return
   const next = new Map(users.value)
   next.set(user.userKey, { ...current, account })
   users.value = next
