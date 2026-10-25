@@ -1,5 +1,15 @@
 # caribou-app
 
+## 0.3.1
+
+### Patch Changes
+
+- [#75](https://github.com/beatzball/caribou/pull/75) [`cbaf05a`](https://github.com/beatzball/caribou/commit/cbaf05ac7ec2f2ce06fa5e27bd8f1793ba48ae87) Thanks [@beatzball](https://github.com/beatzball)! - Fix compose and the post cards for a real sign-in. Sign-in stores the session with `account: null`, and the new code read the account without a check: every post card threw on load, and New post and Reply did nothing. The cards, the profile header and the compose dialog now work without the account. The app also loads the account in the background (`verify_credentials`) and stores it, so compose then starts from the account's default visibility.
+
+- Updated dependencies [[`cbaf05a`](https://github.com/beatzball/caribou/commit/cbaf05ac7ec2f2ce06fa5e27bd8f1793ba48ae87), [`cbaf05a`](https://github.com/beatzball/caribou/commit/cbaf05ac7ec2f2ce06fa5e27bd8f1793ba48ae87)]:
+  - @beatzball/caribou-mastodon-client@0.2.1
+  - @beatzball/caribou-state@0.2.1
+
 ## 0.3.0
 
 ### Minor Changes
