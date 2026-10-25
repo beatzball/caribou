@@ -3,6 +3,7 @@ import { customElement, property } from 'lit/decorators.js'
 import './caribou-nav-rail.js'
 import './caribou-right-rail.js'
 import './caribou-toaster.js'
+import './caribou-compose-dialog.js'
 
 @customElement('caribou-app-shell')
 export class CaribouAppShell extends LitElement {
@@ -36,6 +37,7 @@ export class CaribouAppShell extends LitElement {
         <caribou-right-rail instance=${this.instance}></caribou-right-rail>
       </div>
       <caribou-toaster></caribou-toaster>
+      <caribou-compose-dialog></caribou-compose-dialog>
     `
   }
 }

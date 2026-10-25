@@ -148,4 +148,22 @@ describe('caribou-nav-rail', () => {
     expect(btn).toBeTruthy()
     expect(btn?.textContent).toContain('Sign out')
   })
+
+  it('shows New post only with a session, and the button opens compose', async () => {
+    const el = await mount()
+    expect(el.hasAttribute('can-compose')).toBe(false)
+    activeUserKey.value = toUserKey('alice', 'example.social')
+    expect(el.hasAttribute('can-compose')).toBe(true)
+    const seen: Event[] = []
+    const onCompose = (e: Event) => seen.push(e)
+    window.addEventListener('caribou:compose', onCompose)
+    try {
+      el.shadowRoot!.querySelector<HTMLButtonElement>('button.compose-btn')!.click()
+    } finally {
+      window.removeEventListener('caribou:compose', onCompose)
+    }
+    expect(seen).toHaveLength(1)
+    activeUserKey.value = null
+    expect(el.hasAttribute('can-compose')).toBe(false)
+  })
 })
