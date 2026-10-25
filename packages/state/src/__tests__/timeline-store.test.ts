@@ -24,6 +24,12 @@ function fakeClient(impl?: FetchImpl): FakeClient {
     fetchThread: unused as CaribouClient['fetchThread'],
     lookupAccount: unused as CaribouClient['lookupAccount'],
     fetchAccountStatuses: unused as CaribouClient['fetchAccountStatuses'],
+    favourite: unused as CaribouClient['favourite'],
+    unfavourite: unused as CaribouClient['unfavourite'],
+    reblog: unused as CaribouClient['reblog'],
+    unreblog: unused as CaribouClient['unreblog'],
+    bookmark: unused as CaribouClient['bookmark'],
+    unbookmark: unused as CaribouClient['unbookmark'],
   }
 }
 
