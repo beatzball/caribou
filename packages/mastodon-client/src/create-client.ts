@@ -26,6 +26,15 @@ export interface CaribouClient {
     accountId: string,
     params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
   ): Promise<mastodon.v1.Status[]>
+
+  // Status actions. Each resolves to the post itself as the server now has
+  // it, never the reblog wrapper `reblog` creates.
+  favourite(statusId: string): Promise<mastodon.v1.Status>
+  unfavourite(statusId: string): Promise<mastodon.v1.Status>
+  reblog(statusId: string): Promise<mastodon.v1.Status>
+  unreblog(statusId: string): Promise<mastodon.v1.Status>
+  bookmark(statusId: string): Promise<mastodon.v1.Status>
+  unbookmark(statusId: string): Promise<mastodon.v1.Status>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -38,8 +47,19 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
   }
 
   async function run<T>(key: string, fn: (c: mastodon.rest.Client) => Promise<T>): Promise<T> {
+    return guard(() => dedup.run(key, () => fn(rest())))
+  }
+
+  // Writes skip dedup. Two calls are two intents: a favourite and the
+  // unfavourite that follows it must both reach the server, and a shared
+  // key would hand the second caller the first one's result.
+  async function write<T>(fn: (c: mastodon.rest.Client) => Promise<T>): Promise<T> {
+    return guard(() => fn(rest()))
+  }
+
+  async function guard<T>(fn: () => Promise<T>): Promise<T> {
     try {
-      return await dedup.run(key, () => fn(rest()))
+      return await fn()
     } catch (err) {
       const norm = normalizeError(err)
       if (norm.code === 'unauthorized') session.onUnauthorized()
@@ -87,6 +107,29 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
           ...(limit ? { limit } : {}),
         }),
       )
+    },
+
+    // --- status actions ---
+    async favourite(statusId) {
+      return write((c) => c.v1.statuses.$select(statusId).favourite())
+    },
+    async unfavourite(statusId) {
+      return write((c) => c.v1.statuses.$select(statusId).unfavourite())
+    },
+    async reblog(statusId) {
+      // Mastodon answers a boost with the new wrapper status; the caller
+      // wants the post it wraps, with `reblogged` and the count updated.
+      const wrapper = await write((c) => c.v1.statuses.$select(statusId).reblog())
+      return wrapper.reblog ?? wrapper
+    },
+    async unreblog(statusId) {
+      return write((c) => c.v1.statuses.$select(statusId).unreblog())
+    },
+    async bookmark(statusId) {
+      return write((c) => c.v1.statuses.$select(statusId).bookmark())
+    },
+    async unbookmark(statusId) {
+      return write((c) => c.v1.statuses.$select(statusId).unbookmark())
     },
   }
 }

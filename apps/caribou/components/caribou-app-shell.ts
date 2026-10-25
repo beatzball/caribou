@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import './caribou-nav-rail.js'
 import './caribou-right-rail.js'
+import './caribou-toaster.js'
 
 @customElement('caribou-app-shell')
 export class CaribouAppShell extends LitElement {
@@ -34,6 +35,7 @@ export class CaribouAppShell extends LitElement {
         <main><slot></slot></main>
         <caribou-right-rail instance=${this.instance}></caribou-right-rail>
       </div>
+      <caribou-toaster></caribou-toaster>
     `
   }
 }

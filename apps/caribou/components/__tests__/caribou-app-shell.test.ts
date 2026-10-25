@@ -52,4 +52,10 @@ describe('caribou-app-shell', () => {
     expect(el.shadowRoot!.querySelectorAll('slot').length).toBe(1)
     expect(el.shadowRoot!.querySelector('slot')!.hasAttribute('name')).toBe(false)
   })
+
+  it('mounts one toaster outside the grid', async () => {
+    const el = await mount()
+    expect(el.shadowRoot!.querySelectorAll('caribou-toaster').length).toBe(1)
+    expect(el.shadowRoot!.querySelector('.shell-grid caribou-toaster')).toBeNull()
+  })
 })

@@ -5,6 +5,11 @@ import DOMPurify from 'dompurify'
 import type { mastodon } from 'masto'
 import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
+import { effect } from '@preact/signals-core'
+import {
+  activeClient, activeUser, statusCache,
+  toggleBookmark, toggleFavourite, toggleReblog,
+} from '@beatzball/caribou-state'
 import { ICONS } from './_icons.js'
 
 export type StatusCardVariant = 'timeline' | 'focused' | 'ancestor' | 'descendant'
@@ -34,6 +39,55 @@ function absoluteLabel(iso: string): string {
 // URL path (some non-Mastodon ActivityPub bridges expose ids with `/`,
 // `:`, etc.). Encode via `encodeURIComponent` so the URL stays
 // well-formed; the route resolver decodes it back.
+type Status = mastodon.v1.Status
+
+// The fields the action bar shows. The card re-reads them from the status
+// cache after mount, so an action taken anywhere shows here even when the
+// parent's `.status` is a copy the cache does not own (the thread store).
+interface ActionFields {
+  favourited: boolean
+  favouritesCount: number
+  reblogged: boolean
+  reblogsCount: number
+  bookmarked: boolean
+  repliesCount: number
+}
+
+function actionFields(s: Status): ActionFields {
+  return {
+    favourited: s.favourited === true,
+    favouritesCount: s.favouritesCount ?? 0,
+    reblogged: s.reblogged === true,
+    reblogsCount: s.reblogsCount ?? 0,
+    bookmarked: s.bookmarked === true,
+    repliesCount: s.repliesCount ?? 0,
+  }
+}
+
+function sameFields(a: ActionFields, b: ActionFields): boolean {
+  return a.favourited === b.favourited && a.favouritesCount === b.favouritesCount
+    && a.reblogged === b.reblogged && a.reblogsCount === b.reblogsCount
+    && a.bookmarked === b.bookmarked && a.repliesCount === b.repliesCount
+}
+
+// The page sets the instance its data came from on the shell, and the card
+// sits inside other elements' shadow roots, so walk up through each shadow
+// host until a shell is found.
+function findShell(from: Element): Element | null {
+  let el: Element | null = from
+  while (el) {
+    const shell = el.closest('caribou-app-shell')
+    if (shell) return shell
+    const root = el.getRootNode()
+    el = root instanceof ShadowRoot ? root.host : null
+  }
+  return null
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
   return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
 }
@@ -77,6 +131,27 @@ export class CaribouStatusCard extends LitElement {
       color: inherit; text-decoration: none;
     }
     .permalink:hover time { text-decoration: underline; }
+    .actions {
+      display: flex; gap: var(--space-4); margin-top: var(--space-3);
+      margin-inline-start: calc(-1 * var(--space-2));
+    }
+    .actions button {
+      display: inline-flex; align-items: center; gap: var(--space-1);
+      min-width: 2.5rem; min-height: 2rem; padding: 0 var(--space-2);
+      border: 0; border-radius: var(--radius-md); background: none;
+      color: var(--fg-muted); font: inherit; font-size: 0.875rem; cursor: pointer;
+    }
+    .actions button:hover:not([aria-disabled="true"]) { color: var(--fg-0); background: var(--bg-1); }
+    .actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .actions button[aria-disabled="true"] { cursor: default; opacity: 0.6; }
+    .actions button[aria-pressed="true"] { color: var(--accent); }
+    .actions button.boost[aria-pressed="true"] { color: var(--success); }
+    .actions button[aria-pressed="true"] svg path { fill: currentColor; }
+    .actions button.boost[aria-pressed="true"] svg path { fill: none; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
     .boost-attribution {
       display: flex; gap: var(--space-2); align-items: center;
       padding: 0 0 var(--space-2) var(--space-2);
@@ -86,6 +161,18 @@ export class CaribouStatusCard extends LitElement {
 
   @property({ attribute: false }) status: mastodon.v1.Status | null = null
   @property({ reflect: true }) variant: StatusCardVariant = 'timeline'
+  // The instance the status came from. Optional: without it the card reads
+  // the instance off the enclosing `<caribou-app-shell>` after mount.
+  @property() instance = ''
+
+  // Both start false, so the server and the first client render show the
+  // signed-out bar. `bindActions` sets them after mount.
+  @state() private canAct = false
+  @state() private ownPost = false
+  @state() private liveFields: ActionFields | null = null
+
+  private disposeActions: (() => void) | null = null
+  private shellObserver: MutationObserver | null = null
 
   // The server prints an absolute timestamp so its HTML does not depend on
   // the clock. The first client render repeats it; after that the card
@@ -107,11 +194,155 @@ export class CaribouStatusCard extends LitElement {
 
   protected override firstUpdated() {
     this.relativeTime = true
+    this.bindActions()
+  }
+
+  override connectedCallback() {
+    super.connectedCallback()
+    // Re-attach after a move in the DOM; the first bind is in firstUpdated.
+    if (this.hasUpdated && !this.disposeActions) this.bindActions()
   }
 
   override disconnectedCallback() {
     clearTimeout(this.retryTimer)
+    this.unbindActions()
     super.disconnectedCallback()
+  }
+
+  private unbindActions() {
+    this.disposeActions?.()
+    this.disposeActions = null
+    this.shellObserver?.disconnect()
+    this.shellObserver = null
+  }
+
+  private bindActions() {
+    // The shell's `instance` is an attribute, not a signal; watch it so a
+    // change re-decides whether this card can act.
+    if (!this.instance) {
+      const shell = findShell(this)
+      if (shell) {
+        this.shellObserver = new MutationObserver(() => this.rebindActions())
+        this.shellObserver.observe(shell, { attributes: true, attributeFilter: ['instance'] })
+      }
+    }
+    this.disposeActions = effect(() => {
+      const client = activeClient.value
+      const user = activeUser.value
+      const s = this.status
+      const post = s?.reblog ?? s
+      this.canAct = client !== null && this.sameInstance(user?.server)
+      this.ownPost = this.canAct && post !== null && post !== undefined && user?.account.id === post.account.id
+      const cache = statusCache.value
+      const cached = post ? cache.get(post.id) ?? (s?.reblog ? cache.get(s.id)?.reblog : undefined) : undefined
+      const next = cached ? actionFields(cached) : null
+      const prev = this.liveFields
+      if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
+    })
+  }
+
+  // Hosts are case-insensitive; `server` is a bare host, like `instance`.
+  // No known instance means the page did not say, as in caribou-profile.
+  private sameInstance(server: string | undefined): boolean {
+    const instance = this.instance || (findShell(this)?.getAttribute('instance') ?? '')
+    if (!instance) return true
+    return server !== undefined && server.toLowerCase() === instance.toLowerCase()
+  }
+
+  private rebindActions() {
+    this.unbindActions()
+    this.bindActions()
+  }
+
+  protected override willUpdate(changed: Map<PropertyKey, unknown>) {
+    // The effect only re-runs on a signal change. A new `.status` must not
+    // show the old post's cached fields for a render, and a new `instance`
+    // decides again whether the buttons act.
+    if ((changed.has('status') || changed.has('instance')) && this.disposeActions) {
+      this.rebindActions()
+    }
+  }
+
+  private onReply = () => {
+    if (!this.canAct || !this.status) return
+    window.dispatchEvent(new CustomEvent('caribou:compose', {
+      detail: { inReplyTo: this.status.reblog ?? this.status },
+    }))
+  }
+
+  private onFavourite = () => {
+    if (this.canAct && this.status) void toggleFavourite(this.status)
+  }
+
+  private onBoost = () => {
+    if (this.canAct && this.status && this.canBoost(this.status.reblog ?? this.status)) {
+      void toggleReblog(this.status)
+    }
+  }
+
+  private onBookmark = () => {
+    if (this.canAct && this.status) void toggleBookmark(this.status)
+  }
+
+  // Mastodon: nobody boosts a direct post, and only its author boosts a
+  // followers-only one.
+  private canBoost(post: Status): boolean {
+    if (post.visibility === 'direct') return false
+    if (post.visibility === 'private') return this.ownPost
+    return true
+  }
+
+  private renderActions(post: Status) {
+    const f = this.liveFields ?? actionFields(post)
+    const off = !this.canAct
+    const boostable = this.canBoost(post)
+    const boostHint = !boostable
+      ? 'This post cannot be boosted'
+      : off ? 'Sign in to boost' : ''
+    const count = (n: number) => n > 0 ? html`<span class="count">${n}</span>` : nothing
+    const title = (hint: string) => hint || nothing
+    // The label names the action; the description carries the count and
+    // the hint a mouse user reads in the title. Ids are scoped to this
+    // card's shadow root.
+    const describe = (...parts: string[]) => parts.filter(Boolean).join('. ')
+    const hint = (verb: string) => off ? `Sign in to ${verb}` : ''
+    const d = {
+      reply: describe(plural(f.repliesCount, 'reply', 'replies'), hint('reply')),
+      boost: describe(plural(f.reblogsCount, 'boost', 'boosts'), boostHint),
+      favourite: describe(plural(f.favouritesCount, 'favourite', 'favourites'), hint('favourite')),
+      bookmark: hint('bookmark'),
+    }
+    return html`
+      <div class="actions" role="group" aria-label="Post actions">
+        <button type="button" class="reply" aria-label="Reply"
+                aria-describedby="desc-reply"
+                aria-disabled=${off ? 'true' : 'false'}
+                title=${title(hint('reply'))}
+                @click=${this.onReply}>${ICONS.messageCircle}${count(f.repliesCount)}</button>
+        <button type="button" class="boost" aria-label=${f.reblogged ? 'Undo boost' : 'Boost'}
+                aria-describedby="desc-boost"
+                aria-pressed=${f.reblogged ? 'true' : 'false'}
+                aria-disabled=${off || !boostable ? 'true' : 'false'}
+                title=${title(boostHint)}
+                @click=${this.onBoost}>${ICONS.repeat2}${count(f.reblogsCount)}</button>
+        <button type="button" class="favourite" aria-label=${f.favourited ? 'Unfavourite' : 'Favourite'}
+                aria-describedby="desc-favourite"
+                aria-pressed=${f.favourited ? 'true' : 'false'}
+                aria-disabled=${off ? 'true' : 'false'}
+                title=${title(hint('favourite'))}
+                @click=${this.onFavourite}>${ICONS.star}${count(f.favouritesCount)}</button>
+        <button type="button" class="bookmark" aria-label=${f.bookmarked ? 'Remove bookmark' : 'Bookmark'}
+                aria-describedby=${d.bookmark ? 'desc-bookmark' : nothing}
+                aria-pressed=${f.bookmarked ? 'true' : 'false'}
+                aria-disabled=${off ? 'true' : 'false'}
+                title=${title(hint('bookmark'))}
+                @click=${this.onBookmark}>${ICONS.bookmark}</button>
+        <span class="sr-only" id="desc-reply">${d.reply}</span>
+        <span class="sr-only" id="desc-boost">${d.boost}</span>
+        <span class="sr-only" id="desc-favourite">${d.favourite}</span>
+        <span class="sr-only" id="desc-bookmark">${d.bookmark}</span>
+      </div>
+    `
   }
 
   // Avatars sometimes truncate mid-response under CDN load
@@ -198,6 +429,7 @@ export class CaribouStatusCard extends LitElement {
               </a>
             </header>
             <div class="status-content">${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
+            ${this.renderActions(display)}
           </div>
         </div>
       </article>
