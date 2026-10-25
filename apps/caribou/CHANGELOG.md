@@ -1,5 +1,34 @@
 # caribou-app
 
+## 0.3.0
+
+### Minor Changes
+
+- [#72](https://github.com/beatzball/caribou/pull/72) [`c5b45e3`](https://github.com/beatzball/caribou/commit/c5b45e36ad1d82e2f122d9847ca6bce0941329e3) Thanks [@beatzball](https://github.com/beatzball)! - Add the compose dialog. Open it with the New post button in the nav rail,
+  the `n` key, or a `caribou:compose` event (reply mode shows the post,
+  prefills the mentions and keeps its visibility). It starts from the
+  account's default visibility, counts characters the way Mastodon does
+  (grapheme clusters, 23 per link) against the instance limit, has a content warning,
+  visibility, and media with alt text, posts with Ctrl/Cmd+Enter, saves all alt
+  text before it posts, and keeps the draft on Esc or on an error. A draft
+  stays with the account it was started for.
+
+- [#71](https://github.com/beatzball/caribou/pull/71) [`a46114c`](https://github.com/beatzball/caribou/commit/a46114c9a3177ba516911a02bc68ad2b066682ab) Thanks [@beatzball](https://github.com/beatzball)! - Follow and unfollow from a profile. The profile header shows Follow, Following (Unfollow under the pointer or focus) or Requested, and "Follows you". The button appears after mount for a signed-in reader and never on the reader's own profile. On a profile from another instance the header first looks the account up on the reader's server; when that server does not know it, there is no button.
+
+- [#70](https://github.com/beatzball/caribou/pull/70) [`1541e71`](https://github.com/beatzball/caribou/commit/1541e716563a98ff0b7b685842aa9462e78d499a) Thanks [@beatzball](https://github.com/beatzball)! - Every post now has a reply, boost, favourite and bookmark button, with counts.
+  They work when you are signed in to the instance the post came from; otherwise
+  they are dimmed and say "Sign in to …". Boost is off for direct posts and for
+  other people's followers-only posts. Reply opens compose through the
+  `caribou:compose` event. A new toaster shows `caribou:toast` messages, for
+  example when an action fails and is rolled back. Info messages close after
+  5 seconds; errors stay until you close them.
+
+### Patch Changes
+
+- Updated dependencies [[`c5b45e3`](https://github.com/beatzball/caribou/commit/c5b45e36ad1d82e2f122d9847ca6bce0941329e3), [`c5b45e3`](https://github.com/beatzball/caribou/commit/c5b45e36ad1d82e2f122d9847ca6bce0941329e3), [`a46114c`](https://github.com/beatzball/caribou/commit/a46114c9a3177ba516911a02bc68ad2b066682ab), [`a46114c`](https://github.com/beatzball/caribou/commit/a46114c9a3177ba516911a02bc68ad2b066682ab), [`1541e71`](https://github.com/beatzball/caribou/commit/1541e716563a98ff0b7b685842aa9462e78d499a), [`1541e71`](https://github.com/beatzball/caribou/commit/1541e716563a98ff0b7b685842aa9462e78d499a)]:
+  - @beatzball/caribou-mastodon-client@0.2.0
+  - @beatzball/caribou-state@0.2.0
+
 ## 0.2.4
 
 ### Patch Changes
