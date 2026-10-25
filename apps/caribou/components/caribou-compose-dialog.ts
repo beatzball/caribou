@@ -3,7 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser, activeUserKey,
+  activeClient, activeUser, activeUserKey, userName,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
   type ComposeDraft, type DraftMedia, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
@@ -61,10 +61,10 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
-// The account's own default, when the stored session came from
-// verify_credentials and so carries `source`.
+// The account's own default, once `loadActiveAccount` has stored the
+// verify_credentials body (it carries `source`). Until then, public.
 function defaultVisibility(user: UserSession): mastodon.v1.StatusVisibility {
-  const privacy = (user.account as Partial<mastodon.v1.AccountCredentials>).source?.privacy
+  const privacy = (user.account as Partial<mastodon.v1.AccountCredentials> | null)?.source?.privacy
   return privacy && ['public', 'unlisted', 'private', 'direct'].includes(privacy) ? privacy : 'public'
 }
 
@@ -249,7 +249,7 @@ export class CaribouComposeDialog extends LitElement {
     const visibility = defaultVisibility(user)
     this.draft = loadDraft(client.userKey, this.draftKey) ?? (inReplyTo
       ? emptyDraft({
-        text: replyMentions(inReplyTo, user.account.acct),
+        text: replyMentions(inReplyTo, userName(user)),
         visibility: replyVisibility(inReplyTo.visibility, visibility),
         inReplyToId: inReplyTo.id,
         cw: inReplyTo.spoilerText !== '',

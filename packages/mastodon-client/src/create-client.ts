@@ -22,6 +22,7 @@ export interface CaribouClient {
     descendants: mastodon.v1.Status[]
   }>
   lookupAccount(handle: string): Promise<mastodon.v1.Account>
+  verifyCredentials(): Promise<mastodon.v1.AccountCredentials>
   fetchAccountStatuses(
     accountId: string,
     params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
@@ -148,6 +149,9 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchThread(statusId) {
       return run(`thread:${statusId}`, (c) => c.v1.statuses.$select(statusId).context.fetch())
+    },
+    async verifyCredentials() {
+      return run('verify-credentials', (c) => c.v1.accounts.verifyCredentials())
     },
     async lookupAccount(handle) {
       return run(`account-lookup:${handle}`, (c) =>
