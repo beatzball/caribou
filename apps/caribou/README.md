@@ -87,6 +87,37 @@ state — `aria-current`, a class — write a plain `<a href>` and bind
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.
 
+## Shared controls
+
+Use these instead of a hand-styled `<button>`. Each one wraps a real
+`<button>` in its shadow root, so keyboard use and accessibility come from
+the browser. Focus is delegated to that button, so the control is one tab
+stop. Import the module from the component that renders it; the import
+registers the element on the server and the client alike.
+
+| element | attributes | parts | custom properties |
+|---|---|---|---|
+| `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`) | — | — |
+| `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `count` | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size` |
+| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
+
+- `<caribou-icon>` is always hidden from assistive tech, and is sized by
+  `font-size` and coloured by `color`. An unknown name renders nothing.
+- `<caribou-icon-button>`: `label` becomes the button's `aria-label` and its
+  tooltip. `pressed` has three states: no attribute means it is not a
+  toggle (no `aria-pressed`); `pressed="false"` is a toggle that is off;
+  `pressed` or `pressed="true"` is on. Bind it as
+  `pressed=${on ? 'true' : 'false'}`. The hit area is 2.25rem, 44px on a
+  coarse pointer.
+- `<caribou-button>`: the label is the slotted text. `type="submit"` submits
+  its form (through `ElementInternals`) the way a native submit button
+  does: after every click listener has run, and not if one of them called
+  `preventDefault()`. `loading` sets
+  `aria-busy`, shows a spinner and swallows clicks, but keeps the button
+  focusable; `disabled` takes it out of use.
+- A disabled or loading control's host does not fire `click`, so a
+  `@click` on the host is safe.
+
 ## Tests
 
 - Component: happy-dom. Create the element, append it, `await el.updateComplete`,

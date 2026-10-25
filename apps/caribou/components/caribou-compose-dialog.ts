@@ -9,7 +9,8 @@ import {
 } from '@beatzball/caribou-state'
 import { MediaProcessingTimeout, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
-import { ICONS } from './_icons.js'
+import './caribou-button.js'
+import './caribou-icon-button.js'
 import { countChars, plainText, replyMentions, replyVisibility } from './_compose-text.js'
 
 export interface ComposeDetail { inReplyTo?: mastodon.v1.Status }
@@ -126,27 +127,17 @@ export class CaribouComposeDialog extends LitElement {
     .spacer { flex: 1; }
     .count { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
     .count[data-over] { color: var(--danger); }
-    button, .pick {
+    button {
       font: inherit; cursor: pointer; border-radius: var(--radius-md);
       padding: var(--space-2) var(--space-3); border: 1px solid var(--border);
       background: var(--bg-1); color: var(--fg-0);
     }
-    .toolbar button, .toolbar select, .pick { min-block-size: 2.25rem; }
-    .icon {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-inline-size: 2.25rem; padding: 0; font-size: 1.25em;
-    }
+    .toolbar select { min-block-size: 2.25rem; }
     @media (pointer: coarse) {
-      .toolbar button, .toolbar select, .pick { min-block-size: 44px; }
-      .icon { min-inline-size: 44px; }
+      .toolbar select { min-block-size: 44px; }
     }
-    button:focus-visible, .pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
-    button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-    /* An accent ring on an accent fill would not show. */
-    button[aria-pressed="true"]:focus-visible { outline-color: var(--fg-0); }
-    button.post { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .pick[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
@@ -167,6 +158,7 @@ export class CaribouComposeDialog extends LitElement {
   @query('dialog') private dialogEl?: HTMLDialogElement
   @query('textarea') private textareaEl?: HTMLTextAreaElement
   @query('select') private selectEl?: HTMLSelectElement
+  @query('input[type="file"]') private fileEl?: HTMLInputElement
 
   private draftKey: DraftSlot = 'new'
   private returnFocus: HTMLElement | null = null
@@ -511,16 +503,15 @@ export class CaribouComposeDialog extends LitElement {
                 </li>`)}
             </ul>` : nothing}
           <div class="toolbar">
-            <!-- The real file input stays inside the label, not behind a
-                 button, so Tab reaches it and Enter or Space opens the picker. -->
-            <label class="pick icon" title="Add images or video" aria-disabled=${full || busy ? 'true' : 'false'}>
-              ${ICONS.image}
-              <input class="visually-hidden" type="file" multiple accept=${this.limits.accept}
-                aria-label="Add images or video" ?disabled=${full || busy} @change=${this.onFiles}>
-            </label>
-            <button type="button" class="icon" data-action="toggle-cw" aria-label="Content warning" title="Content warning"
-              aria-pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
-              @click=${() => this.patchDraft({ cw: !d.cw })}>${ICONS.triangleAlert}</button>
+            <!-- The button is the one control Tab reaches; Enter or Space
+                 clicks it, and the click opens the hidden file input. -->
+            <caribou-icon-button icon="image" label="Add images or video" data-action="add-media"
+              ?disabled=${full || busy} @click=${() => this.fileEl?.click()}></caribou-icon-button>
+            <input type="file" hidden multiple accept=${this.limits.accept}
+              ?disabled=${full || busy} @change=${this.onFiles}>
+            <caribou-icon-button icon="triangleAlert" label="Content warning" data-action="toggle-cw"
+              pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
+              @click=${() => this.patchDraft({ cw: !d.cw })}></caribou-icon-button>
             <label class="visually-hidden" for="compose-visibility">Visibility</label>
             <select id="compose-visibility" name="visibility" ?disabled=${busy}
               @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as mastodon.v1.StatusVisibility })}>
@@ -531,9 +522,10 @@ export class CaribouComposeDialog extends LitElement {
               aria-label=${`${this.limits.maxChars - count} characters left`}>${this.limits.maxChars - count}</span>
             <!-- Announces only when the limit is crossed, not every keystroke. -->
             <span class="visually-hidden" aria-live="polite" data-limit-status>${over ? 'Over the character limit' : ''}</span>
-            <button type="submit" class="post" ?disabled=${!this.canPost}>
-              ${this.posting ? 'Posting…' : this.replyTo ? 'Reply' : 'Post'}
-            </button>
+            <caribou-button variant="primary" type="submit" class="post" data-action="post"
+              ?disabled=${!this.canPost && !busy} ?loading=${busy}>
+              ${busy ? 'Posting…' : this.replyTo ? 'Reply' : 'Post'}
+            </caribou-button>
           </div>
         </form>
       </dialog>

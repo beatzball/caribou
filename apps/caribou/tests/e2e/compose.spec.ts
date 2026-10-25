@@ -223,6 +223,81 @@ for (const key of ['Enter', 'Space']) {
   })
 }
 
+test('the media button uploads the file the picker returns', async ({ page }) => {
+  await seedSession(page)
+  await mockApi(page)
+  await page.route('**/api/v2/media', (route) => route.fulfill({
+    status: 200, contentType: 'application/json',
+    body: JSON.stringify({ id: 'm1', type: 'image', url: AVATAR, preview_url: AVATAR, description: null }),
+  }))
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  const chooser = page.waitForEvent('filechooser')
+  await dialog.getByRole('button', { name: 'Add images or video' }).click()
+  await (await chooser).setFiles({ name: 'a.png', mimeType: 'image/png', buffer: PIXEL })
+  await expect(dialog.getByRole('list', { name: 'Attachments' }).getByRole('textbox', { name: 'Alt text' })).toHaveCount(1)
+  await expect(dialog.getByRole('button', { name: 'Post', exact: true })).toBeEnabled()
+})
+
+test('Tab stops once on each toolbar control; Space on Post publishes', async ({ page }) => {
+  await seedSession(page)
+  const posted = await mockApi(page)
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await dialog.getByRole('textbox', { name: 'Post text' }).fill('by keyboard')
+  const order: string[] = []
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Tab')
+    order.push(await page.evaluate(() => {
+      let el = document.activeElement
+      while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
+      if (!el) return ''
+      const own = el.getAttribute('aria-label') ?? (el.id || null)
+      if (own) return own
+      // A slotted label lives on the host, outside the shadow root.
+      const root = el.getRootNode()
+      return (root instanceof ShadowRoot ? root.host : el).textContent!.trim()
+    }))
+  }
+  expect(order).toEqual(['Add images or video', 'Content warning', 'compose-visibility', 'Post'])
+  await page.keyboard.press('Space')
+  await expect(dialog).toBeHidden()
+  expect(posted).toHaveLength(1)
+  expect(posted[0]!.body).toEqual({ status: 'by keyboard', visibility: 'public' })
+})
+
+test('Post is busy, not disabled, while it sends', async ({ page }) => {
+  await seedSession(page)
+  await mockApi(page)
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  let calls = 0
+  await page.route('**/api/v1/statuses', async (route) => {
+    calls += 1
+    await held
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify(makeStatus('new', '<p>posted</p>')),
+    })
+  })
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await dialog.getByRole('textbox', { name: 'Post text' }).fill('slow')
+  await dialog.getByRole('button', { name: 'Post', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  const busy = dialog.getByRole('button', { name: 'Posting…' })
+  await expect(busy).toHaveAttribute('aria-busy', 'true')
+  await expect(busy).toBeFocused()
+  // A second press while busy sends nothing more.
+  await page.keyboard.press('Enter')
+  release()
+  await expect(dialog).toBeHidden()
+  expect(calls).toBe(1)
+})
+
 test('signed out: no New post button and n does nothing', async ({ page }) => {
   await page.route('**/a.png', (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
