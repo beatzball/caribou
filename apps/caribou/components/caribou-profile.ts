@@ -155,7 +155,8 @@ export class CaribouProfile extends LitElement {
     return server !== undefined && server.toLowerCase() === host.toLowerCase()
   }
 
-  protected override willUpdate(changed: PropertyValues<this>) {
+  // Untyped: `accountServer` is private, so it is not a key of `this`.
+  protected override willUpdate(changed: PropertyValues) {
     // The effect in bind() recomputes `canFetch` when a signal changes, but
     // `instance` and `accountServer` are Lit fields, not signals. A new host
     // must have the same effect without waiting for the next sign-in or
