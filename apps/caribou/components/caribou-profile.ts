@@ -214,7 +214,7 @@ export class CaribouProfile extends LitElement {
     // happy-dom's parser drops a child binding that has no parent element,
     // and the component tests would never see the link.
     return html`
-      <caribou-profile-header .account=${account}></caribou-profile-header>
+      <caribou-profile-header .account=${account} instance=${this.instance}></caribou-profile-header>
       <caribou-profile-tabs handle=${linkHandle} tab=${this.tab}></caribou-profile-tabs>
       <div class="posts">
         <ul>

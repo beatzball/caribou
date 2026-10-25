@@ -63,6 +63,12 @@ afterEach(() => {
 })
 
 describe('<caribou-profile>', () => {
+  it('hands the instance to the header, which needs it to follow across instances', async () => {
+    const el = await mount({ instance: 'example.social', initial: initialOf([STATUS]) })
+    const header = el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!
+    expect(header.instance).toBe('example.social')
+  })
+
   it('mounts header + tabs + status list when initial is provided', async () => {
     const el = await mount({ tab: 'media', initial: { ...initialOf([STATUS]), tab: 'media' } })
     const root = el.shadowRoot!
@@ -369,6 +375,9 @@ describe('<caribou-profile> — pagination', () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
     const list = vi.spyOn(client, 'fetchAccountStatuses')
+    // The header looks the account up on the reader's server for its follow
+    // button; keep that off the network.
+    vi.spyOn(client, 'lookupAccount').mockRejectedValue(new Error('not found'))
     const el = await mount({ instance: 'other.host', initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
@@ -413,7 +422,9 @@ describe('<caribou-profile> — pagination', () => {
 
   it('hands the link back when the instance changes to another host', async () => {
     const observers = stubIntersectionObserver()
-    signIn()
+    // The header looks the account up on the reader's server once the
+    // instance differs; keep that off the network.
+    vi.spyOn(signIn(), 'lookupAccount').mockRejectedValue(new Error('not found'))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     expect(watching(observers, next)).toBeDefined()
