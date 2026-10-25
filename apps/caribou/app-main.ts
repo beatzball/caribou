@@ -9,12 +9,15 @@
 import '@beatzball/litro/runtime/LitroOutlet.js'
 import '@beatzball/litro/runtime/LitroLink.js'
 
-import { loadFromStorage, removeActiveUser } from '@beatzball/caribou-state'
+import { activeUserKey, loadActiveAccount, loadFromStorage, removeActiveUser } from '@beatzball/caribou-state'
 import { routes } from './routes.generated.js'
 
 // Hydrate session from localStorage before any component reads it.
 if (typeof window !== 'undefined') {
   loadFromStorage()
+  // A session from sign-in has no account yet. Load it in the background,
+  // now and whenever the active user changes.
+  activeUserKey.subscribe(() => { void loadActiveAccount() })
   // Global 401 interceptor: if any mastodon-client call hits 401, the client
   // calls session.onUnauthorized(). Our session source (see `session-source.ts`
   // wiring in createTimelineStore's clientSource) calls removeActiveUser and

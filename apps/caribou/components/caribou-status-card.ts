@@ -7,7 +7,7 @@ import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, statusCache,
+  activeClient, activeUser, isOwnAccount, statusCache,
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { ICONS } from './_icons.js'
@@ -232,7 +232,7 @@ export class CaribouStatusCard extends LitElement {
       const s = this.status
       const post = s?.reblog ?? s
       this.canAct = client !== null && this.sameInstance(user?.server)
-      this.ownPost = this.canAct && post !== null && post !== undefined && user?.account.id === post.account.id
+      this.ownPost = this.canAct && post !== null && post !== undefined && user !== null && isOwnAccount(user, post.account)
       const cache = statusCache.value
       const cached = post ? cache.get(post.id) ?? (s?.reblog ? cache.get(s.id)?.reblog : undefined) : undefined
       const next = cached ? actionFields(cached) : null

@@ -6,7 +6,7 @@ import { effect, signal } from '@preact/signals-core'
 import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import type { Account, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUser, loadRelationship, relationshipCache, relationshipKey, toggleFollow,
+  activeClient, activeUser, isOwnAccount, loadRelationship, relationshipCache, relationshipKey, toggleFollow,
   type UserSession,
 } from '@beatzball/caribou-state'
 
@@ -144,7 +144,7 @@ export class CaribouProfileHeader extends LitElement {
     }
     // A newer account, instance or session arrived while this one was
     // looking up.
-    if (seq !== this.resolveSeq || !target || target.id === user.account.id) return
+    if (seq !== this.resolveSeq || !target || isOwnAccount(user, target)) return
     this.targetSignal.value = target
     void loadRelationship(target.id)
   }

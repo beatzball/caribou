@@ -42,10 +42,12 @@ async function gotoSettled(page: Page, path: string) {
   await expect(page.locator('litro-outlet > *')).toHaveCount(1)
 }
 
-async function seedSession(page: Page) {
+// `account: null` is what sign-in stores (`server/routes/signin/done.get.ts`);
+// the app loads the account afterwards.
+async function seedSession(page: Page, account: typeof ALICE | null = ALICE) {
   const session = {
     userKey: `alice@${INSTANCE}`, server: INSTANCE, token: 'TOKEN',
-    vapidKey: '', account: ALICE, createdAt: 1,
+    vapidKey: '', account, createdAt: 1,
   }
   await page.addInitScript((data) => {
     if (localStorage.getItem('caribou.__seeded__') === '1') return
@@ -197,5 +199,59 @@ test('signed out: no New post button and n does nothing', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'New post' })).toHaveCount(0)
   await page.keyboard.press('n')
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a fresh sign-in (no stored account yet): cards load, New post and Reply open', async ({ page }) => {
+  await seedSession(page, null)
+  await mockApi(page)
+  // The account never loads, so every reader must cope with null.
+  await page.route('**/api/v1/accounts/verify_credentials', (route) =>
+    route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"down"}' }))
+  const errors = collectErrors(page)
+  await gotoSettled(page, '/home')
+  await expect(page.getByText('first post')).toBeVisible()
+
+  await page.getByRole('button', { name: 'New post' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('Visibility')).toHaveValue('public')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+
+  // Alice's own post: the reply does not mention her.
+  await page.getByRole('button', { name: 'Reply' }).first().click()
+  const reply = page.getByRole('dialog', { name: 'Reply' })
+  await expect(reply).toBeVisible()
+  await expect(reply.getByRole('textbox', { name: 'Post text' })).toHaveValue('')
+  // The 500 above is the only expected error.
+  expect(errors.filter((e) => !e.includes('500'))).toEqual([])
+})
+
+test('a fresh sign-in loads the account once, and compose then uses its default visibility', async ({ page }) => {
+  await seedSession(page, null)
+  await mockApi(page)
+  let calls = 0
+  await page.route('**/api/v1/accounts/verify_credentials', (route) => {
+    calls += 1
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ ...ALICE, source: { privacy: 'unlisted', note: '', fields: [] } }),
+    })
+  })
+  const errors = collectErrors(page)
+  await gotoSettled(page, '/home')
+  await expect.poll(() => page.evaluate(() =>
+    (JSON.parse(localStorage.getItem('caribou.users') ?? '[]') as [string, { account: { id: string } | null }][])[0]?.[1].account?.id,
+  )).toBe('a1')
+  await page.getByRole('button', { name: 'New post' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog.getByLabel('Visibility')).toHaveValue('unlisted')
+
+  // A reload finds the stored account and does not ask again.
+  await page.reload()
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  await expect(page.getByText('first post')).toBeVisible()
+  expect(calls).toBe(1)
   expect(errors).toEqual([])
 })

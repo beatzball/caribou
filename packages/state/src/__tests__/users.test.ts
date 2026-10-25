@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, activeUser,
-  addUserSession, removeActiveUser,
+  addUserSession, removeActiveUser, isOwnAccount, userName, loadActiveAccount,
   loadFromStorage, saveToStorage,
   type UserSession,
 } from '../users.js'
@@ -134,5 +134,74 @@ describe('activeClient', () => {
       globalThis.fetch = originalFetch
       window.removeEventListener('caribou:unauthorized', spy)
     }
+  })
+})
+
+describe('a session without its account (as sign-in stores it)', () => {
+  const bare = { userKey: key, account: null }
+
+  it('userName falls back to the handle in the user key', () => {
+    expect(userName(bare)).toBe('beatzball')
+    expect(userName(sampleSession())).toBe('beatzball')
+  })
+
+  it('isOwnAccount compares ids with the account, handles without it', () => {
+    expect(isOwnAccount(sampleSession(), { id: 'a1', acct: 'other' })).toBe(true)
+    expect(isOwnAccount(sampleSession(), { id: 'a2', acct: 'beatzball' })).toBe(false)
+    expect(isOwnAccount(bare, { id: 'x', acct: 'beatzball' })).toBe(true)
+    expect(isOwnAccount(bare, { id: 'x', acct: 'beatzball@elsewhere.social' })).toBe(false)
+  })
+})
+
+describe('loadActiveAccount', () => {
+  function bareSession(): UserSession {
+    return { ...sampleSession(), account: null }
+  }
+
+  it('stores the verify_credentials account for a session without one', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ id: 'a1', username: 'beatzball', acct: 'beatzball' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    addUserSession(bareSession())
+    await loadActiveAccount()
+    expect((fetchSpy.mock.calls[0]?.[0] as Request).url).toContain('/api/v1/accounts/verify_credentials')
+    expect(activeUser.value?.account?.id).toBe('a1')
+    const stored = JSON.parse(localStorage.getItem('caribou.users')!) as [string, UserSession][]
+    expect(stored[0]![1].account?.id).toBe('a1')
+    fetchSpy.mockRestore()
+  })
+
+  it('does nothing when the account is already stored', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    addUserSession(sampleSession())
+    await loadActiveAccount()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
+
+  it('leaves the account null when the request fails', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 500 }))
+    addUserSession(bareSession())
+    await loadActiveAccount()
+    expect(activeUser.value?.account).toBeNull()
+    fetchSpy.mockRestore()
+  })
+
+  it('drops a late answer when the session was replaced while it loaded', async () => {
+    let answer!: (r: Response) => void
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise((r) => { answer = r }))
+    addUserSession(bareSession())
+    const loading = loadActiveAccount()
+    removeActiveUser()
+    addUserSession({ ...bareSession(), token: 'TOKEN-2' })
+    answer(new Response(
+      JSON.stringify({ id: 'old', username: 'beatzball', acct: 'beatzball' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    await loading
+    expect(activeUser.value?.token).toBe('TOKEN-2')
+    expect(activeUser.value?.account).toBeNull()
+    fetchSpy.mockRestore()
   })
 })

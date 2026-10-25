@@ -11,7 +11,10 @@ export interface UserSession {
   server: string
   token: string
   vapidKey: string
-  account: mastodon.v1.Account
+  // Null until it is loaded: sign-in stores the session before the app has
+  // the account (`server/routes/signin/done.get.ts`). `loadActiveAccount`
+  // fills it in. Code that needs the user's handle uses `userName()`.
+  account: mastodon.v1.Account | null
   createdAt: number
 }
 
@@ -44,6 +47,46 @@ export function addUserSession(session: UserSession): void {
   next.set(session.userKey, session)
   users.value = next
   activeUserKey.value = session.userKey
+  saveToStorage()
+}
+
+/** The user's own handle on their server, with or without the account. */
+export function userName(user: Pick<UserSession, 'userKey' | 'account'>): string {
+  return user.account?.acct ?? user.userKey.slice(0, user.userKey.lastIndexOf('@'))
+}
+
+/**
+ * Whether `account`, as the user's own server returns it, is the user. Without
+ * the stored account it compares handles: a local account's `acct` is its
+ * bare username.
+ */
+export function isOwnAccount(
+  user: Pick<UserSession, 'userKey' | 'account'>, account: Pick<mastodon.v1.Account, 'id' | 'acct'>,
+): boolean {
+  return user.account ? user.account.id === account.id : account.acct === userName(user)
+}
+
+/**
+ * Loads the active user's account when the session has none yet, and stores
+ * it. A failure leaves `account` null; every reader copes with that.
+ */
+export async function loadActiveAccount(): Promise<void> {
+  const user = activeUser.value
+  const client = activeClient.value
+  if (!user || !client || user.account) return
+  let account: mastodon.v1.Account
+  try {
+    account = await client.verifyCredentials()
+  } catch {
+    return
+  }
+  // Store it only on the session that asked: after a sign-out and a new
+  // sign-in under the same key, the entry is a new session with a new token.
+  const current = users.value.get(user.userKey)
+  if (!current || current.account || current.token !== user.token) return
+  const next = new Map(users.value)
+  next.set(user.userKey, { ...current, account })
+  users.value = next
   saveToStorage()
 }
 
