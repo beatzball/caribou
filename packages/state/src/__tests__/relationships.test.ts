@@ -89,6 +89,26 @@ describe('loadRelationship', () => {
     write.resolve(rel('7', { following: true }))
     await toggling
   })
+
+  // The read left before the click and lands after the write finished: what
+  // it carries is older than the write's answer.
+  it('does not overwrite a write that finished while it was loading', async () => {
+    const read = deferred<mastodon.v1.Relationship[]>()
+    const client = fakeClient({ fetchRelationships: vi.fn(() => read.promise) })
+    const loading = loadRelationship('7', { clientSource: () => client })
+    await toggleFollow(BOB, { clientSource: () => client })
+    expect(cached('7')?.following).toBe(true)
+    read.resolve([rel('7')])
+    expect((await loading)?.following).toBe(true)
+    expect(cached('7')?.following).toBe(true)
+  })
+
+  it('takes a read that started after the last write', async () => {
+    const client = fakeClient({ fetchRelationships: vi.fn(async () => [rel('7', { followedBy: true })]) })
+    await toggleFollow(BOB, { clientSource: () => client })
+    await loadRelationship('7', { clientSource: () => client })
+    expect(cached('7')).toMatchObject({ following: false, followedBy: true })
+  })
 })
 
 describe('relationshipFor', () => {

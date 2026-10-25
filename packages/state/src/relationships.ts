@@ -29,6 +29,10 @@ const defaultSource = () => activeClient.value
 // One write per account at a time. A second click while the first is on its
 // way is dropped: the button already shows the state the first one asked for.
 const writing = new Set<string>()
+// Bumped when a write starts. A read compares it before and after its fetch:
+// if a write started in between — still on its way or already done — the
+// read carries older state than the write and must not replace it.
+const revisions = new Map<string, number>()
 
 function put(key: string, rel: mastodon.v1.Relationship | undefined): void {
   const next = new Map(relationshipCache.value)
@@ -48,12 +52,11 @@ export async function loadRelationship(
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return null
   const key = relationshipKey(client.userKey, accountId)
+  const revision = revisions.get(key) ?? 0
   try {
     const [rel] = await client.fetchRelationships([accountId])
     if (!rel) return null
-    // A write that started after this read owns the state now; the read
-    // would put back what the reader saw before the click.
-    if (!writing.has(key)) put(key, rel)
+    if ((revisions.get(key) ?? 0) === revision) put(key, rel)
     return relationshipCache.value.get(key) ?? rel
   } catch {
     return null
@@ -78,6 +81,7 @@ export async function toggleFollow(
     // A locked account takes a request, not a follow.
     : { ...base, following: !account.locked, requested: !!account.locked })
   writing.add(key)
+  revisions.set(key, (revisions.get(key) ?? 0) + 1)
   try {
     const rel = undo ? await client.unfollow(account.id) : await client.follow(account.id)
     put(key, rel)
