@@ -35,6 +35,11 @@ export interface CaribouClient {
   unreblog(statusId: string): Promise<mastodon.v1.Status>
   bookmark(statusId: string): Promise<mastodon.v1.Status>
   unbookmark(statusId: string): Promise<mastodon.v1.Status>
+
+  // Relationships (follow / unfollow).
+  fetchRelationships(accountIds: readonly string[]): Promise<mastodon.v1.Relationship[]>
+  follow(accountId: string): Promise<mastodon.v1.Relationship>
+  unfollow(accountId: string): Promise<mastodon.v1.Relationship>
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -130,6 +135,19 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async unbookmark(statusId) {
       return write((c) => c.v1.statuses.$select(statusId).unbookmark())
+    },
+
+    // --- relationships ---
+    async fetchRelationships(accountIds) {
+      return run(`relationships:${accountIds.join(',')}`, (c) =>
+        c.v1.accounts.relationships.fetch({ id: [...accountIds] }),
+      )
+    },
+    async follow(accountId) {
+      return write((c) => c.v1.accounts.$select(accountId).follow())
+    },
+    async unfollow(accountId) {
+      return write((c) => c.v1.accounts.$select(accountId).unfollow())
     },
   }
 }
