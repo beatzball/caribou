@@ -31,6 +31,14 @@ describe('caribou-icon', () => {
     expect(warn).toHaveBeenCalledWith('<caribou-icon>: no icon named "nope".')
   })
 
+  it('warns once per bad name, not once per render', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const el = await mount('nope')
+    el.requestUpdate()
+    await el.updateComplete
+    expect(warn).toHaveBeenCalledOnce()
+  })
+
   it('does not treat an inherited Object key as an icon', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const el = await mount('toString')

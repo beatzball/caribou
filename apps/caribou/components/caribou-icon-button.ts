@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing, type PropertyDeclaration } from 'lit'
+import { LitElement, html, css, nothing, type PropertyDeclaration, type PropertyValues } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { boxReset } from './_shared-styles.js'
 import { devWarn } from './_dev-warn.js'
@@ -68,8 +68,13 @@ export class CaribouIconButton extends LitElement {
     })
   }
 
+  protected override willUpdate(changed: PropertyValues<this>) {
+    if (changed.has('label') && !this.label) {
+      devWarn(`<caribou-icon-button icon="${this.icon}">: a label is required.`)
+    }
+  }
+
   override render() {
-    if (!this.label) devWarn(`<caribou-icon-button icon="${this.icon}">: a label is required.`)
     return html`<button type="button" part="button"
       aria-label=${this.label || nothing} title=${this.label || nothing}
       aria-pressed=${this.pressed === undefined ? nothing : String(this.pressed)}

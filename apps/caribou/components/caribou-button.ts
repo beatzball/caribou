@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from 'lit'
-import { customElement, property } from 'lit/decorators.js'
+import { customElement, property, query } from 'lit/decorators.js'
 import { boxReset } from './_shared-styles.js'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger'
@@ -47,6 +47,7 @@ export class CaribouButton extends LitElement {
       --_fg: var(--caribou-button-fg, var(--bg-0));
       border-color: transparent;
     }
+    button:hover:not(:disabled, [aria-disabled="true"]) { background: color-mix(in srgb, var(--_bg) 85%, var(--fg-0)); }
     button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     /* An accent ring on an accent fill would not show. */
     button[data-variant="primary"]:focus-visible { outline-color: var(--fg-0); }
@@ -65,11 +66,18 @@ export class CaribouButton extends LitElement {
 
   @property({ reflect: true }) variant: ButtonVariant = 'secondary'
   @property() type: 'button' | 'submit' = 'button'
-  @property({ type: Boolean }) disabled = false
+  // Reflected: the browser folds the host's own `disabled` attribute into
+  // formDisabledCallback, so the property must move the attribute or
+  // `el.disabled = false` could never undo it.
+  @property({ type: Boolean, reflect: true }) disabled = false
   @property({ type: Boolean }) loading = false
 
-  // Set by a disabled <fieldset> around the button.
+  // From formDisabledCallback: a disabled <fieldset> around the button, or
+  // the host's own `disabled`. The server never has it, so render() must
+  // not read it; updated() puts it on the button.
   private formDisabled = false
+
+  @query('button') private buttonEl?: HTMLButtonElement
   // The server's DOM shim may have no attachInternals.
   private internals: ElementInternals | null =
     typeof this.attachInternals === 'function' ? this.attachInternals() : null
@@ -81,29 +89,47 @@ export class CaribouButton extends LitElement {
     this.addEventListener('click', this.onClick)
   }
 
+  private get blocked(): boolean {
+    return this.disabled || this.formDisabled || this.loading
+  }
+
   formDisabledCallback(disabled: boolean) {
     this.formDisabled = disabled
     this.requestUpdate()
   }
 
+  // A null form from the internals is an answer (say `form="missing"`),
+  // not a reason to fall back on the nearest form.
   get form(): HTMLFormElement | null {
-    return this.internals?.form ?? this.closest('form')
+    return this.internals ? this.internals.form : this.closest('form')
   }
 
   private onClick = (e: MouseEvent) => {
-    if (this.disabled || this.formDisabled || this.loading) {
+    if (this.blocked) {
       e.preventDefault()
       e.stopImmediatePropagation()
       return
     }
-    if (this.type === 'submit') this.form?.requestSubmit()
+    if (this.type !== 'submit') return
+    // Like a native submit button: submit once the click has reached every
+    // listener, and only if none of them cancelled it. A microtask is not
+    // late enough; for a real click it runs between listeners.
+    setTimeout(() => {
+      if (!e.defaultPrevented && !this.blocked && this.isConnected) this.form?.requestSubmit()
+    })
+  }
+
+  protected override updated() {
+    // After hydration too: Lit adopts the server's attributes without
+    // writing its own values, so this is what disables a server-rendered
+    // button inside a disabled fieldset.
+    if (this.buttonEl) this.buttonEl.disabled = this.disabled || this.formDisabled
   }
 
   override render() {
-    const blocked = this.disabled || this.formDisabled
     return html`<button type="button" part="button" data-variant=${this.variant}
-      ?disabled=${blocked}
-      aria-disabled=${this.loading && !blocked ? 'true' : nothing}
+      ?disabled=${this.disabled}
+      aria-disabled=${this.loading && !this.disabled ? 'true' : nothing}
       aria-busy=${this.loading ? 'true' : nothing}>${this.loading
         ? html`<span class="spinner" part="spinner" aria-hidden="true"></span>` : nothing}<slot></slot></button>`
   }

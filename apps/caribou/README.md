@@ -110,7 +110,9 @@ registers the element on the server and the client alike.
   `pressed=${on ? 'true' : 'false'}`. The hit area is 2.25rem, 44px on a
   coarse pointer.
 - `<caribou-button>`: the label is the slotted text. `type="submit"` submits
-  the enclosing form (through `ElementInternals`). `loading` sets
+  its form (through `ElementInternals`) the way a native submit button
+  does: after every click listener has run, and not if one of them called
+  `preventDefault()`. `loading` sets
   `aria-busy`, shows a spinner and swallows clicks, but keeps the button
   focusable; `disabled` takes it out of use.
 - A disabled or loading control's host does not fire `click`, so a

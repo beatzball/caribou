@@ -1,4 +1,4 @@
-import { LitElement, css, nothing } from 'lit'
+import { LitElement, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { ICONS } from './_icons.js'
 import { devWarn } from './_dev-warn.js'
@@ -29,10 +29,14 @@ export class CaribouIcon extends LitElement {
     this.setAttribute('aria-hidden', 'true')
   }
 
+  protected override willUpdate(changed: PropertyValues<this>) {
+    if (changed.has('name') && this.name && !isIconName(this.name)) {
+      devWarn(`<caribou-icon>: no icon named "${this.name}".`)
+    }
+  }
+
   override render() {
-    if (isIconName(this.name)) return ICONS[this.name]
-    if (this.name) devWarn(`<caribou-icon>: no icon named "${this.name}".`)
-    return nothing
+    return isIconName(this.name) ? ICONS[this.name] : nothing
   }
 }
 

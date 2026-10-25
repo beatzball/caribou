@@ -37,6 +37,9 @@ describe('caribou-icon-button', () => {
     const el = await mount({ icon: 'star' })
     expect(inner(el).hasAttribute('aria-label')).toBe(false)
     expect(warn).toHaveBeenCalledWith('<caribou-icon-button icon="star">: a label is required.')
+    el.count = '2'
+    await el.updateComplete
+    expect(warn).toHaveBeenCalledOnce()
   })
 
   it('has no aria-pressed unless it is a toggle', async () => {
