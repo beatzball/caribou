@@ -151,8 +151,8 @@ jobs:
 
   # Coolify builds whatever main points at, not github.sha. So deploy only
   # when this run's commit is still main's head; a newer push has its own run,
-  # which deploys once that commit is tested. The shared group keeps two
-  # deploys (and their probes) from overlapping.
+  # which deploys once that commit is tested. The group keeps two deploys
+  # from overlapping.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [checks, e2e, smoke-image]
@@ -165,7 +165,11 @@ jobs:
       - name: Check main has not moved on
         id: head
         run: |
-          head=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/main | cut -f1)
+          # An unknown head is not "moved on": fail loudly instead of skipping green.
+          if ! head=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/main | cut -f1) || [[ -z "$head" ]]; then
+            echo "::error::Could not read the head of main from GitHub; not deploying."
+            exit 1
+          fi
           if [[ "$head" == "${{ github.sha }}" ]]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
           else
@@ -184,7 +188,6 @@ jobs:
     needs: [deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency: { group: deploy-prod, cancel-in-progress: false }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
