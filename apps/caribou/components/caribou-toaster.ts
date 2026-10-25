@@ -50,10 +50,6 @@ export class CaribouToaster extends LitElement {
   `
 
   @state() private toasts: Toast[] = []
-  // False on the server and for the first client render, so the server
-  // HTML (nothing) equals what hydration expects. The live regions appear
-  // right after mount, before any toast, so screen readers watch them.
-  @state() private ready = false
 
   private nextId = 1
   private timers = new Map<number, ReturnType<typeof setTimeout>>()
@@ -69,10 +65,6 @@ export class CaribouToaster extends LitElement {
     this.timers.clear()
     this.toasts = []
     super.disconnectedCallback()
-  }
-
-  protected override firstUpdated() {
-    this.ready = true
   }
 
   private onToast = (e: Event) => {
@@ -101,20 +93,23 @@ export class CaribouToaster extends LitElement {
 
   private renderList(kind: ToastKind) {
     return repeat(this.toasts.filter((t) => t.kind === kind), (t) => t.id, (t) => html`
-      <div class="toast" data-kind=${t.kind}>
+      <div class="toast" data-kind=${t.kind} role=${kind === 'error' ? 'alert' : nothing}>
         <span class="message">${t.message}</span>
         <button type="button" aria-label="Dismiss" @click=${() => this.dismiss(t.id)}>${ICONS.x}</button>
       </div>
     `)
   }
 
+  // The server renders the empty stack too, so hydration finds the same
+  // markup and the polite region is in the page before its first toast;
+  // a screen reader only announces changes to a region it already knows.
+  // Errors interrupt: each one is its own `alert`, added when it happens.
+  // An empty `role="alert"` box would sit in every page and match any
+  // lookup for the page's own alert.
   override render() {
-    if (!this.ready) return nothing
-    // Two regions: errors interrupt (`alert`), everything else waits its
-    // turn (`status`).
     return html`
       <div class="stack">
-        <div class="stack" role="alert">${this.renderList('error')}</div>
+        <div class="stack errors">${this.renderList('error')}</div>
         <div class="stack" role="status" aria-live="polite">${this.renderList('info')}</div>
       </div>
     `

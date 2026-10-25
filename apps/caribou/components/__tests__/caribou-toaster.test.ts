@@ -13,8 +13,9 @@ function toast(detail: Partial<ToastDetail> | null) {
   window.dispatchEvent(new CustomEvent('caribou:toast', { detail }))
 }
 
-const messages = (el: CaribouToaster, role: string) =>
-  [...el.shadowRoot!.querySelectorAll(`[role="${role}"] .message`)].map((m) => m.textContent)
+const messages = (el: CaribouToaster, role: 'alert' | 'status') =>
+  [...el.shadowRoot!.querySelectorAll(role === 'alert' ? '[role="alert"] .message' : '[role="status"] .message')]
+    .map((m) => m.textContent)
 
 beforeEach(() => {
   document.body.replaceChildren()
@@ -23,9 +24,9 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('<caribou-toaster>', () => {
-  it('renders empty live regions after mount', async () => {
+  it('renders an empty polite region and no empty alert', async () => {
     const el = await mount()
-    expect(el.shadowRoot!.querySelector('[role="alert"]')).toBeTruthy()
+    expect(el.shadowRoot!.querySelector('[role="alert"]')).toBeNull()
     expect(el.shadowRoot!.querySelector('[role="status"]')?.getAttribute('aria-live')).toBe('polite')
     expect(el.shadowRoot!.querySelectorAll('.toast')).toHaveLength(0)
   })
@@ -36,6 +37,7 @@ describe('<caribou-toaster>', () => {
     toast({ kind: 'info', message: 'Saved.' })
     await el.updateComplete
     expect(messages(el, 'alert')).toEqual(['Could not favourite this post.'])
+    expect(el.shadowRoot!.querySelectorAll('.toast[role="alert"]')).toHaveLength(1)
     expect(messages(el, 'status')).toEqual(['Saved.'])
   })
 

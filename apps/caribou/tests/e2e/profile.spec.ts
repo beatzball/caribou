@@ -77,8 +77,8 @@ test.describe('/@me — own profile', () => {
       lookups.push(new URL(route.request().url()).searchParams.get('acct') ?? '')
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ACCOUNT) })
     })
-    // The "Older posts" link is in view on a short list, so the next page is
-    // requested at once. It must be empty, or the list would grow forever.
+    // The next page is requested once the "Older posts" link is in view.
+    // It must be empty, or the list would grow forever.
     await page.route('**/api/v1/accounts/a1/statuses*', (route) => {
       const u = new URL(route.request().url())
       const body = u.searchParams.get('max_id') ? [] : [makeStatus('s2', '<p>newest post</p>'), makeStatus('s1', '<p>older post</p>')]
@@ -90,11 +90,15 @@ test.describe('/@me — own profile', () => {
     await expect(page.getByText('Alice Example').first()).toBeVisible()
     await expect(page.getByText('bio of alice')).toBeVisible()
     await expect(page.getByText('newest post')).toBeVisible()
-    await expect(page.getByText('older post')).toBeVisible()
+    // Exact: the "Older posts" link also contains the words.
+    await expect(page.getByText('older post', { exact: true })).toBeVisible()
     await expect(page.locator('caribou-profile caribou-status-card')).toHaveCount(2)
     await expect(page.locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('posts')
     await expect(page.getByText(/Your profile shows posts/)).toHaveCount(0)
-    // The last page came back empty, so there is nothing more to link to.
+    // Two cards and their action bars fill the viewport; scroll the link
+    // into view to load the next page. It comes back empty, so there is
+    // nothing more to link to.
+    await page.mouse.wheel(0, 2000)
     await expect(page.locator('caribou-profile a[rel="next"]')).toHaveCount(0)
     expect(lookups.every((acct) => acct === 'alice@example.social')).toBe(true)
     expect(errors).toEqual([])
