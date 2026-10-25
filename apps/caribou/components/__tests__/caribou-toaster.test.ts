@@ -52,16 +52,26 @@ describe('<caribou-toaster>', () => {
     expect(messages(el, 'alert')).toEqual([])
   })
 
-  it('auto-dismisses after the timeout', async () => {
+  it('auto-dismisses info after the timeout', async () => {
     const el = await mount()
-    toast({ kind: 'error', message: 'a' })
+    toast({ kind: 'info', message: 'a' })
     await el.updateComplete
     vi.advanceTimersByTime(TOAST_TIMEOUT_MS - 1)
     await el.updateComplete
-    expect(messages(el, 'alert')).toEqual(['a'])
+    expect(messages(el, 'status')).toEqual(['a'])
     vi.advanceTimersByTime(1)
     await el.updateComplete
-    expect(messages(el, 'alert')).toEqual([])
+    expect(messages(el, 'status')).toEqual([])
+  })
+
+  it('keeps an error until it is dismissed', async () => {
+    const el = await mount()
+    toast({ kind: 'error', message: 'a' })
+    await el.updateComplete
+    expect(vi.getTimerCount()).toBe(0)
+    vi.advanceTimersByTime(TOAST_TIMEOUT_MS * 10)
+    await el.updateComplete
+    expect(messages(el, 'alert')).toEqual(['a'])
   })
 
   it('the dismiss button removes only its toast', async () => {
@@ -80,6 +90,21 @@ describe('<caribou-toaster>', () => {
     for (const m of ['1', '2', '3', '4', '5']) toast({ kind: 'info', message: m })
     await el.updateComplete
     expect(messages(el, 'status')).toEqual(['2', '3', '4', '5'])
+  })
+
+  it('drops the oldest info before any error', async () => {
+    const el = await mount()
+    toast({ kind: 'error', message: 'e1' })
+    toast({ kind: 'info', message: 'i1' })
+    toast({ kind: 'error', message: 'e2' })
+    toast({ kind: 'error', message: 'e3' })
+    toast({ kind: 'error', message: 'e4' })
+    await el.updateComplete
+    expect(messages(el, 'alert')).toEqual(['e1', 'e2', 'e3', 'e4'])
+    expect(messages(el, 'status')).toEqual([])
+    toast({ kind: 'error', message: 'e5' })
+    await el.updateComplete
+    expect(messages(el, 'alert')).toEqual(['e2', 'e3', 'e4', 'e5'])
   })
 
   it('stops listening and clears its timers when removed', async () => {

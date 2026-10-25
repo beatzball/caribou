@@ -14,8 +14,10 @@ interface Toast extends ToastDetail {
   id: number
 }
 
+// Info toasts close on their own. Errors stay until dismissed: a reader
+// may need longer than any timeout to notice and read one (WCAG 2.2.1).
 export const TOAST_TIMEOUT_MS = 5_000
-// Older toasts drop off the top once the stack is this tall.
+// Past this many, the oldest toast drops off, info before errors.
 const MAX_TOASTS = 4
 
 // Shows `caribou:toast` events from anywhere in the app:
@@ -76,9 +78,15 @@ export class CaribouToaster extends LitElement {
       message: detail.message,
     }
     const next = [...this.toasts, toast]
-    for (const old of next.splice(0, Math.max(0, next.length - MAX_TOASTS))) this.clearTimer(old.id)
+    while (next.length > MAX_TOASTS) {
+      const info = next.findIndex((t) => t.kind === 'info')
+      const [old] = next.splice(info === -1 ? 0 : info, 1)
+      this.clearTimer(old!.id)
+    }
     this.toasts = next
-    this.timers.set(toast.id, setTimeout(() => this.dismiss(toast.id), TOAST_TIMEOUT_MS))
+    if (toast.kind === 'info') {
+      this.timers.set(toast.id, setTimeout(() => this.dismiss(toast.id), TOAST_TIMEOUT_MS))
+    }
   }
 
   private clearTimer(id: number) {
