@@ -40,6 +40,30 @@ export interface CaribouClient {
   fetchRelationships(accountIds: readonly string[]): Promise<mastodon.v1.Relationship[]>
   follow(accountId: string): Promise<mastodon.v1.Relationship>
   unfollow(accountId: string): Promise<mastodon.v1.Relationship>
+
+  // Compose. Writes bypass dedup: two posts with the same text are two posts.
+  createStatus(params: CreateStatusInput, opts?: { idempotencyKey?: string }): Promise<mastodon.v1.Status>
+  /** Resolves once the server has processed the file and it has a `url`. */
+  uploadMedia(file: Blob, opts?: UploadMediaOpts): Promise<mastodon.v1.MediaAttachment>
+  fetchMedia(id: string): Promise<mastodon.v1.MediaAttachment>
+  updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
+  fetchInstance(): Promise<mastodon.v2.Instance>
+}
+
+export interface UploadMediaOpts {
+  description?: string
+  pollIntervalMs?: number
+  timeoutMs?: number
+}
+
+export interface CreateStatusInput {
+  status: string
+  spoilerText?: string
+  visibility: mastodon.v1.StatusVisibility
+  inReplyToId?: string
+  mediaIds?: string[]
+  sensitive?: boolean
+  language?: string
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -148,6 +172,49 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async unfollow(accountId) {
       return write((c) => c.v1.accounts.$select(accountId).unfollow())
+    },
+    async createStatus(params, opts = {}) {
+      const { status, mediaIds, ...rest } = params
+      const body = mediaIds && mediaIds.length > 0
+        ? { ...rest, status, mediaIds }
+        : { ...rest, status }
+      // Mastodon remembers an Idempotency-Key for an hour and answers a
+      // repeat with the first post, so a retry after a lost response never
+      // posts twice. The caller keeps one key per draft.
+      const meta = opts.idempotencyKey
+        ? { requestInit: { headers: { 'Idempotency-Key': opts.idempotencyKey } } }
+        : undefined
+      return write((c) => c.v1.statuses.create(body, meta))
+    },
+    async uploadMedia(file, opts = {}) {
+      const { pollIntervalMs = 1000, timeoutMs = 60_000 } = opts
+      // Large files come back 202 with `url: null` while the server
+      // transcodes them. masto can wait for that itself, but its wait is
+      // not routed through run(), so a 401 mid-wait would skip onUnauthorized.
+      let media = await write((c) => c.v2.media.create({
+        file,
+        ...(opts.description ? { description: opts.description } : {}),
+        skipPolling: true,
+      }))
+      const deadline = Date.now() + timeoutMs
+      while (!media.url) {
+        if (Date.now() >= deadline) {
+          throw new CaribouError('server_error', 'media processing timed out')
+        }
+        await new Promise((r) => setTimeout(r, pollIntervalMs))
+        const id = media.id
+        media = await run(`media:${id}`, (c) => c.v1.media.$select(id).fetch())
+      }
+      return media
+    },
+    async fetchMedia(id) {
+      return run(`media:${id}`, (c) => c.v1.media.$select(id).fetch())
+    },
+    async updateMedia(id, params) {
+      return write((c) => c.v1.media.$select(id).update(params))
+    },
+    async fetchInstance() {
+      return run('instance', (c) => c.v2.instance.fetch())
     },
   }
 }
