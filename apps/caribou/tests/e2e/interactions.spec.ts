@@ -67,13 +67,16 @@ test.beforeEach(async ({ page }) => {
 
 test('favourite then unfavourite on /home updates the count', async ({ page }) => {
   const calls: string[] = []
+  // Every server count differs from the optimistic one before it, so the
+  // test can tell when each response has been applied: 2, then optimistic
+  // 3, server 5, then optimistic 4, server 1.
   await page.route('**/api/v1/statuses/a/favourite', (route) => {
     calls.push('favourite')
-    return route.fulfill(json(makeStatus('a', { favourited: true, favourites_count: 3 })))
+    return route.fulfill(json(makeStatus('a', { favourited: true, favourites_count: 5 })))
   })
   await page.route('**/api/v1/statuses/a/unfavourite', (route) => {
     calls.push('unfavourite')
-    return route.fulfill(json(makeStatus('a', { favourited: false, favourites_count: 2 })))
+    return route.fulfill(json(makeStatus('a', { favourited: false, favourites_count: 1 })))
   })
   const errors = collectErrors(page)
   await gotoSettled(page, '/home')
@@ -86,13 +89,16 @@ test('favourite then unfavourite on /home updates the count', async ({ page }) =
   await fav.click()
   const unfav = page.getByRole('button', { name: 'Unfavourite' })
   await expect(unfav).toHaveAttribute('aria-pressed', 'true')
-  await expect(unfav).toHaveText('3')
-  await expect.poll(() => calls).toEqual(['favourite'])
+  // Wait for the server's count, not just the request: a click while the
+  // first write is still in flight is dropped by design (the in-flight
+  // guard in caribou-state's mutations).
+  await expect(unfav).toHaveText('5')
+  expect(calls).toEqual(['favourite'])
 
   await unfav.click()
   await expect(fav).toHaveAttribute('aria-pressed', 'false')
-  await expect(fav).toHaveText('2')
-  await expect.poll(() => calls).toEqual(['favourite', 'unfavourite'])
+  await expect(fav).toHaveText('1')
+  expect(calls).toEqual(['favourite', 'unfavourite'])
   expect(errors).toEqual([])
 })
 
