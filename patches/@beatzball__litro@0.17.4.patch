@@ -1,5 +1,37 @@
+diff --git a/dist/plugins/path-to-route.d.ts b/dist/plugins/path-to-route.d.ts
+index 16639065e3e5a4fea9459fb8e96808658287a702..08bc823111e2490ecca1a8d7cf7f38c39db957b3 100644
+--- a/dist/plugins/path-to-route.d.ts
++++ b/dist/plugins/path-to-route.d.ts
+@@ -42,12 +42,13 @@ export declare function fileToRoute(filePath: string, pagesDir: string): LitroRo
+  *   - Replace path separators (/) with hyphens
+  *   - Replace underscores with hyphens
+  *   - Lowercase everything
+- *   - index at the end → 'home' (for pages/index.ts → 'page-home')
++ *   - index at the end → 'index' (for pages/index.ts → 'page-index'; avoids
++ *     colliding with pages/home.ts → 'page-home' when an app has both)
+  *   - Collapse consecutive hyphens
+  *   - Prepend 'page-'
+  *
+  * Examples:
+- *   pages/index.ts           → page-home
++ *   pages/index.ts           → page-index
+  *   pages/about.ts           → page-about
+  *   pages/blog/index.ts      → page-blog
+  *   pages/blog/[slug].ts     → page-blog-slug
+@@ -80,8 +81,9 @@ export declare function compareRoutes(a: LitroRoute, b: LitroRoute): number;
+  * page module statically. Two pages that derive the same tag both call
+  * `customElements.define()` with it at module evaluation, before any request
+  * is served, and the server dies with "the name has already been used with
+- * this registry". The known pair is `pages/index.ts` (the root index is
+- * special-cased to `page-home`) next to `pages/home.ts`.
++ * this registry". The known pair was `pages/index.ts` (the root index was
++ * special-cased to `page-home`) next to `pages/home.ts`; the root index now
++ * maps to `page-index`, so that pair no longer collides.
+  *
+  * The message names the tag and every page file that claims it, as
+  * root-relative paths, one per line and sorted so the output is stable across
 diff --git a/dist/plugins/path-to-route.js b/dist/plugins/path-to-route.js
-index 0ffb55b6a3269933700d1ed07e0c2737f7f045f0..f9ce21f407b9fc6c22684b6c7d76d762040e3a0d 100644
+index 0ffb55b6a3269933700d1ed07e0c2737f7f045f0..cfce295e671646c92a08bdbff608f3649159b356 100644
 --- a/dist/plugins/path-to-route.js
 +++ b/dist/plugins/path-to-route.js
 @@ -239,12 +239,13 @@ export function fileToRoute(filePath, pagesDir) {
@@ -18,17 +50,32 @@ index 0ffb55b6a3269933700d1ed07e0c2737f7f045f0..f9ce21f407b9fc6c22684b6c7d76d762
   *   pages/about.ts           → page-about
   *   pages/blog/index.ts      → page-blog
   *   pages/blog/[slug].ts     → page-blog-slug
-@@ -271,7 +272,7 @@ export function fileToComponentTag(filePath, pagesDir) {
+@@ -269,9 +270,9 @@ export function fileToComponentTag(filePath, pagesDir) {
+         .replace(/[^a-z0-9-]/gi, '-') // replace non-alphanumeric-hyphen with hyphen
+         .toLowerCase())
          .filter(Boolean);
-     // Handle the root index case: ['index'] → 'home'
+-    // Handle the root index case: ['index'] → 'home'
++    // Handle the root index case: ['index'] → 'page-index'
      if (cleaned.length === 1 && cleaned[0] === 'index') {
 -        return 'page-home';
 +        return 'page-index';
      }
      // Remove trailing 'index' segments (blog/index → blog)
      while (cleaned.length > 1 && cleaned[cleaned.length - 1] === 'index') {
+@@ -343,8 +344,9 @@ function literalLength(route) {
+  * page module statically. Two pages that derive the same tag both call
+  * `customElements.define()` with it at module evaluation, before any request
+  * is served, and the server dies with "the name has already been used with
+- * this registry". The known pair is `pages/index.ts` (the root index is
+- * special-cased to `page-home`) next to `pages/home.ts`.
++ * this registry". The known pair was `pages/index.ts` (the root index was
++ * special-cased to `page-home`) next to `pages/home.ts`; the root index now
++ * maps to `page-index`, so that pair no longer collides.
+  *
+  * The message names the tag and every page file that claims it, as
+  * root-relative paths, one per line and sorted so the output is stable across
 diff --git a/src/plugins/path-to-route.ts b/src/plugins/path-to-route.ts
-index d97adb8200d50c14c89dbe8b7c450f16d329009d..5665d67380877aa6af91027b394dc678c246ff79 100644
+index d97adb8200d50c14c89dbe8b7c450f16d329009d..426cd8c408076fa3b256aa86f5e02ae50c7fd7b9 100644
 --- a/src/plugins/path-to-route.ts
 +++ b/src/plugins/path-to-route.ts
 @@ -296,12 +296,13 @@ export function fileToRoute(filePath: string, pagesDir: string): LitroRoute {
@@ -47,12 +94,27 @@ index d97adb8200d50c14c89dbe8b7c450f16d329009d..5665d67380877aa6af91027b394dc678
   *   pages/about.ts           → page-about
   *   pages/blog/index.ts      → page-blog
   *   pages/blog/[slug].ts     → page-blog-slug
-@@ -333,7 +334,7 @@ export function fileToComponentTag(filePath: string, pagesDir: string): string {
+@@ -331,9 +332,9 @@ export function fileToComponentTag(filePath: string, pagesDir: string): string {
+     )
+     .filter(Boolean);
  
-   // Handle the root index case: ['index'] → 'home'
+-  // Handle the root index case: ['index'] → 'home'
++  // Handle the root index case: ['index'] → 'page-index'
    if (cleaned.length === 1 && cleaned[0] === 'index') {
 -    return 'page-home';
 +    return 'page-index';
    }
  
    // Remove trailing 'index' segments (blog/index → blog)
+@@ -412,8 +413,9 @@ function literalLength(route: LitroRoute): number {
+  * page module statically. Two pages that derive the same tag both call
+  * `customElements.define()` with it at module evaluation, before any request
+  * is served, and the server dies with "the name has already been used with
+- * this registry". The known pair is `pages/index.ts` (the root index is
+- * special-cased to `page-home`) next to `pages/home.ts`.
++ * this registry". The known pair was `pages/index.ts` (the root index was
++ * special-cased to `page-home`) next to `pages/home.ts`; the root index now
++ * maps to `page-index`, so that pair no longer collides.
+  *
+  * The message names the tag and every page file that claims it, as
+  * root-relative paths, one per line and sorted so the output is stable across

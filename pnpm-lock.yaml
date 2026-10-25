@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@beatzball/litro@0.17.4':
-    hash: 0bd417b90a2db0725dd119fd354c6bdecd4c41a49e8c648c6bce3be1e6db8d6b
+    hash: c4d9dc4c2cacbc138b531987d14781dbbf08efa389926928c387c5cce6c31d9f
     path: patches/@beatzball__litro@0.17.4.patch
 
 importers:
@@ -45,7 +45,7 @@ importers:
         version: link:../../packages/caribou-ui-headless
       '@beatzball/litro':
         specifier: 0.17.4
-        version: 0.17.4(patch_hash=0bd417b90a2db0725dd119fd354c6bdecd4c41a49e8c648c6bce3be1e6db8d6b)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)
+        version: 0.17.4(patch_hash=c4d9dc4c2cacbc138b531987d14781dbbf08efa389926928c387c5cce6c31d9f)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)
       '@beatzball/litro-router':
         specifier: 0.3.1
         version: 0.3.1
@@ -120,7 +120,7 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
       vite:
-        specifier: ^8.0.16
+        specifier: ^8.1.6
         version: 8.3.2(@types/node@22.19.17)(esbuild@0.28.2)(jiti@2.6.1)(terser@5.46.1)
       vitest:
         specifier: ^2.1.0
@@ -4256,7 +4256,7 @@ snapshots:
 
   '@beatzball/litro-router@0.3.1': {}
 
-  '@beatzball/litro@0.17.4(patch_hash=0bd417b90a2db0725dd119fd354c6bdecd4c41a49e8c648c6bce3be1e6db8d6b)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)':
+  '@beatzball/litro@0.17.4(patch_hash=c4d9dc4c2cacbc138b531987d14781dbbf08efa389926928c387c5cce6c31d9f)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)':
     dependencies:
       '@beatzball/litro-router': 0.3.1
       '@lit-labs/ssr': 3.3.1
