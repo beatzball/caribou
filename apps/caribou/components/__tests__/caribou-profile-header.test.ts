@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { batch } from '@preact/signals-core'
 import type { Account, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, relationshipCache, users, type UserSession,
@@ -210,6 +211,50 @@ describe('<caribou-profile-header> follow button', () => {
     const el = await mountWith(ACCOUNT, 'example.social')
     expect(button(el)).toBeNull()
     expect(fetchRel).not.toHaveBeenCalled()
+  })
+
+  // Without a host the header cannot tell which server the account id
+  // belongs to, and the active client could read it as someone else.
+  it('shows no button when it does not know the account’s instance', async () => {
+    const client = signIn()
+    const fetchRel = vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel()])
+    const follow = vi.spyOn(client, 'follow')
+    const el = await mountWith(ACCOUNT, '')
+    expect(button(el)).toBeNull()
+    expect(fetchRel).not.toHaveBeenCalled()
+    expect(follow).not.toHaveBeenCalled()
+  })
+
+  // Signed in as one user, the profile loaded; then the reader switched to a
+  // session on another server. The id came from the first server.
+  it('looks the account up again after a switch to a session on another server', async () => {
+    const first = signIn('one.example')
+    vi.spyOn(first, 'fetchRelationships').mockResolvedValue([rel()])
+    const firstFollow = vi.spyOn(first, 'follow')
+    const el = await mountWith({ ...ACCOUNT, acct: 'alice' } as Account, 'one.example')
+    expect(button(el)).not.toBeNull()
+
+    // The header reacts to the switch at once; `batch` holds that back until
+    // the new session's client is stubbed.
+    const { lookup, follow } = batch(() => {
+      addUserSession({
+        userKey: 'bob@two.example', server: 'two.example', token: 'TOKEN-2',
+        vapidKey: '', account: { ...ME, id: '2' }, createdAt: 2,
+      } as unknown as UserSession)
+      const second = activeClient.value!
+      vi.spyOn(second, 'fetchRelationships').mockResolvedValue([rel({ id: '555' })])
+      return {
+        lookup: vi.spyOn(second, 'lookupAccount').mockResolvedValue({ ...ACCOUNT, id: '555' } as Account),
+        follow: vi.spyOn(second, 'follow').mockResolvedValue(rel({ id: '555', following: true })),
+      }
+    })
+    await flush()
+    await el.updateComplete
+    expect(lookup).toHaveBeenCalledWith('alice@one.example')
+    button(el)!.click()
+    expect(follow).toHaveBeenCalledWith('555')
+    expect(follow).not.toHaveBeenCalledWith('42')
+    expect(firstFollow).not.toHaveBeenCalled()
   })
 
   it('removes the button on sign-out', async () => {

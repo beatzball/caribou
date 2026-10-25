@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Signal } from '@preact/signals-core'
+import { batch, type Signal } from '@preact/signals-core'
 import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, cacheStatus, users,
@@ -128,6 +128,31 @@ describe('<caribou-profile> — without initial (own profile)', () => {
     expect(list).toHaveBeenCalledWith('42', { tab: 'replies', maxId: undefined })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['5', '4'])
     expect(el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!.account).toBe(ACCOUNT)
+  })
+
+  // The account's id belongs to the server that looked it up. The header
+  // needs that host to tell when another session is active, whose server
+  // would read the same id as a different account.
+  it('hands the header the server that looked the account up, and keeps it after a session switch', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
+    const el = await mount({ handle: '@alice@example.social' })
+    await flush()
+    await el.updateComplete
+    const header = el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!
+    expect(header.instance).toBe('example.social')
+
+    // `batch` holds the header's reaction back until the new client is stubbed.
+    batch(() => {
+      addUserSession({
+        userKey: 'bob@two.example', server: 'two.example', token: 'TOKEN-2',
+        vapidKey: '', account: { ...ACCOUNT, id: '77' }, createdAt: 2,
+      } as unknown as UserSession)
+      vi.spyOn(activeClient.value!, 'lookupAccount').mockRejectedValue(new Error('not found'))
+    })
+    await el.updateComplete
+    expect(header.instance).toBe('example.social')
   })
 
   it('does not fetch when the server already sent the first page', async () => {

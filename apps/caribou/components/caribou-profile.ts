@@ -58,6 +58,10 @@ export class CaribouProfile extends LitElement {
   @state() private account: Account | null = null
   @state() private statuses: Status[] = []
   @state() private hasMore = false
+  // On /@me: the server of the session that looked the account up, which is
+  // the host the account's id belongs to. The header needs it after the
+  // reader switches to a session on another server.
+  @state() private accountServer = ''
   // False while nobody is signed in on this device (a reader who browses a
   // public profile), or while the signed-in client's server is not the
   // instance the page came from. In both cases the store cannot fetch a
@@ -106,8 +110,10 @@ export class CaribouProfile extends LitElement {
         initial: { statuses: this.initial.statuses, nextMaxId: this.initial.nextMaxId },
       })
     } else {
+      const server = activeUser.value?.server ?? ''
       const cache = createAccountCache(clientSource)
       account = await cache.lookup(this.handle.replace(/^@/, ''))
+      this.accountServer = server
       if (account) {
         store = createProfileStore(account.id, this.tab, { clientSource })
         await store.load()
@@ -214,7 +220,7 @@ export class CaribouProfile extends LitElement {
     // happy-dom's parser drops a child binding that has no parent element,
     // and the component tests would never see the link.
     return html`
-      <caribou-profile-header .account=${account} instance=${this.instance}></caribou-profile-header>
+      <caribou-profile-header .account=${account} instance=${this.instance || this.accountServer}></caribou-profile-header>
       <caribou-profile-tabs handle=${linkHandle} tab=${this.tab}></caribou-profile-tabs>
       <div class="posts">
         <ul>

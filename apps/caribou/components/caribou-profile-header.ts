@@ -42,10 +42,10 @@ export class CaribouProfileHeader extends LitElement {
   `
 
   @property({ attribute: false }) account: Account | null = null
-  // The host the account came from. Account ids are minted per instance, so
-  // a reader signed in elsewhere has to look the account up on their own
-  // server before they can follow it. Empty when the account already came
-  // through the signed-in client (/@me).
+  // The host the account came from, which is also the host its id belongs
+  // to. Account ids are minted per instance, so a reader signed in elsewhere
+  // has to look the account up on their own server before they can follow
+  // it. Without it the header cannot tell, and shows no button.
   @property() instance = ''
 
   // What the follow button needs, known only after mount: the server has no
@@ -127,7 +127,7 @@ export class CaribouProfileHeader extends LitElement {
     this.targetSignal.value = null
     const account = this.account
     const client = activeClient.value
-    if (!user || !account || !client) return
+    if (!user || !account || !client || !this.instance) return
     let target: Account | null = account
     if (!this.sameInstance(user.server)) {
       try {
@@ -146,7 +146,7 @@ export class CaribouProfileHeader extends LitElement {
 
   // Hosts are case-insensitive; `server` is a bare host, like `instance`.
   private sameInstance(server: string): boolean {
-    return !this.instance || server.toLowerCase() === this.instance.toLowerCase()
+    return server.toLowerCase() === this.instance.toLowerCase()
   }
 
   // `acct` is relative to the instance the account came from: a local
