@@ -1,5 +1,11 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.2.1
+
+### Patch Changes
+
+- [#75](https://github.com/beatzball/caribou/pull/75) [`cbaf05a`](https://github.com/beatzball/caribou/commit/cbaf05ac7ec2f2ce06fa5e27bd8f1793ba48ae87) Thanks [@beatzball](https://github.com/beatzball)! - Add `verifyCredentials()` to `CaribouClient`.
+
 ## 0.2.0
 
 ### Minor Changes
