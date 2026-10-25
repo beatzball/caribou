@@ -51,4 +51,15 @@ describe('caribou-status-card SSR', () => {
     expect(out).toMatch(/Bob<!--\/lit-part--> boosted/)
     expect(out).toContain('href="/@alice/42"')
   })
+
+  it('prints the action bar in its signed-out state, with counts and pressed state from the status', async () => {
+    const s = { ...STATUS, visibility: 'public', favourited: true, favouritesCount: 5, reblogsCount: 0, repliesCount: 2, bookmarked: false }
+    const out = await ssr(html`<caribou-status-card .status=${s}></caribou-status-card>`)
+    expect(out).toMatch(/<button[^>]*class="favourite"[^>]*aria-label="Unfavourite"[^>]*aria-pressed="true"[^>]*aria-disabled="true"[^>]*title="Sign in to favourite"/)
+    expect(out).toMatch(/<button[^>]*class="boost"[^>]*aria-label="Boost"[^>]*aria-pressed="false"/)
+    expect(out).toMatch(/<button[^>]*class="reply"[^>]*aria-label="Reply"/)
+    expect(out).toMatch(/<button[^>]*class="bookmark"[^>]*aria-label="Bookmark"/)
+    expect(out).toContain('<span class="count"><!--lit-part-->5<!--/lit-part--></span>')
+    expect(out).toContain('<span class="count"><!--lit-part-->2<!--/lit-part--></span>')
+  })
 })
