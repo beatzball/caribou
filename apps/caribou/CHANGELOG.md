@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.3.2
+
+### Patch Changes
+
+- [#81](https://github.com/beatzball/caribou/pull/81) [`557fca4`](https://github.com/beatzball/caribou/commit/557fca48d623b081a5033b9cb589d115a75230c4) Thanks [@beatzball](https://github.com/beatzball)! - The compose toolbar now uses icon buttons, like Mastodon's composer. The "CW" text button is a warning icon named "Content warning", with a tooltip and a clear pressed look. "Add media" is an image icon named "Add images or video"; the file picker still opens with Enter or Space. All toolbar buttons share one hit area, larger on touch screens.
+
 ## 0.3.1
 
 ### Patch Changes
