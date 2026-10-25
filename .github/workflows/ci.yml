@@ -6,9 +6,19 @@ on:
   push:
     branches: [main]
 
+# A new push to a PR branch makes the run before it worthless, so cancel it.
+# Runs on main deploy, so each gets its own group and is never cancelled or
+# replaced by a later push.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      playwright: ${{ steps.pw.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -17,6 +27,17 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # e2e runs in the Playwright image for this exact version. Ask the app's
+      # own Playwright, so a Playwright upgrade can never leave the image behind.
+      - name: Resolve Playwright version
+        id: pw
+        run: |
+          version=$(pnpm --filter caribou-app exec playwright --version | sed -nE 's/^Version ([0-9][0-9A-Za-z.+-]*)$/\1/p')
+          if [[ -z "$version" ]]; then
+            echo "::error::Could not read the Playwright version of caribou-app; e2e has no image to run in."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Generate Litro routes + page manifest
         run: pnpm --filter caribou-app build
       - name: Compute affected filter
@@ -35,8 +56,20 @@ jobs:
         with: { name: coverage, path: '**/coverage/**' }
 
   e2e:
+    # The release PR only bumps versions and changelogs. Its merge to main
+    # runs e2e again before deploy, so running it on the PR too buys nothing.
+    # A skipped job still satisfies the required check. The repo check stops
+    # a fork from skipping it by naming its branch the same.
+    if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: checks
+    # The image ships the browsers and their system packages, so the job skips
+    # `playwright install --with-deps`. Its apt step once stalled for 36 min
+    # on a slow Ubuntu mirror.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.checks.outputs.playwright }}-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -44,9 +77,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter caribou-app exec playwright install --with-deps chromium firefox webkit
       - run: pnpm build
-      - run: pnpm test:e2e
+      # Firefox refuses to start as root when HOME belongs to another user.
+      # Set it here, not as job env, which the runner's own docker CLI reads too.
+      - run: HOME=/root pnpm test:e2e
       - if: failure()
         uses: actions/upload-artifact@v4
         with: { name: playwright-report, path: apps/caribou/playwright-report }
@@ -55,8 +89,9 @@ jobs:
     # Skip on the bot-authored release PR, which legitimately consumes all
     # pending changesets — `changeset status` treats "packages changed but
     # no changesets" as a hard error, which is the whole point of that PR.
-    if: github.event_name == 'pull_request' && github.head_ref != 'changeset-release/main'
+    if: github.event_name == 'pull_request' && !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -74,8 +109,13 @@ jobs:
   # that does `readFileSync(require.resolve('@workspace/pkg/file'))` at init
   # works locally but throws MODULE_NOT_FOUND in the runtime image, which
   # ships only `dist/`.
+  #
+  # Skipped on the release PR for the same reason as e2e: main runs it again
+  # before deploy, and deploy needs it.
   smoke-image:
+    if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: checks
     steps:
       - uses: actions/checkout@v4
@@ -109,21 +149,45 @@ jobs:
         if: always()
         run: docker stop caribou-smoke || true
 
+  # Coolify builds whatever main points at, not github.sha. So deploy only
+  # when this run's commit is still main's head; a newer push has its own run,
+  # which deploys once that commit is tested. The group keeps two deploys
+  # from overlapping.
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [checks, e2e, smoke-image]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency: { group: deploy-prod, cancel-in-progress: false }
+    outputs:
+      deployed: ${{ steps.head.outputs.current }}
     steps:
+      - name: Check main has not moved on
+        id: head
+        run: |
+          # An unknown head is not "moved on": fail loudly instead of skipping green.
+          if ! head=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/main | cut -f1) || [[ -z "$head" ]]; then
+            echo "::error::Could not read the head of main from GitHub; not deploying."
+            exit 1
+          fi
+          if [[ "$head" == "${{ github.sha }}" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is at $head, not ${{ github.sha }}. Skipping the deploy; the run for the newer commit deploys it."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Trigger Coolify deploy
+        if: steps.head.outputs.current == 'true'
         run: |
           curl -fSsL -X POST \
             -H "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}" \
             "${{ secrets.COOLIFY_WEBHOOK_URL }}"
 
   verify-prod:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deploy.outputs.deployed == 'true'
     needs: [deploy]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
