@@ -67,15 +67,16 @@ test.beforeEach(async ({ page }) => {
 
 test('favourite then unfavourite on /home updates the count', async ({ page }) => {
   const calls: string[] = []
-  // The server's counts differ from the optimistic ones (2 → 3 → 2), so the
-  // test can tell when each response has been applied.
+  // Every server count differs from the optimistic one before it, so the
+  // test can tell when each response has been applied: 2, then optimistic
+  // 3, server 5, then optimistic 4, server 1.
   await page.route('**/api/v1/statuses/a/favourite', (route) => {
     calls.push('favourite')
     return route.fulfill(json(makeStatus('a', { favourited: true, favourites_count: 5 })))
   })
   await page.route('**/api/v1/statuses/a/unfavourite', (route) => {
     calls.push('unfavourite')
-    return route.fulfill(json(makeStatus('a', { favourited: false, favourites_count: 4 })))
+    return route.fulfill(json(makeStatus('a', { favourited: false, favourites_count: 1 })))
   })
   const errors = collectErrors(page)
   await gotoSettled(page, '/home')
@@ -96,7 +97,7 @@ test('favourite then unfavourite on /home updates the count', async ({ page }) =
 
   await unfav.click()
   await expect(fav).toHaveAttribute('aria-pressed', 'false')
-  await expect(fav).toHaveText('4')
+  await expect(fav).toHaveText('1')
   expect(calls).toEqual(['favourite', 'unfavourite'])
   expect(errors).toEqual([])
 })
