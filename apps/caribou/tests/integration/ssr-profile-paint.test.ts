@@ -77,6 +77,30 @@ async function get(path: string): Promise<string> {
   return res.text()
 }
 
+// The replies tab mixes top-level posts in with replies, so its newest entry
+// is not always a reply. Ask the instance directly for a post that answers
+// another one whose parent is still visible, so the thread has an ancestor.
+async function findReplyWithAncestors(): Promise<string> {
+  const api = `https://${HANDLE.split('@')[1]}/api/v1`
+  const lookup = await fetch(`${api}/accounts/lookup?acct=${encodeURIComponent(HANDLE)}`)
+  if (!lookup.ok) throw new Error(`Account lookup for ${HANDLE} failed: HTTP ${lookup.status}`)
+  const { id } = (await lookup.json()) as { id: string }
+  const res = await fetch(`${api}/accounts/${id}/statuses?limit=40&exclude_reblogs=true`)
+  if (!res.ok) throw new Error(`Statuses for ${HANDLE} failed: HTTP ${res.status}`)
+  const statuses = (await res.json()) as { id: string; in_reply_to_id: string | null }[]
+  const replies = statuses.filter((s) => s.in_reply_to_id).slice(0, 5)
+  for (const reply of replies) {
+    const ctx = await fetch(`${api}/statuses/${reply.id}/context`)
+    if (!ctx.ok) continue
+    const { ancestors } = (await ctx.json()) as { ancestors: unknown[] }
+    if (ancestors.length > 0) return reply.id
+  }
+  throw new Error(
+    `No reply with a visible parent among the latest ${statuses.length} posts by ${HANDLE} ` +
+      `(${replies.length} replies checked); pick another account for this test.`,
+  )
+}
+
 let server: ChildProcess | undefined
 let baseUrl = ''
 
@@ -138,12 +162,7 @@ describe.skipIf(SKIP)('SSR profile-paint: /@handle emits header + status cards',
 
 describe.skipIf(SKIP)('SSR thread-paint: /@handle/id emits the whole thread', () => {
   it('SSR HTML for a reply contains its ancestors, then the focused post, no Loading flash', async () => {
-    // The `replies` tab lists statuses that sit inside a thread.
-    const profile = strip(await get(`/@${HANDLE}?tab=replies`))
-    const permalink = /<a class="permalink" href="(\/@[^/"]+\/\d+)"/.exec(profile)?.[1]
-    expect(permalink).toBeDefined()
-
-    const raw = await get(permalink!)
+    const raw = await get(`/@${HANDLE}/${await findReplyWithAncestors()}`)
     const body = strip(raw)
     expect(raw).toContain('"kind":"ok"')
     expect(body).toMatch(/<caribou-thread\s[^>]*>\s*<template shadowroot="open" shadowrootmode="open">/)
