@@ -164,6 +164,28 @@ describe('caribou-compose-dialog', () => {
     expect($(el, '.count')!.textContent).toBe('17')
   })
 
+  it('the toolbar icon buttons have accessible names and tooltips', async () => {
+    signIn()
+    const el = await mount()
+    await compose(el)
+    const cw = $<HTMLButtonElement>(el, '[data-action="toggle-cw"]')!
+    expect(cw.getAttribute('aria-label')).toBe('Content warning')
+    expect(cw.title).toBe('Content warning')
+    expect(cw.getAttribute('aria-pressed')).toBe('false')
+    expect(cw.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true')
+    const file = $<HTMLInputElement>(el, 'input[type="file"]')!
+    expect(file.getAttribute('aria-label')).toBe('Add images or video')
+    const pick = file.closest('label')!
+    expect(pick.title).toBe('Add images or video')
+    expect(pick.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true')
+    // Icons only: no stray text that would read as part of the name.
+    expect(cw.textContent!.trim()).toBe('')
+    expect(pick.textContent!.trim()).toBe('')
+    cw.click()
+    await settle(el)
+    expect(cw.getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('reply mode shows the post, prefills mentions without yourself and inherits visibility', async () => {
     signIn()
     const el = await mount()

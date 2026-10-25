@@ -181,7 +181,7 @@ test('plain Enter in the content warning field does not publish', async ({ page 
   await page.keyboard.press('n')
   const dialog = page.getByRole('dialog', { name: 'New post' })
   await dialog.getByRole('textbox', { name: 'Post text' }).fill('body')
-  await dialog.getByRole('button', { name: 'CW' }).click()
+  await dialog.getByRole('button', { name: 'Content warning' }).click()
   const cw = dialog.getByRole('textbox', { name: 'Content warning' })
   await cw.fill('spoiler')
   await cw.press('Enter')
@@ -189,6 +189,26 @@ test('plain Enter in the content warning field does not publish', async ({ page 
   await page.waitForTimeout(300)
   expect(posted).toHaveLength(0)
   await expect(dialog).toBeVisible()
+})
+
+test('the content warning icon button opens the warning field', async ({ page }) => {
+  await seedSession(page)
+  await mockApi(page)
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  const toggle = dialog.getByRole('button', { name: 'Content warning' })
+  await expect(toggle).toHaveAttribute('title', 'Content warning')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await expect(dialog.getByRole('textbox', { name: 'Content warning' })).toHaveCount(0)
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect(dialog.getByRole('textbox', { name: 'Content warning' })).toBeVisible()
+  const box = await toggle.boundingBox()
+  expect(box!.width).toBeGreaterThanOrEqual(24)
+  expect(box!.height).toBeGreaterThanOrEqual(24)
+  // The media picker is reachable by name, so Tab and Enter reach it.
+  await expect(dialog.getByLabel('Add images or video')).toBeEnabled()
 })
 
 test('signed out: no New post button and n does nothing', async ({ page }) => {

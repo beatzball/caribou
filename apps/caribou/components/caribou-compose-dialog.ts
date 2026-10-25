@@ -9,6 +9,7 @@ import {
 } from '@beatzball/caribou-state'
 import { MediaProcessingTimeout, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
+import { ICONS } from './_icons.js'
 import { countChars, plainText, replyMentions, replyVisibility } from './_compose-text.js'
 
 export interface ComposeDetail { inReplyTo?: mastodon.v1.Status }
@@ -130,7 +131,17 @@ export class CaribouComposeDialog extends LitElement {
       padding: var(--space-2) var(--space-3); border: 1px solid var(--border);
       background: var(--bg-1); color: var(--fg-0);
     }
-    button[aria-pressed="true"] { background: var(--bg-2); }
+    .toolbar button, .pick { min-block-size: 2.25rem; }
+    .icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-inline-size: 2.25rem; padding: 0; font-size: 1.25em;
+    }
+    @media (pointer: coarse) {
+      .toolbar button, .pick { min-block-size: 44px; }
+      .icon { min-inline-size: 44px; }
+    }
+    button:focus-visible, .pick:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
     button.post { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .pick[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
@@ -498,13 +509,16 @@ export class CaribouComposeDialog extends LitElement {
                 </li>`)}
             </ul>` : nothing}
           <div class="toolbar">
-            <label class="pick" aria-disabled=${full || busy ? 'true' : 'false'}>
-              Add media
+            <!-- The real file input stays inside the label, not behind a
+                 button, so Tab reaches it and Enter or Space opens the picker. -->
+            <label class="pick icon" title="Add images or video" aria-disabled=${full || busy ? 'true' : 'false'}>
+              ${ICONS.image}
               <input class="visually-hidden" type="file" multiple accept=${this.limits.accept}
-                ?disabled=${full || busy} @change=${this.onFiles}>
+                aria-label="Add images or video" ?disabled=${full || busy} @change=${this.onFiles}>
             </label>
-            <button type="button" data-action="toggle-cw" aria-pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
-              @click=${() => this.patchDraft({ cw: !d.cw })}>CW</button>
+            <button type="button" class="icon" data-action="toggle-cw" aria-label="Content warning" title="Content warning"
+              aria-pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
+              @click=${() => this.patchDraft({ cw: !d.cw })}>${ICONS.triangleAlert}</button>
             <label class="visually-hidden" for="compose-visibility">Visibility</label>
             <select id="compose-visibility" name="visibility" ?disabled=${busy}
               @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as mastodon.v1.StatusVisibility })}>
