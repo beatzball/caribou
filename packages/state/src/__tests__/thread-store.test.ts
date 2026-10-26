@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { statusCache } from '../caches.js'
 import { createThreadStore } from '../thread-store.js'
 
 const FOCUSED = { id: '300', content: 'focused', account: { id: '42' } } as unknown as mastodon.v1.Status
@@ -73,5 +74,38 @@ describe('createThreadStore', () => {
     if (store.context.value.status !== 'ready') throw new Error('expected ready')
     expect(store.context.value.data.ancestors[0]?.id).toBe('299')
     expect(store.context.value.data.descendants.map((s) => s.id)).toEqual(['302'])
+  })
+})
+
+describe('ThreadStore.offer', () => {
+  const st = (id: string, extra: object = {}) =>
+    ({ id, content: id, account: { id: '42' }, ...extra }) as unknown as mastodon.v1.Status
+
+  it('updates the shown posts in place and adds new replies at the end', () => {
+    statusCache.value = new Map()
+    const store = createThreadStore({} as unknown as CaribouClient, '300', {
+      initial: { focused: st('300'), ancestors: [st('299')], descendants: [st('301'), st('302')] },
+    })
+    // The instance may order replies differently on a later fetch.
+    store.offer({
+      focused: st('300', { content: 'edited' }),
+      ancestors: [st('299')],
+      descendants: [st('303'), st('302', { content: 'edited' }), st('301')],
+    })
+    if (store.focused.value.status !== 'ready' || store.context.value.status !== 'ready') throw new Error('not ready')
+    expect(store.focused.value.data.content).toBe('edited')
+    expect(store.context.value.data.descendants.map((s) => [s.id, s.content]))
+      .toEqual([['301', '301'], ['302', 'edited'], ['303', '303']])
+    expect(statusCache.value.get('302')!.content).toBe('edited')
+  })
+
+  it('keeps the reader flags of a post the reader favourited', () => {
+    statusCache.value = new Map()
+    const store = createThreadStore({} as unknown as CaribouClient, '300', {
+      initial: { focused: st('300', { favourited: true }), ancestors: [], descendants: [] },
+    })
+    store.offer({ focused: st('300', { favourited: false }), ancestors: [], descendants: [] })
+    if (store.focused.value.status !== 'ready') throw new Error('not ready')
+    expect(store.focused.value.data.favourited).toBe(true)
   })
 })

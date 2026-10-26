@@ -1,12 +1,20 @@
-import { LitElement, html, css, nothing } from 'lit'
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
 import type { Status } from '@beatzball/caribou-mastodon-client'
-import { activeClient, createThreadStore, type ThreadStore } from '@beatzball/caribou-state'
+import {
+  activeClient, createKeepAlive, createThreadStore, type ThreadStore,
+} from '@beatzball/caribou-state'
 import './caribou-status-card.js'
+import { isCachedSnapshot } from './_page-cache.js'
 
 const MAX_DEPTH = 3
+
+// The stores of the threads the reader saw last. A store holds the order the
+// reader saw — new replies at the end — which the server's copy does not, so
+// a revisit paints that order again. Emptied when the active account changes.
+const stores = createKeepAlive<ThreadStore>(12)
 
 export interface ThreadInitial {
   focused: Status
@@ -88,12 +96,23 @@ export class CaribouThread extends LitElement {
     super.disconnectedCallback()
   }
 
+  protected override willUpdate(changed: PropertyValues<this>) {
+    // The page got the thread again in the background (`enterWithCache`).
+    if (this.store && changed.has('initial') && this.initial) this.store.offer(this.initial)
+  }
+
   // The store is made here, not in connectedCallback: a server-rendered
   // element connects before its parent has hydrated and set `initial`, and
   // the server itself must never fill the module-level status cache.
   protected override firstUpdated() {
     const client = activeClient.value
-    if (this.initial) {
+    const kept = stores.get(this.statusId)
+    if (kept) {
+      this.store = kept
+      // A snapshot is what the store was filled from; data off the network
+      // may hold new replies.
+      if (this.initial && !isCachedSnapshot(this.initial)) kept.offer(this.initial)
+    } else if (this.initial) {
       // A store seeded with the thread never touches the client, so a
       // signed-out reader gets a working thread too.
       this.store = createThreadStore(client!, this.statusId, { initial: this.initial })
@@ -103,6 +122,7 @@ export class CaribouThread extends LitElement {
     } else {
       return
     }
+    stores.set(this.statusId, this.store)
     if (this.isConnected) this.bind()
   }
 

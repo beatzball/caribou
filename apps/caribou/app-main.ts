@@ -14,6 +14,7 @@ import {
 } from '@beatzball/caribou-state'
 import { installUnauthorizedHandler } from './components/_unauthorized.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
+import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
 // Hydrate session from localStorage before any component reads it.
@@ -29,6 +30,8 @@ if (typeof window !== 'undefined') {
   // The nav rail's unread badge. One poll for the app, not one per rail:
   // every page has its own, and a page swap mounts two.
   startUnreadNotifications()
+  // One "Updating…" live region for the whole tab, outside every page.
+  document.body.append(document.createElement('caribou-update-notice'))
 }
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null

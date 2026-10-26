@@ -1,6 +1,6 @@
 import { html, css } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
-import { LitroPage, pageReset } from '@beatzball/litro/runtime'
+import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRouterParams } from 'h3'
 import { activeUserKey } from '@beatzball/caribou-state'
@@ -13,6 +13,7 @@ import type { ProfilePageData, ShellInfo } from '../server/lib/page-data-types.j
 import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
 import '../components/caribou-profile.js'
+import { enterWithCache } from '../components/_page-cache.js'
 
 type Tab = 'posts' | 'replies' | 'media'
 
@@ -73,6 +74,13 @@ export class HandlePage extends LitroPage {
     const userKey = activeUserKey.value
     if (!userKey) return
     this.me = { userKey, tab: parseTab(new URLSearchParams(window.location.search).get('tab')) }
+  }
+
+  // A revisit paints from the last copy at once. The fresh page data that
+  // follows updates the posts' counts and edits through the status cache;
+  // the list itself stays as it is until the next visit (`enterWithCache`).
+  override onBeforeEnter(location: LitroLocation) {
+    return enterWithCache(this, location, () => super.onBeforeEnter(location))
   }
 
   override render() {

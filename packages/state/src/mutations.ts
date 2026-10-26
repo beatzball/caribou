@@ -1,6 +1,7 @@
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
 import { statusCache } from './caches.js'
+import { inflight } from './inflight.js'
 import { activeClient } from './users.js'
 
 type Status = mastodon.v1.Status
@@ -37,7 +38,6 @@ export interface MutationOpts {
 // is in flight is dropped, so a quick favourite-then-undo leaves the post
 // favourited; the user clicks again once the button settles. Queuing the
 // last intent would fix that, at the cost of ordering two writes.
-const inflight = new Set<string>()
 
 /** Test-only — clears the in-flight guard between tests. */
 export function _testOnlyResetMutations(): void {

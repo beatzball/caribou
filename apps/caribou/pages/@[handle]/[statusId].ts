@@ -1,6 +1,6 @@
 import { html, css } from 'lit'
 import { customElement } from 'lit/decorators.js'
-import { LitroPage, pageReset } from '@beatzball/litro/runtime'
+import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getRouterParams } from 'h3'
 import { getInstance } from '../../server/lib/instance-cookie.js'
@@ -12,6 +12,7 @@ import type { ThreadPageData, ShellInfo } from '../../server/lib/page-data-types
 import '../../components/caribou-app-shell.js'
 import '../../components/caribou-auth-required.js'
 import '../../components/caribou-thread.js'
+import { enterWithCache } from '../../components/_page-cache.js'
 
 export type StatusPageData = ThreadPageData & {
   shell: ShellInfo
@@ -72,6 +73,15 @@ export class HandleStatusPage extends LitroPage {
   static override styles = [pageReset, css`
     article { padding: 1rem; color: var(--fg-muted); }
   `]
+
+  // A revisit paints from the last copy at once. The fresh thread that
+  // follows updates the posts in place and adds new replies at the end
+  // (`enterWithCache`, `ThreadStore.offer`).
+  override onBeforeEnter(location: LitroLocation) {
+    return enterWithCache(this, location, () => super.onBeforeEnter(location), {
+      onFresh: (fresh) => { this.serverData = fresh },
+    })
+  }
 
   override render() {
     const data = (this.serverData ?? {

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activeUserKey, statusCache, users, type TimelineStore } from '@beatzball/caribou-state'
+import {
+  activeUserKey, clearKeptAlive, statusCache, users, type TimelineStore,
+} from '@beatzball/caribou-state'
 import '../caribou-timeline.js'
 import type { CaribouTimeline, TimelineInitial, TimelineKind } from '../caribou-timeline.js'
 import { CaribouStatusCard } from '../caribou-status-card.js'
@@ -81,6 +83,10 @@ class FakeIntersectionObserver {
 
 beforeEach(() => {
   document.body.replaceChildren()
+  // A test that follows the "Older posts" link leaves `?max_id=` in the
+  // address, and the timeline keeps no store for an older page.
+  history.replaceState(null, '', '/')
+  clearKeptAlive()
   statusCache.value = new Map()
   FakeIntersectionObserver.instances = []
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver)
@@ -357,8 +363,8 @@ describe('<caribou-timeline> — states', () => {
     expect(tl.shadowRoot!.textContent).not.toContain('No posts yet')
   })
 
-  it('shows the store error as an alert in place of the list', async () => {
-    const tl = await mount('home', asInitial([mkStatus('s0')]))
+  it('shows the store error as an alert in place of an empty list', async () => {
+    const tl = await mount('home', asInitial([]))
     ;(storeOf(tl).error as Writable<unknown>).value = { message: 'upstream 503' }
     await settle(tl)
     const alert = tl.shadowRoot!.querySelector('[role="alert"]')!
@@ -422,6 +428,35 @@ describe('<caribou-timeline> — older posts', () => {
       expect(sentinel(tl)).toBeNull()
       expect(io.targets.size).toBe(0)
       expect(listItems(tl)).toHaveLength(1)
+    })
+
+    it('stops loading after a page fails, and Retry tries once more', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      let attempts = 0
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => {
+        attempts++
+        ;(store.error as Writable<unknown>).value = { message: 'offline' }
+      })
+      const retry = vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+      })
+      for (let i = 0; i < 3; i++) {
+        io.fire(true)
+        await new Promise((r) => setTimeout(r, 0))
+        await settle(tl)
+      }
+      expect(attempts).toBe(1)
+      expect(io.targets.size).toBe(0)
+      expect(listItems(tl)).toHaveLength(1)
+
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement
+      expect(button.textContent!.trim()).toBe('Retry')
+      button.click()
+      await settle(tl)
+      expect(retry).toHaveBeenCalledOnce()
+      expect([...io.targets]).toEqual([sentinel(tl)])
     })
 
     it('observes the link again after a page loads, so a short page keeps loading', async () => {
@@ -498,5 +533,90 @@ describe('<caribou-timeline> — older posts', () => {
       const io = FakeIntersectionObserver.instances.at(-1)!
       expect([...io.targets]).toEqual([sentinel(tl)])
     })
+  })
+})
+
+describe('<caribou-timeline> — revisit', () => {
+  it('shows the kept list at once and does not fetch it again', async () => {
+    const first = await mount('local', asInitial([mkStatus('b'), mkStatus('a')], 'a'))
+    const store = storeOf(first)
+    first.remove()
+    const load = vi.spyOn(store, 'load')
+    const again = await mount('local', null)
+    expect(storeOf(again)).toBe(store)
+    expect(listItems(again).map((li) => li.firstElementChild!.getAttribute('data-status-id'))).toEqual(['b', 'a'])
+    expect(load).not.toHaveBeenCalled()
+  })
+
+  it('puts posts from fresh page data in the banner and leaves the list alone', async () => {
+    const tl = await mount('local', asInitial([mkStatus('b'), mkStatus('a')], 'a'))
+    tl.initial = asInitial([mkStatus('c'), mkStatus('b'), mkStatus('a')], 'a')
+    await settle(tl)
+    expect(listItems(tl)).toHaveLength(2)
+    expect(bannerButton(tl)!.textContent!.trim()).toBe('1 new post')
+  })
+
+  it('checks for newer posts on a revisit when signed in', async () => {
+    signIn()
+    const first = await mount('home', asInitial([mkStatus('a')]))
+    const store = storeOf(first)
+    first.remove()
+    const refresh = vi.spyOn(store, 'refresh').mockResolvedValue()
+    const outlet = document.createElement('litro-outlet')
+    outlet.setAttribute('data-litro-settled', '')
+    document.body.append(outlet)
+    await mount('home', null, outlet)
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it('does not check again while a full page load is still settling', async () => {
+    signIn()
+    const first = await mount('home', asInitial([mkStatus('a')]))
+    const refresh = vi.spyOn(storeOf(first), 'refresh').mockResolvedValue()
+    await mount('home', null)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('starts empty again after the active account changes', async () => {
+    signIn()
+    const first = await mount('home', asInitial([mkStatus('a')]))
+    first.remove()
+    activeUserKey.value = null
+    const again = await mount('home', asInitial([mkStatus('z')]))
+    expect(storeOf(again)).not.toBe(storeOf(first))
+    expect(listItems(again).map((li) => li.firstElementChild!.getAttribute('data-status-id'))).toEqual(['z'])
+  })
+
+  it('does not keep a store filled from an older page', async () => {
+    history.replaceState(null, '', '/local?max_id=5')
+    const older = await mount('local', asInitial([mkStatus('4'), mkStatus('3')], '3'))
+    older.remove()
+    history.replaceState(null, '', '/local')
+    const first = await mount('local', asInitial([mkStatus('10'), mkStatus('9')], '9'))
+    expect(listItems(first).map((li) => li.firstElementChild!.getAttribute('data-status-id'))).toEqual(['10', '9'])
+    expect(bannerButton(first)).toBeNull()
+  })
+
+  it('keeps the list on screen when a check fails, with the error above it', async () => {
+    const tl = await mount('local', asInitial([mkStatus('a')]))
+    ;(storeOf(tl).error as unknown as Writable<{ message: string } | null>).value = { message: 'offline' }
+    await settle(tl)
+    expect(tl.shadowRoot!.querySelector('[role="alert"]')!.textContent).toBe('offline')
+    expect(listItems(tl)).toHaveLength(1)
+  })
+
+  it('does not keep the bookmarks timeline', async () => {
+    const first = await mount('bookmarks', asInitial([mkStatus('a')]))
+    first.remove()
+    const again = await mount('bookmarks', asInitial([mkStatus('a')]))
+    expect(storeOf(again)).not.toBe(storeOf(first))
+  })
+
+  it('fills a kept empty timeline with paging from the fresh page data', async () => {
+    const tl = await mount('public', asInitial([]))
+    const offer = vi.spyOn(storeOf(tl), 'offer')
+    tl.initial = asInitial([mkStatus('n')], 'n')
+    await settle(tl)
+    expect(offer).toHaveBeenCalledWith(expect.anything(), 'n')
   })
 })

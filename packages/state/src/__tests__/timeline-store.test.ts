@@ -4,6 +4,7 @@ import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { statusCache } from '../caches.js'
 import { createTimelineStore } from '../timeline-store.js'
+import { activeUserKey } from '../users.js'
 
 function makeStatus(id: string): mastodon.v1.Status {
   return { id, content: `<p>${id}</p>`, account: { id: 'a1' } } as unknown as mastodon.v1.Status
@@ -174,5 +175,89 @@ describe('createTimelineStore', () => {
     store._testOnlyPrepend([makeStatus('x'), makeStatus('y')])
     expect(store.newPostsCount.value).toBe(2)
     expect(store.newPosts.value.map((s) => s.id)).toEqual(['x', 'y'])
+  })
+})
+
+describe('createTimelineStore — revisit', () => {
+  it('refresh() puts newer posts in the buffer and leaves the list alone', async () => {
+    const client = fakeClient(async (_kind, params) =>
+      params?.sinceId ? [makeStatus('c')] : [makeStatus('b'), makeStatus('a')])
+    const store = createTimelineStore('home', { clientSource: () => client })
+    await store.load()
+    await store.refresh()
+    expect(client.fetchTimeline).toHaveBeenLastCalledWith('home', { sinceId: 'b' })
+    expect(store.statusIds.value).toEqual(['b', 'a'])
+    expect(store.newPostsCount.value).toBe(1)
+    expect(store.refreshing.value).toBe(false)
+  })
+
+  it('refresh() asks from the top of the buffer when it already holds posts', async () => {
+    const client = fakeClient(async () => [])
+    const store = createTimelineStore('home', {
+      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },
+    })
+    store._testOnlyPrepend([makeStatus('b')])
+    await store.refresh()
+    expect(client.fetchTimeline).toHaveBeenCalledWith('home', { sinceId: 'b' })
+  })
+
+  it('refresh() loads an empty store', async () => {
+    const client = fakeClient(async () => [makeStatus('a')])
+    const store = createTimelineStore('home', { clientSource: () => client })
+    await store.refresh()
+    expect(store.statusIds.value).toEqual(['a'])
+  })
+
+  it('offer() buffers only the posts above the newest known one', () => {
+    const store = createTimelineStore('local', {
+      clientSource: () => null,
+      initial: { statuses: [makeStatus('b'), makeStatus('a')], nextMaxId: 'a' },
+    })
+    store.offer([makeStatus('d'), makeStatus('c'), makeStatus('b'), makeStatus('a')])
+    expect(store.statusIds.value).toEqual(['b', 'a'])
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['d', 'c'])
+    store.offer([makeStatus('d'), makeStatus('c')])
+    expect(store.newPostsCount.value).toBe(2)
+  })
+
+  it('offer() takes edits and counts but keeps the reader flags', () => {
+    const store = createTimelineStore('local', {
+      clientSource: () => null,
+      initial: { statuses: [{ ...makeStatus('a'), favourited: true, favouritesCount: 1 }], nextMaxId: null },
+    })
+    store.offer([{ ...makeStatus('a'), content: '<p>edited</p>', favourited: false, favouritesCount: 4 }])
+    const a = statusCache.value.get('a')!
+    expect([a.content, a.favouritesCount, a.favourited]).toEqual(['<p>edited</p>', 4, true])
+  })
+
+  it('a failed refresh keeps the list, and the next one that works clears the error', async () => {
+    let fail = true
+    const client = fakeClient(async () => {
+      if (fail) throw new Error('offline')
+      return []
+    })
+    const store = createTimelineStore('home', {
+      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },
+    })
+    await store.refresh()
+    expect(store.error.value?.message).toBe('offline')
+    expect(store.statusIds.value).toEqual(['a'])
+    fail = false
+    await store.refresh()
+    expect(store.error.value).toBeNull()
+  })
+
+  it('drops a response that arrives after the active account changed', async () => {
+    let resolve!: (xs: mastodon.v1.Status[]) => void
+    const client = fakeClient(() => new Promise((r) => { resolve = r }))
+    const store = createTimelineStore('home', {
+      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },
+    })
+    const running = store.refresh()
+    activeUserKey.value = toUserKey('bob', 'example.social')
+    resolve([makeStatus('b')])
+    await running
+    activeUserKey.value = null
+    expect(store.newPostsCount.value).toBe(0)
   })
 })

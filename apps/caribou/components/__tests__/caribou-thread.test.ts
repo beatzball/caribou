@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Status } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUserKey, addUserSession, users,
+  activeClient, activeUserKey, addUserSession, clearKeptAlive, users,
   type ThreadStore, type UserSession,
 } from '@beatzball/caribou-state'
 import '../caribou-thread.js'
@@ -43,6 +43,7 @@ function cards(el: CaribouThread): CaribouStatusCard[] {
 
 afterEach(() => {
   document.body.replaceChildren()
+  clearKeptAlive()
   activeUserKey.value = null
   users.value = new Map()
   localStorage.clear()
@@ -136,5 +137,37 @@ describe('<caribou-thread> — data source', () => {
   it('reflects the status id to the statusid attribute', async () => {
     const el = await mount({ focused: F, ancestors: [], descendants: [] })
     expect(el.getAttribute('statusid')).toBe('f')
+  })
+})
+
+describe('<caribou-thread> — fresh thread on a revisit', () => {
+  it('updates the posts in place and adds a new reply at the end', async () => {
+    const el = await mount({ focused: F, ancestors: [A], descendants: [C] })
+    const H = status('h', 'f')
+    el.initial = {
+      focused: { ...F, content: '<p>edited</p>' } as Status, ancestors: [A], descendants: [H, C],
+    }
+    await flush()
+    await el.updateComplete
+    expect(cards(el).map((c) => c.getAttribute('data-id'))).toEqual(['a', 'f', 'c', 'h'])
+    expect(cards(el)[1]!.status!.content).toBe('<p>edited</p>')
+  })
+})
+
+describe('<caribou-thread> — next revisit', () => {
+  it('paints the replies in the order the reader last saw', async () => {
+    const R1 = status('r1', 'f')
+    const R2 = status('r2', 'f')
+    const CHILD = status('child', 'r1')
+    const first = await mount({ focused: F, ancestors: [], descendants: [R1, R2] })
+    first.initial = { focused: F, ancestors: [], descendants: [R1, CHILD, R2] }
+    await flush()
+    await first.updateComplete
+    expect(cards(first).map((c) => c.getAttribute('data-id'))).toEqual(['f', 'r1', 'r2', 'child'])
+    first.remove()
+
+    // The page cache paints the snapshot it saved: the server's order.
+    const again = await mount({ focused: F, ancestors: [], descendants: [R1, CHILD, R2] })
+    expect(cards(again).map((c) => c.getAttribute('data-id'))).toEqual(['f', 'r1', 'r2', 'child'])
   })
 })
