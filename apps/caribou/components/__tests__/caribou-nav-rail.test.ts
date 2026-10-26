@@ -172,12 +172,23 @@ describe('caribou-nav-rail', () => {
     expect(el.hasAttribute('can-compose')).toBe(false)
   })
 
-  it('names the New post button even where its label is hidden', async () => {
+  it('renders New post as a primary caribou-button with the pen and a label', async () => {
     const el = await mount()
     const host = el.shadowRoot!.querySelector<CaribouButton>('caribou-button.compose-btn')!
     await host.updateComplete
     expect(host.variant).toBe('primary')
-    expect(host.shadowRoot!.querySelector('button')!.getAttribute('aria-label')).toBe('New post')
+    // The slotted label names the inner button; the rail clips it, never
+    // display: none, where the text is not shown (checked in e2e).
+    expect(host.querySelector('.label')?.textContent).toBe('New post')
     expect(host.querySelector('caribou-icon')?.getAttribute('name')).toBe('squarePen')
+  })
+
+  // Below desktop the icon is the only thing shown, and it is aria-hidden,
+  // so the label is each control's name. display: none would remove it from
+  // the accessibility tree; e2e checks the names at narrow viewports.
+  it('never hides the labels with display: none', () => {
+    const css = (CaribouNavRail.styles as { cssText: string }).cssText
+    expect(css).not.toMatch(/\.label\s*\{[^}]*display:\s*none/)
+    expect(css).toMatch(/\.label\s*\{[^}]*clip-path/)
   })
 })

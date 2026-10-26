@@ -11,9 +11,6 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger'
 //
 // `loading` keeps the button focusable (so focus is not lost mid-action) but
 // marks it busy and swallows clicks. `disabled` takes it out of use entirely.
-// `label` names the inner button when the slotted text can be hidden (say an
-// icon-and-text button that drops its text at narrow widths); without it the
-// text is the name.
 //
 // Parts: `button`, `spinner`.
 // Custom properties: `--caribou-button-size` (min height, default 2.25rem,
@@ -74,9 +71,6 @@ export class CaribouButton extends LitElement {
   // `el.disabled = false` could never undo it.
   @property({ type: Boolean, reflect: true }) disabled = false
   @property({ type: Boolean }) loading = false
-  // aria-label cannot cross into the shadow root, so the host takes it as
-  // `label` and puts it on the inner button.
-  @property() label = ''
 
   // From formDisabledCallback: a disabled <fieldset> around the button, or
   // the host's own `disabled`. The server never has it, so render() must
@@ -135,7 +129,6 @@ export class CaribouButton extends LitElement {
   override render() {
     return html`<button type="button" part="button" data-variant=${this.variant}
       ?disabled=${this.disabled}
-      aria-label=${this.label || nothing}
       aria-disabled=${this.loading && !this.disabled ? 'true' : nothing}
       aria-busy=${this.loading ? 'true' : nothing}>${this.loading
         ? html`<span class="spinner" part="spinner" aria-hidden="true"></span>` : nothing}<slot></slot></button>`

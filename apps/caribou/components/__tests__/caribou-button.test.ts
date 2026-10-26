@@ -53,16 +53,6 @@ describe('caribou-button', () => {
     expect((el.constructor as typeof CaribouButton).shadowRootOptions.delegatesFocus).toBe(true)
   })
 
-  it('names the inner button from `label`, and leaves it to the text without one', async () => {
-    const named = await mount({ label: 'New post' })
-    expect(inner(named).getAttribute('aria-label')).toBe('New post')
-    const plain = await mount({})
-    expect(inner(plain).hasAttribute('aria-label')).toBe(false)
-    plain.label = 'Send'
-    await plain.updateComplete
-    expect(inner(plain).getAttribute('aria-label')).toBe('Send')
-  })
-
   it('defaults to the secondary variant and a plain button', async () => {
     const el = await mount({})
     expect(el.variant).toBe('secondary')

@@ -45,22 +45,28 @@ export class CaribouNavRail extends LitElement {
     .compose-btn { display: none; width: 100%; }
     :host([can-compose]) .compose-btn { display: flex; }
     /* The rail's rows are left-aligned icon + label; the button centers. */
-    .compose-btn::part(button) {
-      justify-content: flex-start;
-      padding: var(--space-2) var(--space-3);
-    }
+    .compose-btn::part(button) { justify-content: flex-start; }
     :host([signed-out]) caribou-signout-form { display: none; }
     .icon { font-size: 20px; flex-shrink: 0; }
 
-    /* Medium: shell drops to a 56px nav column. Hide labels and center icons
-       so the selected-state background fills the column. */
+    /* Below desktop the rail shows icons only. The label stays in the
+       accessibility tree, clipped rather than display: none, because it is
+       each control's only name: the icon is aria-hidden. */
+    @media (max-width: 1023px) {
+      .label {
+        position: absolute; width: 1px; height: 1px; overflow: hidden;
+        clip-path: inset(50%); white-space: nowrap;
+      }
+    }
+
+    /* Medium: shell drops to a 56px nav column. Center icons so the
+       selected-state background fills the column. */
     @media (min-width: 768px) and (max-width: 1023px) {
       nav { padding: var(--space-2); }
       a, .signout-btn, .compose-btn::part(button) { justify-content: center; padding: var(--space-2); }
-      .label { display: none; }
     }
 
-    /* Mobile: nav becomes a fixed bottom bar; row-flex, no labels. */
+    /* Mobile: nav becomes a fixed bottom bar; row-flex. */
     @media (max-width: 767px) {
       nav { flex-direction: row; justify-content: space-around;
             position: fixed; bottom: 0; left: 0; right: 0;
@@ -68,7 +74,6 @@ export class CaribouNavRail extends LitElement {
       a, .signout-btn, .compose-btn::part(button) { padding: var(--space-2); justify-content: center; }
       /* One item among the others in the bar, not a full-width row. */
       .compose-btn { width: auto; }
-      .label { display: none; }
     }
   `
 
@@ -109,7 +114,7 @@ export class CaribouNavRail extends LitElement {
           return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing} @click=${spaClick}
             ><caribou-icon class="icon" name=${it.icon}></caribou-icon><span class="label">${it.label}</span></a>`
         })}
-        <caribou-button variant="primary" class="compose-btn" label="New post" @click=${openCompose}
+        <caribou-button variant="primary" class="compose-btn" @click=${openCompose}
           ><caribou-icon class="icon" name="squarePen"></caribou-icon><span class="label">New post</span></caribou-button>
         <caribou-signout-form>
           <form action="/api/signout" method="post" class="signout-form">
