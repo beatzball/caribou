@@ -262,7 +262,9 @@ test('a failed upload offers Retry and Remove; Cancel closes from the keyboard',
   await expect(list.getByRole('status')).toHaveText('Upload failed')
   await list.getByRole('button', { name: 'Retry' }).click()
   await expect(list.getByRole('button', { name: 'Retry' })).toHaveCount(0)
-  await expect(list.getByRole('listitem')).toHaveCount(1)
+  // Only a pending item has a status line, so this waits for the retry to land.
+  await expect(list.getByRole('status')).toHaveCount(0)
+  await expect(list.locator('[data-media="m1"]')).toHaveCount(1)
   await list.getByRole('button', { name: 'Remove' }).click()
   await expect(dialog.getByRole('list', { name: 'Attachments' })).toHaveCount(0)
 

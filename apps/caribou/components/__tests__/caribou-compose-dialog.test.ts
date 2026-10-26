@@ -319,6 +319,8 @@ describe('caribou-compose-dialog', () => {
     await settle(el)
     expect(remove.disabled).toBe(true)
     expect(inner(remove).disabled).toBe(true)
+    // patchDraft's posting guard would also keep the item; the disabled
+    // checks above are what pin the button.
     remove.click()
     await settle(el)
     expect($(el, '[data-media="m9"]')).not.toBeNull()
