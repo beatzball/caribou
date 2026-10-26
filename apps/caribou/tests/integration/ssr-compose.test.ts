@@ -14,7 +14,9 @@ describe('compose SSR', () => {
   it('the shell mounts one dialog, and the New post button ships hidden', async () => {
     const out = await ssr(html`<caribou-app-shell></caribou-app-shell>`)
     expect(out.match(/<caribou-compose-dialog/g)).toHaveLength(1)
-    expect(out).toContain('class="compose-btn"')
+    expect(out).toMatch(/<caribou-button[^>]*class="compose-btn"/)
+    // The label is hidden at narrow widths, so the server's button carries the name.
+    expect(out).toMatch(/<button[^>]*aria-label="New post"/)
     // Shown only once the client sets [can-compose] on the rail.
     expect(out).not.toMatch(/<caribou-nav-rail[^>]*can-compose/)
   })

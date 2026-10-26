@@ -99,7 +99,7 @@ registers the element on the server and the client alike.
 |---|---|---|---|
 | `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`) | — | — |
 | `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `count` | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size` |
-| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
+| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled`, `label` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
 
 - `<caribou-icon>` is always hidden from assistive tech, and is sized by
   `font-size` and coloured by `color`. An unknown name renders nothing.
@@ -114,7 +114,10 @@ registers the element on the server and the client alike.
   does: after every click listener has run, and not if one of them called
   `preventDefault()`. `loading` sets
   `aria-busy`, shows a spinner and swallows clicks, but keeps the button
-  focusable; `disabled` takes it out of use.
+  focusable; `disabled` takes it out of use. `label` becomes the inner
+  button's `aria-label`; set it when CSS can hide the slotted text (the nav
+  rail's New post drops its text at medium and mobile widths), because
+  `aria-label` on the host does not reach the button.
 - A disabled or loading control's host does not fire `click`, so a
   `@click` on the host is safe.
 

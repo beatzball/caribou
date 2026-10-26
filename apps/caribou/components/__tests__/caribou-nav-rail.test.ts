@@ -4,6 +4,7 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import { LitroRouter } from '@beatzball/litro-router'
 import '../caribou-nav-rail.js'
 import { CaribouNavRail } from '../caribou-nav-rail.js'
+import type { CaribouButton } from '../caribou-button.js'
 
 // Spy on the real router: the click handler reaches it through a dynamic
 // import, and both import forms must observe the same callable.
@@ -47,6 +48,8 @@ describe('caribou-nav-rail', () => {
     expect(hrefs).toEqual(['/home', '/local', '/public', '/@me'])
     const labels = [...el.shadowRoot!.querySelectorAll('nav > a .label')].map((s) => s.textContent)
     expect(labels).toEqual(['Home', 'Local', 'Public', 'Profile'])
+    const icons = [...el.shadowRoot!.querySelectorAll('nav > a caribou-icon')].map((i) => i.getAttribute('name'))
+    expect(icons).toEqual(['home', 'users', 'globe', 'user'])
   })
 
   it('marks the route in `current` with aria-current="page"', async () => {
@@ -158,7 +161,9 @@ describe('caribou-nav-rail', () => {
     const onCompose = (e: Event) => seen.push(e)
     window.addEventListener('caribou:compose', onCompose)
     try {
-      el.shadowRoot!.querySelector<HTMLButtonElement>('button.compose-btn')!.click()
+      const host = el.shadowRoot!.querySelector<CaribouButton>('caribou-button.compose-btn')!
+      await host.updateComplete
+      host.shadowRoot!.querySelector('button')!.click()
     } finally {
       window.removeEventListener('caribou:compose', onCompose)
     }
@@ -169,7 +174,10 @@ describe('caribou-nav-rail', () => {
 
   it('names the New post button even where its label is hidden', async () => {
     const el = await mount()
-    const btn = el.shadowRoot!.querySelector('button.compose-btn')!
-    expect(btn.getAttribute('aria-label')).toBe('New post')
+    const host = el.shadowRoot!.querySelector<CaribouButton>('caribou-button.compose-btn')!
+    await host.updateComplete
+    expect(host.variant).toBe('primary')
+    expect(host.shadowRoot!.querySelector('button')!.getAttribute('aria-label')).toBe('New post')
+    expect(host.querySelector('caribou-icon')?.getAttribute('name')).toBe('squarePen')
   })
 })
