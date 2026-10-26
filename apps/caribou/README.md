@@ -164,6 +164,9 @@ registers the element on the server and the client alike.
   `tests/integration/_ssr.ts`.
 - A test that sends a `Cookie` header to a spawned server also needs the node
   environment — happy-dom strips that header from `fetch`.
+- `*.mobile.spec.ts` runs only in the `mobile-webkit` Playwright project
+  (iPhone 15: touch, bottom nav bar), locally and in CI. It needs WebKit:
+  `pnpm exec playwright install webkit`.
 
 ### Real-upstream e2e specs
 
