@@ -7,6 +7,9 @@ describe('entryCacheControl', () => {
   it("lets no browser keep this build's entry under another build's ?v=", () => {
     expect(entryCacheControl('/_litro/app.js', q('?v=0123456789ab'), 'aaaaaaaaaaaa')).toBe('no-store')
     expect(entryCacheControl('/_litro/app.js', q('?v='), 'aaaaaaaaaaaa')).toBe('no-store')
+    expect(entryCacheControl('/_litro/app.js', q('?v=aaaaaaaaaaaa&v=0123456789ab'), 'aaaaaaaaaaaa')).toBe('no-store')
+    expect(entryCacheControl('/_litro/app.js', q('?v=aaaaaaaaaaaa&x=1'), 'aaaaaaaaaaaa')).toBe('no-store')
+    expect(entryCacheControl('/_litro/app.js', q('?V=0123456789ab'), 'aaaaaaaaaaaa')).toBe('no-store')
   })
 
   it("leaves this build's ?v= and the bare entry to the route rule", () => {
