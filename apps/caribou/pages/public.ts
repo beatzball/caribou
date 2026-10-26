@@ -1,6 +1,6 @@
 import { html, css } from 'lit'
 import { customElement } from 'lit/decorators.js'
-import { LitroPage, pageReset } from '@beatzball/litro/runtime'
+import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
@@ -10,6 +10,7 @@ import type { TimelinePageData, ShellInfo } from '../server/lib/page-data-types.
 import '../components/caribou-app-shell.js'
 import '../components/caribou-timeline.js'
 import '../components/caribou-auth-required.js'
+import { enterWithCache } from '../components/_page-cache.js'
 
 export type PublicPageData = TimelinePageData & { shell: ShellInfo }
 
@@ -40,6 +41,14 @@ export class PublicPage extends LitroPage {
     litro-link { color: var(--accent); text-decoration-line: underline; }
   `]
 
+  // A revisit paints from the last copy at once, and the fresh page data
+  // that follows only fills the new-posts banner (`enterWithCache`).
+  override onBeforeEnter(location: LitroLocation) {
+    return enterWithCache(this, location, () => super.onBeforeEnter(location), {
+      onFresh: (fresh) => { this.serverData = fresh },
+    })
+  }
+
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null } }) as PublicPageData
     const inst = data.shell.instance ?? ''
@@ -61,8 +70,9 @@ export class PublicPage extends LitroPage {
         </caribou-app-shell>
       `
     }
-    // `data` carries `statuses` and `nextMaxId`, and keeps one identity for
-    // the life of the page, so the timeline's `initial` never changes.
+    // `data` carries `statuses` and `nextMaxId`. It changes only when a
+    // revisit's fresh page data replaces the cached copy; the timeline then
+    // puts the new posts in its banner.
     return html`
       <caribou-app-shell instance=${inst}>
         <caribou-timeline kind="public" .initial=${data}></caribou-timeline>

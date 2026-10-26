@@ -1,0 +1,5 @@
+---
+"@beatzball/caribou-state": minor
+---
+
+Add `createKeepAlive`, an in-memory LRU cache that empties itself when the active account changes, with `clearKeptAlive` and `ownerGeneration` (changes on every account change, so a late result can be dropped). An account change also drops the reader's own flags from every cached status (`forgetReaderFields`), so one account's favourites never show as another's. Add `mergeStatus`, which caches a fresh copy of a status but keeps the reader's flags, and keeps the count while one of the reader's actions on that post is in flight or when the fresh copy is older. Timeline stores get `refresh()`, `retry()` (runs the last failed fetch again), `offer(page, nextMaxId)` (a fresh first page from elsewhere: new posts go to the buffer, known ones are merged; into an empty list it sets up paging), and `refreshing` / `syncedAt` signals. Every fetch checks the owner generation right before it writes. The new-posts buffer never holds a post the list already shows. `poll()` now asks from the top of the new-posts buffer. Thread stores get `offer(thread)`: posts update in place and new replies go at the end.

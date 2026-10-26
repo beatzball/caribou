@@ -1,16 +1,18 @@
-import { LitElement, html, css, nothing } from 'lit'
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, createTimelineStore, startPolling, type TimelineStore,
+  activeClient, createKeepAlive, createTimelineStore, startPolling, type TimelineStore,
 } from '@beatzball/caribou-state'
 import {
   createIntersectionObserver, type CaribouIntersectionObserver,
 } from '@beatzball/caribou-ui-headless'
 import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
+import './caribou-button.js'
+import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
 
@@ -27,6 +29,25 @@ function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
   return true
 }
 
+// The stores of the timelines the reader saw last, so coming back to one
+// shows its posts at once instead of fetching them again. The keep-alive
+// empties itself when the active account changes.
+const stores = createKeepAlive<TimelineStore>(12)
+
+// On a full page load the router mounts the page twice (README); the second
+// mount must not refetch what the first one has just loaded. The outlet is
+// marked settled only once that first swap is done.
+const firstLoadSettling = () => !document.querySelector('litro-outlet[data-litro-settled]')
+
+// Only the first page of a timeline is kept. `?max_id=` is an older page,
+// reached by the no-JS "Older posts" link; kept under the timeline's name it
+// would become the list the next visit shows.
+const isFirstPage = () => !new URLSearchParams(location.search).has('max_id')
+
+// The timelines that are kept. Bookmarks are not, yet: their pages run by a
+// bookmark cursor, and a `since_id` check by status id does not fit them.
+const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public'])
+
 @customElement('caribou-timeline')
 export class CaribouTimeline extends LitElement {
   static override styles = css`
@@ -34,6 +55,8 @@ export class CaribouTimeline extends LitElement {
     ul { list-style: none; margin: 0; padding: 0; }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
+    .failed { display: flex; align-items: center; gap: var(--space-2); padding-inline-end: var(--space-4); }
+    .failed [role="alert"] { flex: 1; }
     a[data-sentinel] {
       display: block; padding: var(--space-4);
       color: var(--fg-muted); text-align: center;
@@ -49,6 +72,8 @@ export class CaribouTimeline extends LitElement {
   @state() private statuses: mastodon.v1.Status[] = []
   @state() private loading = false
   @state() private errorMsg: string | null = null
+  // A failed older page shows at the bottom, where the reader is looking.
+  @state() private failedOlder = false
   @state() private hasMore = true
   @state() private newPostsCount = 0
   // False while nobody is signed in on this device (browsing /local or
@@ -83,17 +108,40 @@ export class CaribouTimeline extends LitElement {
     super.disconnectedCallback()
   }
 
-  protected override willUpdate() {
+  protected override willUpdate(changed: PropertyValues<this>) {
     // The store is made here and not in `connectedCallback`: while hydration
     // is deferred the element connects before its parent has set `initial`.
     // The server also runs `willUpdate`, and must not make a store — the
     // status cache behind it is a process-wide global. (`typeof window`, not
     // Lit's `isServer`, which is also true in the unit tests.)
-    if (this.store || typeof window === 'undefined') return
+    if (typeof window === 'undefined') return
+    if (this.store) {
+      // The page got fresh data in the background (`enterWithCache`).
+      if (changed.has('initial') && this.initial && !isCachedSnapshot(this.initial)) {
+        this.store.offer(this.initial.statuses, this.initial.nextMaxId)
+      }
+      return
+    }
+    const keep = KEPT.has(this.kind) && isFirstPage()
+    const kept = keep ? stores.get(this.kind) : undefined
+    if (kept) {
+      this.store = kept
+      this.bind(kept)
+      const old = Date.now() - kept.syncedAt.peek() > STALE_MS
+      // The list is already there; what is new goes to the banner. A cached
+      // snapshot is what the store was filled from, so it adds nothing.
+      if (this.initial && !isCachedSnapshot(this.initial)) kept.offer(this.initial.statuses, this.initial.nextMaxId)
+      if (activeClient.peek() && !firstLoadSettling()) {
+        const refresh = kept.refresh()
+        if (old) trackUpdate(refresh)
+      }
+      return
+    }
     this.store = createTimelineStore(this.kind, {
       clientSource: () => activeClient.value,
       ...(this.initial ? { initial: this.initial } : {}),
     })
+    if (keep) stores.set(this.kind, this.store)
     this.bind(this.store)
     // The server already paid for the first page when `initial` is set.
     if (!this.initial) void this.store.load()
@@ -110,6 +158,7 @@ export class CaribouTimeline extends LitElement {
       if (!sameItems(statuses, this.statuses)) this.statuses = statuses
       this.loading = store.loading.value
       this.errorMsg = store.error.value?.message ?? null
+      this.failedOlder = store.failedOp.value === 'loadMore'
       this.hasMore = store.hasMore.value
       this.newPostsCount = store.newPostsCount.value
       this.canFetch = activeClient.value !== null
@@ -129,7 +178,10 @@ export class CaribouTimeline extends LitElement {
     // stays a plain link to the next server-rendered page — hijacking it
     // would fetch nothing, read that as the end of the timeline, and remove
     // the only way to older posts.
-    const sentinel = this.canFetch ? this.renderRoot.querySelector('a[data-sentinel]') : null
+    //
+    // After a failed page it waits: a fresh report for an anchor still in
+    // view would fail again at once, and again. Retry starts it again.
+    const sentinel = this.canFetch && !this.errorMsg ? this.renderRoot.querySelector('a[data-sentinel]') : null
     if (sentinel === this.observedSentinel) return
     this.observedSentinel = sentinel
     this.io?.disconnect()
@@ -151,7 +203,7 @@ export class CaribouTimeline extends LitElement {
     // target only when its state changes. Observe again to get a fresh
     // report and keep loading until the anchor leaves the viewport or the
     // timeline ends (the anchor is then no longer rendered).
-    if (this.io && this.observedSentinel?.isConnected) {
+    if (this.io && this.observedSentinel?.isConnected && !this.store?.error.peek()) {
       this.io.disconnect()
       this.io.observe(this.observedSentinel)
     }
@@ -164,13 +216,15 @@ export class CaribouTimeline extends LitElement {
 
   private onApplyNewPosts = () => { this.store?.applyNewPosts() }
 
+  private onRetry = () => { void this.store?.retry() }
+
   override render() {
     // No store: this is the server. It renders from `initial` alone.
     const statuses = this.store ? this.statuses : (this.initial?.statuses ?? [])
     const hasMore = this.store ? this.hasMore : this.initial?.nextMaxId != null
-    if (this.errorMsg) {
-      return html`<div role="alert">${this.errorMsg}</div>`
-    }
+    // A failed background check must not hide the list the reader has; it
+    // shows above it until a later check works.
+    if (this.errorMsg && statuses.length === 0) return this.renderFailed()
     if (this.loading && statuses.length === 0) {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
@@ -187,6 +241,7 @@ export class CaribouTimeline extends LitElement {
     // against the current path.
     return html`
       <div>
+        ${this.errorMsg && !this.failedOlder ? this.renderFailed() : nothing}
         <caribou-new-posts-banner
           .count=${this.newPostsCount}
           @apply-new-posts=${this.onApplyNewPosts}
@@ -196,11 +251,18 @@ export class CaribouTimeline extends LitElement {
             <li><caribou-status-card data-status-id=${s.id} .status=${s}></caribou-status-card></li>
           `)}
         </ul>
-        ${hasMore
+        ${this.errorMsg && this.failedOlder
+          ? this.renderFailed()
+          : hasMore
           ? html`<a href="?max_id=${encodeURIComponent(last.id)}" rel="next" data-sentinel
                     @click=${this.onSentinelClick}>Older posts →</a>`
           : nothing}
       </div>
     `
+  }
+
+  private renderFailed() {
+    return html`<div class="failed"><div role="alert">${this.errorMsg}</div>
+      <caribou-button variant="secondary" data-action="retry" @click=${this.onRetry}>Retry</caribou-button></div>`
   }
 }

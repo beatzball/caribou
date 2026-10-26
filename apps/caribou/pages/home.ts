@@ -1,6 +1,6 @@
 import { html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
-import { LitroPage } from '@beatzball/litro/runtime'
+import { LitroPage, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { getStorage } from '../server/lib/storage.js'
@@ -8,6 +8,7 @@ import type { ShellInfo } from '../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
 import '../components/caribou-timeline.js'
+import { enterWithCache } from '../components/_page-cache.js'
 
 export interface HomeData {
   kind: 'auth-required'
@@ -30,6 +31,13 @@ export class HomePage extends LitroPage {
   protected override firstUpdated() {
     const meRaw = localStorage.getItem('caribou.activeUserKey')
     this.signedIn = !!meRaw && meRaw !== 'null' && meRaw !== '""'
+  }
+
+  // A revisit paints from the last copy at once. The page data is only the
+  // shell, so there is nothing to fetch again; the timeline checks for new
+  // posts itself (`enterWithCache`).
+  override onBeforeEnter(location: LitroLocation) {
+    return enterWithCache(this, location, () => super.onBeforeEnter(location), { refresh: false })
   }
 
   override render() {

@@ -114,6 +114,27 @@ client: `activeClient` is a new client whenever `users` changes. The browser can
 read the header because Mastodon sends `Access-Control-Expose-Headers: Link`;
 an e2e mock must send it too (`tests/e2e/bookmarks.spec.ts`).
 
+**A page the reader comes back to paints at once.** On an SPA navigation the
+router swaps a page in only when its `onBeforeEnter` returns. A page that opts
+in hands that hook to `enterWithCache` (`components/_page-cache.ts`): a page
+seen before renders its last page data at once and fetches fresh data in the
+background. `<caribou-timeline>` keeps its store in a keep-alive
+(`createKeepAlive` in `@beatzball/caribou-state`), so the list is there in the
+first frame; newer posts go to the new-posts banner, and the list does not
+move. Snapshot statuses are read back through `statusCache`. A page older than
+five minutes (`STALE_MS`) still paints at once, and `<caribou-update-notice>`
+(one live region on `body`, outside every page, so its text change is
+announced) shows "Updating…" until the refresh ends. Both caches drop everything when the
+active account changes. A full page load never reads them, so the hydration
+rule holds; it fills them, so the first move away and back is instant too.
+Threads keep their store too, so a revisit shows replies in the order the
+reader last saw. On an account change the caches empty, late results are
+dropped (`ownerGeneration()`), and cached posts lose the reader's flags.
+Home, Local, Public, profiles and threads opt in. Another page opts in with
+its own `onBeforeEnter` override and, for a list, its own `createKeepAlive`.
+`tests/e2e/page-cache.spec.ts` and `page-cache.mobile.spec.ts` hold the
+requests and check the cached paint, the banner and the restored scroll.
+
 **Server-only code stays out of the client bundle.** A page's `pageData`
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.
