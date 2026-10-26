@@ -114,6 +114,7 @@ describe('<caribou-status-card> sanitizing', () => {
     '<p><span class="h-card"><a href="https://example.social/@alice" class="u-url mention">@<span>alice</span></a></span> hello &amp; welcome</p>',
     '<p><a href="https://example.social/tags/AI" class="mention hashtag" rel="tag">#<span>AI</span></a><a href="https://example.social/tags/Tech" class="mention hashtag" rel="tag">#<span>Tech</span></a></p>',
     '<p><a href="https://example.com/a?b=1&amp;c=2" target="_blank" rel="nofollow noopener noreferrer"><span class="invisible">https://</span><span class="ellipsis">example.com/a</span></a></p>',
+    '<p><a href="https://example.com/b" target="_blank">no rel from this server</a></p>',
     '<p>5 &lt; 6 &gt; 4 "quoted" &nbsp;café \u{1F98C}</p>',
     '<p><em>em</em> <strong>strong</strong> <code>code</code></p><pre><code>a\n  b</code></pre><ul><li>one</li></ul><ol><li>two</li></ol>',
     '<p lang="de">Hallo</p>',
@@ -123,6 +124,14 @@ describe('<caribou-status-card> sanitizing', () => {
     const fromServer = sanitize(raw)
     const el = await mount(fixture({ content: fromServer }))
     expect(contentHtml(el)).toBe(fromServer)
+  })
+
+  it('adds noopener and noreferrer to a new-tab link on both sides', async () => {
+    const raw = '<p><a href="https://example.com/b" target="_blank" rel="nofollow">x</a></p>'
+    const want = '<p><a href="https://example.com/b" target="_blank" rel="nofollow noopener noreferrer">x</a></p>'
+    expect(sanitize(raw)).toBe(want)
+    const el = await mount(fixture({ content: raw }))
+    expect(contentHtml(el)).toBe(want)
   })
 })
 

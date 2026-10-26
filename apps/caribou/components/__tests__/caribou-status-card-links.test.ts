@@ -8,7 +8,7 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 const goSpy = vi.spyOn(LitroRouter, 'go').mockImplementation(async () => {})
 
 const LOCAL = '<span class="h-card"><a href="https://example.social/@alice" class="u-url mention">@<span>alice</span></a></span>'
-const REMOTE = '<span class="h-card"><a href="https://other.example/@bob" class="u-url mention" target="_blank">@<span>bob</span></a></span>'
+const REMOTE = '<span class="h-card"><a href="https://other.example/@bob" class="u-url mention" target="_blank" rel="noopener noreferrer">@<span>bob</span></a></span>'
 const TAG = '<a href="https://example.social/tags/AI" class="mention hashtag" rel="tag">#<span>AI</span></a>'
 const EXTERNAL = '<a href="https://example.com/a" target="_blank" rel="nofollow noopener noreferrer">example.com/a</a>'
 const UNKNOWN = '<a href="https://example.social/@carol" class="u-url mention">@<span>carol</span></a>'

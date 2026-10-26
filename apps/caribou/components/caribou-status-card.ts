@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
 import type { mastodon } from 'masto'
-import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
+import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
@@ -11,6 +11,9 @@ import {
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { ICONS } from './_icons.js'
+
+// The same hooks as the server's sanitizer, so the two agree on every string.
+installPurifyHooks(DOMPurify)
 
 export type StatusCardVariant = 'timeline' | 'focused' | 'ancestor' | 'descendant'
 
