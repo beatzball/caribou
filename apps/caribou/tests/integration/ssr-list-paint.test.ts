@@ -115,8 +115,13 @@ describe.skipIf(SKIP)('SSR list-paint: timelines arrive with their status cards'
     // Each card is rendered, not an empty shell waiting for JavaScript.
     const articles = body.match(/<article data-variant="timeline">/g) ?? []
     expect(articles.length).toBe(cardMatches.length)
-    const permalinks = body.match(/<a class="permalink" href="\/@[^"]+"/g) ?? []
+    // The permalink is a `<litro-link>`; its shadow root holds the real
+    // anchor that works without JavaScript.
+    const permalinks = [...body.matchAll(
+      /<litro-link\s+class="permalink" href="(\/@[^"]+)"[^>]*><template shadowroot="open"[\s\S]*?<a\s+href="([^"]+)"/g,
+    )]
     expect(permalinks.length).toBe(cardMatches.length)
+    for (const [, host, anchor] of permalinks) expect(anchor).toBe(host)
 
     // No "No posts yet." flash.
     expect(body).not.toContain('No posts yet')

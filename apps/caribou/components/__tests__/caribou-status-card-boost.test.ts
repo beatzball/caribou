@@ -41,7 +41,7 @@ describe('<caribou-status-card> boost rendering', () => {
     // Permalink targets the inner reblog (alice/inner), not the wrapper
     // (booster/wrapper) — clicking through a boost should land on the
     // boosted post's thread page.
-    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    const permalink = el.shadowRoot!.querySelector('litro-link.permalink')
     expect(permalink?.getAttribute('href')).toBe('/@alice/inner')
     expect(permalink?.querySelector('time')).toBeTruthy()
   })
@@ -54,7 +54,7 @@ describe('<caribou-status-card> boost rendering', () => {
       createdAt: '2026-04-28T12:00:00Z',
     })
     expect(el.shadowRoot!.querySelector('.boost-attribution')).toBeFalsy()
-    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    const permalink = el.shadowRoot!.querySelector('litro-link.permalink')
     expect(permalink?.getAttribute('href')).toBe('/@a/1')
   })
 
@@ -71,7 +71,7 @@ describe('<caribou-status-card> boost rendering', () => {
                  displayName: 'Carol', avatar: '', avatarStatic: '' },
       createdAt: '2026-04-28T12:00:00Z',
     })
-    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    const permalink = el.shadowRoot!.querySelector('litro-link.permalink')
     expect(permalink?.getAttribute('href'))
       .toBe('/@carol@remote.example/116527525773628717')
     expect(permalink?.getAttribute('target')).toBeNull()
@@ -90,7 +90,7 @@ describe('<caribou-status-card> boost rendering', () => {
                  avatar: '', avatarStatic: '' },
       createdAt: '2026-04-28T12:00:00Z',
     })
-    const permalink = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')
+    const permalink = el.shadowRoot!.querySelector('litro-link.permalink')
     expect(permalink?.getAttribute('href'))
       .toBe('/@magazine@bridge.example/a-KG-G6ylKSNW1-Fu18u5PnA%3Aa%3A2586892611-%2F0')
   })

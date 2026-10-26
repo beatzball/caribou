@@ -405,6 +405,8 @@ export class CaribouStatusCard extends LitElement {
     // <article> would put the post-content links (hashtags, mentions, external
     // urls) inside an <a>, and the HTML parser closes the outer anchor when
     // it sees the inner one. The timestamp anchor is the no-JS-safe primitive.
+    // `<litro-link>` keeps that anchor (the server renders it) and turns a
+    // plain click into a client-side navigation to the thread.
     return html`
       <article data-variant=${this.variant}>
         ${boostName
@@ -424,9 +426,9 @@ export class CaribouStatusCard extends LitElement {
             <header>
               <strong>${display.account.displayName || display.account.username}</strong>
               <span class="acct">@${display.account.acct}</span>
-              <a class="permalink" href=${statusPermalink(display)}>
+              <litro-link class="permalink" href=${statusPermalink(display)}>
                 <time datetime=${dt}>${timeLabel}</time>
-              </a>
+              </litro-link>
             </header>
             <div class="status-content">${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
             ${this.renderActions(display)}

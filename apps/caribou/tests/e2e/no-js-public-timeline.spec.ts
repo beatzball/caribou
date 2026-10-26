@@ -35,8 +35,8 @@ for (const route of ['/local', '/public']) {
     const first = page.locator('caribou-status-card').first()
     await expect(first.locator('article')).toBeVisible()
     await expect(first.locator('header strong')).not.toBeEmpty()
-    await expect(first.locator('a.permalink time')).toBeVisible()
-    await expect(first.locator('a.permalink')).toHaveAttribute('href', /^\/@[^/]+\/.+/)
+    await expect(first.locator('litro-link.permalink time')).toBeVisible()
+    await expect(first.locator('litro-link.permalink')).toHaveAttribute('href', /^\/@[^/]+\/.+/)
   })
 }
 

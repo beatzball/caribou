@@ -23,6 +23,7 @@ interface ServerPageAtSwap {
 //
 // With no instance cookie and no session the three timeline routes render
 // their auth-required placeholder, so they need no upstream and add nothing.
+// The thread route renders its instance placeholder for the same reason.
 const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/', adds: [] },
   { route: '/?error=denied', adds: ['caribou-error-banner > div'] },
@@ -33,6 +34,7 @@ const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/home', adds: [] },
   { route: '/local', adds: [] },
   { route: '/public', adds: [] },
+  { route: '/@alice@example.social/123', adds: [] },
 ]
 
 function collectErrors(page: Page): string[] {
