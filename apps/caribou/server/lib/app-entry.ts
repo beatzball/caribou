@@ -7,8 +7,11 @@
 // browser has cached yet. See `nitro.config.ts` for where the version comes
 // from.
 //
-// Unset outside a production build (dev, unit tests): Litro then uses the
-// bare `/_litro/app.js`.
+// Unset when no client build exists (unit tests, a fresh clone): Litro then
+// uses the bare `/_litro/app.js`. Under `litro dev` it can be the hash of a
+// leftover `dist/client/app.js`; that does no harm, because the dev live
+// entry takes no `appScriptUrl`, and without it the bare file is served
+// `no-cache` either way.
 declare const __CARIBOU_APP_ENTRY_VERSION__: string | undefined
 
 export const APP_SCRIPT_URL: string | undefined =

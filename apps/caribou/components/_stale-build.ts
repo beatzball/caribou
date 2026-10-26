@@ -14,36 +14,74 @@
 
 const KEY = 'caribou.stale-reload'
 
-// A load brings the tab onto the build the server has now, so a second
-// failure soon after means that build is broken too, and loading again would
-// loop. A deploy after this window can recover the tab again.
-const GUARD_MS = 30_000
+// How many tried (build, URL) pairs to remember. Only the latest matter: a
+// loop repeats one pair, which then is always among them.
+const MAX_TRIED = 20
 
 // Set once a load has started. Both handlers can see the same failure (the
 // preload helper fires its event, then rethrows into the route action), and
 // only the first one may act.
 let reloading = false
 
+export interface StaleBuildEnv {
+  assign: (href: string) => void
+  /** The build this document runs, from the entry's `?v=`. */
+  version: () => string
+  online: () => boolean
+}
+
+const browserEnv: StaleBuildEnv = {
+  assign: (href) => location.assign(href),
+  version: documentBuildVersion,
+  online: () => navigator.onLine !== false,
+}
+
 /**
- * Loads `href` from the server, unless this tab already did that for a failed
- * import in the last `GUARD_MS`. Returns whether a load is under way.
+ * The `?v=` of the entry script this page loaded (see
+ * `server/lib/app-entry.ts`), or `''` where the entry has none (dev).
  */
-export function reloadOnce(
-  href: string,
-  assign: (href: string) => void = (h) => location.assign(h),
-  now: number = Date.now(),
-): boolean {
+export function documentBuildVersion(): string {
+  const entry = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/_litro/app.js"]')
+  if (!entry) return ''
+  return new URL(entry.src, location.href).searchParams.get('v') ?? ''
+}
+
+/**
+ * Whether `err` says a module could not be fetched, rather than that one
+ * loaded and threw. Each engine words it its own way, always as a TypeError:
+ * Chromium "Failed to fetch dynamically imported module", Firefox "error
+ * loading dynamically imported module", WebKit "Importing a module script
+ * failed". `tests/e2e/stale-build.spec.ts` checks all three against a real 404.
+ */
+export function isModuleLoadError(err: unknown): boolean {
+  return err instanceof TypeError
+    && /dynamically imported module|importing a module script failed/i.test(err.message)
+}
+
+/**
+ * Loads `href` from the server, once for each pair of (the build this page
+ * runs, `href`). The full load runs the build the server has now, so it has
+ * a different version: if the chunk is missing there too, that pair is tried
+ * once more and then never again, however long each load takes. A later
+ * deploy is a new version and may try again. Returns whether a load is under
+ * way.
+ */
+export function reloadOnce(href: string, env: StaleBuildEnv = browserEnv): boolean {
   if (reloading) return true
+  // Offline, the full load would only swap the page for the browser's error
+  // page. Leave the reader where they are.
+  if (!env.online()) return false
+  const pair = `${env.version()} ${href}`
   try {
-    const last = Number(sessionStorage.getItem(KEY))
-    if (last && now - last >= 0 && now - last < GUARD_MS) return false
-    sessionStorage.setItem(KEY, String(now))
+    const tried: string[] = JSON.parse(sessionStorage.getItem(KEY) ?? '[]')
+    if (tried.includes(pair)) return false
+    sessionStorage.setItem(KEY, JSON.stringify([...tried, pair].slice(-MAX_TRIED)))
   } catch {
     // Without sessionStorage there is no guard against a loop, so do not load.
     return false
   }
   reloading = true
-  assign(href)
+  env.assign(href)
   return true
 }
 
@@ -59,12 +97,11 @@ interface RouteWithAction {
 /**
  * Wraps each route's action so a failed import loads the target URL from the
  * server. The router has already pushed the new URL when the action runs, so
- * `location.href` is the page the reader asked for.
+ * `location.href` is the page the reader asked for. A module that loaded and
+ * threw is a bug in this build, not a stale tab, so its error goes on to the
+ * router as before.
  */
-export function withStaleBuildReload<R extends RouteWithAction>(
-  routes: R[],
-  assign?: (href: string) => void,
-): R[] {
+export function withStaleBuildReload<R extends RouteWithAction>(routes: R[], env?: StaleBuildEnv): R[] {
   return routes.map((route) => {
     const action = route.action
     if (!action) return route
@@ -74,9 +111,12 @@ export function withStaleBuildReload<R extends RouteWithAction>(
         try {
           await action()
         } catch (err) {
+          if (!isModuleLoadError(err)) throw err
+          // The unload drops the console in some browsers; say why first.
+          console.error('[caribou] a page chunk failed to load; loading the page from the server', err)
           // The page is going away. Keep the router waiting rather than let
           // it mount an element whose class never loaded.
-          if (reloadOnce(location.href, assign)) return new Promise<never>(() => {})
+          if (reloadOnce(location.href, env)) return new Promise<never>(() => {})
           throw err
         }
       },
@@ -84,7 +124,12 @@ export function withStaleBuildReload<R extends RouteWithAction>(
   })
 }
 
-/** Reloads on Vite's `vite:preloadError`, once per URL. */
-export function installPreloadErrorReload(target: EventTarget, assign?: (href: string) => void): void {
-  target.addEventListener('vite:preloadError', () => { reloadOnce(location.href, assign) })
+/** Reloads on Vite's `vite:preloadError` when a module failed to load. */
+export function installPreloadErrorReload(target: EventTarget, env?: StaleBuildEnv): void {
+  target.addEventListener('vite:preloadError', (event) => {
+    const err = (event as Event & { payload?: unknown }).payload
+    if (!isModuleLoadError(err)) return
+    console.error('[caribou] a chunk failed to load; loading the page from the server', err)
+    reloadOnce(location.href, env)
+  })
 }

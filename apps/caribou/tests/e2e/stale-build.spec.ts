@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { expect, test, type Page } from '@playwright/test'
 
 // A deploy replaces every hashed chunk. A browser must never keep an entry
@@ -31,15 +32,35 @@ test('the page loads a versioned entry, and only hashed assets are immutable', a
     expect(res.headers()['etag']).toBeTruthy()
   }
 
-  // The entry no longer holds code other chunks import, so a chunk never
-  // asks for app.js under a second URL.
-  const entry = await (await request.get(src!)).text()
-  const chunk = /\.\/assets\/app-main-[\w-]+\.js/.exec(entry)?.[0]
-  expect(chunk).toBeTruthy()
-  const res = await request.get(`/_litro/${chunk!.slice(2)}`)
-  expect(res.headers()['cache-control']).toBe('public, max-age=31536000, immutable')
-  expect(await res.text()).not.toMatch(/["'`]\.\.\/app\.js["'`]/)
+  // The version is the entry's own content hash, so it moves with every build.
+  const entry = await (await request.get('/_litro/app.js')).body()
+  expect(src).toBe(`/_litro/app.js?v=${createHash('sha256').update(entry).digest('hex').slice(0, 12)}`)
+
+  // The entry holds no code other chunks import, so no chunk asks for it
+  // under a second URL. Walk every chunk the entry can reach.
+  const seen = new Set<string>()
+  const queue = [...chunkNames(entry.toString())]
+  while (queue.length > 0) {
+    const name = queue.pop()!
+    if (seen.has(name)) continue
+    seen.add(name)
+    const res = await request.get(`/_litro/assets/${name}`)
+    expect(res.status(), name).toBe(200)
+    expect(res.headers()['cache-control'], name).toBe('public, max-age=31536000, immutable')
+    const js = await res.text()
+    // A static or dynamic import of the entry, or the entry in a preload list.
+    expect(js, name).not.toMatch(/(?:from|import\s*\(?)\s*["'`][^"'`]*\/app\.js[?"'`]|["'`]app\.js["'`]/)
+    queue.push(...chunkNames(js))
+  }
+  // app-main, boot and every page chunk at least.
+  expect(seen.size).toBeGreaterThan(10)
 })
+
+// Hashed chunk names a file mentions (`x-<8-char hash>.js`): `./x.js` and
+// `./assets/x.js` imports, and `assets/x.js` in Vite's preload lists.
+function chunkNames(js: string): string[] {
+  return [...js.matchAll(/(?:\.\/|assets\/)(?:assets\/)?([\w@-]+-[\w-]{8}\.js)\b/g)].map((m) => m[1]!)
+}
 
 // Rewrites every chunk name a file mentions, `x-<hash>.js` → `x-<hash>.old.js`.
 const toOld = (js: string) => js.replace(/((?:\.\/|assets\/)[\w@-]+)\.js\b/g, '$1.old.js')
