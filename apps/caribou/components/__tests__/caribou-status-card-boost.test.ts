@@ -37,7 +37,7 @@ describe('<caribou-status-card> boost rendering', () => {
     expect(el.shadowRoot!.textContent).toContain('Alice')
     expect(el.shadowRoot!.textContent).toContain('Booster')
     expect(el.shadowRoot!.querySelector('.boost-attribution')).toBeTruthy()
-    expect(el.shadowRoot!.querySelector('.boost-attribution svg')).toBeTruthy()
+    expect(el.shadowRoot!.querySelector('.boost-attribution caribou-icon[name="repeat2"]')).toBeTruthy()
     // Permalink targets the inner reblog (alice/inner), not the wrapper
     // (booster/wrapper) — clicking through a boost should land on the
     // boosted post's thread page.

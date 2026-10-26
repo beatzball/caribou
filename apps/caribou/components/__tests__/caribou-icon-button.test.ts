@@ -82,6 +82,56 @@ describe('caribou-icon-button', () => {
     expect(onClick).toHaveBeenCalledOnce()
   })
 
+  it('soft-disabled: stays a focusable button with aria-disabled, and the host reports no click', async () => {
+    const el = await mount({ icon: 'repeat2', label: 'Boost', 'soft-disabled': '' })
+    const b = inner(el)
+    expect(b.disabled).toBe(false)
+    expect(b.getAttribute('aria-disabled')).toBe('true')
+    const onClick = vi.fn()
+    el.addEventListener('click', onClick)
+    b.click()
+    el.click()
+    expect(onClick).not.toHaveBeenCalled()
+    el.softDisabled = false
+    await el.updateComplete
+    expect(b.hasAttribute('aria-disabled')).toBe(false)
+    b.click()
+    expect(onClick).toHaveBeenCalledOnce()
+  })
+
+  it('hint replaces the tooltip; the label stays the name', async () => {
+    const el = await mount({ icon: 'repeat2', label: 'Boost', hint: 'Sign in to boost' })
+    expect(inner(el).getAttribute('aria-label')).toBe('Boost')
+    expect(inner(el).title).toBe('Sign in to boost')
+    el.hint = ''
+    await el.updateComplete
+    expect(inner(el).title).toBe('Boost')
+  })
+
+  it('links the description from inside its own shadow root', async () => {
+    const el = await mount({ icon: 'star', label: 'Favourite', description: '3 favourites' })
+    const id = inner(el).getAttribute('aria-describedby')!
+    expect(el.shadowRoot!.getElementById(id)!.textContent).toBe('3 favourites')
+    el.description = ''
+    await el.updateComplete
+    expect(inner(el).hasAttribute('aria-describedby')).toBe(false)
+  })
+
+  it('ghost: marks the button, and fills the icon only while pressed', async () => {
+    const el = await mount({ icon: 'star', label: 'Favourite', variant: 'ghost', pressed: 'false' })
+    const icon = () => el.shadowRoot!.querySelector('caribou-icon')!
+    expect(inner(el).dataset.variant).toBe('ghost')
+    expect(icon().hasAttribute('filled')).toBe(false)
+    el.pressed = true
+    await el.updateComplete
+    expect(icon().hasAttribute('filled')).toBe(true)
+    // The bordered default shows "on" with its fill colour instead.
+    el.variant = 'default'
+    await el.updateComplete
+    expect(inner(el).hasAttribute('data-variant')).toBe(false)
+    expect(icon().hasAttribute('filled')).toBe(false)
+  })
+
   it('delegates focus to the inner button', async () => {
     const el = await mount({ icon: 'star', label: 'Favourite' })
     // happy-dom ignores delegatesFocus; the e2e spec checks the real Tab order.

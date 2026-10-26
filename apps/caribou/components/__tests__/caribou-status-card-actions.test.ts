@@ -43,9 +43,13 @@ async function mount(status: Status, instance?: string): Promise<CaribouStatusCa
   return el
 }
 
+// The native button inside each action's `<caribou-icon-button>`.
 function button(el: CaribouStatusCard, cls: string): HTMLButtonElement {
-  return el.shadowRoot!.querySelector<HTMLButtonElement>(`.actions button.${cls}`)!
+  const host = el.shadowRoot!.querySelector(`.actions caribou-icon-button.${cls}`)!
+  return host.shadowRoot!.querySelector('button')!
 }
+
+const isSoftDisabled = (b: HTMLButtonElement) => b.getAttribute('aria-disabled') === 'true'
 
 beforeEach(() => {
   document.body.replaceChildren()
@@ -80,7 +84,9 @@ describe('<caribou-status-card> action bar', () => {
   it('without a client every button is aria-disabled with a sign-in hint, and a click does nothing', async () => {
     const el = await mount(post())
     for (const cls of ['reply', 'boost', 'favourite', 'bookmark']) {
-      expect(button(el, cls).getAttribute('aria-disabled')).toBe('true')
+      expect(isSoftDisabled(button(el, cls))).toBe(true)
+      // Still reachable, so a reader hears the sign-in hint.
+      expect(button(el, cls).disabled).toBe(false)
     }
     expect(button(el, 'favourite').title).toBe('Sign in to favourite')
     const compose = vi.fn()
@@ -96,7 +102,7 @@ describe('<caribou-status-card> action bar', () => {
   it('stays disabled when the client is on another instance', async () => {
     signIn('other.example')
     const el = await mount(post(), 'example.social')
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(true)
   })
 
   it('reads the instance off the enclosing app shell', async () => {
@@ -106,14 +112,15 @@ describe('<caribou-status-card> action bar', () => {
     render(html`<caribou-app-shell instance="example.social"><caribou-status-card .status=${post()}></caribou-status-card></caribou-app-shell>`, host)
     const el = host.querySelector('caribou-status-card') as CaribouStatusCard
     while (!(await el.updateComplete)) { /* settle */ }
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(true)
   })
 
   it('matches the instance case-insensitively and enables the bar', async () => {
     signIn('Example.Social')
     const el = await mount(post(), 'example.social')
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false')
-    expect(button(el, 'favourite').hasAttribute('title')).toBe(false)
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(false)
+    // No hint: the tooltip is the action's name.
+    expect(button(el, 'favourite').title).toBe('Favourite')
   })
 
   it('favourite click flips the button before the server answers, then shows its count', async () => {
@@ -139,9 +146,11 @@ describe('<caribou-status-card> action bar', () => {
 
   it('describes each button with its count, and the sign-in hint when signed out', async () => {
     const el = await mount(post({ repliesCount: 1, favouritesCount: 0 }))
+    // The description lives beside the button, in the icon button's root.
     const desc = (cls: string) => {
-      const id = button(el, cls).getAttribute('aria-describedby')
-      return id ? el.shadowRoot!.getElementById(id)?.textContent : null
+      const b = button(el, cls)
+      const id = b.getAttribute('aria-describedby')
+      return id ? (b.getRootNode() as ShadowRoot).getElementById(id)?.textContent : null
     }
     expect(desc('reply')).toBe('1 reply. Sign in to reply')
     expect(desc('boost')).toBe('2 boosts. Sign in to boost')
@@ -156,10 +165,10 @@ describe('<caribou-status-card> action bar', () => {
   it('decides again when the instance property changes', async () => {
     signIn('example.social')
     const el = await mount(post(), 'other.example')
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(true)
     el.instance = 'example.social'
     await el.updateComplete
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(false)
   })
 
   it("decides again when the shell's instance changes", async () => {
@@ -169,9 +178,9 @@ describe('<caribou-status-card> action bar', () => {
     render(html`<caribou-app-shell instance="other.example"><caribou-status-card .status=${post()}></caribou-status-card></caribou-app-shell>`, host)
     const el = host.querySelector('caribou-status-card') as CaribouStatusCard
     while (!(await el.updateComplete)) { /* settle */ }
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(true)
     host.querySelector('caribou-app-shell')!.setAttribute('instance', 'example.social')
-    await vi.waitFor(() => expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false'))
+    await vi.waitFor(() => expect(isSoftDisabled(button(el, 'favourite'))).toBe(false))
   })
 
   it('shows cache updates even when the parent keeps the old .status object', async () => {
@@ -215,7 +224,7 @@ describe('<caribou-status-card> action bar', () => {
     signIn('example.social', '42')
     const el = await mount(post({ visibility: 'direct' }))
     const boost = button(el, 'boost')
-    expect(boost.getAttribute('aria-disabled')).toBe('true')
+    expect(isSoftDisabled(boost)).toBe(true)
     expect(boost.title).toBe('This post cannot be boosted')
     const reblog = vi.spyOn(activeClient.value!, 'reblog')
     boost.click()
@@ -225,22 +234,22 @@ describe('<caribou-status-card> action bar', () => {
   it('disables boost on a followers-only post by someone else', async () => {
     signIn()
     const el = await mount(post({ visibility: 'private' }))
-    expect(button(el, 'boost').getAttribute('aria-disabled')).toBe('true')
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false')
+    expect(isSoftDisabled(button(el, 'boost'))).toBe(true)
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(false)
   })
 
   it('allows boosting your own followers-only post', async () => {
     signIn('example.social', '42')
     const el = await mount(post({ visibility: 'private' }))
-    expect(button(el, 'boost').getAttribute('aria-disabled')).toBe('false')
+    expect(isSoftDisabled(button(el, 'boost'))).toBe(false)
   })
 
   it('re-enables after sign-in without a remount', async () => {
     const el = await mount(post())
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('true')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(true)
     signIn()
     await el.updateComplete
-    expect(button(el, 'favourite').getAttribute('aria-disabled')).toBe('false')
+    expect(isSoftDisabled(button(el, 'favourite'))).toBe(false)
   })
 
   it('a new .status replaces the cached fields of the old one', async () => {

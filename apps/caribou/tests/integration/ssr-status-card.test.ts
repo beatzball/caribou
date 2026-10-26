@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { html } from 'lit'
 import { ssr } from './_ssr.js'
 import '../../components/caribou-status-card.js'
+import { SSR_STATUS, SSR_STATUS_CARD, withoutTime } from '../e2e/_status-card-ssr.js'
 
 const STATUS = {
   id: '42',
@@ -55,11 +56,23 @@ describe('caribou-status-card SSR', () => {
   it('prints the action bar in its signed-out state, with counts and pressed state from the status', async () => {
     const s = { ...STATUS, visibility: 'public', favourited: true, favouritesCount: 5, reblogsCount: 0, repliesCount: 2, bookmarked: false }
     const out = await ssr(html`<caribou-status-card .status=${s}></caribou-status-card>`)
-    expect(out).toMatch(/<button[^>]*class="favourite"[^>]*aria-label="Unfavourite"[^>]*aria-pressed="true"[^>]*aria-disabled="true"[^>]*title="Sign in to favourite"/)
-    expect(out).toMatch(/<button[^>]*class="boost"[^>]*aria-label="Boost"[^>]*aria-pressed="false"/)
-    expect(out).toMatch(/<button[^>]*class="reply"[^>]*aria-label="Reply"/)
-    expect(out).toMatch(/<button[^>]*class="bookmark"[^>]*aria-label="Bookmark"/)
-    expect(out).toContain('<span class="count"><!--lit-part-->5<!--/lit-part--></span>')
-    expect(out).toContain('<span class="count"><!--lit-part-->2<!--/lit-part--></span>')
+    // Each action is a soft-disabled ghost icon button; its own shadow root
+    // is in the server HTML, with the hint as the tooltip.
+    expect(out).toMatch(/<caribou-icon-button[^>]*class="favourite"[^>]*label="Unfavourite"[^>]*pressed="true"[^>]*hint="Sign in to favourite"[^>]*soft-disabled/)
+    expect(out).toMatch(/<caribou-icon-button[^>]*class="boost"[^>]*label="Boost"[^>]*pressed="false"/)
+    expect(out).toMatch(/<caribou-icon-button[^>]*class="reply"[^>]*label="Reply"/)
+    expect(out).toMatch(/<caribou-icon-button[^>]*class="bookmark"[^>]*label="Bookmark"/)
+    expect(out).toMatch(/<button[^>]*aria-label="Unfavourite" title="Sign in to favourite"\s*aria-pressed="true"\s*aria-disabled="true"/)
+    expect(out.match(/<caribou-icon-button\s/g)).toHaveLength(4)
+    expect(out).toContain('<span class="count" part="count"><!--lit-part-->5<!--/lit-part--></span>')
+    expect(out).toContain('<span class="count" part="count"><!--lit-part-->2<!--/lit-part--></span>')
+  })
+})
+
+describe('the server markup the e2e card hydration spec replays', () => {
+  it('matches a fresh server render', async () => {
+    const out = await ssr(html`<caribou-status-card .status=${SSR_STATUS}></caribou-status-card>`)
+    const el = out.slice(out.indexOf('<caribou-status-card'), out.lastIndexOf('</caribou-status-card>') + '</caribou-status-card>'.length)
+    expect(withoutTime(el.replace(/<style>[\s\S]*?<\/style>/g, ''))).toBe(SSR_STATUS_CARD)
   })
 })

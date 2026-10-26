@@ -10,7 +10,8 @@ import {
   activeClient, activeUser, isOwnAccount, statusCache,
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
-import { ICONS } from './_icons.js'
+import './caribou-icon.js'
+import './caribou-icon-button.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -150,22 +151,11 @@ export class CaribouStatusCard extends LitElement {
       display: flex; gap: var(--space-4); margin-top: var(--space-3);
       margin-inline-start: calc(-1 * var(--space-2));
     }
-    .actions button {
-      display: inline-flex; align-items: center; gap: var(--space-1);
-      min-width: 2.5rem; min-height: 2rem; padding: 0 var(--space-2);
-      border: 0; border-radius: var(--radius-md); background: none;
-      color: var(--fg-muted); font: inherit; font-size: 0.875rem; cursor: pointer;
-    }
-    .actions button:hover:not([aria-disabled="true"]) { color: var(--fg-0); background: var(--bg-1); }
-    .actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .actions button[aria-disabled="true"] { cursor: default; opacity: 0.6; }
-    .actions button[aria-pressed="true"] { color: var(--accent); }
-    .actions button.boost[aria-pressed="true"] { color: var(--success); }
-    .actions button[aria-pressed="true"] svg path { fill: currentColor; }
-    .actions button.boost[aria-pressed="true"] svg path { fill: none; }
-    .sr-only {
-      position: absolute; width: 1px; height: 1px; overflow: hidden;
-      clip-path: inset(50%); white-space: nowrap;
+    .actions caribou-icon-button { font-size: 0.875rem; }
+    /* Repeat is all lines: a pressed boost changes colour, not fill. */
+    .actions .boost {
+      --caribou-icon-button-pressed-fg: var(--success);
+      --caribou-icon-fill: none;
     }
     .boost-attribution {
       display: flex; gap: var(--space-2); align-items: center;
@@ -314,48 +304,35 @@ export class CaribouStatusCard extends LitElement {
     const boostHint = !boostable
       ? 'This post cannot be boosted'
       : off ? 'Sign in to boost' : ''
-    const count = (n: number) => n > 0 ? html`<span class="count">${n}</span>` : nothing
-    const title = (hint: string) => hint || nothing
+    const count = (n: number) => n > 0 ? String(n) : ''
     // The label names the action; the description carries the count and
-    // the hint a mouse user reads in the title. Ids are scoped to this
-    // card's shadow root.
+    // the hint a mouse user reads in the title.
     const describe = (...parts: string[]) => parts.filter(Boolean).join('. ')
     const hint = (verb: string) => off ? `Sign in to ${verb}` : ''
-    const d = {
-      reply: describe(plural(f.repliesCount, 'reply', 'replies'), hint('reply')),
-      boost: describe(plural(f.reblogsCount, 'boost', 'boosts'), boostHint),
-      favourite: describe(plural(f.favouritesCount, 'favourite', 'favourites'), hint('favourite')),
-      bookmark: hint('bookmark'),
-    }
     return html`
       <div class="actions" role="group" aria-label="Post actions">
-        <button type="button" class="reply" aria-label="Reply"
-                aria-describedby="desc-reply"
-                aria-disabled=${off ? 'true' : 'false'}
-                title=${title(hint('reply'))}
-                @click=${this.onReply}>${ICONS.messageCircle}${count(f.repliesCount)}</button>
-        <button type="button" class="boost" aria-label=${f.reblogged ? 'Undo boost' : 'Boost'}
-                aria-describedby="desc-boost"
-                aria-pressed=${f.reblogged ? 'true' : 'false'}
-                aria-disabled=${off || !boostable ? 'true' : 'false'}
-                title=${title(boostHint)}
-                @click=${this.onBoost}>${ICONS.repeat2}${count(f.reblogsCount)}</button>
-        <button type="button" class="favourite" aria-label=${f.favourited ? 'Unfavourite' : 'Favourite'}
-                aria-describedby="desc-favourite"
-                aria-pressed=${f.favourited ? 'true' : 'false'}
-                aria-disabled=${off ? 'true' : 'false'}
-                title=${title(hint('favourite'))}
-                @click=${this.onFavourite}>${ICONS.star}${count(f.favouritesCount)}</button>
-        <button type="button" class="bookmark" aria-label=${f.bookmarked ? 'Remove bookmark' : 'Bookmark'}
-                aria-describedby=${d.bookmark ? 'desc-bookmark' : nothing}
-                aria-pressed=${f.bookmarked ? 'true' : 'false'}
-                aria-disabled=${off ? 'true' : 'false'}
-                title=${title(hint('bookmark'))}
-                @click=${this.onBookmark}>${ICONS.bookmark}</button>
-        <span class="sr-only" id="desc-reply">${d.reply}</span>
-        <span class="sr-only" id="desc-boost">${d.boost}</span>
-        <span class="sr-only" id="desc-favourite">${d.favourite}</span>
-        <span class="sr-only" id="desc-bookmark">${d.bookmark}</span>
+        <caribou-icon-button class="reply" variant="ghost" icon="messageCircle" label="Reply"
+          count=${count(f.repliesCount)} hint=${hint('reply')}
+          description=${describe(plural(f.repliesCount, 'reply', 'replies'), hint('reply'))}
+          ?soft-disabled=${off}
+          @click=${this.onReply}></caribou-icon-button>
+        <caribou-icon-button class="boost" variant="ghost" icon="repeat2" label=${f.reblogged ? 'Undo boost' : 'Boost'}
+          pressed=${f.reblogged ? 'true' : 'false'}
+          count=${count(f.reblogsCount)} hint=${boostHint}
+          description=${describe(plural(f.reblogsCount, 'boost', 'boosts'), boostHint)}
+          ?soft-disabled=${off || !boostable}
+          @click=${this.onBoost}></caribou-icon-button>
+        <caribou-icon-button class="favourite" variant="ghost" icon="star" label=${f.favourited ? 'Unfavourite' : 'Favourite'}
+          pressed=${f.favourited ? 'true' : 'false'}
+          count=${count(f.favouritesCount)} hint=${hint('favourite')}
+          description=${describe(plural(f.favouritesCount, 'favourite', 'favourites'), hint('favourite'))}
+          ?soft-disabled=${off}
+          @click=${this.onFavourite}></caribou-icon-button>
+        <caribou-icon-button class="bookmark" variant="ghost" icon="bookmark" label=${f.bookmarked ? 'Remove bookmark' : 'Bookmark'}
+          pressed=${f.bookmarked ? 'true' : 'false'}
+          hint=${hint('bookmark')} description=${hint('bookmark')}
+          ?soft-disabled=${off}
+          @click=${this.onBookmark}></caribou-icon-button>
       </div>
     `
   }
@@ -456,7 +433,7 @@ export class CaribouStatusCard extends LitElement {
       <article data-variant=${this.variant}>
         ${boostName
           ? html`<div class="boost-attribution">
-                   <span class="boost-icon">${ICONS.repeat2}</span>
+                   <caribou-icon class="boost-icon" name="repeat2"></caribou-icon>
                    <span>${boostName} boosted</span>
                  </div>`
           : nothing}
