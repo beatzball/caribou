@@ -91,6 +91,20 @@ test('a tap opens More above the bar, inside the viewport, with 44px items', asy
   expect((await signOut.boundingBox())!.height).toBeGreaterThanOrEqual(44)
 })
 
+test('More shows the current mark while a page from its menu is shown', async ({ page }) => {
+  await signedIn(page)
+  await gotoSettled(page, '/local')
+  const more = rail(page).locator('caribou-menu.more')
+  await expect(more).not.toHaveAttribute('data-current')
+  const plain = await trigger(page).evaluate((el) => getComputedStyle(el).backgroundColor)
+  await trigger(page).tap()
+  await rail(page).getByRole('link', { name: 'Public', exact: true }).tap()
+  await expect(page.locator('litro-outlet > page-public:not([hidden])')).toHaveCount(1)
+  await expect(page.locator('litro-outlet > *')).toHaveCount(1)
+  await expect(more).toHaveAttribute('data-current', '')
+  expect(await trigger(page).evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(plain)
+})
+
 test('a tap outside closes More', async ({ page }) => {
   await signedIn(page)
   await gotoSettled(page, '/local')

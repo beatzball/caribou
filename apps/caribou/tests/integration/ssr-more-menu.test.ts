@@ -9,9 +9,15 @@ import '../../components/caribou-nav-rail.js'
 describe('SSR: the nav rail\'s More menu', () => {
   it('renders a native popover trigger and panel', async () => {
     const out = (await ssr(html`<caribou-nav-rail></caribou-nav-rail>`)).replace(/<style>[\s\S]*?<\/style>/g, '')
-    expect(out).toMatch(/<caribou-menu\s+class="more" icon="ellipsis" label="More"/)
-    expect(out).toMatch(/<button type="button" class="trigger" part="trigger" popovertarget="panel"/)
-    expect(out).toMatch(/<div\s+id="panel" class="panel" part="panel" popover/)
+    // Each attribute on its own, so a harmless reorder in a template does
+    // not fail this.
+    const tag = (name: string, has: string) => out.match(new RegExp(`<${name}\\s[^>]*${has}[^>]*>`))?.[0] ?? ''
+    const menu = tag('caribou-menu', 'class="more"')
+    for (const attr of ['icon="ellipsis"', 'label="More"']) expect(menu).toContain(attr)
+    const trigger = tag('button', 'class="trigger"')
+    for (const attr of ['type="button"', 'popovertarget="panel"']) expect(trigger).toContain(attr)
+    const panel = tag('div', 'id="panel"')
+    expect(panel).toMatch(/\spopover[\s>]/)
     // Rendered "false", it would stay wrong on a menu opened without JS.
     expect(out).not.toContain('aria-expanded')
     expect(out.match(/<form action="\/api\/signout" method="post"/g)).toHaveLength(2)

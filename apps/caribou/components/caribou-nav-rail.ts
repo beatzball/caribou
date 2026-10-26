@@ -100,6 +100,10 @@ export class CaribouNavRail extends LitElement {
        in the menu, and display: none keeps the hidden copy out of the
        accessibility tree, so a name is never heard twice. */
     .more { display: none; }
+    /* The bar hides the rail's copy of a moved item, so More shows its
+       current and pending marks. */
+    .more[data-current]::part(trigger) { background: var(--bg-2); color: var(--fg-0); }
+    .more[data-pending]::part(trigger) { color: var(--fg-0); box-shadow: inset 0 -2px 0 var(--accent); }
     caribou-menu .menu-item {
       display: flex; align-items: center; justify-content: flex-start; gap: var(--space-2);
       width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3);
@@ -108,8 +112,9 @@ export class CaribouNavRail extends LitElement {
       .in-more, nav > caribou-signout-form { display: none; }
       .more {
         display: inline-flex;
-        /* Above the bar (61px with its border) and clear of the iOS edges. */
-        --caribou-menu-bottom: calc(61px + var(--space-2) + env(safe-area-inset-bottom, 0px));
+        /* Above the bar and clear of the iOS edges. The bar is a 44px item,
+           its padding and its 1px top border; the last --space-2 is the gap. */
+        --caribou-menu-bottom: calc(44px + 3 * var(--space-2) + 1px + env(safe-area-inset-bottom, 0px));
         --caribou-menu-right: calc(var(--space-2) + env(safe-area-inset-right, 0px));
       }
     }
@@ -174,14 +179,17 @@ export class CaribouNavRail extends LitElement {
 
   override render() {
     const active = this.current || this.path
+    const moved = ITEMS.filter((it) => it.more)
     return html`
       <nav aria-label="Primary">
         ${ITEMS.map((it) => this.renderItem(it, active))}
         <caribou-button variant="primary" class="compose-btn" @click=${openCompose}
           ><caribou-icon class="icon" name="squarePen"></caribou-icon><span class="label">New post</span></caribou-button>
         ${this.renderItem(PROFILE, active)}
-        <caribou-menu class="more" icon="ellipsis" label="More">
-          ${ITEMS.filter((it) => it.more).map((it) => html`<a href=${it.href} class="menu-item"
+        <caribou-menu class="more" icon="ellipsis" label="More"
+          ?data-current=${moved.some((it) => it.href === active)}
+          ?data-pending=${moved.some((it) => it.href === this.pending)}>
+          ${moved.map((it) => html`<a href=${it.href} class="menu-item"
             aria-current=${it.href === active ? 'page' : nothing} @click=${spaClick}
             ><caribou-icon class="icon" name=${it.icon}></caribou-icon>${it.label}</a>`)}
           <caribou-signout-form>

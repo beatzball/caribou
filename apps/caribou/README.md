@@ -186,8 +186,10 @@ The phone nav bar uses it for More (Public, Bookmarks, Sign out).
   element's shadow root. It is 44px square; `label` is its name.
 - With JavaScript it also sets `aria-expanded`, focuses the first item on
   open, returns focus to the trigger when the menu closes from inside, and
-  closes when an item is chosen. A browser without the Popover API gets the
-  same from a script fallback.
+  closes when an item is chosen or focus leaves it. A browser without the
+  Popover API gets the same from a script fallback, but only with
+  JavaScript on: an old browser with JavaScript off cannot open the menu,
+  so on a phone its items are out of reach there.
 - The panel is fixed above the viewport's bottom-right corner;
   `--caribou-menu-bottom` and `--caribou-menu-right` move it. It never grows
   past the viewport. Parts: `trigger`, `icon`, `panel`.

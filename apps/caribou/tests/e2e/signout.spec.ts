@@ -70,6 +70,30 @@ test('signout clears localStorage, preserves the instance cookie, and redirects 
   await expect(page.locator('caribou-landing')).toHaveCount(1)
 })
 
+// On a phone Sign out is in More. The menu closes on the click, and the
+// submit must still reach <caribou-signout-form>.
+test('at phone width, sign-out through More signs out', async ({ page, context }) => {
+  await page.setViewportSize({ width: 360, height: 700 })
+  await setupSignedIn(page, context)
+  await gotoSettled(page, START_PATH)
+
+  const rail = page.locator('caribou-nav-rail')
+  await rail.getByRole('button', { name: 'More', exact: true }).click()
+  const signOut = rail.locator('caribou-menu button.signout-btn')
+  await expect(signOut).toBeVisible()
+
+  const signoutPost = page.waitForRequest(
+    (req) => req.method() === 'POST' && new URL(req.url()).pathname === '/api/signout',
+  )
+  await Promise.all([
+    page.waitForURL('**/', { timeout: 5000 }),
+    signOut.click(),
+  ])
+  await signoutPost
+  expect(await page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))).toBe('null')
+  await expect(page.locator('caribou-landing')).toHaveCount(1)
+})
+
 // The right rail's "Signed in to …" line needs an instance the server has an
 // app registration for, which an e2e run does not have; the component test
 // covers that line. The host attribute below is what both rails key off.

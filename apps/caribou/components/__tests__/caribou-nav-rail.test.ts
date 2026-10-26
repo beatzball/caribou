@@ -252,6 +252,21 @@ describe('caribou-nav-rail', () => {
       expect(submit?.textContent?.trim()).toBe('Sign out')
     })
 
+    it('marks More when a moved item is current, since its bar copy is hidden', async () => {
+      const menu = (el: CaribouNavRail) => el.shadowRoot!.querySelector('caribou-menu.more')!
+      expect(menu(await mount('/bookmarks')).hasAttribute('data-current')).toBe(true)
+      document.body.replaceChildren()
+      expect(menu(await mount('/local')).hasAttribute('data-current')).toBe(false)
+    })
+
+    it('marks More pending while a moved item\'s page loads', async () => {
+      const el = await mount('/local')
+      happyDOM.setURL('http://localhost/public')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await el.updateComplete
+      expect(el.shadowRoot!.querySelector('caribou-menu.more')!.hasAttribute('data-pending')).toBe(true)
+    })
+
     it('a menu link navigates in the app', async () => {
       const el = await mount()
       el.shadowRoot!.querySelector<HTMLAnchorElement>('caribou-menu a[href="/public"]')!.click()

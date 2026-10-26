@@ -39,6 +39,28 @@ test('Enter opens More and focuses the first item; Tab walks the items; Escape c
   await expect(trigger(page)).toBeFocused()
 })
 
+test('Tab past the last item never leaves More open behind focus', async ({ page, browserName }) => {
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+  await openLocal(page)
+  await trigger(page).focus()
+  await page.keyboard.press('Enter')
+  // The menu focuses its first item once it has opened; wait for that.
+  await expect(rail(page).getByRole('link', { name: 'Public', exact: true })).toBeFocused()
+  await rail(page).getByRole('button', { name: 'Sign out', exact: true }).focus()
+  await page.keyboard.press(tab)
+  // Chromium and WebKit move focus on to the page, and the menu closes.
+  // Firefox wraps Tab inside an open popover, back to its first item, so
+  // the menu stays open with focus still in it. Never open with focus out.
+  await expect.poll(() => rail(page).locator('caribou-menu').evaluate((m) => {
+    const open = m.shadowRoot!.querySelector('.panel')!.matches(':popover-open')
+    return open ? m.matches(':focus-within') : true
+  })).toBe(true)
+  if (browserName !== 'firefox') {
+    await expect(panel(page)).toBeHidden()
+    await expect(trigger(page)).toHaveAttribute('aria-expanded', 'false')
+  }
+})
+
 test('Space opens it too', async ({ page }) => {
   await openLocal(page)
   await trigger(page).focus()

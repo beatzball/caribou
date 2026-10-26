@@ -22,7 +22,7 @@ import './caribou-icon.js'
 //
 // With JavaScript the element keeps `aria-expanded` set, focuses the first
 // item on open, returns focus to the trigger when the menu closes from
-// inside it, and closes the menu when an item is chosen. A browser without
+// inside it, and closes the menu when an item is chosen or focus leaves it. A browser without
 // the Popover API gets the same behaviour from a script fallback.
 //
 // The panel is fixed to the viewport's bottom-right corner, where the phone
@@ -81,6 +81,7 @@ export class CaribouMenu extends LitElement {
   // Whether focus was inside when the menu began to close. Read before the
   // panel hides, because hiding it drops focus from a focused item.
   private _hadFocus = false
+  private _pressing = false
 
   get open(): boolean { return this._open }
 
@@ -102,6 +103,20 @@ export class CaribouMenu extends LitElement {
     })
     this.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this._open && !CaribouMenu.popoverSupported) this.hide()
+    })
+    // Tab past the last item leaves the menu, so the menu closes rather than
+    // cover the page under the new focus. `relatedTarget` is retargeted to
+    // this host when focus moves to the trigger. Presses are left to the
+    // light dismiss and the click: Safari does not focus a pressed button
+    // or link, it moves focus to a focusable ancestor outside the menu,
+    // and closing then would swallow the press. The mark lasts until the
+    // click, because a touch moves focus after `pointerup`.
+    this.addEventListener('pointerdown', () => { this._pressing = true })
+    this.addEventListener('click', () => { this._pressing = false })
+    this.addEventListener('keydown', () => { this._pressing = false })
+    this.addEventListener('focusout', (e) => {
+      const to = e.relatedTarget
+      if (this._open && !this._pressing && to instanceof Node && to !== this && !this.contains(to)) this.hide()
     })
   }
 

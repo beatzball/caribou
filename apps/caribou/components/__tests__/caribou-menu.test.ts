@@ -38,7 +38,8 @@ describe('caribou-menu', () => {
     expect(panel(el).querySelector('slot')).not.toBeNull()
   })
 
-  it('sets aria-expanded only once the client runs', async () => {
+  // That the server renders none is in tests/integration/ssr-more-menu.test.ts.
+  it('sets aria-expanded to false after the first update', async () => {
     const el = await mount()
     expect(trigger(el).getAttribute('aria-expanded')).toBe('false')
   })
@@ -87,6 +88,22 @@ describe('caribou-menu', () => {
     el.querySelector('a')!.click()
     expect(el.open).toBe(false)
     expect(seen).toBeDefined()
+  })
+
+  it('closes when focus leaves it, not when focus moves inside it', async () => {
+    const el = await mount()
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    el.show()
+    const [link, submit] = el.querySelectorAll<HTMLElement>('a, button')
+    link!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, composed: true, relatedTarget: submit! }))
+    expect(el.open).toBe(true)
+    link!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, composed: true, relatedTarget: el }))
+    expect(el.open).toBe(true)
+    link!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, composed: true, relatedTarget: null }))
+    expect(el.open).toBe(true)
+    submit!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, composed: true, relatedTarget: outside }))
+    expect(el.open).toBe(false)
   })
 
   it('stops listening outside once removed', async () => {

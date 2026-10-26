@@ -33,6 +33,11 @@ for (const { width, layout } of [
       expect(tree).toContain('button "Sign out"')
       return
     }
+    // Before More opens, its items are nowhere in the tree.
+    expect(tree).toContain('button "More"')
+    for (const name of ['link "Public"', 'link "Bookmarks"', 'button "Sign out"']) {
+      expect(tree).not.toContain(name)
+    }
     await rail.getByRole('button', { name: 'More', exact: true }).click()
     for (const name of ['Public', 'Bookmarks']) {
       await expect(rail.getByRole('link', { name, exact: true })).toBeVisible()
