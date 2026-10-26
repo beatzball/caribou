@@ -51,7 +51,7 @@ test.describe('/@handle/id — server-rendered thread (real upstream)', () => {
   // tab lists statuses that sit inside a thread.
   async function threadPath(page: Page): Promise<string> {
     await page.goto('/@kev@fosstodon.org?tab=replies')
-    const href = await page.locator('caribou-profile caribou-status-card a.permalink').first().getAttribute('href')
+    const href = await page.locator('caribou-profile caribou-status-card litro-link.permalink').first().getAttribute('href')
     expect(href).toMatch(/^\/@[^/]+\/\d+$/)
     return href!
   }
