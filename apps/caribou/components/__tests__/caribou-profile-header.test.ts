@@ -6,6 +6,7 @@ import {
 } from '@beatzball/caribou-state'
 import '../caribou-profile-header.js'
 import type { CaribouProfileHeader } from '../caribou-profile-header.js'
+import type { CaribouButton } from '../caribou-button.js'
 
 const ACCOUNT = {
   id: '42', acct: 'alice@example.social', username: 'alice', displayName: 'Alice',
@@ -119,9 +120,11 @@ async function mountWith(account: Account, instance = 'example.social'): Promise
   return el
 }
 
-const button = (el: CaribouProfileHeader) => el.shadowRoot!.querySelector<HTMLButtonElement>('button.follow')
+const button = (el: CaribouProfileHeader) => el.shadowRoot!.querySelector<CaribouButton>('caribou-button.follow')
+// The real button; a click on the host would pass even with no component.
+const inner = (el: CaribouProfileHeader) => button(el)!.shadowRoot!.querySelector('button')!
 // What a screen reader and a sighted reader see: the label that is displayed.
-const visibleLabel = (b: HTMLButtonElement) =>
+const visibleLabel = (b: HTMLElement) =>
   [...b.childNodes]
     .filter((n) => n.nodeType === Node.TEXT_NODE || (n instanceof HTMLElement && !n.classList.contains('hover')))
     .map((n) => n.textContent).join('')
@@ -156,17 +159,19 @@ describe('<caribou-profile-header> follow button', () => {
     expect(fetchRel).toHaveBeenCalledWith(['42'])
     expect(button(el)?.textContent).toBe('Follow')
     expect(button(el)?.dataset.state).toBe('follow')
+    expect(button(el)?.variant).toBe('primary')
     expect(button(el)!.parentElement?.getAttribute('aria-live')).toBe('polite')
 
-    button(el)!.click()
+    inner(el).click()
     await el.updateComplete
     expect(button(el)?.dataset.state).toBe('following')
+    expect(button(el)?.variant).toBe('secondary')
     expect(visibleLabel(button(el)!)).toBe('Following')
     expect(button(el)!.querySelector('.hover')?.textContent).toBe('Unfollow')
     expect(follow).toHaveBeenCalledWith('42')
     await flush()
 
-    button(el)!.click()
+    inner(el).click()
     await el.updateComplete
     expect(button(el)?.textContent).toBe('Follow')
     expect(unfollow).toHaveBeenCalledWith('42')
@@ -178,7 +183,8 @@ describe('<caribou-profile-header> follow button', () => {
     const unfollow = vi.spyOn(client, 'unfollow').mockResolvedValue(rel())
     const el = await mountWith({ ...ACCOUNT, locked: true } as Account)
     expect(button(el)?.textContent).toBe('Requested')
-    button(el)!.click()
+    expect(button(el)?.variant).toBe('secondary')
+    inner(el).click()
     await el.updateComplete
     expect(button(el)?.textContent).toBe('Follow')
     expect(unfollow).toHaveBeenCalledWith('42')
@@ -208,7 +214,7 @@ describe('<caribou-profile-header> follow button', () => {
     const el = await mountWith({ ...ACCOUNT, acct: 'alice' } as Account, 'example.social')
     expect(lookup).toHaveBeenCalledWith('alice@example.social')
     expect(fetchRel).toHaveBeenCalledWith(['900'])
-    button(el)!.click()
+    inner(el).click()
     expect(follow).toHaveBeenCalledWith('900')
   })
 
@@ -259,7 +265,7 @@ describe('<caribou-profile-header> follow button', () => {
     await flush()
     await el.updateComplete
     expect(lookup).toHaveBeenCalledWith('alice@one.example')
-    button(el)!.click()
+    inner(el).click()
     expect(follow).toHaveBeenCalledWith('555')
     expect(follow).not.toHaveBeenCalledWith('42')
     expect(firstFollow).not.toHaveBeenCalled()

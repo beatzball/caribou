@@ -9,6 +9,7 @@ import {
   activeClient, activeUser, isOwnAccount, loadRelationship, relationshipCache, relationshipKey, toggleFollow,
   type UserSession,
 } from '@beatzball/caribou-state'
+import './caribou-button.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -31,19 +32,13 @@ export class CaribouProfileHeader extends LitElement {
       border-radius: var(--radius-sm); background: var(--bg-2); color: var(--fg-muted); font-size: 0.85rem;
     }
     .actions { margin-left: auto; align-self: flex-start; }
-    button.follow {
-      min-width: 7.5rem; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
-      border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg);
-      font: inherit; font-weight: 600; cursor: pointer;
-    }
-    button.follow[data-state="following"], button.follow[data-state="requested"] {
-      background: transparent; color: var(--fg-0); border-color: var(--border);
-    }
+    caribou-button.follow { min-width: 7.5rem; font-weight: 600; }
     /* "Following" reads as "Unfollow" under the pointer or keyboard focus,
-       so the reader knows what a click will do before making it. */
-    button.follow .hover { display: none; }
-    button.follow[data-state="following"]:is(:hover, :focus-visible) .idle { display: none; }
-    button.follow[data-state="following"]:is(:hover, :focus-visible) .hover { display: inline; }
+       so the reader knows what a click will do before making it. The
+       labels are slotted, so these rules reach them from here. */
+    caribou-button.follow .hover { display: none; }
+    caribou-button.follow[data-state="following"]:is(:hover, [data-focus-visible]) .idle { display: none; }
+    caribou-button.follow[data-state="following"]:is(:hover, [data-focus-visible]) .hover { display: inline; }
   `
 
   @property({ attribute: false }) account: Account | null = null
@@ -169,6 +164,17 @@ export class CaribouProfileHeader extends LitElement {
     if (this.target) void toggleFollow(this.target)
   }
 
+  // The host matches `:focus` but not `:focus-visible` when its inner button
+  // has focus, so ask the inner button and mark the host for the CSS. A
+  // mouse click focuses the button too, and must not keep "Unfollow" up.
+  // A key pressed while it keeps focus turns `:focus-visible` on with no
+  // focus event, so key events ask again (keyup: after the browser flips it).
+  private onFollowFocus = (e: Event) => {
+    const host = e.currentTarget as HTMLElement
+    const inner = e.composedPath()[0] as Element
+    host.toggleAttribute('data-focus-visible', e.type !== 'focusout' && inner.matches(':focus-visible'))
+  }
+
   private renderFollow() {
     const rel = this.relationship
     if (!this.target || !rel) return nothing
@@ -178,7 +184,10 @@ export class CaribouProfileHeader extends LitElement {
       : state === 'requested' ? 'Requested' : 'Follow'
     // A live region, so a screen reader hears the new label after a click.
     return html`<div class="actions" aria-live="polite">
-      <button type="button" class="follow" data-state=${state} @click=${this.onFollowClick}>${label}</button>
+      <caribou-button class="follow" data-state=${state} variant=${state === 'follow' ? 'primary' : 'secondary'}
+        @click=${this.onFollowClick} @focusin=${this.onFollowFocus} @focusout=${this.onFollowFocus}
+        @keydown=${this.onFollowFocus} @keyup=${this.onFollowFocus}
+        >${label}</caribou-button>
     </div>`
   }
 

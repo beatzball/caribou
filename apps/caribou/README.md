@@ -125,6 +125,17 @@ registers the element on the server and the client alike.
   focusable; `disabled` takes it out of use.
 - A disabled or loading control's host does not fire `click`, so a
   `@click` on the host is safe.
+- `<caribou-button type="submit">` cannot submit a form without
+  JavaScript. Its inner button is `type="button"` and the submit runs in a
+  click listener; a native submit inside its shadow root would not reach
+  the form either. A form that must work with JavaScript off (sign-out)
+  keeps a native `<button type="submit">`. The sign-in picker uses the
+  component because its form has no `action`: without JavaScript it has
+  nowhere to go anyway.
+- The host matches `:focus` but not `:focus-visible` when its inner button
+  has focus. To style keyboard focus from outside, check
+  `composedPath()[0].matches(':focus-visible')` on `focusin` (see the
+  Follow button in `caribou-profile-header.ts`).
 
 ## Tests
 

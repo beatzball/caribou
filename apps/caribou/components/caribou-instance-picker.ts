@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { boxReset } from './_shared-styles.js'
+import './caribou-button.js'
 
 @customElement('caribou-instance-picker')
 export class CaribouInstancePicker extends LitElement {
@@ -12,10 +13,7 @@ export class CaribouInstancePicker extends LitElement {
       padding: var(--space-3); border-radius: var(--radius-md);
       border: 1px solid var(--border); background: var(--bg-1); color: var(--fg-0);
     }
-    button {
-      padding: var(--space-3); border-radius: var(--radius-md);
-      border: 0; background: var(--accent); color: var(--accent-fg); cursor: pointer;
-    }
+    caribou-button { --caribou-button-size: 2.75rem; }
     [role="alert"] { color: var(--danger); margin: 0; }
   `]
 
@@ -57,9 +55,12 @@ export class CaribouInstancePicker extends LitElement {
         <input id="server" name="server" type="text" autocomplete="off"
                placeholder="mastodon.social"
                required />
-        <button type="submit" ?disabled=${this.submitting}>
+        <!-- The form has no action: without JS it has nowhere to go, so a
+             submit that needs JS (see caribou-button) loses nothing.
+             Enter submits only while this is the form's one text field. -->
+        <caribou-button variant="primary" type="submit" ?loading=${this.submitting}>
           ${this.submitting ? 'Connecting…' : 'Sign in'}
-        </button>
+        </caribou-button>
         ${this.error ? html`<p role="alert">${this.error}</p>` : nothing}
       </form>
     `
