@@ -36,6 +36,14 @@ test('the page loads a versioned entry, and only hashed assets are immutable', a
   const entry = await (await request.get('/_litro/app.js')).body()
   expect(src).toBe(`/_litro/app.js?v=${createHash('sha256').update(entry).digest('hex').slice(0, 12)}`)
 
+  // During a rolling deploy the HTML of the other build can ask this one for
+  // its entry. The page gets a working file, but no browser may keep it under
+  // that URL.
+  const foreign = await request.get('/_litro/app.js?v=000000000000')
+  expect(foreign.status()).toBe(200)
+  expect(foreign.headers()['cache-control']).toBe('no-store')
+  expect(await foreign.body()).toEqual(entry)
+
   // The entry holds no code other chunks import, so no chunk asks for it
   // under a second URL. Walk every chunk the entry can reach.
   const seen = new Set<string>()
