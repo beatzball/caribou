@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Page, type Route } from './_fixtures.js'
 
 const INSTANCE = 'example.social'
 const AVATAR = `https://${INSTANCE}/a.png`

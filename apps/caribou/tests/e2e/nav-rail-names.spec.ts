@@ -25,8 +25,8 @@ for (const { width, layout } of [
     // into the closed menu, which is not in the accessibility tree.
     const tree = await rail.ariaSnapshot()
     const inBar = layout === 'mobile'
-      ? ['Home', 'Local', 'Profile']
-      : ['Home', 'Local', 'Public', 'Bookmarks', 'Profile']
+      ? ['Home', 'Local', 'Notifications', 'Profile']
+      : ['Home', 'Local', 'Notifications', 'Public', 'Bookmarks', 'Profile']
     for (const name of inBar) expect(tree).toContain(`link "${name}"`)
     expect(tree).toContain('button "New post"')
     if (layout !== 'mobile') {

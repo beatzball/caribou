@@ -9,7 +9,9 @@
 import '@beatzball/litro/runtime/LitroOutlet.js'
 import '@beatzball/litro/runtime/LitroLink.js'
 
-import { activeUserKey, loadActiveAccount, loadFromStorage } from '@beatzball/caribou-state'
+import {
+  activeUserKey, loadActiveAccount, loadFromStorage, startUnreadNotifications,
+} from '@beatzball/caribou-state'
 import { installUnauthorizedHandler } from './components/_unauthorized.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
 import { routes } from './routes.generated.js'
@@ -24,6 +26,9 @@ if (typeof window !== 'undefined') {
   installUnauthorizedHandler(window, () => { location.replace('/') })
   // A tab open across a deploy asks for chunks the new build no longer has.
   installPreloadErrorReload(window)
+  // The nav rail's unread badge. One poll for the app, not one per rail:
+  // every page has its own, and a page swap mounts two.
+  startUnreadNotifications()
 }
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null

@@ -21,8 +21,9 @@ interface ServerPageAtSwap {
 // which elements the client may add after hydration, and nothing else may
 // change. `/?error=denied` adds the alert: the server never has the code.
 //
-// With no instance cookie and no session the three timeline routes render
-// their auth-required placeholder, so they need no upstream and add nothing.
+// With no instance cookie and no session the timeline routes and
+// /notifications render their auth-required placeholder, so they need no
+// upstream and add nothing.
 // The thread route renders its instance placeholder for the same reason.
 const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/', adds: [] },
@@ -35,6 +36,7 @@ const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/bookmarks', adds: [] },
   { route: '/local', adds: [] },
   { route: '/public', adds: [] },
+  { route: '/notifications', adds: [] },
   { route: '/@alice@example.social/123', adds: [] },
 ]
 

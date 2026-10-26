@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from './_fixtures.js'
 
 test('signin-done shim parses fragment → writes localStorage → navigates /feed', async ({ page }) => {
   // Intercept /feed so the test does not depend on the home timeline or a live

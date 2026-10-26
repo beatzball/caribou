@@ -51,6 +51,19 @@ export interface CaribouClient {
   waitForMedia(id: string, opts?: WaitForMediaOpts): Promise<mastodon.v1.MediaAttachment>
   updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
   fetchInstance(): Promise<mastodon.v2.Instance>
+
+  // Notifications.
+  fetchNotifications(params?: FetchNotificationsParams): Promise<mastodon.v1.Notification[]>
+}
+
+export interface FetchNotificationsParams {
+  /** Only these types. Omitted or empty means every type. */
+  types?: readonly mastodon.v1.NotificationType[]
+  sinceId?: string
+  /** The page just newer than this id; use it to page forward without a gap. */
+  minId?: string
+  maxId?: string
+  limit?: number
 }
 
 // A page of a timeline. `nextMaxId` is set only where the last status id is
@@ -259,6 +272,18 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchInstance() {
       return run('instance', (c) => c.v2.instance.fetch())
+    },
+
+    // --- notifications ---
+    async fetchNotifications(params = {}) {
+      const key = `notifications:${JSON.stringify(params)}`
+      return run(key, async (c) => c.v1.notifications.list({
+        ...(params.types && params.types.length > 0 ? { types: params.types } : {}),
+        ...(params.sinceId ? { sinceId: params.sinceId } : {}),
+        ...(params.minId ? { minId: params.minId } : {}),
+        ...(params.maxId ? { maxId: params.maxId } : {}),
+        ...(params.limit ? { limit: params.limit } : {}),
+      }))
     },
   }
 }

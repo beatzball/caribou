@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './_fixtures.js'
 
 // A 401 names the session of the client that got it (issue #76). Only a 401
 // for the active session signs the user out; one for another stored session,

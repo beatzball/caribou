@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from './_fixtures.js'
 
 // Where the signed-in user starts: the home timeline, as in real use. Any
 // page inside the app shell works — the sign-out button lives in the nav

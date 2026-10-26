@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './_fixtures.js'
 
 // Runs in the `mobile-webkit` project only (iPhone 15: touch, 393px wide), so
 // the nav rail is the fixed bottom bar and every press is a tap.
@@ -54,6 +54,7 @@ test('bottom bar items are at least 44px square', async ({ page }) => {
   await gotoSettled(page, '/public')
   const items = {
     '/home': item(page, '/home'), '/local': item(page, '/local'),
+    '/notifications': item(page, '/notifications'),
     'New post': rail(page).locator('.compose-btn'), '/@me': item(page, '/@me'),
     'More': rail(page).locator('caribou-menu .trigger'),
   }
