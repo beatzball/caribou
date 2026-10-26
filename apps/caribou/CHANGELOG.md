@@ -1,5 +1,14 @@
 # caribou-app
 
+## 0.4.1
+
+### Patch Changes
+
+- [#86](https://github.com/beatzball/caribou/pull/86) [`9b13b5f`](https://github.com/beatzball/caribou/commit/9b13b5f5ea0ea8e65c3c06778fcac57c4fd51ebe) Thanks [@beatzball](https://github.com/beatzball)! - A stale 401 no longer signs out the current session. The 401 handler removes only the session that got the 401, and only while it still has the same token. It redirects to `/` with the "session expired" banner only when that session was the active one. A 401 for another stored session, or for a replaced token, changes nothing on screen, and no longer blocks a later real 401.
+
+- Updated dependencies [[`9b13b5f`](https://github.com/beatzball/caribou/commit/9b13b5f5ea0ea8e65c3c06778fcac57c4fd51ebe)]:
+  - @beatzball/caribou-state@0.2.2
+
 ## 0.4.0
 
 ### Minor Changes
