@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.5.1
+
+### Patch Changes
+
+- [#97](https://github.com/beatzball/caribou/pull/97) [`179ba8a`](https://github.com/beatzball/caribou/commit/179ba8a7fe1901e1626555a42f360ca45772f787) Thanks [@beatzball](https://github.com/beatzball)! - A deploy no longer leaves browsers on the old build. `/_litro/app.js` was cached for a year although its name never changes, so a browser that had it kept loading the old app, whose page chunks the new image no longer has: a tap on Local or Public did nothing until the cache let go. The page now loads the entry as `app.js?v=<build>`, the bare entry is served `no-cache`, and no chunk imports the entry any more. A tab that stays open across a deploy loads the page in full when a page chunk is missing, once.
+
 ## 0.5.0
 
 ### Minor Changes
