@@ -83,6 +83,14 @@ and text decoration inherit into the anchor). When the anchor itself must carry
 state — `aria-current`, a class — write a plain `<a href>` and bind
 `@click=${spaClick}` from `components/_spa-link.ts`.
 
+**Links inside a post body** are the author's server HTML; never rewrite them.
+`<caribou-status-card>` has one delegated click on `.status-content`: a plain
+click on a mention that matches `status.mentions` opens `/@acct@host` in
+Caribou. Hashtags and other links go to their real `href`. Every module that
+calls DOMPurify installs `installPurifyHooks` from
+`@beatzball/caribou-mastodon-client/sanitize-opts`, so the server and the client
+output stay the same string.
+
 **Server-only code stays out of the client bundle.** A page's `pageData`
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.

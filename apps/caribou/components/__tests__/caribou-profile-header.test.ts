@@ -54,6 +54,13 @@ describe('<caribou-profile-header>', () => {
     expect(p.hasAttribute('onclick')).toBe(false)
   })
 
+  // This file loads the header without the status card, so the hook must
+  // come from the header's own install.
+  it('adds noopener and noreferrer to a new-window link in the bio', async () => {
+    const el = await mount({ ...ACCOUNT, note: '<p><a href="https://example.com" target="_blank">site</a></p>' })
+    expect(el.shadowRoot!.querySelector('.bio a')!.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
   // Hydration compares the bio against the server's HTML by digest, so the
   // render that adopts a server-made shadow root must print the note as the
   // server did. Every later render sanitizes.

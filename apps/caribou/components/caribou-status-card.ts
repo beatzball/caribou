@@ -3,7 +3,7 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
 import type { mastodon } from 'masto'
-import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
+import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
@@ -11,6 +11,11 @@ import {
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { ICONS } from './_icons.js'
+
+// The same hooks as the server's sanitizer, so the two agree on every string.
+// Without a window DOMPurify is a stub with no `addHook`; the server has its
+// own instance.
+if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
 
 export type StatusCardVariant = 'timeline' | 'focused' | 'ancestor' | 'descendant'
 
@@ -86,6 +91,16 @@ function findShell(from: Element): Element | null {
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
+}
+
+// Compare as parsed URLs: `a.href` is the browser's normalized form of the
+// attribute, and `mentions[].url` is the server's raw string.
+function sameUrl(raw: string, href: string): boolean {
+  try { return new URL(raw).href === href } catch { return false }
+}
+
+function hostOf(url: string): string {
+  try { return new URL(url).host } catch { return '' }
 }
 
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
@@ -370,6 +385,36 @@ export class CaribouStatusCard extends LitElement {
     }, 300 * this.retries)
   }
 
+  // Mention links in the body point at the author's instance. Route a plain
+  // click on one to Caribou's own profile page instead, leaving the HTML
+  // string alone: the sanitizers and the hydration digest never see a change,
+  // and without JavaScript, or on a new-tab click, the link still opens the
+  // instance's real profile. Hashtags wait for a tags page; other links are
+  // left to the browser.
+  //
+  // The anchor's `target` is not a guard here, unlike `spaClick`: it comes
+  // from the remote server's HTML, not from the reader. A reader who wants a
+  // new tab still gets one through the modifier keys or the middle button.
+  private onContentClick = (e: MouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0) return
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    const content = e.currentTarget as HTMLElement
+    const a = (e.target as Element).closest?.('a')
+    if (!a || !content.contains(a) || !a.matches('.mention') || a.matches('.hashtag')) return
+    const display = this.status?.reblog ?? this.status
+    const mention = display?.mentions?.find((m) => sameUrl(m.url, a.href))
+    if (!mention) return
+    // `acct` is relative to the instance the status came from: a local
+    // account has no `@host` part. The mention URL's host is a last resort
+    // for a card that knows no instance: on a server whose web domain differs
+    // from its account domain it names the wrong host, and the profile lookup
+    // then fails the way a mistyped handle does.
+    const host = this.instance || findShell(this)?.getAttribute('instance') || hostOf(mention.url)
+    const acct = mention.acct.includes('@') ? mention.acct : `${mention.acct}@${host}`
+    e.preventDefault()
+    void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(`/@${acct}`))
+  }
+
   // The page's `pageData` pre-sanitizes on the server with the jsdom-backed
   // sanitizer, and DOMPurify cannot run there (no window), so the server
   // trusts that string. The client re-sanitizes as defense-in-depth for
@@ -430,7 +475,7 @@ export class CaribouStatusCard extends LitElement {
                 <time datetime=${dt}>${timeLabel}</time>
               </litro-link>
             </header>
-            <div class="status-content">${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
+            <div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
             ${this.renderActions(display)}
           </div>
         </div>

@@ -150,7 +150,7 @@ describe.skipIf(SKIP)('SSR profile-paint: /@handle emits header + status cards',
     expect((body.match(/<caribou-status-card\s+variant="timeline"/g) ?? []).length).toBe(cardMatches.length)
 
     // Each card's own shadow root is in the HTML, with the post inside it.
-    expect((body.match(/<div class="status-content">/g) ?? []).length).toBe(cardMatches.length)
+    expect((body.match(/<div class="status-content"\s*>/g) ?? []).length).toBe(cardMatches.length)
 
     // Header SSR-painted with real account data (counts row), not empty.
     expect(body).toMatch(/<strong>\d+<\/strong> Posts/)
@@ -178,7 +178,7 @@ describe.skipIf(SKIP)('SSR thread-paint: /@handle/id emits the whole thread', ()
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b))
 
     // Every card is rendered, not only listed.
-    expect((body.match(/<div class="status-content">/g) ?? []).length).toBe(variants.length)
+    expect((body.match(/<div class="status-content"\s*>/g) ?? []).length).toBe(variants.length)
 
     // Each descendant row carries its depth and the matching indent.
     const descendantRows = [...body.matchAll(/<li([^>]*)><caribou-status-card\s+variant="descendant"/g)]
