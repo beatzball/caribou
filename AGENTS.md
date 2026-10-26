@@ -49,3 +49,27 @@ as the source of truth and the hook as a backstop.
 If you have a genuine, documented need for a literal absolute path in
 committed content, bypass with `git commit --no-verify` and explain the
 reason in the commit message.
+
+## Release token expires 2026-11-30
+
+`.github/workflows/release.yml` opens the `chore: version packages` pull
+request with the `CHANGESETS_TOKEN` secret, a fine-grained token (Contents
+write, Pull requests write). A pull request opened with it starts its own
+checks. The token expires on **2026-11-30**.
+
+When it expires, nothing fails. The workflow falls back to `GITHUB_TOKEN`.
+GitHub does not run checks for a pull request that `github-actions[bot]`
+opens, so the release pull request waits for a person to click **Approve
+and run**. `gh pr checks` then says "no checks reported on the
+'changeset-release/main' branch". That looks like no CI, but it is this.
+
+To check:
+
+```
+gh secret list -R beatzball/caribou        # CHANGESETS_TOKEN is listed
+gh run list --branch changeset-release/main --limit 1
+# action_required = the token is expired or missing; renew it
+```
+
+Renew the token before 2026-11-30 and update the secret. Do not change the
+fallback line in `release.yml`.
