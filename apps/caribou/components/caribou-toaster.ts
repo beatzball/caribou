@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
-import { ICONS } from './_icons.js'
+import './caribou-icon-button.js'
 
 export type ToastKind = 'error' | 'info'
 
@@ -42,13 +42,11 @@ export class CaribouToaster extends LitElement {
     }
     .toast[data-kind="error"] { border-color: var(--danger); }
     .message { flex: 1; }
-    button {
-      display: inline-flex; padding: var(--space-1);
-      border: 0; border-radius: var(--radius-sm); background: none;
-      color: var(--fg-muted); cursor: pointer;
+    /* Borderless and muted: the toast's own border is the frame. */
+    caribou-icon-button::part(button) {
+      border: 0; background: none; color: var(--fg-muted);
     }
-    button:hover { color: var(--fg-0); }
-    button:focus-visible { outline: 2px solid var(--accent); }
+    caribou-icon-button::part(button):hover { color: var(--fg-0); }
   `
 
   @state() private toasts: Toast[] = []
@@ -103,7 +101,7 @@ export class CaribouToaster extends LitElement {
     return repeat(this.toasts.filter((t) => t.kind === kind), (t) => t.id, (t) => html`
       <div class="toast" data-kind=${t.kind} role=${kind === 'error' ? 'alert' : nothing}>
         <span class="message">${t.message}</span>
-        <button type="button" aria-label="Dismiss" @click=${() => this.dismiss(t.id)}>${ICONS.x}</button>
+        <caribou-icon-button icon="x" label="Dismiss" @click=${() => this.dismiss(t.id)}></caribou-icon-button>
       </div>
     `)
   }

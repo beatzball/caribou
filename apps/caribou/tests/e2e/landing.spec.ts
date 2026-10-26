@@ -61,7 +61,24 @@ test('submitting the picker POSTs /api/signin/start and follows the redirect', a
   expect(posted).toEqual({ server: 'example.social' })
 })
 
-test('the picker shows "Connecting…" and disables the button while it waits', async ({ page }) => {
+// The form has no native submit button, so Enter relies on implicit
+// submission of a form with a single text field.
+test('Enter in the instance field submits the picker', async ({ page }) => {
+  let posted: unknown
+  await page.route('**/api/signin/start', (route) => {
+    posted = route.request().postDataJSON()
+    return route.fulfill({ status: 502, contentType: 'application/json', body: '{}' })
+  })
+  await gotoSettled(page, '/')
+  await page.getByLabel(/your mastodon instance/i).fill('example.social')
+  await page.getByLabel(/your mastodon instance/i).press('Enter')
+  await expect(page.getByRole('alert')).toHaveText(
+    'Could not reach that instance. Check the spelling and try again.',
+  )
+  expect(posted).toEqual({ server: 'example.social' })
+})
+
+test('the picker shows "Connecting…" and marks the button busy while it waits', async ({ page }) => {
   let release!: () => void
   const held = new Promise<void>((r) => { release = r })
   await page.route('**/api/signin/start', async (route) => {
@@ -72,12 +89,16 @@ test('the picker shows "Connecting…" and disables the button while it waits', 
   await page.getByLabel(/your mastodon instance/i).fill('example.social')
   await page.getByRole('button', { name: /sign in/i }).click()
 
-  const button = page.locator('caribou-instance-picker button[type="submit"]')
-  await expect(button).toHaveText(/connecting…/i)
+  // The label is slotted into the host; the role and the busy state are on
+  // the inner button. `loading` keeps it focusable: aria-disabled, not disabled.
+  const host = page.locator('caribou-instance-picker caribou-button')
+  const button = host.getByRole('button')
+  await expect(host).toHaveText(/connecting…/i)
   await expect(button).toBeDisabled()
+  await expect(button).toHaveAttribute('aria-busy', 'true')
 
   release()
-  await expect(button).toHaveText(/sign in/i)
+  await expect(host).toHaveText(/sign in/i)
   await expect(button).toBeEnabled()
 })
 

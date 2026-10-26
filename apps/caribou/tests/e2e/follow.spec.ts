@@ -90,7 +90,7 @@ test('follow, then unfollow, from a profile', async ({ page }) => {
   })
   await openBobsProfile(page)
 
-  const button = page.locator('caribou-profile-header button.follow')
+  const button = page.locator('caribou-profile-header caribou-button.follow')
   await expect(button).toHaveText('Follow')
   await expect(page.locator('caribou-profile-header .follows-you')).toHaveText('Follows you')
 
@@ -98,10 +98,18 @@ test('follow, then unfollow, from a profile', async ({ page }) => {
   await expect(button).toHaveAttribute('data-state', 'following')
   // The pointer is still on the button, so it offers what a click would do.
   // `innerText` is what is displayed; the other label is in the DOM, hidden.
-  await expect.poll(() => button.innerText()).toBe('Unfollow')
+  await expect.poll(async () => (await button.innerText()).trim()).toBe('Unfollow')
   await page.mouse.move(0, 0)
-  await expect.poll(() => button.innerText()).toBe('Following')
+  await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
+  // Keyboard focus offers it too. Not every browser focuses a button on a
+  // click, so put focus there first, then leave and come back by keyboard.
+  await button.focus()
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Tab')
+  await expect.poll(async () => (await button.innerText()).trim()).toBe('Unfollow')
   expect(writes).toEqual(['follow'])
+  await page.mouse.click(0, 0)
+  await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
 
   await button.click()
   await expect(button).toHaveAttribute('data-state', 'follow')
@@ -119,7 +127,7 @@ test('a failed follow puts the button back and says so', async ({ page }) => {
   const toast = page.evaluate(() => new Promise<unknown>((resolve) => {
     window.addEventListener('caribou:toast', (e) => resolve((e as CustomEvent).detail), { once: true })
   }))
-  const button = page.locator('caribou-profile-header button.follow')
+  const button = page.locator('caribou-profile-header caribou-button.follow')
   await button.click()
   expect(await toast).toEqual({ kind: 'error', message: "Couldn't follow @bob." })
   await expect(button).toHaveAttribute('data-state', 'follow')
@@ -137,6 +145,6 @@ test('no button on the reader’s own profile', async ({ page }) => {
   await page.goto('/@me')
   await settled(page)
   await expect(page.locator('caribou-profile-header .handle')).toHaveText('@alice')
-  await expect(page.locator('caribou-profile-header button.follow')).toHaveCount(0)
+  await expect(page.locator('caribou-profile-header caribou-button.follow')).toHaveCount(0)
   expect(relationships).toEqual([])
 })

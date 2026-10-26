@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../caribou-instance-picker.js'
 import type { CaribouInstancePicker } from '../caribou-instance-picker.js'
+import type { CaribouButton } from '../caribou-button.js'
 
 async function mount(): Promise<CaribouInstancePicker> {
   const el = document.createElement('caribou-instance-picker') as CaribouInstancePicker
@@ -12,7 +13,7 @@ async function mount(): Promise<CaribouInstancePicker> {
 const parts = (el: CaribouInstancePicker) => ({
   form: el.shadowRoot!.querySelector('form')!,
   input: el.shadowRoot!.querySelector<HTMLInputElement>('input[name="server"]')!,
-  button: el.shadowRoot!.querySelector<HTMLButtonElement>('button[type="submit"]')!,
+  button: el.shadowRoot!.querySelector<CaribouButton>('caribou-button[type="submit"]')!,
   alert: el.shadowRoot!.querySelector('[role="alert"]'),
 })
 
@@ -63,7 +64,8 @@ describe('caribou-instance-picker', () => {
     expect(input.getAttribute('autocomplete')).toBe('off')
     expect(input.getAttribute('placeholder')).toBe('mastodon.social')
     expect(button.textContent?.trim()).toBe('Sign in')
-    expect(button.disabled).toBe(false)
+    expect(button.variant).toBe('primary')
+    expect(button.loading).toBe(false)
     expect(alert).toBeNull()
   })
 
@@ -85,7 +87,7 @@ describe('caribou-instance-picker', () => {
     expect(parts(el).alert).toBeNull()
   })
 
-  it('shows "Connecting…" and disables the button while the request is pending', async () => {
+  it('shows "Connecting…" and marks the button busy while the request is pending', async () => {
     let respond!: (r: Response) => void
     vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise<Response>((r) => { respond = r }))
     const el = await mount()
@@ -93,12 +95,24 @@ describe('caribou-instance-picker', () => {
     submit(el, 'example.social')
     await el.updateComplete
     expect(parts(el).button.textContent?.trim()).toBe('Connecting…')
-    expect(parts(el).button.disabled).toBe(true)
+    expect(parts(el).button.loading).toBe(true)
 
     respond(new Response(null, { status: 502 }))
     await settle(el)
     expect(parts(el).button.textContent?.trim()).toBe('Sign in')
-    expect(parts(el).button.disabled).toBe(false)
+    expect(parts(el).button.loading).toBe(false)
+  })
+
+  it('a click on Sign in submits the form', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(okResponse())
+    const el = await mount()
+    const { input, button } = parts(el)
+    input.value = 'example.social'
+    button.shadowRoot!.querySelector('button')!.click()
+    await settle(el)
+    await settle(el)
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    expect(fakeLocation.href).toBe('https://example.social/oauth/authorize?x=1')
   })
 
   it('ignores a second submit while one is pending', async () => {
@@ -144,7 +158,7 @@ describe('caribou-instance-picker', () => {
     await settle(el)
 
     expect(parts(el).alert?.textContent).toBe('Network error — try again.')
-    expect(parts(el).button.disabled).toBe(false)
+    expect(parts(el).button.loading).toBe(false)
   })
 
   it('clears the previous error when a new attempt starts', async () => {

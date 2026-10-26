@@ -79,7 +79,7 @@ describe('<caribou-toaster>', () => {
     toast({ kind: 'error', message: 'a' })
     toast({ kind: 'error', message: 'b' })
     await el.updateComplete
-    const buttons = el.shadowRoot!.querySelectorAll<HTMLButtonElement>('button[aria-label="Dismiss"]')
+    const buttons = el.shadowRoot!.querySelectorAll<HTMLElement>('caribou-icon-button[icon="x"][label="Dismiss"]')
     buttons[0]!.click()
     await el.updateComplete
     expect(messages(el, 'alert')).toEqual(['b'])
