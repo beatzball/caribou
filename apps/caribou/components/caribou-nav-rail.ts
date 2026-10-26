@@ -6,17 +6,23 @@ import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
 import './caribou-icon.js'
+import './caribou-menu.js'
 import './caribou-signout-form.js'
 
-interface NavItem { label: string; icon: IconName; href: string }
+// `more`: on a phone the item lives in the More menu instead of the bar.
+interface NavItem { label: string; icon: IconName; href: string; more?: boolean }
 
+// The items above New post. DOM order is the visual order at every width,
+// so Tab and the picture agree: the phone bar reads Home, Local, …, New
+// post, Profile, More once the `more` items are hidden.
 const ITEMS: NavItem[] = [
   { label: 'Home',    icon: 'home',  href: '/home' },
   { label: 'Local',   icon: 'users', href: '/local' },
-  { label: 'Public',  icon: 'globe', href: '/public' },
-  { label: 'Profile', icon: 'user',  href: '/@me' },
-  { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks' },
+  { label: 'Public',  icon: 'globe', href: '/public', more: true },
+  { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
 ]
+
+const PROFILE: NavItem = { label: 'Profile', icon: 'user', href: '/@me' }
 
 function openCompose() {
   window.dispatchEvent(new CustomEvent('caribou:compose', { detail: {} }))
@@ -88,6 +94,25 @@ export class CaribouNavRail extends LitElement {
       /* One item among the others in the bar, not a full-width row. */
       .compose-btn { width: auto; }
     }
+
+    /* The phone bar holds five items and More; the rest move into the
+       More menu. Each item is in the DOM twice, once in the rail and once
+       in the menu, and display: none keeps the hidden copy out of the
+       accessibility tree, so a name is never heard twice. */
+    .more { display: none; }
+    caribou-menu .menu-item {
+      display: flex; align-items: center; justify-content: flex-start; gap: var(--space-2);
+      width: 100%; min-height: 44px; padding: var(--space-2) var(--space-3);
+    }
+    @media (max-width: 767px) {
+      .in-more, nav > caribou-signout-form { display: none; }
+      .more {
+        display: inline-flex;
+        /* Above the bar (61px with its border) and clear of the iOS edges. */
+        --caribou-menu-bottom: calc(61px + var(--space-2) + env(safe-area-inset-bottom, 0px));
+        --caribou-menu-right: calc(var(--space-2) + env(safe-area-inset-right, 0px));
+      }
+    }
   `
 
   @property({ reflect: true }) current = ''
@@ -139,19 +164,34 @@ export class CaribouNavRail extends LitElement {
     this.path = window.location.pathname
   }
 
+  private renderItem(it: NavItem, active: string) {
+    const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
+    const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
+    return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
+      class=${it.more ? 'in-more' : nothing} ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
+      ><caribou-icon class="icon" name=${it.icon}></caribou-icon><span class="label">${it.label}</span></a>`
+  }
+
   override render() {
     const active = this.current || this.path
     return html`
       <nav aria-label="Primary">
-        ${ITEMS.map((it) => {
-          const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
-          const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
-          return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
-            ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
-            ><caribou-icon class="icon" name=${it.icon}></caribou-icon><span class="label">${it.label}</span></a>`
-        })}
+        ${ITEMS.map((it) => this.renderItem(it, active))}
         <caribou-button variant="primary" class="compose-btn" @click=${openCompose}
           ><caribou-icon class="icon" name="squarePen"></caribou-icon><span class="label">New post</span></caribou-button>
+        ${this.renderItem(PROFILE, active)}
+        <caribou-menu class="more" icon="ellipsis" label="More">
+          ${ITEMS.filter((it) => it.more).map((it) => html`<a href=${it.href} class="menu-item"
+            aria-current=${it.href === active ? 'page' : nothing} @click=${spaClick}
+            ><caribou-icon class="icon" name=${it.icon}></caribou-icon>${it.label}</a>`)}
+          <caribou-signout-form>
+            <form action="/api/signout" method="post" class="signout-form">
+              <button type="submit" class="signout-btn menu-item">
+                <caribou-icon class="icon" name="logOut"></caribou-icon>Sign out
+              </button>
+            </form>
+          </caribou-signout-form>
+        </caribou-menu>
         <caribou-signout-form>
           <form action="/api/signout" method="post" class="signout-form">
             <button type="submit" class="signout-btn">

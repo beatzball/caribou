@@ -223,4 +223,40 @@ describe('caribou-nav-rail', () => {
     expect(css).not.toMatch(/\.label\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.label\s*\{[^}]*clip-path/)
   })
+
+  // DOM order is the visual order at every width (WCAG 2.4.3): the phone bar
+  // hides the `in-more` items and shows More, it never reorders.
+  describe('More menu', () => {
+    it('puts New post just above Profile, and More after Profile', async () => {
+      const el = await mount()
+      const order = [...el.shadowRoot!.querySelector('nav')!.children].map((c) =>
+        c.getAttribute('href') ?? c.className)
+      expect(order).toEqual(['/home', '/local', '/public', 'compose-btn', '/@me', 'more', ''])
+    })
+
+    it('marks the bar items the phone moves into the menu', async () => {
+      const el = await mount()
+      const moved = [...el.shadowRoot!.querySelectorAll('nav > a.in-more')].map((a) => a.getAttribute('href'))
+      expect(moved).toEqual(['/public'])
+    })
+
+    it('holds the moved links and a native sign-out form', async () => {
+      const el = await mount('/public')
+      const menu = el.shadowRoot!.querySelector('caribou-menu.more')!
+      expect(menu.getAttribute('label')).toBe('More')
+      expect(menu.getAttribute('icon')).toBe('ellipsis')
+      const links = [...menu.querySelectorAll('a.menu-item')]
+      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/public'])
+      expect(links[0]!.getAttribute('aria-current')).toBe('page')
+      const submit = menu.querySelector('caribou-signout-form form[action="/api/signout"][method="post"] button[type="submit"]')
+      expect(submit?.textContent?.trim()).toBe('Sign out')
+    })
+
+    it('a menu link navigates in the app', async () => {
+      const el = await mount()
+      el.shadowRoot!.querySelector<HTMLAnchorElement>('caribou-menu a[href="/public"]')!.click()
+      await flush()
+      expect(goSpy).toHaveBeenCalledWith('/public')
+    })
+  })
 })
