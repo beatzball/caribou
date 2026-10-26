@@ -59,9 +59,9 @@ async function settle(el: CaribouNotifications) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
-async function mount(): Promise<CaribouNotifications> {
+async function mount(parent: ParentNode = document.body): Promise<CaribouNotifications> {
   const el = document.createElement('caribou-notifications') as CaribouNotifications
-  document.body.appendChild(el)
+  parent.appendChild(el)
   await flush()
   while (!(await el.updateComplete)) { /* until no update is pending */ }
   return el
@@ -192,6 +192,41 @@ describe('caribou-notifications', () => {
     setVisibility('visible')
     await settle(el)
     expect(lastSeenNotificationId(userKey)).toBe('9')
+  })
+
+  // The router's next page: added with `hidden`, inside the page's shadow root.
+  function hiddenPage() {
+    const page = document.createElement('div')
+    page.setAttribute('hidden', '')
+    document.body.appendChild(page)
+    return { page, root: page.attachShadow({ mode: 'open' }) }
+  }
+
+  it('in a page the router has not shown yet, marks seen only once the page is shown', async () => {
+    fetchSpy.mockResolvedValueOnce([notif('9', 'follow')])
+    unreadNotificationCount.value = 1
+    const { page, root } = hiddenPage()
+    const el = await mount(root)
+    await settle(el)
+    expect(items(el)).toHaveLength(1)
+    expect(lastSeenNotificationId(userKey)).toBeNull()
+    expect(unreadNotificationCount.value).toBe(1)
+
+    page.removeAttribute('hidden')
+    await settle(el)
+    expect(lastSeenNotificationId(userKey)).toBe('9')
+    expect(unreadNotificationCount.value).toBe(0)
+  })
+
+  it('a hidden page that the router removes never marks seen', async () => {
+    fetchSpy.mockResolvedValueOnce([notif('9', 'follow')])
+    const { page, root } = hiddenPage()
+    const el = await mount(root)
+    await settle(el)
+    page.remove()
+    page.removeAttribute('hidden')
+    await settle(el)
+    expect(lastSeenNotificationId(userKey)).toBeNull()
   })
 
   it('a reply for the old session is dropped, and the list starts again for the new one', async () => {

@@ -126,7 +126,7 @@ page: every page has its own rail, and a page swap mounts two. The rail shows
 the count only after its first update, because the server always renders 0.
 The seen marker is `lastSeenNotificationId` in `caribou.prefs.<userKey>`; only
 the unfiltered list on `/notifications` moves it, and only to a row that is on
-screen in a visible tab, for the session the list was loaded for.
+screen in a visible tab and a page the router has shown, for the session the list was loaded for.
 
 ## Shared controls
 

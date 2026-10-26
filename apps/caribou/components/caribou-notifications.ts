@@ -79,6 +79,7 @@ export class CaribouNotifications extends LitElement {
   private disposeBindings: (() => void) | null = null
   private stopPolling: (() => void) | null = null
   private disposeSession: (() => void) | null = null
+  private revealObserver: MutationObserver | null = null
 
   // The list belongs to one session. A new one starts the list again.
   private readonly session = computed(() => {
@@ -135,6 +136,8 @@ export class CaribouNotifications extends LitElement {
   }
 
   private close() {
+    this.revealObserver?.disconnect()
+    this.revealObserver = null
     this.disposeBindings?.()
     this.disposeBindings = null
     this.stopPolling?.()
@@ -145,15 +148,45 @@ export class CaribouNotifications extends LitElement {
   // Only the full list moves the marker: the newest mention can be newer
   // than a favourite the reader has not seen yet. It moves only to a row
   // that is on screen, in a visible tab, for the session the list is for.
-  // A tab that is hidden now marks seen when it is shown again.
+  // A tab that is hidden now marks seen when it is shown again. So does a
+  // page the router has added but not shown yet.
   private async markSeen(store: NotificationsStore | null) {
     if (!store) return
     await this.updateComplete
     if (store !== this.store || this.filter !== 'all') return
     if (document.visibilityState !== 'visible') return
+    const hidden = this.hiddenAncestor()
+    if (hidden) {
+      this.markSeenOnReveal(hidden)
+      return
+    }
     const session = this.session.peek()
     const newest = this.items[0]
     if (session && newest) markNotificationsSeen(newest.id, session.userKey)
+  }
+
+  // The router adds the next page with `hidden`, lets it render, then shows
+  // it, or removes it when a newer navigation wins. Walks out of shadow roots.
+  private hiddenAncestor(): Element | null {
+    if (this.hasAttribute('hidden')) return this
+    let node: Node | null = this.parentNode
+    while (node) {
+      if (node instanceof Element && node.hasAttribute('hidden')) return node
+      node = node instanceof ShadowRoot ? node.host : node.parentNode
+    }
+    return null
+  }
+
+  private markSeenOnReveal(hidden: Element) {
+    this.revealObserver?.disconnect()
+    const observer = new MutationObserver(() => {
+      if (hidden.hasAttribute('hidden')) return
+      observer.disconnect()
+      if (this.revealObserver === observer) this.revealObserver = null
+      void this.markSeen(this.store)
+    })
+    observer.observe(hidden, { attributes: true, attributeFilter: ['hidden'] })
+    this.revealObserver = observer
   }
 
   private onVisibility = () => { void this.markSeen(this.store) }

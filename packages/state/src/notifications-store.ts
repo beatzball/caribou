@@ -243,15 +243,20 @@ export function startUnreadNotifications(opts: StartUnreadNotificationsOpts = {}
     return user ? `${user.userKey}\n${user.token}` : null
   })
 
+  // Every new session starts a new activation. A reply from an older one is
+  // dropped, also for the same key and token after A -> B -> A.
+  let activation = 0
+
   const dispose = effect(() => {
     const current = session.value
+    const mine = ++activation
     stopPolling?.()
     stopPolling = null
     unreadNotificationCount.value = 0
     const user = activeUser.peek()
     if (!current || !user) return
 
-    const refresh = async () => {
+    const fetchCount = async () => {
       const client = activeClient.peek()
       if (!client) return
       const since = lastSeenNotificationId(user.userKey)
@@ -261,15 +266,34 @@ export function startUnreadNotifications(opts: StartUnreadNotificationsOpts = {}
       } catch {
         return
       }
-      // A reply after stop, or for a session that is no longer the active
-      // one, is dropped.
-      if (disposed || session.peek() !== current) return
+      if (disposed || mine !== activation) return
       // The page may have marked newer ones seen while this was in flight.
       const seen = lastSeenNotificationId(user.userKey)
       unreadNotificationCount.value = seen
         ? page.filter((n) => compareNotificationIds(n.id, seen) > 0).length
         : page.length
     }
+
+    // One refresh at a time, so an older reply can not land after a newer
+    // one. Loading the account makes a new client for the same session, and
+    // the two do not share a request. A refresh asked for during one runs
+    // once more after it.
+    let running: Promise<void> | null = null
+    let again = false
+    const refresh = (): Promise<void> => {
+      if (running) {
+        again = true
+        return running
+      }
+      running = (async () => {
+        do {
+          again = false
+          await fetchCount()
+        } while (again && !disposed && mine === activation)
+      })().finally(() => { running = null })
+      return running
+    }
+
     void refresh()
     stopPolling = startPolling({
       intervalMs: opts.intervalMs ?? NOTIFICATIONS_POLL_MS,

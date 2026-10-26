@@ -144,9 +144,11 @@ describe('createNotificationsStore', () => {
     const top = 1 + cap * NOTIFICATIONS_PAGE
     expect(ids(store)).toEqual(range(top, 1).map((n) => n.id))
 
-    fetchNotifications.mockResolvedValueOnce([])
+    // The rest is a real 6th page: the next poll gets it, and every id is there.
+    fetchNotifications.mockResolvedValueOnce(range(top + 10, top + 1))
     await store.poll()
     expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], minId: String(top), limit: NOTIFICATIONS_PAGE })
+    expect(ids(store)).toEqual(range(top + 10, 1).map((n) => n.id))
   })
 
   it('a poll that fails on a later page merges nothing, keeps the rows, and the next success clears the error', async () => {
@@ -322,6 +324,92 @@ describe('startUnreadNotifications', () => {
     await flush()
     expect(unreadNotificationCount.value).toBe(0)
     stop()
+  })
+
+  // A held reply: `resolve` sends it.
+  function held() {
+    let resolve!: (v: mastodon.v1.Notification[]) => void
+    fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    return (v: mastodon.v1.Notification[]) => resolve(v)
+  }
+  const three = () => [notif('3'), notif('2'), notif('1')]
+
+  it('one refresh at a time: a new client for the same session waits, then its reply wins', async () => {
+    signIn('T1')
+    const first = held()
+    const h = host()
+    const stop = startUnreadNotifications({ host: h })
+    // Loading the account replaces the session object, and with it the client.
+    signIn('T1')
+    fetchNotifications.mockResolvedValueOnce(three())
+    h.visibilityState = 'visible'
+    await flush()
+    expect(fetchNotifications).toHaveBeenCalledOnce()
+
+    first([])
+    await flush()
+    expect(fetchNotifications).toHaveBeenCalledTimes(2)
+    expect(unreadNotificationCount.value).toBe(3)
+    stop()
+  })
+
+  it('one refresh at a time: the later reply wins also when the first one had more', async () => {
+    signIn('T1')
+    const first = held()
+    const h = host()
+    const stop = startUnreadNotifications({ host: h })
+    const second = held()
+    h.visibilityState = 'visible'
+    first(three())
+    await flush()
+    expect(unreadNotificationCount.value).toBe(3)
+    second([])
+    await flush()
+    expect(unreadNotificationCount.value).toBe(0)
+    stop()
+  })
+
+  describe('a reply from before A -> B -> A, with the same token', () => {
+    const bob = toUserKey('bob', 'example.social')
+    function switchAway() {
+      users.value = new Map([...users.value, [bob, {
+        userKey: bob, server: 'example.social', token: 'TB', vapidKey: '', account: null, createdAt: 2,
+      }]])
+      activeUserKey.value = bob
+      activeUserKey.value = key
+    }
+
+    it('is dropped when it lands after the new one', async () => {
+      signIn('T1')
+      const old = held()
+      const stop = startUnreadNotifications({ host: host() })
+      fetchNotifications.mockReturnValueOnce(Promise.resolve([]))  // bob's
+      const newer = held()
+      switchAway()
+      newer(three())
+      await flush()
+      expect(unreadNotificationCount.value).toBe(3)
+      old([notif('9')])
+      await flush()
+      expect(unreadNotificationCount.value).toBe(3)
+      stop()
+    })
+
+    it('is dropped when it lands first', async () => {
+      signIn('T1')
+      const old = held()
+      const stop = startUnreadNotifications({ host: host() })
+      fetchNotifications.mockReturnValueOnce(Promise.resolve([]))  // bob's
+      const newer = held()
+      switchAway()
+      old([notif('9')])
+      await flush()
+      expect(unreadNotificationCount.value).toBe(0)
+      newer(three())
+      await flush()
+      expect(unreadNotificationCount.value).toBe(3)
+      stop()
+    })
   })
 
   it('drops a reply that arrives after it was stopped', async () => {
