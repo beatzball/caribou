@@ -65,6 +65,17 @@ only the support and loads the rest (`app-main.ts`) with a dynamic `import()`.
 Put new client start-up code in `app-main.ts`, never in `app.ts`.
 `tests/e2e/hydration-bootstrap.spec.ts` guards this.
 
+**A deploy must not strand a browser on the old build.** Vite names every
+chunk under `/_litro/assets/` by its hash, and those are cached for a year;
+the entry `/_litro/app.js` keeps its name and is served `no-cache`. The page
+loads it as `app.js?v=<hash of app.js>` (`server/lib/app-entry.ts`, through
+the `appScriptUrl` option the litro patch adds), so a browser that kept an
+old entry never meets it again. That only works while no chunk imports
+`app.js`: `vite.config.ts` keeps lit-html and Vite's preload helper out of it.
+A tab that stays open across a deploy loads the target URL in full when a
+page chunk fails to load (`components/_stale-build.ts`).
+`tests/e2e/stale-build.spec.ts` covers all three.
+
 **Test for the server with `typeof window === 'undefined'`, not `isServer`.**
 Vitest loads `lit` under Node's `node` export condition, so Lit's `isServer`
 is `true` in a happy-dom component test even though a DOM exists. A guard on

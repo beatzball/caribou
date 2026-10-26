@@ -98,6 +98,18 @@ export default defineConfig({
       input: 'app.ts',
       output: {
         entryFileNames: '[name].js',
+        // Keep app.js a bootstrap that nothing imports. Left to itself, the
+        // bundler puts lit-html (the hydration support needs it) and Vite's
+        // preload helper into the entry, and every other chunk then imports
+        // `../app.js`. The page loads the entry as `app.js?v=<build>` (see
+        // server/lib/app-entry.ts), and a module under a second URL is a
+        // second copy, so the chunks must not ask for it by its bare name.
+        // lit-element stays out of this group: it must run after the
+        // hydration support, which app.ts guarantees by importing the app
+        // dynamically.
+        codeSplitting: {
+          groups: [{ name: 'boot', test: /lit-element-hydrate-support|[\\/]lit-html[\\/]|vite\/preload-helper/ }],
+        },
       },
     },
   },

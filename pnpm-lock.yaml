@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@beatzball/litro@0.17.4':
-    hash: c4d9dc4c2cacbc138b531987d14781dbbf08efa389926928c387c5cce6c31d9f
+    hash: fedee5a36381a27c66679fa3f791aa35e27deb446fc393b5331dcd814f1445af
     path: patches/@beatzball__litro@0.17.4.patch
 
 importers:
@@ -45,7 +45,7 @@ importers:
         version: link:../../packages/caribou-ui-headless
       '@beatzball/litro':
         specifier: 0.17.4
-        version: 0.17.4(patch_hash=c4d9dc4c2cacbc138b531987d14781dbbf08efa389926928c387c5cce6c31d9f)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)
+        version: 0.17.4(patch_hash=fedee5a36381a27c66679fa3f791aa35e27deb446fc393b5331dcd814f1445af)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)
       '@beatzball/litro-router':
         specifier: 0.3.1
         version: 0.3.1
@@ -4256,7 +4256,7 @@ snapshots:
 
   '@beatzball/litro-router@0.3.1': {}
 
-  '@beatzball/litro@0.17.4(patch_hash=c4d9dc4c2cacbc138b531987d14781dbbf08efa389926928c387c5cce6c31d9f)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)':
+  '@beatzball/litro@0.17.4(patch_hash=fedee5a36381a27c66679fa3f791aa35e27deb446fc393b5331dcd814f1445af)(@types/node@22.19.17)(esbuild@0.28.2)(rolldown@1.2.12)(terser@5.46.1)(typescript@5.9.3)':
     dependencies:
       '@beatzball/litro-router': 0.3.1
       '@lit-labs/ssr': 3.3.1

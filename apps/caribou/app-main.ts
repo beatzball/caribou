@@ -11,6 +11,7 @@ import '@beatzball/litro/runtime/LitroLink.js'
 
 import { activeUserKey, loadActiveAccount, loadFromStorage } from '@beatzball/caribou-state'
 import { installUnauthorizedHandler } from './components/_unauthorized.js'
+import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
 import { routes } from './routes.generated.js'
 
 // Hydrate session from localStorage before any component reads it.
@@ -21,11 +22,13 @@ if (typeof window !== 'undefined') {
   activeUserKey.subscribe(() => { void loadActiveAccount() })
   // A client that gets a 401 fires `caribou:unauthorized` with its session.
   installUnauthorizedHandler(window, () => { location.replace('/') })
+  // A tab open across a deploy asks for chunks the new build no longer has.
+  installPreloadErrorReload(window)
 }
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null
 if (outlet) {
-  outlet.routes = routes
+  outlet.routes = withStaleBuildReload(routes)
 } else {
   console.warn('[litro] <litro-outlet> not found — router will not start.')
 }
