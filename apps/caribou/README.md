@@ -105,18 +105,30 @@ registers the element on the server and the client alike.
 
 | element | attributes | parts | custom properties |
 |---|---|---|---|
-| `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`) | — | — |
-| `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `count` | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size` |
+| `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`), `filled` | — | `--caribou-icon-fill` |
+| `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `soft-disabled`, `count`, `hint`, `description`, `variant` (`default`, `ghost`) | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size`, `--caribou-icon-button-pressed-fg` |
 | `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
 
 - `<caribou-icon>` is always hidden from assistive tech, and is sized by
   `font-size` and coloured by `color`. An unknown name renders nothing.
-- `<caribou-icon-button>`: `label` becomes the button's `aria-label` and its
-  tooltip. `pressed` has three states: no attribute means it is not a
+- `<caribou-icon-button>`: `label` becomes the button's `aria-label`. It
+  is not the tooltip: a `title` equal to the name is read again as the
+  description. Set `hint` for a tooltip. `pressed` has three states: no attribute means it is not a
   toggle (no `aria-pressed`); `pressed="false"` is a toggle that is off;
   `pressed` or `pressed="true"` is on. Bind it as
   `pressed=${on ? 'true' : 'false'}`. The hit area is 2.25rem, 44px on a
   coarse pointer.
+- `<caribou-icon-button>` for a control that is off but must still be
+  heard (signed out, "Sign in to boost"): `soft-disabled` keeps it in the
+  tab order with `aria-disabled` and swallows its clicks; `hint` is the
+  tooltip; `description` is read after the name. It
+  lives in the button's own shadow root, because an `aria-describedby` id
+  in the caller's root cannot reach the inner button. `variant="ghost"` is
+  borderless and muted, and fills the icon while pressed; the status card
+  sets `--caribou-icon-button-pressed-fg: var(--success)` and
+  `--caribou-icon-fill: none` on boost. The status card's actions are the
+  first server-rendered use; `tests/e2e/status-card-hydration.spec.ts`
+  hydrates them in CI.
 - `<caribou-button>`: the label is the slotted text. `type="submit"` submits
   its form (through `ElementInternals`) the way a native submit button
   does: after every click listener has run, and not if one of them called

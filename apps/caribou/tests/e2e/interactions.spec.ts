@@ -82,7 +82,9 @@ test('favourite then unfavourite on /home updates the count', async ({ page }) =
   await gotoSettled(page, '/home')
 
   const fav = page.getByRole('button', { name: 'Favourite', exact: true })
-  await expect(fav).toHaveAttribute('aria-disabled', 'false')
+  // Signed out it is soft-disabled (`aria-disabled`), which Playwright
+  // counts as disabled.
+  await expect(fav).toBeEnabled()
   await expect(fav).toHaveAttribute('aria-pressed', 'false')
   await expect(fav).toHaveText('2')
 

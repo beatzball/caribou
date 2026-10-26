@@ -39,6 +39,14 @@ describe('caribou-icon', () => {
     expect(warn).toHaveBeenCalledOnce()
   })
 
+  it('reflects filled, which the stylesheet keys on', async () => {
+    const el = await mount('star')
+    expect(el.hasAttribute('filled')).toBe(false)
+    el.filled = true
+    await el.updateComplete
+    expect(el.hasAttribute('filled')).toBe(true)
+  })
+
   it('does not treat an inherited Object key as an icon', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const el = await mount('toString')

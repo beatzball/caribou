@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { serverPageReport, watchServerPage } from './_server-page.js'
 
 // Hits the real fosstodon.org via the server's SSR pageData fetch (no
 // browser-level interception is possible because the fetch is in the
@@ -83,6 +84,28 @@ for (const route of ['/local', '/public']) {
     // relative form ("5m", "2h", "3d", "Apr 14", "just now").
     await expect(page.locator('caribou-status-card time').first())
       .toHaveText(/^\s*(just now|\d+[mhd]|[A-Z][a-z]{2} \d{1,2}(, \d{4})?)\s*$/)
+  })
+}
+
+for (const route of ['/local', '/public']) {
+  test(`${route} hydrates each card's action buttons in place, with no second copy`, async ({ page, context }) => {
+    await withInstanceCookie(context)
+    const errors = collectErrors(page)
+    // The native button inside every action's `<caribou-icon-button>`.
+    await watchServerPage(page, 'button[part="button"]')
+    await page.goto(route)
+    await settled(page)
+
+    const cards = await page.locator('caribou-status-card').count()
+    expect(cards).toBeGreaterThan(0)
+    const report = await serverPageReport(page)
+    expect(report!.sent).toBe(cards * 4)
+    expect(report).toEqual({ sent: report!.sent, atSwap: report!.sent, sameNodes: true, deferred: [] })
+    // Signed out, each action is still in the tab order, with its hint.
+    const favourite = page.locator('caribou-status-card').first().locator('caribou-icon-button.favourite button')
+    await expect(favourite).toHaveAttribute('aria-disabled', 'true')
+    await expect(favourite).toHaveAttribute('title', 'Sign in to favourite')
+    expect(errors).toEqual([])
   })
 }
 
