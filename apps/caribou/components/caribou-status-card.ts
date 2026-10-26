@@ -13,7 +13,9 @@ import {
 import { ICONS } from './_icons.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
-installPurifyHooks(DOMPurify)
+// Without a window DOMPurify is a stub with no `addHook`; the server has its
+// own instance.
+if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
 
 export type StatusCardVariant = 'timeline' | 'focused' | 'ancestor' | 'descendant'
 
