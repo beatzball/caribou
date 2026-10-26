@@ -51,8 +51,29 @@ describe('forceSafeTargetRel', () => {
     expect(set).not.toHaveBeenCalled()
   })
 
-  it('leaves links without target=_blank and other elements alone', () => {
-    for (const node of [anchor({ href: '/x' }), anchor({ target: '_self' }), anchor({ target: '_blank' }, 'SPAN')]) {
+  it.each(['_BLANK', '_Blank', 'win'])('treats target=%s as a new window', (target) => {
+    const a = anchor({ target })
+    forceSafeTargetRel(a)
+    expect(a.attrs.get('rel')).toBe('noopener noreferrer')
+    expect(a.attrs.get('target')).toBe(target)
+  })
+
+  it('keeps rel=opener and adds the words that override it', () => {
+    const a = anchor({ target: '_blank', rel: 'opener' })
+    forceSafeTargetRel(a)
+    expect(a.attrs.get('rel')).toBe('opener noopener noreferrer')
+  })
+
+  it('matches rel words without case and does not rewrite them', () => {
+    const a = anchor({ target: '_blank', rel: 'NoOpener NOREFERRER' })
+    const set = vi.spyOn(a, 'setAttribute')
+    forceSafeTargetRel(a)
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it('leaves same-window links and other elements alone', () => {
+    const same = ['', '_self', '_SELF', '_parent', '_top'].map((target) => anchor({ target }))
+    for (const node of [anchor({ href: '/x' }), ...same, anchor({ target: '_blank' }, 'SPAN')]) {
       forceSafeTargetRel(node)
       expect(node.attrs.has('rel')).toBe(false)
     }

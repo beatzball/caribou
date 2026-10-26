@@ -14,15 +14,24 @@ interface AnchorLike {
   setAttribute(name: string, value: string): void
 }
 
+// Targets that stay in this browsing context. Any other value, `_blank` or a
+// named window like `target="win"`, opens a new one.
+const SAME_CONTEXT_TARGETS = ['', '_self', '_parent', '_top']
+
 // Mastodon sends `rel="nofollow noopener noreferrer"` with `target="_blank"`,
-// but other servers may not, and a new-tab link without `noopener` hands the
-// opened page a reference to this window. Adds only the missing words, so
-// content that already has them comes out as the same string: the server and
-// the client sanitizers must agree for hydration.
+// but other servers may not, and a new-window link without `noopener` hands
+// the opened page a reference to this window. Target keywords and rel words
+// are case-insensitive in HTML, so compare lowercased. Adds only the missing
+// words and never rewrites the ones there, so content that already has them
+// comes out as the same string: the server and the client sanitizers must
+// agree for hydration. A `rel="opener"` stays, but `noopener` wins over it.
 export function forceSafeTargetRel(node: AnchorLike): void {
-  if (node.tagName !== 'A' || node.getAttribute('target') !== '_blank') return
+  if (node.tagName !== 'A') return
+  const target = node.getAttribute('target')
+  if (target === null || SAME_CONTEXT_TARGETS.includes(target.toLowerCase())) return
   const rel = (node.getAttribute('rel') ?? '').split(/\s+/).filter(Boolean)
-  const missing = ['noopener', 'noreferrer'].filter((w) => !rel.includes(w))
+  const lower = rel.map((w) => w.toLowerCase())
+  const missing = ['noopener', 'noreferrer'].filter((w) => !lower.includes(w))
   if (missing.length > 0) node.setAttribute('rel', [...rel, ...missing].join(' '))
 }
 

@@ -126,9 +126,13 @@ describe('<caribou-status-card> sanitizing', () => {
     expect(contentHtml(el)).toBe(fromServer)
   })
 
-  it('adds noopener and noreferrer to a new-tab link on both sides', async () => {
-    const raw = '<p><a href="https://example.com/b" target="_blank" rel="nofollow">x</a></p>'
-    const want = '<p><a href="https://example.com/b" target="_blank" rel="nofollow noopener noreferrer">x</a></p>'
+  it.each([
+    ['_blank', 'nofollow', 'nofollow noopener noreferrer'],
+    ['_BLANK', 'opener', 'opener noopener noreferrer'],
+    ['win', '', 'noopener noreferrer'],
+  ])('adds noopener and noreferrer to a target=%s link on both sides', async (target, rel, wantRel) => {
+    const raw = `<p><a href="https://example.com/b" target="${target}"${rel ? ` rel="${rel}"` : ''}>x</a></p>`
+    const want = `<p><a href="https://example.com/b" target="${target}" rel="${wantRel}">x</a></p>`
     expect(sanitize(raw)).toBe(want)
     const el = await mount(fixture({ content: raw }))
     expect(contentHtml(el)).toBe(want)
