@@ -110,6 +110,12 @@ test('follow, then unfollow, from a profile', async ({ page }) => {
   expect(writes).toEqual(['follow'])
   await page.mouse.click(0, 0)
   await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
+  // So does a key pressed while a button focused without the keyboard keeps focus.
+  await button.focus()
+  await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
+  await page.keyboard.press('Shift')
+  await expect.poll(async () => (await button.innerText()).trim()).toBe('Unfollow')
+  await page.mouse.click(0, 0)
 
   await button.click()
   await expect(button).toHaveAttribute('data-state', 'follow')

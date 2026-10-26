@@ -167,10 +167,12 @@ export class CaribouProfileHeader extends LitElement {
   // The host matches `:focus` but not `:focus-visible` when its inner button
   // has focus, so ask the inner button and mark the host for the CSS. A
   // mouse click focuses the button too, and must not keep "Unfollow" up.
-  private onFollowFocus = (e: FocusEvent) => {
+  // A key pressed while it keeps focus turns `:focus-visible` on with no
+  // focus event, so key events ask again (keyup: after the browser flips it).
+  private onFollowFocus = (e: Event) => {
     const host = e.currentTarget as HTMLElement
     const inner = e.composedPath()[0] as Element
-    host.toggleAttribute('data-focus-visible', e.type === 'focusin' && inner.matches(':focus-visible'))
+    host.toggleAttribute('data-focus-visible', e.type !== 'focusout' && inner.matches(':focus-visible'))
   }
 
   private renderFollow() {
@@ -184,6 +186,7 @@ export class CaribouProfileHeader extends LitElement {
     return html`<div class="actions" aria-live="polite">
       <caribou-button class="follow" data-state=${state} variant=${state === 'follow' ? 'primary' : 'secondary'}
         @click=${this.onFollowClick} @focusin=${this.onFollowFocus} @focusout=${this.onFollowFocus}
+        @keydown=${this.onFollowFocus} @keyup=${this.onFollowFocus}
         >${label}</caribou-button>
     </div>`
   }

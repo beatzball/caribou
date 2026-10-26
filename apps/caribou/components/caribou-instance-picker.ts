@@ -56,7 +56,8 @@ export class CaribouInstancePicker extends LitElement {
                placeholder="mastodon.social"
                required />
         <!-- The form has no action: without JS it has nowhere to go, so a
-             submit that needs JS (see caribou-button) loses nothing. -->
+             submit that needs JS (see caribou-button) loses nothing.
+             Enter submits only while this is the form's one text field. -->
         <caribou-button variant="primary" type="submit" ?loading=${this.submitting}>
           ${this.submitting ? 'Connecting…' : 'Sign in'}
         </caribou-button>
