@@ -26,9 +26,17 @@ export const activeUser = computed<UserSession | null>(() => {
   return key ? users.value.get(key) ?? null : null
 })
 
-function emitUnauthorized(): void {
+/** Detail of `caribou:unauthorized`: the session whose request got the 401. */
+export interface UnauthorizedDetail {
+  userKey: UserKey
+  token: string
+}
+
+// The detail names the client's own session, not the active one: a request
+// started before a switch or a re-sign-in can return 401 after it.
+function emitUnauthorized(detail: UnauthorizedDetail): void {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('caribou:unauthorized'))
+    window.dispatchEvent(new CustomEvent<UnauthorizedDetail>('caribou:unauthorized', { detail }))
   }
 }
 
@@ -37,7 +45,7 @@ export const activeClient = computed<CaribouClient | null>(() => {
   if (!user) return null
   const source: SessionSource = {
     get: () => ({ userKey: user.userKey, server: user.server, token: user.token }),
-    onUnauthorized: emitUnauthorized,
+    onUnauthorized: () => { emitUnauthorized({ userKey: user.userKey, token: user.token }) },
   }
   return createCaribouClient(user.userKey, source)
 })
@@ -102,6 +110,25 @@ export function removeActiveUser(): void {
   saveToStorage()
 }
 
+/**
+ * Removes the session `userKey` only if it still has `token`; a 401 from an
+ * older token must not remove the session that replaced it. Returns whether
+ * the removed session was the active one, or `'stale'` when nothing changed.
+ */
+export function removeSession(userKey: UserKey, token: string): 'active' | 'inactive' | 'stale' {
+  const current = users.value.get(userKey)
+  if (!current || current.token !== token) return 'stale'
+  const next = new Map(users.value)
+  next.delete(userKey)
+  users.value = next
+  const wasActive = activeUserKey.value === userKey
+  if (wasActive) activeUserKey.value = null
+  localStorage.removeItem(`caribou.prefs.${userKey}`)
+  localStorage.removeItem(`caribou.drafts.${userKey}`)
+  saveToStorage()
+  return wasActive ? 'active' : 'inactive'
+}
+
 const K_USERS = 'caribou.users'
 const K_ACTIVE = 'caribou.activeUserKey'
 
@@ -117,7 +144,9 @@ export function loadFromStorage(): void {
     if (rawUsers) {
       const entries = JSON.parse(rawUsers) as [UserKey, UserSession][]
       const map = new Map<UserKey, UserSession>()
-      for (const [k, v] of entries) if (isUserKey(k)) map.set(k, v)
+      // Older entries can lack `userKey`; the 401 event needs it to find the
+      // session again, so take it from the map key.
+      for (const [k, v] of entries) if (isUserKey(k)) map.set(k, v.userKey ? v : { ...v, userKey: k })
       users.value = map
     }
     if (rawActive) {

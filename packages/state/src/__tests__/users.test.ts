@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, activeUser,
-  addUserSession, removeActiveUser, isOwnAccount, userName, loadActiveAccount,
+  addUserSession, removeActiveUser, removeSession, isOwnAccount, userName, loadActiveAccount,
   loadFromStorage, saveToStorage,
   type UserSession,
 } from '../users.js'
@@ -52,6 +52,15 @@ describe('persistence', () => {
     const parsed = JSON.parse(raw!)
     expect(parsed).toEqual([[key, expect.objectContaining({ userKey: key })]])
     expect(localStorage.getItem('caribou.activeUserKey')).toBe(JSON.stringify(key))
+  })
+
+  it('loadFromStorage fills a missing userKey from the map key', () => {
+    const { userKey: _, ...stored } = sampleSession()
+    localStorage.setItem('caribou.users', JSON.stringify([[key, stored]]))
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+    loadFromStorage()
+    expect(users.value.get(key)?.userKey).toBe(key)
+    expect(removeSession(key, 'TOKEN-1')).toBe('active')
   })
 
   it('loadFromStorage hydrates the signals', () => {
@@ -203,5 +212,90 @@ describe('loadActiveAccount', () => {
     expect(activeUser.value?.token).toBe('TOKEN-2')
     expect(activeUser.value?.account).toBeNull()
     fetchSpy.mockRestore()
+  })
+})
+
+describe('removeSession (a 401 for one client)', () => {
+  const other = toUserKey('alice', 'example.social')
+
+  function otherSession(): UserSession {
+    return {
+      userKey: other, server: 'example.social', token: 'TOKEN-A', vapidKey: 'VAPID',
+      account: null, createdAt: 1_700_000_000_001,
+    }
+  }
+
+  function seedLocal(k: string): void {
+    localStorage.setItem(`caribou.prefs.${k}`, '{}')
+    localStorage.setItem(`caribou.drafts.${k}`, '[]')
+  }
+
+  it('removes the active session when the token matches, with its prefs and drafts', () => {
+    addUserSession(sampleSession())
+    seedLocal(key)
+    expect(removeSession(key, 'TOKEN-1')).toBe('active')
+    expect(users.value.has(key)).toBe(false)
+    expect(activeUserKey.value).toBeNull()
+    expect(localStorage.getItem(`caribou.prefs.${key}`)).toBeNull()
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBeNull()
+    expect(JSON.parse(localStorage.getItem('caribou.users')!)).toEqual([])
+  })
+
+  it('keeps a session that was replaced under the same key', () => {
+    addUserSession({ ...sampleSession(), token: 'TOKEN-2' })
+    seedLocal(key)
+    expect(removeSession(key, 'TOKEN-1')).toBe('stale')
+    expect(users.value.get(key)?.token).toBe('TOKEN-2')
+    expect(activeUserKey.value).toBe(key)
+    expect(localStorage.getItem(`caribou.prefs.${key}`)).toBe('{}')
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('[]')
+  })
+
+  it('does nothing for a session that is already gone', () => {
+    addUserSession(sampleSession())
+    expect(removeSession(other, 'TOKEN-A')).toBe('stale')
+    expect(users.value.size).toBe(1)
+    expect(activeUserKey.value).toBe(key)
+  })
+
+  it('removes only the non-active session when two are stored', () => {
+    addUserSession(otherSession())
+    addUserSession(sampleSession())
+    seedLocal(key)
+    seedLocal(other)
+    expect(removeSession(other, 'TOKEN-A')).toBe('inactive')
+    expect([...users.value.keys()]).toEqual([key])
+    expect(activeUserKey.value).toBe(key)
+    expect(localStorage.getItem(`caribou.prefs.${other}`)).toBeNull()
+    expect(localStorage.getItem(`caribou.drafts.${other}`)).toBeNull()
+    expect(localStorage.getItem(`caribou.prefs.${key}`)).toBe('{}')
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('[]')
+    expect(JSON.parse(localStorage.getItem('caribou.activeUserKey')!)).toBe(key)
+  })
+})
+
+describe('the 401 event', () => {
+  it('names the session of the client that got the 401, not the one active now', async () => {
+    const { activeClient } = await import('../users.js')
+    addUserSession(sampleSession())
+    const client = activeClient.value!
+    // Another session becomes active while the first client's request is in flight.
+    addUserSession({ ...sampleSession(), userKey: toUserKey('alice', 'example.social'), token: 'TOKEN-A' })
+    const details: unknown[] = []
+    const listener = (e: Event) => { details.push((e as CustomEvent).detail) }
+    window.addEventListener('caribou:unauthorized', listener)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401, headers: { 'content-type': 'application/json' },
+      }),
+    ) as typeof fetch
+    try {
+      await expect(client.fetchTimeline('home')).rejects.toMatchObject({ code: 'unauthorized' })
+      expect(details).toEqual([{ userKey: key, token: 'TOKEN-1' }])
+    } finally {
+      globalThis.fetch = originalFetch
+      window.removeEventListener('caribou:unauthorized', listener)
+    }
   })
 })

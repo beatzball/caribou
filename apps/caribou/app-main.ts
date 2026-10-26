@@ -9,7 +9,8 @@
 import '@beatzball/litro/runtime/LitroOutlet.js'
 import '@beatzball/litro/runtime/LitroLink.js'
 
-import { activeUserKey, loadActiveAccount, loadFromStorage, removeActiveUser } from '@beatzball/caribou-state'
+import { activeUserKey, loadActiveAccount, loadFromStorage } from '@beatzball/caribou-state'
+import { installUnauthorizedHandler } from './components/_unauthorized.js'
 import { routes } from './routes.generated.js'
 
 // Hydrate session from localStorage before any component reads it.
@@ -18,31 +19,8 @@ if (typeof window !== 'undefined') {
   // A session from sign-in has no account yet. Load it in the background,
   // now and whenever the active user changes.
   activeUserKey.subscribe(() => { void loadActiveAccount() })
-  // Global 401 interceptor: if any mastodon-client call hits 401, the client
-  // calls session.onUnauthorized(). Our session source (see `session-source.ts`
-  // wiring in createTimelineStore's clientSource) calls removeActiveUser and
-  // navigates to /?error=unauthorized.
-  //
-  // More than one timeline can be alive during a route swap, and each one
-  // fires `caribou:unauthorized` when its fetch hits 401. Calling
-  // `location.replace` from the second listener interrupts the navigation
-  // started by the first, which Chromium reports as `net::ERR_ABORTED` (and
-  // Playwright's `waitForURL` surfaces as a test failure). Guard with a
-  // one-shot flag so only the first unauthorized event triggers the redirect.
-  let unauthorizedHandled = false
-  window.addEventListener('caribou:unauthorized', () => {
-    if (unauthorizedHandled) return
-    unauthorizedHandled = true
-    removeActiveUser()
-    // Signal the error via sessionStorage instead of `?error=` on the
-    // replace target. Firefox + webkit race the query param between
-    // `location.replace` and navigation commit (firefox sometimes drops
-    // it entirely; webkit observes the banner's post-load URL cleanup).
-    // sessionStorage survives the same-tab navigation atomically and is
-    // browser-agnostic.
-    try { sessionStorage.setItem('caribou.error', 'unauthorized') } catch { /* ignore */ }
-    location.replace('/')
-  })
+  // A client that gets a 401 fires `caribou:unauthorized` with its session.
+  installUnauthorizedHandler(window, () => { location.replace('/') })
 }
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null
