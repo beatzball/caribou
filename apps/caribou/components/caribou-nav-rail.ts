@@ -15,6 +15,7 @@ const ITEMS: NavItem[] = [
   { label: 'Local',   icon: 'users', href: '/local' },
   { label: 'Public',  icon: 'globe', href: '/public' },
   { label: 'Profile', icon: 'user',  href: '/@me' },
+  { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks' },
 ]
 
 function openCompose() {

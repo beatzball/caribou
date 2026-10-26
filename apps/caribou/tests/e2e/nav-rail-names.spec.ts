@@ -20,7 +20,7 @@ for (const { width, layout } of [
       el.setAttribute('can-compose', '')
     })
 
-    for (const name of ['Home', 'Local', 'Public', 'Profile']) {
+    for (const name of ['Home', 'Local', 'Public', 'Profile', 'Bookmarks']) {
       await expect(rail.getByRole('link', { name, exact: true })).toBeVisible()
     }
     await expect(rail.getByRole('button', { name: 'New post', exact: true })).toBeVisible()

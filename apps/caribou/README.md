@@ -106,6 +106,13 @@ calls DOMPurify installs `installPurifyHooks` from
 `@beatzball/caribou-mastodon-client/sanitize-opts`, so the server and the client
 output stay the same string.
 
+**Bookmarks page by a cursor, not a status id.** Mastodon orders
+`/api/v1/bookmarks` by bookmark id and names the next page only in the Link
+header. The client keeps that cursor per page and translates the status id
+the timeline store passes as `maxId` (`create-client.ts`). The browser can
+read the header because Mastodon sends `Access-Control-Expose-Headers: Link`;
+an e2e mock must send it too (`tests/e2e/bookmarks.spec.ts`).
+
 **Server-only code stays out of the client bundle.** A page's `pageData`
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.

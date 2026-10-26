@@ -54,6 +54,7 @@ test('bottom bar items are at least 44px square', async ({ page }) => {
   const items = {
     '/home': item(page, '/home'), '/local': item(page, '/local'),
     '/public': item(page, '/public'), '/@me': item(page, '/@me'),
+    '/bookmarks': item(page, '/bookmarks'),
     'New post': rail(page).locator('.compose-btn'),
     'Sign out': rail(page).locator('.signout-btn'),
   }

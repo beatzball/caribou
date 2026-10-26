@@ -32,6 +32,7 @@ const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/blog', adds: [] },
   { route: '/blog/hello-world', adds: [] },
   { route: '/home', adds: [] },
+  { route: '/bookmarks', adds: [] },
   { route: '/local', adds: [] },
   { route: '/public', adds: [] },
   { route: '/@alice@example.social/123', adds: [] },

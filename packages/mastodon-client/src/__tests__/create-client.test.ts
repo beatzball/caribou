@@ -111,6 +111,51 @@ describe('createCaribouClient', () => {
     expect(statuses.map((s) => s.id)).toEqual(['bm-1'])
   })
 
+  it('fetchTimeline("bookmarks") pages with the Link header cursor, not the status id', async () => {
+    const sess = sessionSource()
+    const client = createCaribouClient(userKey, sess)
+    const seen: Array<string | null> = []
+    server.use(
+      http.get('https://fosstodon.org/api/v1/bookmarks', ({ request }) => {
+        const maxId = new URL(request.url).searchParams.get('max_id')
+        seen.push(maxId)
+        if (maxId === null) {
+          return HttpResponse.json([makeStatus('s9'), makeStatus('s5')], {
+            headers: {
+              link: '<https://fosstodon.org/api/v1/bookmarks?max_id=700>; rel="next", '
+                + '<https://fosstodon.org/api/v1/bookmarks?min_id=800>; rel="prev"',
+            },
+          })
+        }
+        if (maxId === '700') return HttpResponse.json([makeStatus('s1')])
+        return HttpResponse.json([makeStatus('wrong')])
+      }),
+    )
+    const first = await client.fetchTimeline('bookmarks')
+    expect(first.map((s) => s.id)).toEqual(['s9', 's5'])
+    // The store passes the last status id; the client sends the cursor.
+    const second = await client.fetchTimeline('bookmarks', { maxId: 's5' })
+    expect(second.map((s) => s.id)).toEqual(['s1'])
+    // That page had no next link: the bookmarks end, with no request.
+    const third = await client.fetchTimeline('bookmarks', { maxId: 's1' })
+    expect(third).toEqual([])
+    expect(seen).toEqual([null, '700'])
+  })
+
+  it('fetchTimeline("bookmarks") does not poll with a status id', async () => {
+    const sess = sessionSource()
+    const client = createCaribouClient(userKey, sess)
+    let hits = 0
+    server.use(
+      http.get('https://fosstodon.org/api/v1/bookmarks', () => {
+        hits += 1
+        return HttpResponse.json([makeStatus('bm-1')])
+      }),
+    )
+    expect(await client.fetchTimeline('bookmarks', { sinceId: 'bm-1' })).toEqual([])
+    expect(hits).toBe(0)
+  })
+
   it('fetchTimeline({ type: "hashtag", tag }) fetches tag timeline', async () => {
     const sess = sessionSource()
     const client = createCaribouClient(userKey, sess)

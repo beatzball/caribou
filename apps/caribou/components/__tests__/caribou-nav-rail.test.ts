@@ -41,15 +41,15 @@ describe('caribou-nav-rail', () => {
     document.body.replaceChildren()
   })
 
-  it('renders four real nav anchors inside a labelled <nav>', async () => {
+  it('renders the real nav anchors inside a labelled <nav>', async () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary')
     const hrefs = [...el.shadowRoot!.querySelectorAll('nav > a')].map((a) => a.getAttribute('href'))
-    expect(hrefs).toEqual(['/home', '/local', '/public', '/@me'])
+    expect(hrefs).toEqual(['/home', '/local', '/public', '/@me', '/bookmarks'])
     const labels = [...el.shadowRoot!.querySelectorAll('nav > a .label')].map((s) => s.textContent)
-    expect(labels).toEqual(['Home', 'Local', 'Public', 'Profile'])
+    expect(labels).toEqual(['Home', 'Local', 'Public', 'Profile', 'Bookmarks'])
     const icons = [...el.shadowRoot!.querySelectorAll('nav > a caribou-icon')].map((i) => i.getAttribute('name'))
-    expect(icons).toEqual(['home', 'users', 'globe', 'user'])
+    expect(icons).toEqual(['home', 'users', 'globe', 'user', 'bookmark'])
   })
 
   it('marks the route in `current` with aria-current="page"', async () => {
