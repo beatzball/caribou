@@ -118,15 +118,16 @@ test('the nav rail marks the active item with aria-current after hydration', asy
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   const localNav = page.locator('page-local caribou-nav-rail')
   await expect(localNav.getByRole('link', { name: 'Local' })).toHaveAttribute('aria-current', 'page')
-  await expect(localNav.locator('a[aria-current]')).toHaveCount(1)
+  await expect(localNav.locator('nav > a[aria-current]')).toHaveCount(1)
 
   // The mark follows a client-side navigation. The old and the new page
   // share the outlet for a moment, so scope to the page that is expected.
-  await localNav.getByRole('link', { name: 'Public' }).click()
+  // `nav > a` is the rail's own link; the More menu holds a second one.
+  await localNav.locator('nav > a[href="/public"]').click()
   await expect(page).toHaveURL(/\/public$/)
   const publicNav = page.locator('page-public caribou-nav-rail')
-  await expect(publicNav.getByRole('link', { name: 'Public' })).toHaveAttribute('aria-current', 'page')
-  await expect(publicNav.locator('a[aria-current]')).toHaveCount(1)
+  await expect(publicNav.locator('nav > a[href="/public"]')).toHaveAttribute('aria-current', 'page')
+  await expect(publicNav.locator('nav > a[aria-current]')).toHaveCount(1)
   await expect(page.locator('litro-outlet > *')).toHaveCount(1)
 })
 

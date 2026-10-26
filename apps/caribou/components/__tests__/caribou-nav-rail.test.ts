@@ -45,11 +45,11 @@ describe('caribou-nav-rail', () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary')
     const hrefs = [...el.shadowRoot!.querySelectorAll('nav > a')].map((a) => a.getAttribute('href'))
-    expect(hrefs).toEqual(['/home', '/local', '/public', '/@me', '/bookmarks'])
+    expect(hrefs).toEqual(['/home', '/local', '/public', '/bookmarks', '/@me'])
     const labels = [...el.shadowRoot!.querySelectorAll('nav > a .label')].map((s) => s.textContent)
-    expect(labels).toEqual(['Home', 'Local', 'Public', 'Profile', 'Bookmarks'])
+    expect(labels).toEqual(['Home', 'Local', 'Public', 'Bookmarks', 'Profile'])
     const icons = [...el.shadowRoot!.querySelectorAll('nav > a caribou-icon')].map((i) => i.getAttribute('name'))
-    expect(icons).toEqual(['home', 'users', 'globe', 'user', 'bookmark'])
+    expect(icons).toEqual(['home', 'users', 'globe', 'bookmark', 'user'])
   })
 
   it('marks the route in `current` with aria-current="page"', async () => {
@@ -222,5 +222,56 @@ describe('caribou-nav-rail', () => {
     const css = (CaribouNavRail.styles as { cssText: string }).cssText
     expect(css).not.toMatch(/\.label\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.label\s*\{[^}]*clip-path/)
+  })
+
+  // DOM order is the visual order at every width (WCAG 2.4.3): the phone bar
+  // hides the `in-more` items and shows More, it never reorders.
+  describe('More menu', () => {
+    it('puts New post just above Profile, and More after Profile', async () => {
+      const el = await mount()
+      const order = [...el.shadowRoot!.querySelector('nav')!.children].map((c) =>
+        c.getAttribute('href') ?? c.className)
+      expect(order).toEqual(['/home', '/local', '/public', '/bookmarks', 'compose-btn', '/@me', 'more', ''])
+    })
+
+    it('marks the bar items the phone moves into the menu', async () => {
+      const el = await mount()
+      const moved = [...el.shadowRoot!.querySelectorAll('nav > a.in-more')].map((a) => a.getAttribute('href'))
+      expect(moved).toEqual(['/public', '/bookmarks'])
+    })
+
+    it('holds the moved links and a native sign-out form', async () => {
+      const el = await mount('/public')
+      const menu = el.shadowRoot!.querySelector('caribou-menu.more')!
+      expect(menu.getAttribute('label')).toBe('More')
+      expect(menu.getAttribute('icon')).toBe('ellipsis')
+      const links = [...menu.querySelectorAll('a.menu-item')]
+      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/public', '/bookmarks'])
+      expect(links[0]!.getAttribute('aria-current')).toBe('page')
+      const submit = menu.querySelector('caribou-signout-form form[action="/api/signout"][method="post"] button[type="submit"]')
+      expect(submit?.textContent?.trim()).toBe('Sign out')
+    })
+
+    it('marks More when a moved item is current, since its bar copy is hidden', async () => {
+      const menu = (el: CaribouNavRail) => el.shadowRoot!.querySelector('caribou-menu.more')!
+      expect(menu(await mount('/bookmarks')).hasAttribute('data-current')).toBe(true)
+      document.body.replaceChildren()
+      expect(menu(await mount('/local')).hasAttribute('data-current')).toBe(false)
+    })
+
+    it('marks More pending while a moved item\'s page loads', async () => {
+      const el = await mount('/local')
+      happyDOM.setURL('http://localhost/public')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      await el.updateComplete
+      expect(el.shadowRoot!.querySelector('caribou-menu.more')!.hasAttribute('data-pending')).toBe(true)
+    })
+
+    it('a menu link navigates in the app', async () => {
+      const el = await mount()
+      el.shadowRoot!.querySelector<HTMLAnchorElement>('caribou-menu a[href="/public"]')!.click()
+      await flush()
+      expect(goSpy).toHaveBeenCalledWith('/public')
+    })
   })
 })

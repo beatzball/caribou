@@ -172,6 +172,33 @@ registers the element on the server and the client alike.
   `composedPath()[0].matches(':focus-visible')` on `focusin` (see the
   Follow button in `caribou-profile-header.ts`).
 
+### `<caribou-menu>`: a small menu behind a button
+
+`<caribou-menu icon="ellipsis" label="More">` with the items as children:
+real links, and native forms where an item must work without JavaScript.
+The phone nav bar uses it for More (Public, Bookmarks, Sign out).
+
+- The panel is a native popover, and the trigger names it with
+  `popovertarget`. The browser opens it, closes it on Escape or a press
+  outside, and exposes its expanded state, with JavaScript off too.
+- The trigger is a native `<button>` in the menu's own shadow root, not a
+  `<caribou-icon-button>`: an id reference cannot reach into another
+  element's shadow root. It is 44px square; `label` is its name.
+- With JavaScript it also sets `aria-expanded`, focuses the first item on
+  open, returns focus to the trigger when the menu closes from inside, and
+  closes when an item is chosen or focus leaves it. A browser without the
+  Popover API gets the same from a script fallback, but only with
+  JavaScript on: an old browser with JavaScript off cannot open the menu,
+  so on a phone its items are out of reach there.
+- The panel is fixed above the viewport's bottom-right corner;
+  `--caribou-menu-bottom` and `--caribou-menu-right` move it. It never grows
+  past the viewport. Parts: `trigger`, `icon`, `panel`.
+- The items are the caller's light DOM, so the caller styles them. An item
+  that is also shown elsewhere at another width must be `display: none`
+  there, so its name is in the accessibility tree once. In e2e, check that
+  with `ariaSnapshot()`: `getByRole` still finds an item slotted into the
+  closed panel.
+
 ## Tests
 
 - Component: happy-dom. Create the element, append it, `await el.updateComplete`,

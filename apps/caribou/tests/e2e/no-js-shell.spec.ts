@@ -22,7 +22,8 @@ test('privacy page shows its text inside the shell, with real links', async ({ p
   for (const [name, href] of [['Home', '/home'], ['Local', '/local'], ['Public', '/public'], ['Profile', '/@me'], ['Bookmarks', '/bookmarks']] as const) {
     await expect(nav.getByRole('link', { name })).toHaveAttribute('href', href)
   }
-  await expect(nav.locator('form[action="/api/signout"][method="post"] button[type="submit"]')).toHaveCount(1)
+  // The rail's own form; the More menu, hidden at this width, holds a second.
+  await expect(nav.locator(':scope > caribou-signout-form form[action="/api/signout"][method="post"] button[type="submit"]')).toBeVisible()
 })
 
 test('a shell link is followed as a full page load', async ({ page }) => {
