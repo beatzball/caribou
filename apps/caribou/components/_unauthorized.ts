@@ -9,12 +9,13 @@ import { removeSession, type UnauthorizedDetail } from '@beatzball/caribou-state
  */
 export function installUnauthorizedHandler(target: EventTarget, redirect: () => void): void {
   // More than one timeline can be alive during a route swap, and each one
-  // fires `caribou:unauthorized` when its fetch hits 401. Calling
-  // `location.replace` from the second listener interrupts the navigation
-  // started by the first, which Chromium reports as `net::ERR_ABORTED` (and
-  // Playwright's `waitForURL` surfaces as a test failure). The flag is set
-  // only when a redirect starts, so an ignored stale 401 never blocks a
-  // later real one.
+  // fires `caribou:unauthorized` when its fetch hits 401. The token check in
+  // `removeSession` is what stops the second redirect: once the first event
+  // removes the session, the others are 'stale'. The flag is a second guard,
+  // for a session made active after a redirect started: a second
+  // `location.replace` interrupts the first navigation, which Chromium
+  // reports as `net::ERR_ABORTED`. It is set only when a redirect starts, so
+  // an ignored stale 401 never blocks a later real one.
   let redirecting = false
   target.addEventListener('caribou:unauthorized', (event) => {
     const detail = (event as CustomEvent<UnauthorizedDetail | null>).detail

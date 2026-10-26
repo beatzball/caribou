@@ -45,6 +45,16 @@ describe('installUnauthorizedHandler', () => {
     expect(redirect).toHaveBeenCalledOnce()
   })
 
+  it('does not start a second redirect for a session made active after the first began', () => {
+    addUserSession(session(bob, 'B1'))
+    fire(target, bob, 'B1')
+    addUserSession(session(alice, 'A1'))
+    fire(target, alice, 'A1')
+    expect(users.value.size).toBe(0)
+    expect(activeUserKey.value).toBeNull()
+    expect(redirect).toHaveBeenCalledOnce()
+  })
+
   it('removes only the other session, silently, when a non-active session gets a 401', () => {
     addUserSession(session(alice, 'A1'))
     addUserSession(session(bob, 'B1'))

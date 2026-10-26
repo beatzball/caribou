@@ -54,6 +54,15 @@ describe('persistence', () => {
     expect(localStorage.getItem('caribou.activeUserKey')).toBe(JSON.stringify(key))
   })
 
+  it('loadFromStorage fills a missing userKey from the map key', () => {
+    const { userKey: _, ...stored } = sampleSession()
+    localStorage.setItem('caribou.users', JSON.stringify([[key, stored]]))
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+    loadFromStorage()
+    expect(users.value.get(key)?.userKey).toBe(key)
+    expect(removeSession(key, 'TOKEN-1')).toBe('active')
+  })
+
   it('loadFromStorage hydrates the signals', () => {
     localStorage.setItem('caribou.users', JSON.stringify([[key, sampleSession()]]))
     localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))

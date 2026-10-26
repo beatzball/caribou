@@ -144,7 +144,9 @@ export function loadFromStorage(): void {
     if (rawUsers) {
       const entries = JSON.parse(rawUsers) as [UserKey, UserSession][]
       const map = new Map<UserKey, UserSession>()
-      for (const [k, v] of entries) if (isUserKey(k)) map.set(k, v)
+      // Older entries can lack `userKey`; the 401 event needs it to find the
+      // session again, so take it from the map key.
+      for (const [k, v] of entries) if (isUserKey(k)) map.set(k, v.userKey ? v : { ...v, userKey: k })
       users.value = map
     }
     if (rawActive) {

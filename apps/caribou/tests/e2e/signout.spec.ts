@@ -27,7 +27,7 @@ async function setupSignedIn(page: Page, context: BrowserContext) {
       localStorage.setItem('caribou.activeUserKey', JSON.stringify(userKey))
       localStorage.setItem(
         'caribou.users',
-        JSON.stringify([[userKey, { token: 'TOK', server: instance, vapidKey: 'VK' }]]),
+        JSON.stringify([[userKey, { userKey, token: 'TOK', server: instance, vapidKey: 'VK' }]]),
       )
     },
     { userKey: USER_KEY, instance: INSTANCE },
