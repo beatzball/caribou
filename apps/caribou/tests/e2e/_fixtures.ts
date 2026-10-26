@@ -1,6 +1,6 @@
 import { test as base } from '@playwright/test'
 
-export { expect, type BrowserContext, type Page } from '@playwright/test'
+export { expect, type BrowserContext, type Page, type Route } from '@playwright/test'
 
 // A signed-in page asks the user's server for notifications as soon as it
 // loads (the nav rail's unread badge). The test instance does not resolve,
