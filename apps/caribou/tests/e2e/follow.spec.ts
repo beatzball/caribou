@@ -73,7 +73,7 @@ async function openBobsProfile(page: Page) {
   await expect(page.locator('litro-outlet > *')).toHaveCount(1)
 }
 
-test('follow, then unfollow, from a profile', async ({ page }) => {
+test('follow, then unfollow, from a profile', async ({ page, browserName }) => {
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
   await signIn(page)
@@ -110,12 +110,20 @@ test('follow, then unfollow, from a profile', async ({ page }) => {
   expect(writes).toEqual(['follow'])
   await page.mouse.click(0, 0)
   await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
-  // So does a key pressed while a button focused without the keyboard keeps focus.
-  await button.focus()
-  await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
-  await page.keyboard.press('Shift')
-  await expect.poll(async () => (await button.innerText()).trim()).toBe('Unfollow')
-  await page.mouse.click(0, 0)
+  // Chromium also turns focus-visible on for a key pressed while a
+  // mouse-focused button keeps focus, with no focus event. Press the mouse
+  // on the button and release it elsewhere: focus, but no click.
+  if (browserName === 'chromium') {
+    const box = (await button.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(0, 0)
+    await page.mouse.up()
+    await expect.poll(async () => (await button.innerText()).trim()).toBe('Following')
+    await page.keyboard.press('Shift')
+    await expect.poll(async () => (await button.innerText()).trim()).toBe('Unfollow')
+    await page.mouse.click(0, 0)
+  }
 
   await button.click()
   await expect(button).toHaveAttribute('data-state', 'follow')
