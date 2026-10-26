@@ -74,7 +74,11 @@ old entry never meets it again. That only works while no chunk imports
 `app.js`: `vite.config.ts` keeps lit-html and Vite's preload helper out of it.
 A tab that stays open across a deploy loads the target URL in full when a
 page chunk fails to load (`components/_stale-build.ts`).
-`tests/e2e/stale-build.spec.ts` covers all three.
+During a rolling deploy the HTML of one build can reach the other for its
+entry; any query other than none or exactly this build's `?v=` is answered
+`no-store` (`server/plugins/app-entry-cache.ts`), so no browser keeps the
+wrong app under that URL.
+`tests/e2e/stale-build.spec.ts` covers all four.
 
 **Test for the server with `typeof window === 'undefined'`, not `isServer`.**
 Vitest loads `lit` under Node's `node` export condition, so Lit's `isServer`

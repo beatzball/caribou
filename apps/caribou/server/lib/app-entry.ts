@@ -18,3 +18,24 @@ export const APP_SCRIPT_URL: string | undefined =
   typeof __CARIBOU_APP_ENTRY_VERSION__ === 'string'
     ? `/_litro/app.js?v=${__CARIBOU_APP_ENTRY_VERSION__}`
     : undefined
+
+// During a rolling deploy two builds answer for a short time, so the HTML of
+// one build can bring a request for its entry to the other. A `?v=` that is
+// not this build's then gets this build's file, which the page can still use,
+// but that file must not be kept under the other build's URL. `no-cache` is
+// not enough: a browser revalidates with both validators, and Nitro answers
+// 304 on `If-Modified-Since` alone, so after a rollback (an older `app.js`
+// mtime) the other build's entry would stay under this build's URL for good.
+// Only the bare URL and exactly this build's `?v=` keep the route rule's
+// `no-cache`; any other query is `no-store`.
+export function entryCacheControl(
+  pathname: string,
+  search: URLSearchParams,
+  version: string | undefined = typeof __CARIBOU_APP_ENTRY_VERSION__ === 'string'
+    ? __CARIBOU_APP_ENTRY_VERSION__
+    : undefined,
+): 'no-store' | undefined {
+  if (pathname !== '/_litro/app.js' || version === undefined) return undefined
+  const own = search.size === 0 || (search.size === 1 && search.get('v') === version)
+  return own ? undefined : 'no-store'
+}
