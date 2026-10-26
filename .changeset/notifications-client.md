@@ -2,4 +2,4 @@
 "@beatzball/caribou-mastodon-client": minor
 ---
 
-Add `fetchNotifications({ types, sinceId, maxId, limit })` for `GET /api/v1/notifications`.
+Add `fetchNotifications({ types, sinceId, minId, maxId, limit })` for `GET /api/v1/notifications`.

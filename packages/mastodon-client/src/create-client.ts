@@ -60,6 +60,8 @@ export interface FetchNotificationsParams {
   /** Only these types. Omitted or empty means every type. */
   types?: readonly mastodon.v1.NotificationType[]
   sinceId?: string
+  /** The page just newer than this id; use it to page forward without a gap. */
+  minId?: string
   maxId?: string
   limit?: number
 }
@@ -278,6 +280,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       return run(key, async (c) => c.v1.notifications.list({
         ...(params.types && params.types.length > 0 ? { types: params.types } : {}),
         ...(params.sinceId ? { sinceId: params.sinceId } : {}),
+        ...(params.minId ? { minId: params.minId } : {}),
         ...(params.maxId ? { maxId: params.maxId } : {}),
         ...(params.limit ? { limit: params.limit } : {}),
       }))

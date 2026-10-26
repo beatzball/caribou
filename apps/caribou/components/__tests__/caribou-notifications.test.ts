@@ -1,12 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
+import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUserKey, lastSeenNotificationId, statusCache, unreadNotificationCount, users,
+  activeUserKey, lastSeenNotificationId, statusCache, unreadNotificationCount, users,
 } from '@beatzball/caribou-state'
 import '../caribou-notifications.js'
 import type { CaribouNotifications } from '../caribou-notifications.js'
 
-const userKey = 'alice@example.social' as NonNullable<typeof activeUserKey.value>
+// Every client, also one made by a switch inside a test, asks `fetchSpy`.
+vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
+  const real = await importOriginal<typeof ClientModule>()
+  return {
+    ...real,
+    createCaribouClient: (...args: Parameters<typeof real.createCaribouClient>) => ({
+      ...real.createCaribouClient(...args),
+      fetchNotifications: (...a: unknown[]) => fetchSpy(...a),
+    }),
+  }
+})
+
+type Key = NonNullable<typeof activeUserKey.value>
+const userKey = 'alice@example.social' as Key
+const bobKey = 'bob@example.social' as Key
 const ACCT = { id: 'b1', acct: 'bob', username: 'bob', displayName: 'Bob', avatar: '', avatarStatic: '' }
 
 function status(id: string) {
@@ -20,15 +35,26 @@ function notif(id: string, type: string, withStatus = !['follow', 'follow_reques
   } as unknown as mastodon.v1.Notification
 }
 
-let fetchSpy: ReturnType<typeof vi.fn>
+const fetchSpy = vi.fn(async (..._: unknown[]) => [] as mastodon.v1.Notification[])
 
-function signIn() {
-  users.value = new Map([[userKey, {
-    userKey, server: 'example.social', token: 'TOKEN', vapidKey: '', createdAt: 1, account: null,
+function signIn(key: Key = userKey) {
+  users.value = new Map([...users.value, [key, {
+    userKey: key, server: 'example.social', token: 'TOKEN', vapidKey: '', createdAt: 1, account: null,
   }]])
-  activeUserKey.value = userKey
-  fetchSpy = vi.fn(async () => [] as mastodon.v1.Notification[])
-  ;(activeClient.value as unknown as { fetchNotifications: typeof fetchSpy }).fetchNotifications = fetchSpy
+  activeUserKey.value = key
+}
+
+let visibility: DocumentVisibilityState = 'visible'
+Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => visibility })
+function setVisibility(v: DocumentVisibilityState) {
+  visibility = v
+  document.dispatchEvent(new Event('visibilitychange'))
+}
+
+async function settle(el: CaribouNotifications) {
+  await flush()
+  await el.updateComplete
+  await flush()
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
@@ -45,6 +71,10 @@ const items = (el: CaribouNotifications) => [...el.shadowRoot!.querySelectorAll(
 const lineText = (li: Element) => li.querySelector('.line')?.textContent?.replace(/\s+/g, ' ').trim()
 
 beforeEach(() => {
+  fetchSpy.mockReset()
+  fetchSpy.mockResolvedValue([])
+  visibility = 'visible'
+  users.value = new Map()
   localStorage.clear()
   statusCache.value = new Map()
   unreadNotificationCount.value = 0
@@ -126,15 +156,74 @@ describe('caribou-notifications', () => {
     expect(el.shadowRoot!.querySelector('.notice')?.textContent).toBe('No mentions yet.')
   })
 
-  it('shows an error with Retry, which loads again', async () => {
+  it('shows an error with Retry, which loads again and marks seen', async () => {
     fetchSpy.mockRejectedValueOnce(new Error('server is down'))
     const el = await mount()
     expect(el.shadowRoot!.querySelector('[role="alert"]')?.textContent).toContain('server is down')
     fetchSpy.mockResolvedValueOnce([notif('1', 'follow')])
     el.shadowRoot!.querySelector<HTMLElement>('[role="alert"] caribou-button')!.click()
-    await flush()
-    await el.updateComplete
+    await settle(el)
     expect(items(el)).toHaveLength(1)
+    expect(lastSeenNotificationId(userKey)).toBe('1')
+  })
+
+  it('a failed poll keeps the rows and shows the error beside them, until a poll works', async () => {
+    fetchSpy.mockResolvedValueOnce([notif('1', 'follow')])
+    const el = await mount()
+    fetchSpy.mockRejectedValueOnce(new Error('blip'))
+    setVisibility('visible')
+    await settle(el)
+    expect(items(el)).toHaveLength(1)
+    expect(el.shadowRoot!.querySelector('.inline-error')?.textContent).toBe('blip')
+
+    fetchSpy.mockResolvedValueOnce([notif('2', 'follow')])
+    setVisibility('visible')
+    await settle(el)
+    expect(items(el)).toHaveLength(2)
+    expect(el.shadowRoot!.querySelector('[role="alert"]')).toBeNull()
+  })
+
+  it('does not mark seen in a hidden tab, and marks seen when the tab is shown', async () => {
+    visibility = 'hidden'
+    fetchSpy.mockResolvedValueOnce([notif('9', 'follow')])
+    const el = await mount()
+    expect(items(el)).toHaveLength(1)
+    expect(lastSeenNotificationId(userKey)).toBeNull()
+    setVisibility('visible')
+    await settle(el)
+    expect(lastSeenNotificationId(userKey)).toBe('9')
+  })
+
+  it('a reply for the old session is dropped, and the list starts again for the new one', async () => {
+    let resolve!: (v: mastodon.v1.Notification[]) => void
+    fetchSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    const el = await mount()
+    fetchSpy.mockResolvedValueOnce([notif('3', 'follow')])
+    signIn(bobKey)
+    await settle(el)
+    resolve([notif('900', 'follow')])
+    await settle(el)
+    expect(items(el).map((li) => li.className)).toEqual(['n-follow no-status'])
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(lastSeenNotificationId(bobKey)).toBe('3')
+    expect(lastSeenNotificationId(userKey)).toBeNull()
+  })
+
+  it('polls when the app-wide unread count goes up', async () => {
+    fetchSpy.mockResolvedValueOnce([notif('1', 'follow')])
+    const el = await mount()
+    fetchSpy.mockResolvedValueOnce([notif('2', 'follow')])
+    unreadNotificationCount.value = 1
+    await settle(el)
+    expect(fetchSpy).toHaveBeenLastCalledWith({ types: [], minId: '1', limit: 40 })
+    expect(items(el)).toHaveLength(2)
+    expect(unreadNotificationCount.value).toBe(0)
+  })
+
+  it('a mention without its post gets the generic line', async () => {
+    fetchSpy.mockResolvedValueOnce([notif('1', 'mention', false)])
+    const el = await mount()
+    expect(lineText(items(el)[0]!)).toBe('Bob sent you a notification')
   })
 
   it('Load older pages with max_id', async () => {

@@ -1,11 +1,11 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
-import { effect } from '@preact/signals-core'
+import { computed, effect, untracked } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
   activeClient, activeUser, createNotificationsStore, markNotificationsSeen, startPolling,
-  NOTIFICATIONS_POLL_MS, type NotificationFilter, type NotificationsStore,
+  unreadNotificationCount, NOTIFICATIONS_POLL_MS, type NotificationFilter, type NotificationsStore,
 } from '@beatzball/caribou-state'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
@@ -62,6 +62,7 @@ export class CaribouNotifications extends LitElement {
     .line a:hover { text-decoration: underline; }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
+    .inline-error { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); }
     .more { display: flex; justify-content: center; padding: var(--space-4); }
   `
 
@@ -74,20 +75,42 @@ export class CaribouNotifications extends LitElement {
   private store: NotificationsStore | null = null
   private disposeBindings: (() => void) | null = null
   private stopPolling: (() => void) | null = null
+  private disposeSession: (() => void) | null = null
+
+  // The list belongs to one session. A new one starts the list again.
+  private readonly session = computed(() => {
+    const user = activeUser.value
+    return user ? { userKey: user.userKey, id: `${user.userKey}\n${user.token}` } : null
+  })
 
   override connectedCallback() {
     super.connectedCallback()
-    this.open(this.filter)
+    let last: string | null | undefined
+    this.disposeSession = effect(() => {
+      const id = this.session.value?.id ?? null
+      if (id === last) return
+      last = id
+      this.items = []
+      untracked(() => this.open(this.filter))
+    })
+    document.addEventListener('visibilitychange', this.onVisibility)
   }
 
   override disconnectedCallback() {
+    this.disposeSession?.()
+    this.disposeSession = null
+    document.removeEventListener('visibilitychange', this.onVisibility)
     this.close()
     super.disconnectedCallback()
   }
 
   private open(filter: NotificationFilter) {
     this.close()
-    const store = createNotificationsStore({ clientSource: () => activeClient.value, filter })
+    const session = this.session.peek()
+    // A request made after the session changed gets no client, so it can
+    // not mix another account's rows into this list.
+    const clientSource = () => this.session.peek()?.id === session?.id ? activeClient.peek() : null
+    const store = createNotificationsStore({ clientSource, filter })
     this.store = store
     this.disposeBindings = effect(() => {
       this.items = store.notifications.value
@@ -96,10 +119,15 @@ export class CaribouNotifications extends LitElement {
       this.hasMore = store.hasMore.value
     })
     void store.load().then(() => this.markSeen(store))
-    this.stopPolling = startPolling({
-      intervalMs: NOTIFICATIONS_POLL_MS,
-      fn: () => store.poll().then(() => this.markSeen(store)),
+    const poll = () => store.poll().then(() => this.markSeen(store))
+    this.stopPolling = startPolling({ intervalMs: NOTIFICATIONS_POLL_MS, fn: poll })
+    // The app-wide poll found something new: show it here too, so the
+    // badge and the list agree.
+    const stopUnread = effect(() => {
+      if (unreadNotificationCount.value > 0 && !store.loading.peek()) untracked(() => void poll())
     })
+    const stopTimer = this.stopPolling
+    this.stopPolling = () => { stopTimer(); stopUnread() }
   }
 
   private close() {
@@ -111,13 +139,20 @@ export class CaribouNotifications extends LitElement {
   }
 
   // Only the full list moves the marker: the newest mention can be newer
-  // than a favourite the reader has not seen yet. The poll runs only while
-  // the tab is visible, so what it shows is what the reader sees.
-  private markSeen(store: NotificationsStore) {
+  // than a favourite the reader has not seen yet. It moves only to a row
+  // that is on screen, in a visible tab, for the session the list is for.
+  // A tab that is hidden now marks seen when it is shown again.
+  private async markSeen(store: NotificationsStore | null) {
+    if (!store) return
+    await this.updateComplete
     if (store !== this.store || this.filter !== 'all') return
-    const newest = store.notifications.value[0]
-    if (newest) markNotificationsSeen(newest.id)
+    if (document.visibilityState !== 'visible') return
+    const session = this.session.peek()
+    const newest = this.items[0]
+    if (session && newest) markNotificationsSeen(newest.id, session.userKey)
   }
+
+  private onVisibility = () => { void this.markSeen(this.store) }
 
   private onFilter(filter: NotificationFilter) {
     if (filter === this.filter) return
@@ -126,7 +161,10 @@ export class CaribouNotifications extends LitElement {
     this.open(filter)
   }
 
-  private onRetry = () => { void this.store?.load() }
+  private onRetry = () => {
+    const store = this.store
+    if (store) void store.load().then(() => this.markSeen(store))
+  }
   private onMore = () => { void this.store?.loadMore() }
 
   // `acct` is relative to the user's own server for a local account.
@@ -157,7 +195,8 @@ export class CaribouNotifications extends LitElement {
       ? html`<caribou-status-card data-status-id=${status.id} .status=${status}
           instance=${activeUser.value?.server ?? ''}></caribou-status-card>`
       : nothing
-    if (loose.type === 'mention') {
+    // A mention is its post. Without one it gets the generic line.
+    if (loose.type === 'mention' && status) {
       return html`<li class="n-mention">${card}</li>`
     }
     const known = LINES[loose.type]
@@ -168,7 +207,8 @@ export class CaribouNotifications extends LitElement {
   }
 
   private renderList() {
-    if (this.errorMsg) {
+    // With rows on screen, a failed poll or Load older keeps them.
+    if (this.errorMsg && this.items.length === 0) {
       return html`<div role="alert">
         ${this.errorMsg}
         <caribou-button @click=${this.onRetry}>Retry</caribou-button>
@@ -181,6 +221,7 @@ export class CaribouNotifications extends LitElement {
       return html`<div class="notice">${FILTERS.find((f) => f.value === this.filter)!.empty}</div>`
     }
     return html`<div>
+      ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
       <ul>${repeat(this.items, (n) => n.id, (n) => this.renderItem(n))}</ul>
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`

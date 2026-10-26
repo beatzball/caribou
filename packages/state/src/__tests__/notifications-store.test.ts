@@ -15,6 +15,7 @@ const { users, activeUserKey, addUserSession, removeSession } = await import('..
 const {
   createNotificationsStore, compareNotificationIds, lastSeenNotificationId,
   markNotificationsSeen, startUnreadNotifications, unreadNotificationCount, UNREAD_CAP,
+  NOTIFICATIONS_PAGE, NOTIFICATIONS_POLL_MAX_PAGES,
 } = await import('../notifications-store.js')
 import type { PollHost } from '../polling.js'
 
@@ -101,14 +102,114 @@ describe('createNotificationsStore', () => {
     expect(store.notifications.value.map((n) => n.id)).toEqual(['3', '2', '1'])
   })
 
-  it('poll() prepends what is newer than the first one', async () => {
+  // Ids from `to` down to `from`, newest first, as the server sends them.
+  const range = (to: number, from: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => notif(String(to - i), 'follow'))
+  const ids = (store: { notifications: { value: mastodon.v1.Notification[] } }) =>
+    store.notifications.value.map((n) => n.id)
+
+  it('poll() prepends what is newer than the first one, paging forward with min_id', async () => {
     fetchNotifications.mockResolvedValueOnce([notif('2')])
     const store = createNotificationsStore({ clientSource: client })
     await store.load()
     fetchNotifications.mockResolvedValueOnce([notif('4'), notif('3')])
     await store.poll()
-    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], sinceId: '2' })
-    expect(store.notifications.value.map((n) => n.id)).toEqual(['4', '3', '2'])
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], minId: '2', limit: NOTIFICATIONS_PAGE })
+    expect(ids(store)).toEqual(['4', '3', '2'])
+  })
+
+  it('poll() fetches every page that came in before it merges, so no notification is lost', async () => {
+    fetchNotifications.mockResolvedValueOnce(range(10, 1))
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    // 50 came in: a full page just above 10, then the rest.
+    fetchNotifications.mockResolvedValueOnce(range(50, 11))
+    fetchNotifications.mockResolvedValueOnce(range(60, 51))
+    await store.poll()
+    expect(fetchNotifications.mock.calls.slice(1).map((c) => c[0]?.minId)).toEqual(['10', '50'])
+    expect(ids(store)).toEqual(range(60, 1).map((n) => n.id))
+  })
+
+  it('poll() stops at the page cap, keeps what joins the list, and the next poll goes on', async () => {
+    fetchNotifications.mockResolvedValueOnce(range(1, 1))
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    const cap = NOTIFICATIONS_POLL_MAX_PAGES
+    for (let i = 0; i < cap; i++) {
+      const low = 2 + i * NOTIFICATIONS_PAGE
+      fetchNotifications.mockResolvedValueOnce(range(low + NOTIFICATIONS_PAGE - 1, low))
+    }
+    await store.poll()
+    expect(fetchNotifications).toHaveBeenCalledTimes(1 + cap)
+    const top = 1 + cap * NOTIFICATIONS_PAGE
+    expect(ids(store)).toEqual(range(top, 1).map((n) => n.id))
+
+    fetchNotifications.mockResolvedValueOnce([])
+    await store.poll()
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], minId: String(top), limit: NOTIFICATIONS_PAGE })
+  })
+
+  it('a poll that fails on a later page merges nothing, keeps the rows, and the next success clears the error', async () => {
+    fetchNotifications.mockResolvedValueOnce(range(10, 1))
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    fetchNotifications.mockResolvedValueOnce(range(50, 11))
+    fetchNotifications.mockRejectedValueOnce(new Error('blip'))
+    await store.poll()
+    expect(ids(store)).toEqual(range(10, 1).map((n) => n.id))
+    expect(store.error.value?.message).toBe('blip')
+
+    fetchNotifications.mockResolvedValueOnce([notif('11')])
+    await store.poll()
+    expect(ids(store)[0]).toBe('11')
+    expect(store.error.value).toBeNull()
+  })
+
+  it('poll() on an empty list asks for the first page', async () => {
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    expect(store.hasMore.value).toBe(false)
+    fetchNotifications.mockResolvedValueOnce([notif('1')])
+    await store.poll()
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [] })
+    expect(ids(store)).toEqual(['1'])
+    expect(store.hasMore.value).toBe(true)
+  })
+
+  it('a failed Load older keeps the rows, and the next success clears the error', async () => {
+    fetchNotifications.mockResolvedValueOnce([notif('3')])
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    fetchNotifications.mockRejectedValueOnce(new Error('blip'))
+    await store.loadMore()
+    expect(ids(store)).toEqual(['3'])
+    expect(store.error.value?.message).toBe('blip')
+    fetchNotifications.mockResolvedValueOnce([notif('2')])
+    await store.loadMore()
+    expect(ids(store)).toEqual(['3', '2'])
+    expect(store.error.value).toBeNull()
+  })
+
+  it('drops a poll reply that arrives after load() replaced the list', async () => {
+    fetchNotifications.mockResolvedValueOnce([notif('1')])
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    let resolve!: (v: mastodon.v1.Notification[]) => void
+    fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    const polled = store.poll()
+    fetchNotifications.mockResolvedValueOnce([notif('5')])
+    await store.load()
+    resolve([notif('2')])
+    await polled
+    expect(ids(store)).toEqual(['5'])
+  })
+
+  it('runs one poll at a time', async () => {
+    fetchNotifications.mockResolvedValueOnce([notif('1')])
+    const store = createNotificationsStore({ clientSource: client })
+    await store.load()
+    await Promise.all([store.poll(), store.poll(), store.poll()])
+    expect(fetchNotifications).toHaveBeenCalledTimes(2)
   })
 
   it('a post changed in the cache shows in its notification', async () => {
@@ -144,6 +245,16 @@ describe('seen marker', () => {
     expect(JSON.parse(localStorage.getItem(`caribou.prefs.${key}`)!)).toEqual({
       theme: 'dark', lastSeenNotificationId: '10',
     })
+    expect(lastSeenNotificationId(key)).toBe('10')
+  })
+
+  it('with a user key, moves only that user\'s marker, and only while they are active', () => {
+    signIn()
+    unreadNotificationCount.value = 3
+    markNotificationsSeen('10', toUserKey('bob', 'example.social'))
+    expect(lastSeenNotificationId(key)).toBeNull()
+    expect(unreadNotificationCount.value).toBe(3)
+    markNotificationsSeen('10', key)
     expect(lastSeenNotificationId(key)).toBe('10')
   })
 
@@ -211,6 +322,17 @@ describe('startUnreadNotifications', () => {
     await flush()
     expect(unreadNotificationCount.value).toBe(0)
     stop()
+  })
+
+  it('drops a reply that arrives after it was stopped', async () => {
+    signIn()
+    let resolve!: (v: mastodon.v1.Notification[]) => void
+    fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    const stop = startUnreadNotifications({ host: host() })
+    stop()
+    resolve([notif('1')])
+    await flush()
+    expect(unreadNotificationCount.value).toBe(0)
   })
 
   it('marking seen clears the count', async () => {

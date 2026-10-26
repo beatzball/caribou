@@ -92,8 +92,8 @@ test('/notifications lists each type, and Mentions asks for types[]=mention', as
   const asked: string[] = []
   await page.route('**/api/v1/notifications*', (route) => {
     const u = new URL(route.request().url())
-    if (u.searchParams.get('max_id') || u.searchParams.get('since_id')) return route.fulfill({ json: [] })
-    // The badge's own fetch (limit=40, no filter) is not the list.
+    // Older pages, polls, and the badge's own fetch (limit=40) are not the list.
+    if (u.searchParams.get('max_id') || u.searchParams.get('min_id')) return route.fulfill({ json: [] })
     if (u.searchParams.get('limit')) return route.fulfill({ json: [] })
     const types = u.searchParams.getAll('types[]')
     asked.push(types.join(',') || 'all')
@@ -127,7 +127,7 @@ test('/notifications lists each type, and Mentions asks for types[]=mention', as
 test('the nav rail shows the unread count, and opening the page clears it', async ({ page }) => {
   await page.route('**/api/v1/notifications*', (route) => {
     const u = new URL(route.request().url())
-    if (u.searchParams.get('max_id')) return route.fulfill({ json: [] })
+    if (u.searchParams.get('max_id') || u.searchParams.get('min_id')) return route.fulfill({ json: [] })
     const since = u.searchParams.get('since_id')
     if (since === '3') return route.fulfill({ json: ALL.slice(0, 2) })
     if (since) return route.fulfill({ json: [] })
@@ -154,16 +154,28 @@ test('the nav rail shows the unread count, and opening the page clears it', asyn
   expect(errors).toEqual([])
 })
 
-test('/notifications polls when the tab becomes visible and shows what is new', async ({ page }) => {
+test('/notifications does not poll in a hidden tab, and polls when it is shown again', async ({ page }) => {
   let newer = false
+  let polls = 0
   await page.route('**/api/v1/notifications*', (route) => {
     const u = new URL(route.request().url())
     if (u.searchParams.get('max_id')) return route.fulfill({ json: [] })
-    if (u.searchParams.get('since_id') === '5' && newer) {
-      return route.fulfill({ json: [makeNotification('6', 'favourite', '<p>later post</p>')] })
+    if (u.searchParams.get('min_id') === '5') {
+      polls++
+      return route.fulfill({ json: newer ? [makeNotification('6', 'favourite', '<p>later post</p>')] : [] })
     }
-    if (u.searchParams.get('since_id')) return route.fulfill({ json: [] })
+    if (u.searchParams.get('limit')) return route.fulfill({ json: [] })
     return route.fulfill({ json: ALL })
+  })
+  await page.addInitScript(() => {
+    // Lets the test hide and show the tab. Playwright's own tab is always visible.
+    let state: DocumentVisibilityState = 'visible'
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => state === 'hidden' })
+    ;(window as unknown as { setVisibility: (v: DocumentVisibilityState) => void }).setVisibility = (v) => {
+      state = v
+      document.dispatchEvent(new Event('visibilitychange'))
+    }
   })
   await signIn(page)
   await gotoSettled(page, '/notifications')
@@ -171,7 +183,16 @@ test('/notifications polls when the tab becomes visible and shows what is new', 
   await expect(list.locator('li')).toHaveCount(5)
 
   newer = true
-  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  const before = polls
+  await page.evaluate(() => (window as unknown as { setVisibility: (v: string) => void }).setVisibility('hidden'))
+  // A hidden tab has no timer and does not ask on the hide itself.
+  await page.waitForTimeout(500)
+  expect(polls).toBe(before)
+  await expect(list.locator('li')).toHaveCount(5)
+
+  await page.evaluate(() => (window as unknown as { setVisibility: (v: string) => void }).setVisibility('visible'))
   await expect(list.locator('li')).toHaveCount(6)
   await expect(list.locator('li').first()).toContainText('later post')
+  const prefs = await page.evaluate((key) => localStorage.getItem(`caribou.prefs.${key}`), USER_KEY)
+  expect(JSON.parse(prefs!)).toEqual({ lastSeenNotificationId: '6' })
 })

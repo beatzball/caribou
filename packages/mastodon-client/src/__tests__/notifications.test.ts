@@ -44,17 +44,18 @@ describe('CaribouClient.fetchNotifications', () => {
     expect(ns[0]!.status?.id).toBe('s2')
   })
 
-  it('sends types[], since_id, max_id and limit', async () => {
+  it('sends types[], since_id, min_id, max_id and limit', async () => {
     let params: URLSearchParams | null = null
     server.use(http.get(url, ({ request }) => {
       params = new URL(request.url).searchParams
       return HttpResponse.json([])
     }))
     const c = createCaribouClient(userKey, sessionSource())
-    await c.fetchNotifications({ types: ['mention'], sinceId: '5', maxId: '9', limit: 40 })
+    await c.fetchNotifications({ types: ['mention'], sinceId: '5', minId: '6', maxId: '9', limit: 40 })
     const p = params as unknown as URLSearchParams
     expect(p.getAll('types[]')).toEqual(['mention'])
     expect(p.get('since_id')).toBe('5')
+    expect(p.get('min_id')).toBe('6')
     expect(p.get('max_id')).toBe('9')
     expect(p.get('limit')).toBe('40')
   })
