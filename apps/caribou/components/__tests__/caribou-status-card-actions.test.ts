@@ -119,8 +119,8 @@ describe('<caribou-status-card> action bar', () => {
     signIn('Example.Social')
     const el = await mount(post(), 'example.social')
     expect(isSoftDisabled(button(el, 'favourite'))).toBe(false)
-    // No hint: the tooltip is the action's name.
-    expect(button(el, 'favourite').title).toBe('Favourite')
+    // No hint, so no tooltip that would repeat the name.
+    expect(button(el, 'favourite').hasAttribute('title')).toBe(false)
   })
 
   it('favourite click flips the button before the server answers, then shows its count', async () => {

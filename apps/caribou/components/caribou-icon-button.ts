@@ -15,13 +15,14 @@ export const pressedConverter: PropertyDeclaration['converter'] = {
 
 export type IconButtonVariant = 'default' | 'ghost'
 
-// An icon-only button. `label` is its accessible name and its tooltip, so
-// no caller can ship a button a screen reader announces as just "button".
+// An icon-only button. `label` is its accessible name, so no caller can
+// ship a button a screen reader announces as just "button".
 //
 //   <caribou-icon-button icon="star" label="Favourite" pressed="false" count="3">
 //
-// `hint` replaces the tooltip ("Sign in to boost" on a button named
-// "Boost"). `description` is read after the name; the text lives in this
+// `hint` is the tooltip ("Sign in to boost" on a button named "Boost").
+// There is no tooltip without one: a `title` equal to the name becomes the
+// button's description, and a reader hears the name twice. `description` is read after the name; the text lives in this
 // element's own shadow root, because an `aria-describedby` id from the
 // caller's root cannot reach the inner button. `soft-disabled` is for a
 // control a reader must still be able to reach and hear: it stays in the
@@ -65,7 +66,9 @@ export class CaribouIconButton extends LitElement {
     button[aria-disabled="true"] { opacity: 0.6; cursor: default; }
     button[aria-disabled="true"]:hover { background: var(--bg-1); }
     button[data-variant="ghost"] { border-color: transparent; background: none; color: var(--fg-muted); }
-    button[data-variant="ghost"]:hover:not(:disabled, [aria-disabled="true"]) { color: var(--fg-0); background: var(--bg-1); }
+    button[data-variant="ghost"]:hover:not(:disabled, [aria-disabled="true"]) { background: var(--bg-1); }
+    /* A pressed button keeps its pressed colour under the pointer. */
+    button[data-variant="ghost"]:hover:not(:disabled, [aria-disabled="true"], [aria-pressed="true"]) { color: var(--fg-0); }
     button[data-variant="ghost"][aria-disabled="true"]:hover { background: none; }
     button[data-variant="ghost"][aria-pressed="true"] { background: none; color: var(--caribou-icon-button-pressed-fg, var(--accent)); }
     button[data-variant="ghost"][aria-pressed="true"]:focus-visible { outline-color: var(--accent); }
@@ -106,7 +109,7 @@ export class CaribouIconButton extends LitElement {
     const ghost = this.variant === 'ghost'
     return html`<button type="button" part="button"
       data-variant=${ghost ? 'ghost' : nothing}
-      aria-label=${this.label || nothing} title=${this.hint || this.label || nothing}
+      aria-label=${this.label || nothing} title=${this.hint || nothing}
       aria-pressed=${this.pressed === undefined ? nothing : String(this.pressed)}
       aria-disabled=${this.softDisabled ? 'true' : nothing}
       aria-describedby=${this.description ? 'description' : nothing}

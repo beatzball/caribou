@@ -20,12 +20,12 @@ afterEach(() => {
 })
 
 describe('caribou-icon-button', () => {
-  it('uses the label as the accessible name and the tooltip', async () => {
+  it('uses the label as the accessible name, with no tooltip that repeats it', async () => {
     const el = await mount({ icon: 'star', label: 'Favourite' })
     const b = inner(el)
     expect(b.type).toBe('button')
     expect(b.getAttribute('aria-label')).toBe('Favourite')
-    expect(b.title).toBe('Favourite')
+    expect(b.hasAttribute('title')).toBe(false)
     expect(b.getAttribute('part')).toBe('button')
     const icon = b.querySelector('caribou-icon')!
     expect(icon.getAttribute('part')).toBe('icon')
@@ -99,13 +99,13 @@ describe('caribou-icon-button', () => {
     expect(onClick).toHaveBeenCalledOnce()
   })
 
-  it('hint replaces the tooltip; the label stays the name', async () => {
+  it('hint is the tooltip; the label stays the name', async () => {
     const el = await mount({ icon: 'repeat2', label: 'Boost', hint: 'Sign in to boost' })
     expect(inner(el).getAttribute('aria-label')).toBe('Boost')
     expect(inner(el).title).toBe('Sign in to boost')
     el.hint = ''
     await el.updateComplete
-    expect(inner(el).title).toBe('Boost')
+    expect(inner(el).hasAttribute('title')).toBe(false)
   })
 
   it('links the description from inside its own shadow root', async () => {

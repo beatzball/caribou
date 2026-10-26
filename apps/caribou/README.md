@@ -111,8 +111,9 @@ registers the element on the server and the client alike.
 
 - `<caribou-icon>` is always hidden from assistive tech, and is sized by
   `font-size` and coloured by `color`. An unknown name renders nothing.
-- `<caribou-icon-button>`: `label` becomes the button's `aria-label` and its
-  tooltip. `pressed` has three states: no attribute means it is not a
+- `<caribou-icon-button>`: `label` becomes the button's `aria-label`. It
+  is not the tooltip: a `title` equal to the name is read again as the
+  description. Set `hint` for a tooltip. `pressed` has three states: no attribute means it is not a
   toggle (no `aria-pressed`); `pressed="false"` is a toggle that is off;
   `pressed` or `pressed="true"` is on. Bind it as
   `pressed=${on ? 'true' : 'false'}`. The hit area is 2.25rem, 44px on a
@@ -120,7 +121,7 @@ registers the element on the server and the client alike.
 - `<caribou-icon-button>` for a control that is off but must still be
   heard (signed out, "Sign in to boost"): `soft-disabled` keeps it in the
   tab order with `aria-disabled` and swallows its clicks; `hint` is the
-  tooltip in place of the label; `description` is read after the name. It
+  tooltip; `description` is read after the name. It
   lives in the button's own shadow root, because an `aria-describedby` id
   in the caller's root cannot reach the inner button. `variant="ghost"` is
   borderless and muted, and fills the icon while pressed; the status card

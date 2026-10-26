@@ -498,11 +498,13 @@ export class CaribouComposeDialog extends LitElement {
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space
                  clicks it, and the click opens the hidden file input. -->
-            <caribou-icon-button icon="image" label="Add images or video" data-action="add-media"
+            <!-- Icon only, with no text beside it, so a mouse user needs the
+                 tooltip even though a reader then hears the name twice. -->
+            <caribou-icon-button icon="image" label="Add images or video" hint="Add images or video" data-action="add-media"
               ?disabled=${full || busy} @click=${() => this.fileEl?.click()}></caribou-icon-button>
             <input type="file" hidden multiple accept=${this.limits.accept}
               ?disabled=${full || busy} @change=${this.onFiles}>
-            <caribou-icon-button icon="triangleAlert" label="Content warning" data-action="toggle-cw"
+            <caribou-icon-button icon="triangleAlert" label="Content warning" hint="Content warning" data-action="toggle-cw"
               pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
               @click=${() => this.patchDraft({ cw: !d.cw })}></caribou-icon-button>
             <label class="visually-hidden" for="compose-visibility">Visibility</label>

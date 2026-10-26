@@ -17,7 +17,7 @@ export const SSR_STATUS = {
   },
 }
 
-export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part NS36B3ZS208=-->
+export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part vy2G91wtCqI=-->
       <!--lit-node 0--><article data-variant="timeline">
         <!--lit-part xI1yegC+b3I=--><div class="boost-attribution">
                    <!--lit-node 1--><caribou-icon   class="boost-icon" name="repeat2" defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part 5qecDuV0+bI=--><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -36,9 +36,9 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
             <header>
               <strong><!--lit-part-->Alice<!--/lit-part--></strong>
               <span class="acct">@<!--lit-part-->alice<!--/lit-part--></span>
-              <!--lit-node 10--><a class="permalink" href="/@alice/42">
+              <!--lit-node 10--><litro-link class="permalink" href="/@alice/42">
                 <!--lit-node 11--><time datetime="2026-04-28T12:00:00Z"><!--lit-part--><!--/lit-part--></time>
-              </a>
+              </litro-link>
             </header>
             <div class="status-content"><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div>
             <!--lit-part x0gb5fvNV/0=-->
