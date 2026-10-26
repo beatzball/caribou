@@ -4,6 +4,7 @@ import { routes, pageModules } from '#litro/page-manifest';
 import { TOKENS_HEAD } from '../lib/tokens-head.js';
 import { BASE_HEAD } from '../lib/base-head.js';
 import { matchRoute } from '../lib/match-route.js';
+import { APP_SCRIPT_URL } from '../lib/app-entry.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
 // not every client encodes, so escape it rather than trust that.
@@ -41,6 +42,7 @@ export default defineEventHandler(async (event) => {
     //     component's `static styles` can use them.
     //   • BASE_HEAD   — document-level rules that no shadow root owns.
     routeMeta: { head: TOKENS_HEAD + BASE_HEAD },
+    appScriptUrl: APP_SCRIPT_URL,
   });
   return handler(event);
 });
