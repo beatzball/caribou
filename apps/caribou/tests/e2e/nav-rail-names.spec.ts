@@ -20,10 +20,23 @@ for (const { width, layout } of [
       el.setAttribute('can-compose', '')
     })
 
-    for (const name of ['Home', 'Local', 'Public', 'Profile', 'Bookmarks']) {
+    // The aria snapshot, not getByRole: every item the phone moves into
+    // More is in the DOM twice, and getByRole also finds the copy slotted
+    // into the closed menu, which is not in the accessibility tree.
+    const tree = await rail.ariaSnapshot()
+    const inBar = layout === 'mobile'
+      ? ['Home', 'Local', 'Profile']
+      : ['Home', 'Local', 'Public', 'Bookmarks', 'Profile']
+    for (const name of inBar) expect(tree).toContain(`link "${name}"`)
+    expect(tree).toContain('button "New post"')
+    if (layout !== 'mobile') {
+      expect(tree).toContain('button "Sign out"')
+      return
+    }
+    await rail.getByRole('button', { name: 'More', exact: true }).click()
+    for (const name of ['Public', 'Bookmarks']) {
       await expect(rail.getByRole('link', { name, exact: true })).toBeVisible()
     }
-    await expect(rail.getByRole('button', { name: 'New post', exact: true })).toBeVisible()
     await expect(rail.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
   })
 }

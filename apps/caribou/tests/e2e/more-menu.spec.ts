@@ -16,7 +16,10 @@ async function openLocal(page: Page, width = 360) {
   await rail(page).evaluate((el) => { el.removeAttribute('signed-out'); el.setAttribute('can-compose', '') })
 }
 
-test('Enter opens More and focuses the first item; Tab walks the items; Escape closes and returns focus', async ({ page }) => {
+test('Enter opens More and focuses the first item; Tab walks the items; Escape closes and returns focus', async ({ page, browserName }) => {
+  // Safari's Tab skips links unless its setting says otherwise; Option+Tab
+  // is the key its users press to reach them.
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
   await openLocal(page)
   await trigger(page).focus()
   await page.keyboard.press('Enter')
@@ -25,7 +28,9 @@ test('Enter opens More and focuses the first item; Tab walks the items; Escape c
   const publicLink = rail(page).getByRole('link', { name: 'Public', exact: true })
   await expect(publicLink).toBeFocused()
 
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(tab)
+  await expect(rail(page).getByRole('link', { name: 'Bookmarks', exact: true })).toBeFocused()
+  await page.keyboard.press(tab)
   await expect(rail(page).getByRole('button', { name: 'Sign out', exact: true })).toBeFocused()
 
   await page.keyboard.press('Escape')
@@ -81,6 +86,7 @@ test.describe('without JavaScript', () => {
     await more.click()
     await expect(nav.locator('caribou-menu .panel')).toBeVisible()
     await expect(nav.locator('caribou-menu a.menu-item[href="/public"]')).toBeVisible()
+    await expect(nav.locator('caribou-menu a.menu-item[href="/bookmarks"]')).toBeVisible()
     await expect(nav.locator('caribou-menu form[action="/api/signout"][method="post"] button[type="submit"]')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(nav.locator('caribou-menu .panel')).toBeHidden()
