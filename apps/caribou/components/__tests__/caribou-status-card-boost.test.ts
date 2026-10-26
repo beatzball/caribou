@@ -74,6 +74,8 @@ describe('<caribou-status-card> boost rendering', () => {
     const permalink = el.shadowRoot!.querySelector('litro-link.permalink')
     expect(permalink?.getAttribute('href'))
       .toBe('/@carol@remote.example/116527525773628717')
+    // `<litro-link>` forwards the host's `target` to its anchor, and the
+    // element is not registered here, so the host attribute is what counts.
     expect(permalink?.getAttribute('target')).toBeNull()
   })
 

@@ -72,6 +72,10 @@ test('clicking a post time opens its thread without a full page load', async ({ 
 // A modifier click is the browser's: a new tab or window. The link must not
 // cancel it. The window listener runs last, so it sees what the link did, and
 // then cancels the click itself so the test opens no tab.
+//
+// Read this test with the one above. If `<litro-link>` were not defined at
+// all, nothing would cancel the click and this test would still pass; the
+// test above is the one that fails then.
 test('a modifier click on a post time is left to the browser', async ({ page }) => {
   await gotoSettled(page, '/home')
   await page.evaluate(() => {
