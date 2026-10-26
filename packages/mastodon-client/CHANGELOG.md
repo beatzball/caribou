@@ -1,5 +1,11 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.3.0
+
+### Minor Changes
+
+- [#92](https://github.com/beatzball/caribou/pull/92) [`3ba56a9`](https://github.com/beatzball/caribou/commit/3ba56a9b5aa4c851d8d0a699c0ff395fa4d46fe7) Thanks [@beatzball](https://github.com/beatzball)! - Add `installPurifyHooks(purify)` to `sanitize-opts`. It adds a DOMPurify hook that puts `noopener` and `noreferrer` into the `rel` of every link that opens a new window (`target="_blank"` in any case, or a named target), keeping words already there, and installs only once per DOMPurify instance. `forceSafeTargetRel` is the hook itself.
+
 ## 0.2.1
 
 ### Patch Changes

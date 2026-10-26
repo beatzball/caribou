@@ -1,5 +1,45 @@
 # caribou-app
 
+## 0.5.0
+
+### Minor Changes
+
+- [#94](https://github.com/beatzball/caribou/pull/94) [`df84c76`](https://github.com/beatzball/caribou/commit/df84c76c4a45798b82b69163fafb8f0594f2c364) Thanks [@beatzball](https://github.com/beatzball)! - Status card actions (reply, boost, favourite, bookmark) now use `<caribou-icon-button>`, and the boost attribution icon uses `<caribou-icon>`. Behaviour is the same: signed out, each action stays focusable with its "Sign in to…" hint. Signed in, the tooltip names the action.
+
+  `<caribou-icon-button>` gains `soft-disabled` (stays in the tab order with `aria-disabled`; clicks are swallowed), `hint` (a tooltip in place of the label), `description` (read after the name, from the button's own shadow root) and `variant="ghost"` (borderless and muted; `--caribou-icon-button-pressed-fg` sets the pressed colour). `<caribou-icon>` gains `filled` and `--caribou-icon-fill`.
+
+### Patch Changes
+
+- [#88](https://github.com/beatzball/caribou/pull/88) [`bf683b7`](https://github.com/beatzball/caribou/commit/bf683b76203b9b41276b88054608961789d27811) Thanks [@beatzball](https://github.com/beatzball)! - The compose dialog's Cancel, Retry and Remove buttons now use the shared `<caribou-button>`, so they match Post in size, focus ring and disabled look. The dialog's own button styles are gone.
+
+- [#95](https://github.com/beatzball/caribou/pull/95) [`3abb312`](https://github.com/beatzball/caribou/commit/3abb312d5f3590a83a2da631b0fb5a3f0e46f773) Thanks [@beatzball](https://github.com/beatzball)! - Mobile nav bar answers a tap at once. The tapped item gets a pending look
+  while the next page loads; `aria-current` stays on the page that is shown.
+  Bar items are 44px square, and the bar keeps clear of the iPhone home
+  indicator (`viewport-fit=cover` with safe-area insets).
+
+- [#89](https://github.com/beatzball/caribou/pull/89) [`0fec44c`](https://github.com/beatzball/caribou/commit/0fec44c4d78d2fc9b7396f30b494e5550600521f) Thanks [@beatzball](https://github.com/beatzball)! - The nav rail draws its icons with `<caribou-icon>`, and New post is a
+  `<caribou-button variant="primary">`. The pen icon moves into the shared icon
+  set as `squarePen`. Below desktop width the rail's labels are clipped instead
+  of `display: none`, so the nav links, New post and Sign out keep their
+  accessible names where only the icons show.
+
+- [#92](https://github.com/beatzball/caribou/pull/92) [`3ba56a9`](https://github.com/beatzball/caribou/commit/3ba56a9b5aa4c851d8d0a699c0ff395fa4d46fe7) Thanks [@beatzball](https://github.com/beatzball)! - A mention in a post now opens Caribou's own profile page for that account, without a full page load. The post HTML is unchanged, so without JavaScript, or with a modifier key or middle click, the link still goes to the account's instance. Hashtags and other links keep their old behaviour.
+
+  Links in a post or a bio that open a new window now always carry `rel="noopener noreferrer"`, on the server and in the browser, even when the author's server left it out.
+
+- [#90](https://github.com/beatzball/caribou/pull/90) [`b013d78`](https://github.com/beatzball/caribou/commit/b013d78dbe4cf5245c3b6b0c9ba1399df16cf573) Thanks [@beatzball](https://github.com/beatzball)! - Clicking a post's time now opens its thread without a full page load. The status card's permalink is a `<litro-link>`, so the server still sends a real link that works without JavaScript, and a modifier click still opens a new tab.
+
+- [#91](https://github.com/beatzball/caribou/pull/91) [`8cfd930`](https://github.com/beatzball/caribou/commit/8cfd9308d577caa705350cb5f51bc8065f70effd) Thanks [@beatzball](https://github.com/beatzball)! - Move three more buttons onto the shared controls. The toaster's Dismiss is a
+  `<caribou-icon-button>`; the profile Follow button is a `<caribou-button>`,
+  primary for "Follow" and secondary for "Following" and "Requested", and still
+  reads "Unfollow" under the pointer or keyboard focus; the landing page's Sign
+  in is a primary submit `<caribou-button>` that shows a spinner while it
+  connects. The README notes that `<caribou-button>` cannot submit a form
+  without JavaScript.
+- Updated dependencies [[`3ba56a9`](https://github.com/beatzball/caribou/commit/3ba56a9b5aa4c851d8d0a699c0ff395fa4d46fe7)]:
+  - @beatzball/caribou-mastodon-client@0.3.0
+  - @beatzball/caribou-state@0.2.3
+
 ## 0.4.1
 
 ### Patch Changes
