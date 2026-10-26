@@ -1,5 +1,22 @@
 # @beatzball/caribou-state
 
+## 0.3.0
+
+### Minor Changes
+
+- [#103](https://github.com/beatzball/caribou/pull/103) [`20b0f9c`](https://github.com/beatzball/caribou/commit/20b0f9c708b9dde27c2078d611aedfb3992d2f45) Thanks [@beatzball](https://github.com/beatzball)! - Add `createNotificationsStore` (load, load older, poll, filter by type). A poll pages forward with `min_id` until it has caught up, so a burst of new notifications leaves no hole in the list; a failed poll or load older keeps the rows and an app-wide unread count: `startUnreadNotifications` polls once a minute while the tab is visible, `unreadNotificationCount` holds the count, and `markNotificationsSeen` moves the per-account seen marker, stored as `lastSeenNotificationId` in `caribou.prefs.<userKey>`.
+
+- [#104](https://github.com/beatzball/caribou/pull/104) [`3d3a08f`](https://github.com/beatzball/caribou/commit/3d3a08f1e82ff2bf61b196772403623b5964e098) Thanks [@beatzball](https://github.com/beatzball)! - Add `createKeepAlive`, an in-memory LRU cache that empties itself when the active account changes, with `clearKeptAlive` and `ownerGeneration` (changes on every account change, so a late result can be dropped). An account change also drops the reader's own flags from every cached status (`forgetReaderFields`), so one account's favourites never show as another's. Add `mergeStatus`, which caches a fresh copy of a status but keeps the reader's flags, and keeps the count while one of the reader's actions on that post is in flight or when the fresh copy is older. Timeline stores get `refresh()`, `retry()` (runs the last failed fetch again), `offer(page, nextMaxId)` (a fresh first page from elsewhere: new posts go to the buffer, known ones are merged; into an empty list it sets up paging), and `refreshing` / `syncedAt` signals. Every fetch checks the owner generation right before it writes. The new-posts buffer never holds a post the list already shows. `poll()` now asks from the top of the new-posts buffer. Thread stores get `offer(thread)`: posts update in place and new replies go at the end.
+
+- [#102](https://github.com/beatzball/caribou/pull/102) [`1bf7f0a`](https://github.com/beatzball/caribou/commit/1bf7f0ae0aaea70f1175bae84d363295a4274809) Thanks [@beatzball](https://github.com/beatzball)! - The timeline store pages by the `nextMaxId` a page returns, when it has one,
+  and keeps it across a new `activeClient`. A page with `nextMaxId: null` ends
+  the list at once, so no extra "older" request is made.
+
+### Patch Changes
+
+- Updated dependencies [[`1bf7f0a`](https://github.com/beatzball/caribou/commit/1bf7f0ae0aaea70f1175bae84d363295a4274809), [`20b0f9c`](https://github.com/beatzball/caribou/commit/20b0f9c708b9dde27c2078d611aedfb3992d2f45)]:
+  - @beatzball/caribou-mastodon-client@0.4.0
+
 ## 0.2.3
 
 ### Patch Changes
