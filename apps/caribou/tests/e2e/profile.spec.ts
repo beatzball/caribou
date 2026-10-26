@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './_fixtures.js'
 import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 
 const ACCOUNT = {

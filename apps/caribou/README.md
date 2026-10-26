@@ -118,6 +118,15 @@ an e2e mock must send it too (`tests/e2e/bookmarks.spec.ts`).
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.
 
+**Notifications poll once for the whole app.** `app-main.ts` calls
+`startUnreadNotifications()`; it follows the active session and keeps
+`unreadNotificationCount` (from `@beatzball/caribou-state`) current. The nav
+rail only reads that signal. Do not start a poll from a component inside a
+page: every page has its own rail, and a page swap mounts two. The rail shows
+the count only after its first update, because the server always renders 0.
+The seen marker is `lastSeenNotificationId` in `caribou.prefs.<userKey>`; only
+the unfiltered list on `/notifications` moves it.
+
 ## Shared controls
 
 Use these instead of a hand-styled `<button>`. Each one wraps a real
@@ -214,6 +223,10 @@ The phone nav bar uses it for More (Public, Bookmarks, Sign out).
   `tests/integration/_ssr.ts`.
 - A test that sends a `Cookie` header to a spawned server also needs the node
   environment — happy-dom strips that header from `fetch`.
+- An e2e spec that seeds a session imports `test` and `expect` from
+  `tests/e2e/_fixtures.ts`, not `@playwright/test`. A signed-in page asks for
+  notifications at once (the unread badge); the fixture answers that with an
+  empty list, and a spec's own `page.route` still wins.
 - `*.mobile.spec.ts` runs only in the `mobile-webkit` Playwright project
   (iPhone 15: touch, bottom nav bar), locally and in CI. It needs WebKit:
   `pnpm exec playwright install webkit`.

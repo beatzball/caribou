@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activeUserKey, users } from '@beatzball/caribou-state'
+import { activeUserKey, unreadNotificationCount, users } from '@beatzball/caribou-state'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { LitroRouter } from '@beatzball/litro-router'
 import '../caribou-nav-rail.js'
@@ -33,6 +33,7 @@ describe('caribou-nav-rail', () => {
   beforeEach(() => {
     users.value = new Map()
     activeUserKey.value = null
+    unreadNotificationCount.value = 0
     goSpy.mockClear()
     happyDOM.setURL('http://localhost/')
   })
@@ -45,11 +46,11 @@ describe('caribou-nav-rail', () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary')
     const hrefs = [...el.shadowRoot!.querySelectorAll('nav > a')].map((a) => a.getAttribute('href'))
-    expect(hrefs).toEqual(['/home', '/local', '/public', '/bookmarks', '/@me'])
+    expect(hrefs).toEqual(['/home', '/local', '/notifications', '/public', '/bookmarks', '/@me'])
     const labels = [...el.shadowRoot!.querySelectorAll('nav > a .label')].map((s) => s.textContent)
-    expect(labels).toEqual(['Home', 'Local', 'Public', 'Bookmarks', 'Profile'])
+    expect(labels).toEqual(['Home', 'Local', 'Notifications', 'Public', 'Bookmarks', 'Profile'])
     const icons = [...el.shadowRoot!.querySelectorAll('nav > a caribou-icon')].map((i) => i.getAttribute('name'))
-    expect(icons).toEqual(['home', 'users', 'globe', 'bookmark', 'user'])
+    expect(icons).toEqual(['home', 'users', 'bell', 'globe', 'bookmark', 'user'])
   })
 
   it('marks the route in `current` with aria-current="page"', async () => {
@@ -231,7 +232,7 @@ describe('caribou-nav-rail', () => {
       const el = await mount()
       const order = [...el.shadowRoot!.querySelector('nav')!.children].map((c) =>
         c.getAttribute('href') ?? c.className)
-      expect(order).toEqual(['/home', '/local', '/public', '/bookmarks', 'compose-btn', '/@me', 'more', ''])
+      expect(order).toEqual(['/home', '/local', '/notifications', '/public', '/bookmarks', 'compose-btn', '/@me', 'more', ''])
     })
 
     it('marks the bar items the phone moves into the menu', async () => {
@@ -272,6 +273,55 @@ describe('caribou-nav-rail', () => {
       el.shadowRoot!.querySelector<HTMLAnchorElement>('caribou-menu a[href="/public"]')!.click()
       await flush()
       expect(goSpy).toHaveBeenCalledWith('/public')
+    })
+  })
+
+  describe('unread badge', () => {
+    const link = (el: CaribouNavRail) => el.shadowRoot!.querySelector<HTMLAnchorElement>('a[href="/notifications"]')!
+
+    it('shows no badge at 0, as the server renders it', async () => {
+      const el = await mount()
+      expect(link(el).querySelector('.badge')).toBeNull()
+      expect(link(el).textContent!.trim()).toBe('Notifications')
+    })
+
+    it('shows the count from the signal, and the name reads "Notifications, N unread"', async () => {
+      const el = await mount()
+      unreadNotificationCount.value = 3
+      await el.updateComplete
+      const badge = link(el).querySelector('.badge')!
+      expect(badge.textContent).toBe('3')
+      expect(badge.getAttribute('aria-hidden')).toBe('true')
+      // The visible label stays the start of the name; the count follows it
+      // in visually-hidden text.
+      expect(link(el).getAttribute('aria-label')).toBeNull()
+      expect(link(el).querySelector('.sr-only')!.textContent).toBe(', 3 unread')
+      expect(link(el).textContent!.replace(/\s+/g, ' ').trim()).toBe('3Notifications, 3 unread')
+    })
+
+    it('renders no badge in the first render even when the count is already in', async () => {
+      unreadNotificationCount.value = 2
+      let badgeAtFirstRender: Element | null | undefined
+      const proto = CaribouNavRail.prototype as unknown as { firstUpdated(): void }
+      const original = proto.firstUpdated
+      const spy = vi.spyOn(proto, 'firstUpdated').mockImplementation(function (this: CaribouNavRail) {
+        badgeAtFirstRender = link(this).querySelector('.badge')
+        original.call(this)
+      })
+      const el = await mount()
+      spy.mockRestore()
+      expect(badgeAtFirstRender).toBeNull()
+      expect(link(el).querySelector('.badge')!.textContent).toBe('2')
+    })
+
+    it('caps the count at one page', async () => {
+      const el = await mount()
+      unreadNotificationCount.value = 40
+      await el.updateComplete
+      expect(link(el).querySelector('.badge')!.textContent).toBe('40+')
+      unreadNotificationCount.value = 0
+      await el.updateComplete
+      expect(link(el).querySelector('.badge')).toBeNull()
     })
   })
 })

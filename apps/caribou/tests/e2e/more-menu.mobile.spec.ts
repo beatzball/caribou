@@ -1,7 +1,8 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './_fixtures.js'
 
 // Runs in the `mobile-webkit` project only (iPhone 15: touch). The phone bar
-// holds Home, Local, New post, Profile and More; the rest are in More.
+// holds Home, Local, Notifications, New post, Profile and More; the rest are
+// in More.
 
 const rail = (page: Page) => page.locator('litro-outlet > :not([hidden]) caribou-nav-rail')
 const trigger = (page: Page) => rail(page).locator('caribou-menu .trigger')
@@ -36,6 +37,7 @@ for (const width of [320, 360, 393]) {
     const shown = {
       '/home': rail(page).locator('nav > a[href="/home"]'),
       '/local': rail(page).locator('nav > a[href="/local"]'),
+      '/notifications': rail(page).locator('nav > a[href="/notifications"]'),
       'New post': rail(page).locator('.compose-btn'),
       '/@me': rail(page).locator('nav > a[href="/@me"]'),
       'More': trigger(page),

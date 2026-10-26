@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import { activeUserKey } from '@beatzball/caribou-state'
+import { activeUserKey, UNREAD_CAP, unreadNotificationCount } from '@beatzball/caribou-state'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
@@ -18,6 +18,7 @@ interface NavItem { label: string; icon: IconName; href: string; more?: boolean 
 const ITEMS: NavItem[] = [
   { label: 'Home',    icon: 'home',  href: '/home' },
   { label: 'Local',   icon: 'users', href: '/local' },
+  { label: 'Notifications', icon: 'bell', href: '/notifications' },
   { label: 'Public',  icon: 'globe', href: '/public', more: true },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
 ]
@@ -58,6 +59,19 @@ export class CaribouNavRail extends LitElement {
     .compose-btn::part(button) { justify-content: flex-start; }
     :host([signed-out]) caribou-signout-form { display: none; }
     .icon { font-size: 20px; flex-shrink: 0; }
+    /* The icon and the count share one box, so the badge can sit on the
+       icon's corner when the label is hidden. */
+    .icon-wrap { position: relative; display: inline-flex; }
+    .badge {
+      position: absolute; top: -6px; right: -8px;
+      min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+      border-radius: 8px; background: var(--accent); color: var(--bg-0);
+      font-size: 11px; font-weight: 600; line-height: 16px; text-align: center;
+    }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
 
     /* Below desktop the rail shows icons only. The label stays in the
        accessibility tree, clipped rather than display: none, because it is
@@ -140,6 +154,11 @@ export class CaribouNavRail extends LitElement {
   // rejects in the router and leaves this rail, so a rejection clears the mark.
   @state() private pending = ''
 
+  // Always 0 on the server and in the first client render: the count needs
+  // the session, which only the browser has. The count can be in before this
+  // rail hydrates (a fast reply, or a page swap), so it waits for firstUpdated.
+  @state() private unread = 0
+
   private _onPopState = () => {
     const to = window.location.pathname
     this.pending = to === (this.current || this.path) ? '' : to
@@ -152,6 +171,10 @@ export class CaribouNavRail extends LitElement {
     this._unsubscribe = effect(() => {
       this.toggleAttribute('signed-out', activeUserKey.value === null)
       this.toggleAttribute('can-compose', activeUserKey.value !== null)
+      // Read on every run so the effect keeps following the count, but
+      // shown only after the first update, which hydrates the server's 0.
+      const unread = unreadNotificationCount.value
+      if (this.hasUpdated) this.unread = unread
     })
     window.addEventListener('popstate', this._onPopState)
     window.addEventListener('unhandledrejection', this._onRejection)
@@ -167,6 +190,24 @@ export class CaribouNavRail extends LitElement {
 
   protected override firstUpdated() {
     this.path = window.location.pathname
+    this.unread = unreadNotificationCount.value
+  }
+
+  // The count is shown on the icon and read after the label, so the link's
+  // name stays its label: "Notifications, 3 unread".
+  private renderIcon(it: NavItem) {
+    const icon = html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`
+    if (it.href !== '/notifications' || this.unread === 0) return icon
+    return html`<span class="icon-wrap">${icon}<span class="badge" aria-hidden="true">${this.unreadLabel()}</span></span>`
+  }
+
+  private renderUnreadText(it: NavItem) {
+    if (it.href !== '/notifications' || this.unread === 0) return nothing
+    return html`<span class="sr-only">, ${this.unreadLabel()} unread</span>`
+  }
+
+  private unreadLabel(): string {
+    return this.unread >= UNREAD_CAP ? `${UNREAD_CAP}+` : String(this.unread)
   }
 
   private renderItem(it: NavItem, active: string) {
@@ -174,7 +215,7 @@ export class CaribouNavRail extends LitElement {
     const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
     return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
       class=${it.more ? 'in-more' : nothing} ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
-      ><caribou-icon class="icon" name=${it.icon}></caribou-icon><span class="label">${it.label}</span></a>`
+      >${this.renderIcon(it)}<span class="label">${it.label}</span>${this.renderUnreadText(it)}</a>`
   }
 
   override render() {
