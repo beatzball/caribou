@@ -38,6 +38,9 @@ const LINES: Partial<Record<string, { icon: IconName; text: string }>> = {
  */
 @customElement('caribou-notifications')
 export class CaribouNotifications extends LitElement {
+  /** How often the open list asks for new ones. A test can make it short. */
+  static pollMs = NOTIFICATIONS_POLL_MS
+
   static override styles = css`
     :host { display: block; }
     h1 { font-size: 1.25rem; font-weight: 600; margin: 0; padding: 0 var(--space-4) var(--space-3); }
@@ -120,11 +123,12 @@ export class CaribouNotifications extends LitElement {
     })
     void store.load().then(() => this.markSeen(store))
     const poll = () => store.poll().then(() => this.markSeen(store))
-    this.stopPolling = startPolling({ intervalMs: NOTIFICATIONS_POLL_MS, fn: poll })
+    this.stopPolling = startPolling({ intervalMs: CaribouNotifications.pollMs, fn: poll })
     // The app-wide poll found something new: show it here too, so the
-    // badge and the list agree.
+    // badge and the list agree. A count that comes in during a load is
+    // handled when the load ends.
     const stopUnread = effect(() => {
-      if (unreadNotificationCount.value > 0 && !store.loading.peek()) untracked(() => void poll())
+      if (unreadNotificationCount.value > 0 && !store.loading.value) untracked(() => void poll())
     })
     const stopTimer = this.stopPolling
     this.stopPolling = () => { stopTimer(); stopUnread() }

@@ -176,17 +176,26 @@ test('/notifications does not poll in a hidden tab, and polls when it is shown a
       state = v
       document.dispatchEvent(new Event('visibilitychange'))
     }
+    // Poll every 200ms, so a missing hidden-tab stop shows within the test.
+    void customElements.whenDefined('caribou-notifications').then((C) => {
+      (C as unknown as { pollMs: number }).pollMs = 200
+    })
   })
   await signIn(page)
   await gotoSettled(page, '/notifications')
   const list = page.locator('caribou-notifications')
   await expect(list.locator('li')).toHaveCount(5)
 
-  newer = true
-  const before = polls
+  // Visible: the short timer polls.
+  await expect.poll(() => polls).toBeGreaterThanOrEqual(2)
+
   await page.evaluate(() => (window as unknown as { setVisibility: (v: string) => void }).setVisibility('hidden'))
-  // A hidden tab has no timer and does not ask on the hide itself.
-  await page.waitForTimeout(500)
+  newer = true
+  // Let a poll that was already on its way land first.
+  await page.waitForTimeout(300)
+  const before = polls
+  // Hidden: five timer periods pass with no poll.
+  await page.waitForTimeout(1000)
   expect(polls).toBe(before)
   await expect(list.locator('li')).toHaveCount(5)
 

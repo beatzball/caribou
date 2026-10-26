@@ -335,6 +335,16 @@ describe('startUnreadNotifications', () => {
     expect(unreadNotificationCount.value).toBe(0)
   })
 
+  it('marking seen an id that is not newer keeps the count', () => {
+    signIn()
+    markNotificationsSeen('5')
+    unreadNotificationCount.value = 3
+    markNotificationsSeen('5')
+    markNotificationsSeen('4')
+    expect(unreadNotificationCount.value).toBe(3)
+    expect(lastSeenNotificationId(key)).toBe('5')
+  })
+
   it('marking seen clears the count', async () => {
     signIn()
     fetchNotifications.mockResolvedValue([notif('1')])

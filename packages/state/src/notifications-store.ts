@@ -207,6 +207,8 @@ export const UNREAD_CAP = 40
 /**
  * Moves the active user's seen marker to `id`. Never moves it back: a page
  * shown with an old filter or an old poll must not bring back the badge.
+ * The count goes to 0 only when the marker moves: a poll that failed or
+ * found nothing has not shown what the count is about.
  * With `userKey`, it does nothing unless that user is still the active one.
  */
 export function markNotificationsSeen(id: string, userKey?: UserKey): void {
@@ -214,9 +216,8 @@ export function markNotificationsSeen(id: string, userKey?: UserKey): void {
   if (!user || (userKey && userKey !== user.userKey)) return
   const prefs = readPrefs(user.userKey)
   const current = typeof prefs.lastSeenNotificationId === 'string' ? prefs.lastSeenNotificationId : null
-  if (!current || compareNotificationIds(id, current) > 0) {
-    localStorage.setItem(prefsKey(user.userKey), JSON.stringify({ ...prefs, lastSeenNotificationId: id }))
-  }
+  if (current && compareNotificationIds(id, current) <= 0) return
+  localStorage.setItem(prefsKey(user.userKey), JSON.stringify({ ...prefs, lastSeenNotificationId: id }))
   unreadNotificationCount.value = 0
 }
 

@@ -220,6 +220,31 @@ describe('caribou-notifications', () => {
     expect(unreadNotificationCount.value).toBe(0)
   })
 
+  it('a failed poll does not clear the unread count', async () => {
+    fetchSpy.mockResolvedValueOnce([notif('1', 'follow')])
+    const el = await mount()
+    fetchSpy.mockRejectedValueOnce(new Error('blip'))
+    unreadNotificationCount.value = 3
+    await settle(el)
+    expect(el.shadowRoot!.querySelector('.inline-error')?.textContent).toBe('blip')
+    expect(unreadNotificationCount.value).toBe(3)
+    expect(lastSeenNotificationId(userKey)).toBe('1')
+  })
+
+  it('a count that comes in during a load polls once the load ends', async () => {
+    let resolve!: (v: mastodon.v1.Notification[]) => void
+    fetchSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+    const el = await mount()
+    unreadNotificationCount.value = 2
+    expect(fetchSpy).toHaveBeenCalledOnce()
+    fetchSpy.mockResolvedValueOnce([notif('3', 'follow')])
+    resolve([notif('2', 'follow')])
+    await settle(el)
+    expect(fetchSpy).toHaveBeenLastCalledWith({ types: [], minId: '2', limit: 40 })
+    expect(items(el)).toHaveLength(2)
+    expect(unreadNotificationCount.value).toBe(0)
+  })
+
   it('a mention without its post gets the generic line', async () => {
     fetchSpy.mockResolvedValueOnce([notif('1', 'mention', false)])
     const el = await mount()
