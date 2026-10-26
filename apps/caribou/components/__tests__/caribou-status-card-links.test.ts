@@ -52,13 +52,20 @@ function click(el: CaribouStatusCard, href: string, init: MouseEventInit = {}): 
   return e
 }
 
-// Stop the browser default at the document so happy-dom does not navigate.
-const stop = (e: Event) => e.preventDefault()
+// Stop the browser default at the document so happy-dom does not navigate,
+// after recording whether the card had already cancelled it. A click left to
+// the browser must arrive here still uncancelled.
+const seen: boolean[] = []
+const stop = (e: Event) => {
+  seen.push(e.defaultPrevented)
+  e.preventDefault()
+}
 
 describe('<caribou-status-card> body links', () => {
   beforeEach(() => {
     document.body.replaceChildren()
     goSpy.mockClear()
+    seen.length = 0
   })
   afterEach(() => { document.removeEventListener('click', stop) })
 
@@ -102,6 +109,7 @@ describe('<caribou-status-card> body links', () => {
       await flush()
       expect(goSpy, `should not route ${href}`).not.toHaveBeenCalled()
     }
+    expect(seen).toEqual([false, false, false])
   })
 
   it('leaves modified, non-primary and handled clicks to the browser', async () => {
@@ -112,6 +120,7 @@ describe('<caribou-status-card> body links', () => {
       await flush()
       expect(goSpy, `should not route with ${JSON.stringify(init)}`).not.toHaveBeenCalled()
     }
+    expect(seen).toEqual([false, false, false, false, false])
     const a = el.shadowRoot!.querySelector('.status-content a')!
     a.addEventListener('click', (e) => e.preventDefault(), { once: true })
     click(el, 'https://example.social/@alice')

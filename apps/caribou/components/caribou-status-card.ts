@@ -405,7 +405,10 @@ export class CaribouStatusCard extends LitElement {
     const mention = display?.mentions?.find((m) => sameUrl(m.url, a.href))
     if (!mention) return
     // `acct` is relative to the instance the status came from: a local
-    // account has no `@host` part.
+    // account has no `@host` part. The mention URL's host is a last resort
+    // for a card that knows no instance: on a server whose web domain differs
+    // from its account domain it names the wrong host, and the profile lookup
+    // then fails the way a mistyped handle does.
     const host = this.instance || findShell(this)?.getAttribute('instance') || hostOf(mention.url)
     const acct = mention.acct.includes('@') ? mention.acct : `${mention.acct}@${host}`
     e.preventDefault()
