@@ -240,6 +240,41 @@ test('the media button uploads the file the picker returns', async ({ page }) =>
   await expect(dialog.getByRole('button', { name: 'Post', exact: true })).toBeEnabled()
 })
 
+test('a failed upload offers Retry and Remove; Cancel closes from the keyboard', async ({ page }) => {
+  await seedSession(page)
+  await mockApi(page)
+  let uploads = 0
+  await page.route('**/api/v2/media', (route) => {
+    uploads++
+    if (uploads === 1) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+    return route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ id: 'm1', type: 'image', url: AVATAR, preview_url: AVATAR, description: null }),
+    })
+  })
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  const chooser = page.waitForEvent('filechooser')
+  await dialog.getByRole('button', { name: 'Add images or video' }).click()
+  await (await chooser).setFiles({ name: 'a.png', mimeType: 'image/png', buffer: PIXEL })
+  const list = dialog.getByRole('list', { name: 'Attachments' })
+  await expect(list.getByRole('status')).toHaveText('Upload failed')
+  await list.getByRole('button', { name: 'Retry' }).click()
+  await expect(list.getByRole('button', { name: 'Retry' })).toHaveCount(0)
+  // Only a pending item has a status line, so this waits for the retry to land.
+  await expect(list.getByRole('status')).toHaveCount(0)
+  await expect(list.locator('[data-media="m1"]')).toHaveCount(1)
+  await list.getByRole('button', { name: 'Remove' }).click()
+  await expect(dialog.getByRole('list', { name: 'Attachments' })).toHaveCount(0)
+
+  await dialog.getByRole('textbox', { name: 'Post text' }).focus()
+  await page.keyboard.press('Shift+Tab')
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(dialog).toHaveCount(0)
+})
+
 test('Tab stops once on each toolbar control; Space on Post publishes', async ({ page }) => {
   await seedSession(page)
   const posted = await mockApi(page)

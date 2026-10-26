@@ -127,17 +127,10 @@ export class CaribouComposeDialog extends LitElement {
     .spacer { flex: 1; }
     .count { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
     .count[data-over] { color: var(--danger); }
-    button {
-      font: inherit; cursor: pointer; border-radius: var(--radius-md);
-      padding: var(--space-2) var(--space-3); border: 1px solid var(--border);
-      background: var(--bg-1); color: var(--fg-0);
-    }
     .toolbar select { min-block-size: 2.25rem; }
     @media (pointer: coarse) {
       .toolbar select { min-block-size: 44px; }
     }
-    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
@@ -448,7 +441,7 @@ export class CaribouComposeDialog extends LitElement {
         <form @submit=${this.onSubmit} @keydown=${this.onFormKeydown}>
           <header>
             <h2 id="compose-title">${title}</h2>
-            <button type="button" data-action="cancel" @click=${() => this.close()}>Cancel</button>
+            <caribou-button data-action="cancel" @click=${() => this.close()}>Cancel</caribou-button>
           </header>
           ${this.replyTo ? html`
             <div class="reply-to" data-reply-to>
@@ -480,7 +473,7 @@ export class CaribouComposeDialog extends LitElement {
                         ? { ...x, description: (e.target as HTMLInputElement).value } : x),
                     })}
                     @change=${(e: Event) => this.saveAltOrToast(m.id, (e.target as HTMLInputElement).value)}>
-                  <button type="button" data-action="remove-media" ?disabled=${busy} @click=${() => this.removeMedia(m.id)}>Remove</button>
+                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeMedia(m.id)}>Remove</caribou-button>
                 </li>`)}
               ${this.pending.map((p) => html`
                 <li data-pending=${p.localId}>
@@ -497,9 +490,9 @@ export class CaribouComposeDialog extends LitElement {
                       this.pending = this.pending.map((x) => x.localId === p.localId ? { ...x, description } : x)
                     }}>
                   ${p.state === 'failed'
-                    ? html`<button type="button" data-action="retry-media" @click=${() => void this.upload(p.file, p)}>Retry</button>`
+                    ? html`<caribou-button data-action="retry-media" @click=${() => void this.upload(p.file, p)}>Retry</caribou-button>`
                     : nothing}
-                  <button type="button" data-action="remove-media" @click=${() => this.removePending(p.localId)}>Remove</button>
+                  <caribou-button data-action="remove-media" @click=${() => this.removePending(p.localId)}>Remove</caribou-button>
                 </li>`)}
             </ul>` : nothing}
           <div class="toolbar">
