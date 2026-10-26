@@ -15,7 +15,7 @@ export interface CaribouClient {
     sinceId?: string
     maxId?: string
     limit?: number
-  }): Promise<mastodon.v1.Status[]>
+  }): Promise<TimelinePage>
   fetchStatus(statusId: string): Promise<mastodon.v1.Status>
   fetchThread(statusId: string): Promise<{
     ancestors: mastodon.v1.Status[]
@@ -53,6 +53,12 @@ export interface CaribouClient {
   fetchInstance(): Promise<mastodon.v2.Instance>
 }
 
+// A page of a timeline. `nextMaxId` is set only where the last status id is
+// not the cursor for the next page (bookmarks): the `max_id` to ask for next,
+// or null when there is no next page. Undefined means "page by the last
+// status id", as every other timeline does.
+export type TimelinePage = mastodon.v1.Status[] & { nextMaxId?: string | null }
+
 export interface WaitForMediaOpts {
   pollIntervalMs?: number
   timeoutMs?: number
@@ -84,11 +90,6 @@ export interface CreateStatusInput {
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
   const dedup = createDedup()
-  // Mastodon pages bookmarks by bookmark id, not status id, and names the
-  // next page only in the Link header. A timeline store asks for the next
-  // page with the last status id it holds, so remember which cursor follows
-  // each page's last status.
-  const bookmarkCursors = new Map<string, string>()
 
   function rest(): mastodon.rest.Client {
     const s = session.get()
@@ -130,26 +131,19 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     }
   }
 
+  // Mastodon pages bookmarks by bookmark id, not status id, and names the
+  // next page only in the Link header. The caller keeps that cursor and
+  // passes it back as `maxId`.
   async function fetchBookmarkTimeline(
     c: mastodon.rest.Client, params: { sinceId?: string; maxId?: string; limit?: number },
-  ): Promise<mastodon.v1.Status[]> {
+  ): Promise<TimelinePage> {
     // Bookmarks are not polled; a since_id would be a status id here too.
-    if (params.sinceId) return []
-    let cursor: string | undefined
-    if (params.maxId) {
-      cursor = bookmarkCursors.get(params.maxId)
-      // No cursor after this status: its page had no next link, so the
-      // bookmarks end there.
-      if (!cursor) return []
-    }
+    if (params.sinceId) return Object.assign([], { nextMaxId: null })
     const res = await c.v1.bookmarks.list.$raw({
-      ...(cursor ? { maxId: cursor } : {}),
+      ...(params.maxId ? { maxId: params.maxId } : {}),
       ...(params.limit ? { limit: params.limit } : {}),
     })
-    const next = nextMaxIdFromLink(res.headers.get('link'))
-    const last = res.data[res.data.length - 1]
-    if (last && next) bookmarkCursors.set(last.id, next)
-    return res.data
+    return Object.assign(res.data, { nextMaxId: nextMaxIdFromLink(res.headers.get('link')) })
   }
 
   return {

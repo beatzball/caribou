@@ -108,8 +108,9 @@ output stay the same string.
 
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
-header. The client keeps that cursor per page and translates the status id
-the timeline store passes as `maxId` (`create-client.ts`). The browser can
+header. The client returns it as the page's `nextMaxId`, and the timeline
+store keeps it and sends it back as `maxId`. It lives in the store, not the
+client: `activeClient` is a new client whenever `users` changes. The browser can
 read the header because Mastodon sends `Access-Control-Expose-Headers: Link`;
 an e2e mock must send it too (`tests/e2e/bookmarks.spec.ts`).
 

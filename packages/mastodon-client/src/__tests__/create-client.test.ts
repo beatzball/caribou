@@ -111,7 +111,7 @@ describe('createCaribouClient', () => {
     expect(statuses.map((s) => s.id)).toEqual(['bm-1'])
   })
 
-  it('fetchTimeline("bookmarks") pages with the Link header cursor, not the status id', async () => {
+  it('fetchTimeline("bookmarks") returns the Link header cursor as nextMaxId', async () => {
     const sess = sessionSource()
     const client = createCaribouClient(userKey, sess)
     const seen: Array<string | null> = []
@@ -133,13 +133,19 @@ describe('createCaribouClient', () => {
     )
     const first = await client.fetchTimeline('bookmarks')
     expect(first.map((s) => s.id)).toEqual(['s9', 's5'])
-    // The store passes the last status id; the client sends the cursor.
-    const second = await client.fetchTimeline('bookmarks', { maxId: 's5' })
+    // A bookmark id, unrelated to the status ids on the page.
+    expect(first.nextMaxId).toBe('700')
+    const second = await client.fetchTimeline('bookmarks', { maxId: '700' })
     expect(second.map((s) => s.id)).toEqual(['s1'])
-    // That page had no next link: the bookmarks end, with no request.
-    const third = await client.fetchTimeline('bookmarks', { maxId: 's1' })
-    expect(third).toEqual([])
+    // No next link: the bookmarks end here.
+    expect(second.nextMaxId).toBeNull()
     expect(seen).toEqual([null, '700'])
+  })
+
+  it('other timelines leave nextMaxId unset', async () => {
+    const client = createCaribouClient(userKey, sessionSource())
+    const page = await client.fetchTimeline('home')
+    expect(page.nextMaxId).toBeUndefined()
   })
 
   it('fetchTimeline("bookmarks") does not poll with a status id', async () => {
@@ -152,7 +158,7 @@ describe('createCaribouClient', () => {
         return HttpResponse.json([makeStatus('bm-1')])
       }),
     )
-    expect(await client.fetchTimeline('bookmarks', { sinceId: 'bm-1' })).toEqual([])
+    expect(await client.fetchTimeline('bookmarks', { sinceId: 'bm-1' })).toHaveLength(0)
     expect(hits).toBe(0)
   })
 

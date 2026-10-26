@@ -2,8 +2,8 @@
 "@beatzball/caribou-mastodon-client": minor
 ---
 
-`fetchTimeline('bookmarks')` now pages with the cursor from Mastodon's Link
-header. Bookmarks are ordered by bookmark id, so the last status id is not a
-valid `max_id`. The client remembers which cursor follows each page's last
-status, so a caller can still pass that status id. A page with no next link
-ends the list, and `sinceId` returns an empty page.
+`fetchTimeline` now resolves to a `TimelinePage`: the statuses, plus
+`nextMaxId` where the last status id is not the next page's cursor. For
+`'bookmarks'` it is the `max_id` from Mastodon's Link header (bookmarks are
+ordered by bookmark id), or `null` when there is no next page. Other
+timelines leave it unset. A `sinceId` on bookmarks returns an empty page.

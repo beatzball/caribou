@@ -1,6 +1,6 @@
 import { computed, signal, type ReadonlySignal } from '@preact/signals-core'
 import type {
-  CaribouClient, CaribouError, TimelineKind,
+  CaribouClient, CaribouError, TimelineKind, TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
 import { cacheStatus, statusCache } from './caches.js'
@@ -67,6 +67,10 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   //      Subsequent calls fall through to last-status-id behavior.
   let firstLoadConsumed = false
   let nextMaxIdForFirstLoadMore: string | null = null
+  // The cursor the last page named, for timelines whose next page is not
+  // found by the last status id (bookmarks). It lives here and not in the
+  // client, because `activeClient` is a new client whenever `users` changes.
+  let nextCursor: string | undefined
 
   if (opts.initial) {
     for (const s of opts.initial.statuses) cacheStatus(s)
@@ -76,10 +80,17 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     nextMaxIdForFirstLoadMore = opts.initial.nextMaxId
   }
 
-  async function runFetch(params: { sinceId?: string; maxId?: string; limit?: number } | undefined) {
+  async function runFetch(params: { sinceId?: string; maxId?: string; limit?: number } | undefined): Promise<TimelinePage> {
     const client = opts.clientSource()
     if (!client) return []
     return client.fetchTimeline(kind, params)
+  }
+
+  // A page that names its cursor also says whether there is a next page, so
+  // the store does not ask once more only to learn the list has ended.
+  function setPaging(page: TimelinePage) {
+    nextCursor = page.nextMaxId ?? undefined
+    hasMore.value = page.length > 0 && page.nextMaxId !== null
   }
 
   async function load() {
@@ -92,7 +103,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     try {
       const page = await runFetch(undefined)
       statusIds.value = ingest(page)
-      hasMore.value = page.length > 0
+      setPaging(page)
     } catch (err) {
       error.value = err as CaribouError
     } finally {
@@ -102,14 +113,14 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
 
   async function loadMore() {
     if (loading.value || !hasMore.value) return
-    const anchor = nextMaxIdForFirstLoadMore ?? statusIds.value[statusIds.value.length - 1]
+    const anchor = nextMaxIdForFirstLoadMore ?? nextCursor ?? statusIds.value[statusIds.value.length - 1]
     if (!anchor) return
     nextMaxIdForFirstLoadMore = null
     loading.value = true
     try {
       const page = await runFetch({ maxId: anchor })
       statusIds.value = [...statusIds.value, ...ingest(page)]
-      hasMore.value = page.length > 0
+      setPaging(page)
     } catch (err) {
       error.value = err as CaribouError
     } finally {
