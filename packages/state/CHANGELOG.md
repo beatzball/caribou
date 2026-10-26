@@ -1,5 +1,13 @@
 # @beatzball/caribou-state
 
+## 0.2.2
+
+### Patch Changes
+
+- [#86](https://github.com/beatzball/caribou/pull/86) [`9b13b5f`](https://github.com/beatzball/caribou/commit/9b13b5f5ea0ea8e65c3c06778fcac57c4fd51ebe) Thanks [@beatzball](https://github.com/beatzball)! - `caribou:unauthorized` is now a `CustomEvent` whose detail names the session of the client that got the 401 (`{ userKey, token }`). New `removeSession(userKey, token)` removes that session, with its prefs and drafts, only while it is still stored with the same token, and clears `activeUserKey` only if it was active. It returns `'active'`, `'inactive'` or `'stale'`.
+
+  `loadFromStorage` fills in a missing `userKey` from the map key, so a 401 can still find an older stored session.
+
 ## 0.2.1
 
 ### Patch Changes
