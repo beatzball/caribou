@@ -115,7 +115,7 @@ describe('<caribou-timeline> — keyed list', () => {
     const beforeRefs = listItems(tl)
     expect(beforeRefs).toHaveLength(10)
 
-    storeOf(tl)._testOnlyPrepend(asStatuses([mkStatus('n0'), mkStatus('n1'), mkStatus('n2')]))
+    storeOf(tl)._testOnlyPrepend(asStatuses([mkStatus('n2'), mkStatus('n1'), mkStatus('n0')]))
     await settle(tl)
     bannerButton(tl)!.click()
     await settle(tl)
@@ -123,7 +123,7 @@ describe('<caribou-timeline> — keyed list', () => {
     const afterRefs = listItems(tl)
     expect(afterRefs).toHaveLength(13)
     expect(afterRefs.slice(0, 3).map((li) => (li.firstElementChild as HTMLElement).dataset.statusId))
-      .toEqual(['n0', 'n1', 'n2'])
+      .toEqual(['n2', 'n1', 'n0'])
     // The original 10 now occupy positions 3..12 with identity preserved.
     for (let i = 0; i < 10; i++) {
       expect(afterRefs[i + 3]).toBe(beforeRefs[i])
@@ -372,6 +372,18 @@ describe('<caribou-timeline> — states', () => {
     expect(tl.shadowRoot!.querySelector('ul')).toBeNull()
   })
 
+  it('offers Retry when the first page fails', async () => {
+    const tl = await mount('home', asInitial([]))
+    const store = storeOf(tl)
+    const retry = vi.spyOn(store, 'retry').mockResolvedValue()
+    ;(store.error as Writable<unknown>).value = { message: 'upstream 503' }
+    await settle(tl)
+    const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement
+    expect(button.textContent!.trim()).toBe('Retry')
+    button.click()
+    expect(retry).toHaveBeenCalledOnce()
+  })
+
   it('reflects kind to an attribute', async () => {
     const tl = await mount('public', asInitial([]))
     expect(tl.getAttribute('kind')).toBe('public')
@@ -456,6 +468,35 @@ describe('<caribou-timeline> — older posts', () => {
       button.click()
       await settle(tl)
       expect(retry).toHaveBeenCalledOnce()
+      expect([...io.targets]).toEqual([sentinel(tl)])
+    })
+
+    // The reader who scrolled to the end is looking at the bottom, not the
+    // top: a failed older page shows its error and Retry there.
+    it('shows a failed older page at the bottom, in place of the link', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = { message: 'offline' }
+        ;(store.failedOp as Writable<unknown>).value = 'loadMore'
+      })
+      const retry = vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+      })
+      io.fire(true)
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+
+      expect(sentinel(tl)).toBeNull()
+      const failed = tl.shadowRoot!.querySelector('.failed')!
+      expect(failed.previousElementSibling!.tagName).toBe('UL')
+      expect(failed.querySelector('[role="alert"]')!.textContent).toBe('offline')
+      ;(failed.querySelector('caribou-button[data-action="retry"]') as HTMLElement).click()
+      await settle(tl)
+      expect(retry).toHaveBeenCalledOnce()
+      expect(tl.shadowRoot!.querySelector('.failed')).toBeNull()
       expect([...io.targets]).toEqual([sentinel(tl)])
     })
 

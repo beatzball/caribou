@@ -11,6 +11,8 @@ export interface TimelineStore {
   statuses:      ReadonlySignal<mastodon.v1.Status[]>
   loading:       ReadonlySignal<boolean>
   error:         ReadonlySignal<CaribouError | null>
+  /** Which fetch set `error`, so the view can show it where it belongs. */
+  failedOp:      ReadonlySignal<TimelineOp | null>
   hasMore:       ReadonlySignal<boolean>
   /** True while `refresh()` is fetching in the background. */
   refreshing:    ReadonlySignal<boolean>
@@ -47,6 +49,15 @@ export interface TimelineStore {
   _testOnlyPrepend(xs: mastodon.v1.Status[]): void
 }
 
+export type TimelineOp = 'load' | 'loadMore' | 'poll'
+
+// Mastodon ids are numbers too large for a double, sent as strings. A longer
+// id is a larger number; ids of one length compare as text.
+function newerFirst(a: string, b: string): number {
+  if (a.length !== b.length) return b.length - a.length
+  return a < b ? 1 : a > b ? -1 : 0
+}
+
 export interface CreateTimelineStoreOpts {
   clientSource: () => CaribouClient | null
   pollIntervalMs?: number
@@ -57,6 +68,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   const statusIds  = signal<string[]>([])
   const loading    = signal(false)
   const error      = signal<CaribouError | null>(null)
+  const failedOp   = signal<TimelineOp | null>(null)
   const hasMore    = signal(true)
   const newPostIds = signal<string[]>([])
   const refreshing = signal(false)
@@ -121,21 +133,29 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   }
 
   // The operation `retry()` runs again: the last one that failed.
-  let failed: (() => Promise<void>) | null = null
-  function fail(err: unknown, op: () => Promise<void>) {
-    error.value = err as CaribouError
-    failed = op
+  const ops: Record<TimelineOp, () => Promise<void>> = {
+    load: () => load(), loadMore: () => loadMore(), poll: () => poll(),
+  }
+  function fail(err: unknown, op: TimelineOp) {
+    batch(() => {
+      error.value = err as CaribouError
+      failedOp.value = op
+    })
   }
   function succeed() {
     error.value = null
-    failed = null
+    failedOp.value = null
   }
 
   // Posts go to the buffer only when the list does not show them yet; a
-  // post can come back from the page data and from a check at once.
+  // post can come back from the page data and from a check at once. A page
+  // can also bring posts older than one a check already found, so the
+  // buffer is kept newest first. Bookmarks run in the order they were made,
+  // not by post id, and keep the order they came in.
   function buffer(ids: string[]) {
     const shown = new Set(statusIds.value)
-    newPostIds.value = Array.from(new Set([...ids, ...newPostIds.value])).filter((id) => !shown.has(id))
+    const next = Array.from(new Set([...ids, ...newPostIds.value])).filter((id) => !shown.has(id))
+    newPostIds.value = kind === 'bookmarks' ? next : next.sort(newerFirst)
   }
 
   // Each fetch reads the owner generation before its request and checks it
@@ -160,7 +180,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
         succeed()
       })
     } catch (err) {
-      if (generation === ownerGeneration()) fail(err, load)
+      if (generation === ownerGeneration()) fail(err, 'load')
     } finally {
       loading.value = false
     }
@@ -185,7 +205,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       if (generation !== ownerGeneration()) return
       // The next try asks from the same place.
       nextMaxIdForFirstLoadMore = anchor
-      fail(err, loadMore)
+      fail(err, 'loadMore')
     } finally {
       loading.value = false
     }
@@ -207,7 +227,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
         if (ids.length > 0) buffer(ids)
       })
     } catch (err) {
-      if (generation === ownerGeneration()) fail(err, poll)
+      if (generation === ownerGeneration()) fail(err, 'poll')
     }
   }
 
@@ -228,10 +248,10 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   }
 
   async function retry() {
-    const op = failed
+    const op = failedOp.value
     if (!op) return
     error.value = null
-    await op()
+    await ops[op]()
   }
 
   function offer(page: mastodon.v1.Status[], nextMaxId?: string | null) {
@@ -273,7 +293,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   }
 
   return {
-    statusIds, statuses, loading, error, hasMore, refreshing, syncedAt,
+    statusIds, statuses, loading, error, failedOp, hasMore, refreshing, syncedAt,
     newPosts, newPostsCount,
     load, loadMore, poll, applyNewPosts, refresh, retry, offer, _testOnlyPrepend,
   }

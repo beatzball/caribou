@@ -172,9 +172,9 @@ describe('createTimelineStore', () => {
   it('_testOnlyPrepend injects statuses into the new-posts buffer', () => {
     const client = fakeClient()
     const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
-    store._testOnlyPrepend([makeStatus('x'), makeStatus('y')])
+    store._testOnlyPrepend([makeStatus('y'), makeStatus('x')])
     expect(store.newPostsCount.value).toBe(2)
-    expect(store.newPosts.value.map((s) => s.id)).toEqual(['x', 'y'])
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['y', 'x'])
   })
 })
 

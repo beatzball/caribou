@@ -72,6 +72,8 @@ export class CaribouTimeline extends LitElement {
   @state() private statuses: mastodon.v1.Status[] = []
   @state() private loading = false
   @state() private errorMsg: string | null = null
+  // A failed older page shows at the bottom, where the reader is looking.
+  @state() private failedOlder = false
   @state() private hasMore = true
   @state() private newPostsCount = 0
   // False while nobody is signed in on this device (browsing /local or
@@ -156,6 +158,7 @@ export class CaribouTimeline extends LitElement {
       if (!sameItems(statuses, this.statuses)) this.statuses = statuses
       this.loading = store.loading.value
       this.errorMsg = store.error.value?.message ?? null
+      this.failedOlder = store.failedOp.value === 'loadMore'
       this.hasMore = store.hasMore.value
       this.newPostsCount = store.newPostsCount.value
       this.canFetch = activeClient.value !== null
@@ -221,9 +224,7 @@ export class CaribouTimeline extends LitElement {
     const hasMore = this.store ? this.hasMore : this.initial?.nextMaxId != null
     // A failed background check must not hide the list the reader has; it
     // shows above it until a later check works.
-    if (this.errorMsg && statuses.length === 0) {
-      return html`<div role="alert">${this.errorMsg}</div>`
-    }
+    if (this.errorMsg && statuses.length === 0) return this.renderFailed()
     if (this.loading && statuses.length === 0) {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
@@ -240,10 +241,7 @@ export class CaribouTimeline extends LitElement {
     // against the current path.
     return html`
       <div>
-        ${this.errorMsg
-          ? html`<div class="failed"><div role="alert">${this.errorMsg}</div>
-              <caribou-button variant="secondary" data-action="retry" @click=${this.onRetry}>Retry</caribou-button></div>`
-          : nothing}
+        ${this.errorMsg && !this.failedOlder ? this.renderFailed() : nothing}
         <caribou-new-posts-banner
           .count=${this.newPostsCount}
           @apply-new-posts=${this.onApplyNewPosts}
@@ -253,11 +251,18 @@ export class CaribouTimeline extends LitElement {
             <li><caribou-status-card data-status-id=${s.id} .status=${s}></caribou-status-card></li>
           `)}
         </ul>
-        ${hasMore
+        ${this.errorMsg && this.failedOlder
+          ? this.renderFailed()
+          : hasMore
           ? html`<a href="?max_id=${encodeURIComponent(last.id)}" rel="next" data-sentinel
                     @click=${this.onSentinelClick}>Older posts →</a>`
           : nothing}
       </div>
     `
+  }
+
+  private renderFailed() {
+    return html`<div class="failed"><div role="alert">${this.errorMsg}</div>
+      <caribou-button variant="secondary" data-action="retry" @click=${this.onRetry}>Retry</caribou-button></div>`
   }
 }

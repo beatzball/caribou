@@ -136,6 +136,19 @@ describe('the new-posts buffer', () => {
     store.applyNewPosts()
     expect(store.statusIds.value).toEqual(['z', 'y', 'x', 'b', 'a'])
   })
+
+  // Round 3: a page offered after a check can bring posts older than the
+  // post the check found. They go below it, not above.
+  it('stays newest first when offer() brings posts older than a polled one', () => {
+    const store = createTimelineStore('local', {
+      clientSource: () => null, initial: { statuses: [st('200'), st('100')], nextMaxId: null },
+    })
+    store._testOnlyPrepend([st('1000')])
+    store.offer([st('900'), st('300'), st('200'), st('100')])
+    store.applyNewPosts()
+    // '1000' is newer than '900': ids compare by length first.
+    expect(store.statusIds.value).toEqual(['1000', '900', '300', '200', '100'])
+  })
 })
 
 describe('an empty kept store', () => {
@@ -179,6 +192,25 @@ describe('retry', () => {
     await store.retry()
     expect(store.error.value).toBeNull()
     expect(store.statusIds.value).toEqual(['1', '0'])
+  })
+
+  it('says which fetch failed, and forgets it when one works', async () => {
+    let fail = true
+    const store = createTimelineStore('home', {
+      clientSource: () => clientWith(async (_k, params) => {
+        if (fail) throw new Error('offline')
+        return params?.maxId ? [st('0')] : []
+      }),
+      initial: { statuses: [st('1')], nextMaxId: '1' },
+    })
+    expect(store.failedOp.value).toBeNull()
+    await store.loadMore()
+    expect(store.failedOp.value).toBe('loadMore')
+    await store.poll()
+    expect(store.failedOp.value).toBe('poll')
+    fail = false
+    await store.retry()
+    expect(store.failedOp.value).toBeNull()
   })
 })
 
