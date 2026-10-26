@@ -233,7 +233,7 @@ describe('caribou-compose-dialog', () => {
     await compose(el)
     await type(el, 'half written')
     expect(loadDraft(KEY, 'new')?.text).toBe('half written')
-    $<HTMLButtonElement>(el, '[data-action="cancel"]')!.click()
+    $(el, 'caribou-button[data-action="cancel"]')!.click()
     await settle(el)
     expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
     await compose(el)
@@ -302,6 +302,26 @@ describe('caribou-compose-dialog', () => {
     expect($(el, '[data-media="m1"] img')!.getAttribute('src')).toBe('https://example.social/m1s.png')
     expect(postButton(el).disabled).toBe(false)
     expect(loadDraft(KEY, 'new')?.media.map((m) => m.id)).toEqual(['m1'])
+  })
+
+  it('Remove on an attachment is a shared button, disabled while posting', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'createStatus').mockReturnValue(new Promise(() => {}))
+    saveDraft(KEY, 'new', emptyDraft({
+      text: 'pic',
+      media: [{ id: 'm9', type: 'image', url: 'u', previewUrl: null, description: '' }],
+    }))
+    const el = await mount()
+    await compose(el)
+    const remove = $<HTMLElement & { disabled: boolean }>(el, '[data-media="m9"] caribou-button[data-action="remove-media"]')!
+    expect(inner(remove).disabled).toBe(false)
+    $<HTMLFormElement>(el, 'form')!.requestSubmit()
+    await settle(el)
+    expect(remove.disabled).toBe(true)
+    expect(inner(remove).disabled).toBe(true)
+    remove.click()
+    await settle(el)
+    expect($(el, '[data-media="m9"]')).not.toBeNull()
   })
 
   it('stops at the instance media limit', async () => {
@@ -457,7 +477,7 @@ describe('caribou-compose-dialog', () => {
       const el = await mount()
       await compose(el)
       expect($<HTMLSelectElement>(el, 'select')!.value).toBe('unlisted')
-      $<HTMLButtonElement>(el, '[data-action="cancel"]')!.click()
+      $(el, 'caribou-button[data-action="cancel"]')!.click()
       await settle(el)
       await compose(el, parent({ visibility: 'public' }))
       expect($<HTMLSelectElement>(el, 'select')!.value).toBe('unlisted')
@@ -487,7 +507,7 @@ describe('caribou-compose-dialog', () => {
       Object.defineProperty(file, 'files', { value: [new File(['x'], 'v.mp4', { type: 'video/mp4' })], configurable: true })
       file.dispatchEvent(new Event('change'))
       await settle(el)
-      $<HTMLButtonElement>(el, '[data-action="retry-media"]')!.click()
+      $(el, 'caribou-button[data-action="retry-media"]')!.click()
       await settle(el)
       expect(upload).toHaveBeenCalledOnce()
       expect(wait).toHaveBeenCalledWith('m5')
@@ -553,10 +573,10 @@ describe('caribou-compose-dialog', () => {
       Object.defineProperty(file, 'files', { value: [new File(['x'], 'v.mp4', { type: 'video/mp4' })], configurable: true })
       file.dispatchEvent(new Event('change'))
       await settle(el)
-      $<HTMLButtonElement>(el, '[data-action="retry-media"]')!.click()
+      $(el, 'caribou-button[data-action="retry-media"]')!.click()
       await settle(el)
       expect(wait).toHaveBeenCalledOnce()
-      $<HTMLButtonElement>(el, '[data-action="retry-media"]')!.click()
+      $(el, 'caribou-button[data-action="retry-media"]')!.click()
       await settle(el)
       expect(wait).toHaveBeenCalledOnce()
       expect(upload).toHaveBeenCalledTimes(2)
