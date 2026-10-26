@@ -3,12 +3,17 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
 import { effect, signal } from '@preact/signals-core'
-import { PURIFY_OPTS } from '@beatzball/caribou-mastodon-client/sanitize-opts'
+import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import type { Account, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, isOwnAccount, loadRelationship, relationshipCache, relationshipKey, toggleFollow,
   type UserSession,
 } from '@beatzball/caribou-state'
+
+// The same hooks as the server's sanitizer, so the two agree on every string.
+// Without a window DOMPurify is a stub with no `addHook`; the server has its
+// own instance.
+if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
 
 @customElement('caribou-profile-header')
 export class CaribouProfileHeader extends LitElement {
