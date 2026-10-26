@@ -38,7 +38,10 @@ export class CaribouNavRail extends LitElement {
       font: inherit; text-align: left;
     }
     a:hover, .signout-btn:hover { background: var(--bg-1); }
-    a[aria-current="page"], a[data-pending] { background: var(--bg-2); color: var(--fg-0); }
+    a[aria-current="page"] { background: var(--bg-2); color: var(--fg-0); }
+    /* Not the same as current: the shown page keeps its look, the tapped
+       item gets an accent underline until its page arrives. */
+    a[data-pending] { color: var(--fg-0); box-shadow: inset 0 -2px 0 var(--accent); }
     .signout-form { display: contents; }
     /* Composing needs a session and JS. The server never sets
        can-compose, so without both the button is not shown at all. */
@@ -75,7 +78,9 @@ export class CaribouNavRail extends LitElement {
       nav { flex-direction: row; justify-content: space-around;
             position: fixed; bottom: 0; left: 0; right: 0;
             background: var(--bg-1); border-top: 1px solid var(--border); padding: var(--space-2);
-            padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); }
+            padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+            padding-left: calc(var(--space-2) + env(safe-area-inset-left, 0px));
+            padding-right: calc(var(--space-2) + env(safe-area-inset-right, 0px)); }
       a, .signout-btn, .compose-btn::part(button) {
         min-width: 44px; min-height: 44px; padding: var(--space-2); justify-content: center;
       }
@@ -99,7 +104,9 @@ export class CaribouNavRail extends LitElement {
   // It fires popstate the moment a link is followed, so the tapped item gets a
   // pending look at once instead of looking like the tap was lost.
   // `aria-current` stays on the page that is shown. The swap removes this rail
-  // with its page; a failed navigation leaves it, so a rejection clears the mark.
+  // with its page, also when the next page's data fails (it renders without
+  // it). A page chunk that fails to load — a stale client after a deploy —
+  // rejects in the router and leaves this rail, so a rejection clears the mark.
   @state() private pending = ''
 
   private _onPopState = () => {
@@ -139,7 +146,7 @@ export class CaribouNavRail extends LitElement {
           const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
           const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
           return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
-            ?data-pending=${isPending} @click=${spaClick}
+            ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
             ><caribou-icon class="icon" name=${it.icon}></caribou-icon><span class="label">${it.label}</span></a>`
         })}
         <caribou-button variant="primary" class="compose-btn" @click=${openCompose}

@@ -96,7 +96,11 @@ export class CaribouComposeDialog extends LitElement {
     :host { display: contents; }
     dialog {
       width: min(600px, calc(100vw - 2 * var(--space-4)));
+      /* dvh follows the visible area as Safari's toolbars come and go; the
+         insets keep Post and Cancel out of the home-indicator zone. */
       max-height: calc(100vh - 2 * var(--space-4));
+      max-height: calc(100dvh - 2 * var(--space-4)
+        - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
       padding: 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
       background: var(--bg-0); color: var(--fg-0);
     }

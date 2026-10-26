@@ -40,12 +40,29 @@ test('a tapped item looks pending at once while the next page loads', async ({ p
 })
 
 test('bottom bar items are at least 44px square', async ({ page }) => {
+  // Signed in, so New post and Sign out are in the bar too. The page is
+  // server-rendered; answer any call to the instance with an empty list.
+  await page.addInitScript(() => {
+    const key = 'alice@example.social'
+    const account = { id: 'a1', username: 'alice', acct: 'alice' }
+    localStorage.setItem('caribou.users', JSON.stringify([[key,
+      { userKey: key, server: 'example.social', token: 'TOKEN', vapidKey: '', account, createdAt: 1 }]]))
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+  })
+  await page.route('https://example.social/**', (route) => route.fulfill({ json: [] }))
   await gotoSettled(page, '/public')
-  for (const href of ['/home', '/local', '/public', '/@me']) {
-    const box = await item(page, href).boundingBox()
-    expect(box, href).not.toBeNull()
-    expect(box!.width, href).toBeGreaterThanOrEqual(44)
-    expect(box!.height, href).toBeGreaterThanOrEqual(44)
+  const items = {
+    '/home': item(page, '/home'), '/local': item(page, '/local'),
+    '/public': item(page, '/public'), '/@me': item(page, '/@me'),
+    'New post': rail(page).locator('.compose-btn'),
+    'Sign out': rail(page).locator('.signout-btn'),
+  }
+  for (const [name, loc] of Object.entries(items)) {
+    await expect(loc, name).toBeVisible()
+    const box = await loc.boundingBox()
+    expect(box, name).not.toBeNull()
+    expect(box!.width, name).toBeGreaterThanOrEqual(44)
+    expect(box!.height, name).toBeGreaterThanOrEqual(44)
   }
 })
 
@@ -66,4 +83,15 @@ test('the page asks for viewport-fit=cover so safe-area insets apply', async ({ 
     (els) => els.map((e) => e.getAttribute('content') ?? ''))
   // The last viewport meta is the one the browser uses.
   expect(metas.at(-1)).toContain('viewport-fit=cover')
+})
+
+test('a toast sits above the bottom bar, not over it', async ({ page }) => {
+  await gotoSettled(page, '/public')
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('caribou:toast',
+    { detail: { kind: 'info', message: 'Hello' } })))
+  const toast = page.locator('caribou-toaster .toast').first()
+  await expect(toast).toBeVisible()
+  const t = (await toast.boundingBox())!
+  const bar = (await rail(page).locator('nav').boundingBox())!
+  expect(t.y + t.height).toBeLessThanOrEqual(bar.y)
 })

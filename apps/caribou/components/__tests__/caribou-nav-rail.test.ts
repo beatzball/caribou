@@ -113,6 +113,7 @@ describe('caribou-nav-rail', () => {
     window.dispatchEvent(new PopStateEvent('popstate'))
     await el.updateComplete
     expect(el.shadowRoot!.querySelector('a[data-pending]')?.getAttribute('href')).toBe('/local')
+    expect(el.shadowRoot!.querySelector('a[aria-busy="true"]')?.getAttribute('href')).toBe('/local')
     expect(el.shadowRoot!.querySelector('a[aria-current="page"]')?.getAttribute('href')).toBe('/public')
 
     // Back to the shown page: nothing is pending any more.
@@ -122,7 +123,7 @@ describe('caribou-nav-rail', () => {
     expect(el.shadowRoot!.querySelector('a[data-pending]')).toBeNull()
   })
 
-  it('clears the pending mark when a navigation fails', async () => {
+  it('clears the pending mark when a page chunk fails to load', async () => {
     happyDOM.setURL('http://localhost/public')
     const el = await mount()
     happyDOM.setURL('http://localhost/@me/posts')
@@ -130,6 +131,7 @@ describe('caribou-nav-rail', () => {
     await el.updateComplete
     expect(el.shadowRoot!.querySelector('a[data-pending]')?.getAttribute('href')).toBe('/@me')
 
+    // The router rejects when the route's dynamic import fails.
     window.dispatchEvent(new Event('unhandledrejection'))
     await el.updateComplete
     expect(el.shadowRoot!.querySelector('a[data-pending]')).toBeNull()

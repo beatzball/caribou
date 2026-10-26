@@ -26,9 +26,15 @@ const MAX_TOASTS = 4
 @customElement('caribou-toaster')
 export class CaribouToaster extends LitElement {
   static override styles = css`
+    /* Clear of the iPhone home indicator, and on mobile above the fixed
+       nav bar (61px with its border) so a toast never covers it. */
     :host {
-      position: fixed; inset-inline: 0; bottom: var(--space-4); z-index: 100;
+      position: fixed; inset-inline: 0; z-index: 100;
+      bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
       display: flex; justify-content: center; pointer-events: none;
+    }
+    @media (max-width: 767px) {
+      :host { bottom: calc(61px + var(--space-4) + env(safe-area-inset-bottom, 0px)); }
     }
     .stack { display: flex; flex-direction: column; gap: var(--space-2); }
     .toast {
