@@ -1,5 +1,17 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.0
+
+### Minor Changes
+
+- [#102](https://github.com/beatzball/caribou/pull/102) [`1bf7f0a`](https://github.com/beatzball/caribou/commit/1bf7f0ae0aaea70f1175bae84d363295a4274809) Thanks [@beatzball](https://github.com/beatzball)! - `fetchTimeline` now resolves to a `TimelinePage`: the statuses, plus
+  `nextMaxId` where the last status id is not the next page's cursor. For
+  `'bookmarks'` it is the `max_id` from Mastodon's Link header (bookmarks are
+  ordered by bookmark id), or `null` when there is no next page. Other
+  timelines leave it unset. A `sinceId` on bookmarks returns an empty page.
+
+- [#103](https://github.com/beatzball/caribou/pull/103) [`20b0f9c`](https://github.com/beatzball/caribou/commit/20b0f9c708b9dde27c2078d611aedfb3992d2f45) Thanks [@beatzball](https://github.com/beatzball)! - Add `fetchNotifications({ types, sinceId, minId, maxId, limit })` for `GET /api/v1/notifications`.
+
 ## 0.3.0
 
 ### Minor Changes

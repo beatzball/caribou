@@ -1,5 +1,27 @@
 # caribou-app
 
+## 0.6.0
+
+### Minor Changes
+
+- [#102](https://github.com/beatzball/caribou/pull/102) [`1bf7f0a`](https://github.com/beatzball/caribou/commit/1bf7f0ae0aaea70f1175bae84d363295a4274809) Thanks [@beatzball](https://github.com/beatzball)! - Add a `/bookmarks` page and a Bookmarks item in the nav rail. It lists the
+  signed-in user's bookmarks with infinite scroll and says "No bookmarks yet."
+  when there are none. Signed out, it shows the sign-in placeholder. Removing a
+  bookmark on this page keeps the card, with its button off, so a mistaken tap
+  can be undone.
+
+- [#106](https://github.com/beatzball/caribou/pull/106) [`0f8b92f`](https://github.com/beatzball/caribou/commit/0f8b92f06c8bc97e7f465985fa08b0d12d3270c7) Thanks [@beatzball](https://github.com/beatzball)! - The phone nav bar (below 768px) now holds Home, Local, New post, Profile and a More button, so every item fits at 320px. More opens a small menu with Public, Bookmarks and Sign out. It is a native popover: it opens, closes on Escape or a tap outside, and signs out without JavaScript. The new `<caribou-menu>` element builds it. The rail's order is now the same at every width, with New post just above Profile.
+
+- [#103](https://github.com/beatzball/caribou/pull/103) [`20b0f9c`](https://github.com/beatzball/caribou/commit/20b0f9c708b9dde27c2078d611aedfb3992d2f45) Thanks [@beatzball](https://github.com/beatzball)! - A `/notifications` page lists mentions, favourites, boosts, follows, follow requests, ended polls and edits, with an All / Mentions filter. A type the app does not know shows a plain line instead of breaking the list. The list checks for new notifications every 60 seconds while the tab is visible. The nav rail has a Notifications item after Local, also in the phone bar, with an unread count, which clears when the page is shown; screen readers hear "Notifications, 3 unread".
+
+- [#104](https://github.com/beatzball/caribou/pull/104) [`3d3a08f`](https://github.com/beatzball/caribou/commit/3d3a08f1e82ff2bf61b196772403623b5964e098) Thanks [@beatzball](https://github.com/beatzball)! - Going back to Home, Local, Public, a profile or a thread is instant. The page shows what it showed last time at once, then checks for changes in the background. New posts go to the "N new posts" banner, so the list does not move; new replies in a thread appear at the end, and the next visit keeps that order; edits and counts update in place. Back lands where you were. A page older than five minutes says "Updating…" while it refreshes. A failed refresh or page load keeps the list on screen with a Retry button, and does not retry by itself. The cache is cleared when the active account changes.
+
+### Patch Changes
+
+- Updated dependencies [[`1bf7f0a`](https://github.com/beatzball/caribou/commit/1bf7f0ae0aaea70f1175bae84d363295a4274809), [`20b0f9c`](https://github.com/beatzball/caribou/commit/20b0f9c708b9dde27c2078d611aedfb3992d2f45), [`20b0f9c`](https://github.com/beatzball/caribou/commit/20b0f9c708b9dde27c2078d611aedfb3992d2f45), [`3d3a08f`](https://github.com/beatzball/caribou/commit/3d3a08f1e82ff2bf61b196772403623b5964e098), [`1bf7f0a`](https://github.com/beatzball/caribou/commit/1bf7f0ae0aaea70f1175bae84d363295a4274809)]:
+  - @beatzball/caribou-mastodon-client@0.4.0
+  - @beatzball/caribou-state@0.3.0
+
 ## 0.5.2
 
 ### Patch Changes
