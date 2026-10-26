@@ -19,7 +19,7 @@ test('privacy page shows its text inside the shell, with real links', async ({ p
   await expect(page.getByText(/does not collect analytics or\s+telemetry/i)).toBeVisible()
 
   const nav = page.getByRole('navigation', { name: 'Primary' })
-  for (const [name, href] of [['Home', '/home'], ['Local', '/local'], ['Public', '/public'], ['Profile', '/@me']] as const) {
+  for (const [name, href] of [['Home', '/home'], ['Local', '/local'], ['Public', '/public'], ['Profile', '/@me'], ['Bookmarks', '/bookmarks']] as const) {
     await expect(nav.getByRole('link', { name })).toHaveAttribute('href', href)
   }
   await expect(nav.locator('form[action="/api/signout"][method="post"] button[type="submit"]')).toHaveCount(1)

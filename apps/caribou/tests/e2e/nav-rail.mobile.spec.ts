@@ -54,6 +54,7 @@ test('bottom bar items are at least 44px square', async ({ page }) => {
   const items = {
     '/home': item(page, '/home'), '/local': item(page, '/local'),
     '/public': item(page, '/public'), '/@me': item(page, '/@me'),
+    '/bookmarks': item(page, '/bookmarks'),
     'New post': rail(page).locator('.compose-btn'),
     'Sign out': rail(page).locator('.signout-btn'),
   }
@@ -65,6 +66,36 @@ test('bottom bar items are at least 44px square', async ({ page }) => {
     expect(box!.height, name).toBeGreaterThanOrEqual(44)
   }
 })
+
+// Narrow phones (320px, and 360px — a common Android width) must show every
+// bar item; the bar is fixed and clips what does not fit.
+// fixme: with Bookmarks the signed-in bar has 7 items and needs 372px. The
+// owner decides the mobile bar layout once Notifications adds an 8th item.
+for (const width of [320, 360]) {
+  test.fixme(`every bar item is inside the viewport at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 700 })
+    await page.addInitScript(() => {
+      const key = 'alice@example.social'
+      const account = { id: 'a1', username: 'alice', acct: 'alice' }
+      localStorage.setItem('caribou.users', JSON.stringify([[key,
+        { userKey: key, server: 'example.social', token: 'TOKEN', vapidKey: '', account, createdAt: 1 }]]))
+      localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+    })
+    await page.route('https://example.social/**', (route) => route.fulfill({ json: [] }))
+    await gotoSettled(page, '/public')
+    const nav = rail(page).locator('nav')
+    await expect(rail(page).locator('.compose-btn')).toBeVisible()
+    const fits = await nav.evaluate((el) => el.scrollWidth <= el.clientWidth)
+    expect(fits, 'nav scrollWidth <= clientWidth').toBe(true)
+    const items = nav.locator(':scope > a, .compose-btn, .signout-btn')
+    for (let i = 0; i < await items.count(); i++) {
+      const box = await items.nth(i).boundingBox()
+      expect(box, `item ${i}`).not.toBeNull()
+      expect(box!.x, `item ${i} left`).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width, `item ${i} right`).toBeLessThanOrEqual(width)
+    }
+  })
+}
 
 test('fast taps across the bar still land on the last one', async ({ page }) => {
   await gotoSettled(page, '/public')

@@ -12,7 +12,7 @@ import {
 import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 
-export type TimelineKind = 'home' | 'local' | 'public'
+export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
 
 export interface TimelineInitial {
   statuses: mastodon.v1.Status[]
@@ -172,11 +172,11 @@ export class CaribouTimeline extends LitElement {
       return html`<div role="alert">${this.errorMsg}</div>`
     }
     if (this.loading && statuses.length === 0) {
-      return html`<div class="notice">Loading your timeline…</div>`
+      return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
     const last = statuses[statuses.length - 1]
     if (!last) {
-      return html`<div class="notice">No posts yet.</div>`
+      return html`<div class="notice">${this.kind === 'bookmarks' ? 'No bookmarks yet.' : 'No posts yet.'}</div>`
     }
     // Keyed by status id, and each card gets the status object itself. A
     // poll or a prepend therefore leaves every surviving card alone: same

@@ -345,6 +345,18 @@ describe('<caribou-timeline> — states', () => {
     expect(sentinel(tl)).toBeNull()
   })
 
+  it('says "No bookmarks yet." for an empty bookmarks list', async () => {
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'bookmarks'
+    document.body.appendChild(tl)
+    await tl.updateComplete
+    expect(tl.shadowRoot!.textContent).toContain('Loading your bookmarks…')
+    await new Promise((r) => setTimeout(r, 0))
+    await settle(tl)
+    expect(tl.shadowRoot!.textContent).toContain('No bookmarks yet.')
+    expect(tl.shadowRoot!.textContent).not.toContain('No posts yet')
+  })
+
   it('shows the store error as an alert in place of the list', async () => {
     const tl = await mount('home', asInitial([mkStatus('s0')]))
     ;(storeOf(tl).error as Writable<unknown>).value = { message: 'upstream 503' }

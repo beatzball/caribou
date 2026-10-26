@@ -15,7 +15,7 @@ export interface CaribouClient {
     sinceId?: string
     maxId?: string
     limit?: number
-  }): Promise<mastodon.v1.Status[]>
+  }): Promise<TimelinePage>
   fetchStatus(statusId: string): Promise<mastodon.v1.Status>
   fetchThread(statusId: string): Promise<{
     ancestors: mastodon.v1.Status[]
@@ -52,6 +52,12 @@ export interface CaribouClient {
   updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
   fetchInstance(): Promise<mastodon.v2.Instance>
 }
+
+// A page of a timeline. `nextMaxId` is set only where the last status id is
+// not the cursor for the next page (bookmarks): the `max_id` to ask for next,
+// or null when there is no next page. Undefined means "page by the last
+// status id", as every other timeline does.
+export type TimelinePage = mastodon.v1.Status[] & { nextMaxId?: string | null }
 
 export interface WaitForMediaOpts {
   pollIntervalMs?: number
@@ -125,6 +131,21 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     }
   }
 
+  // Mastodon pages bookmarks by bookmark id, not status id, and names the
+  // next page only in the Link header. The caller keeps that cursor and
+  // passes it back as `maxId`.
+  async function fetchBookmarkTimeline(
+    c: mastodon.rest.Client, params: { sinceId?: string; maxId?: string; limit?: number },
+  ): Promise<TimelinePage> {
+    // Bookmarks are not polled; a since_id would be a status id here too.
+    if (params.sinceId) return Object.assign([], { nextMaxId: null })
+    const res = await c.v1.bookmarks.list.$raw({
+      ...(params.maxId ? { maxId: params.maxId } : {}),
+      ...(params.limit ? { limit: params.limit } : {}),
+    })
+    return Object.assign(res.data, { nextMaxId: nextMaxIdFromLink(res.headers.get('link')) })
+  }
+
   return {
     userKey,
     async fetchTimeline(kind, params = {}) {
@@ -138,7 +159,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         if (kind === 'home')   return c.v1.timelines.home.list(listParams)
         if (kind === 'local')  return c.v1.timelines.public.list({ ...listParams, local: true })
         if (kind === 'public') return c.v1.timelines.public.list(listParams)
-        if (kind === 'bookmarks') return c.v1.bookmarks.list(listParams)
+        if (kind === 'bookmarks') return fetchBookmarkTimeline(c, params)
         if (kind.type === 'hashtag') return c.v1.timelines.tag.$select(kind.tag).list(listParams)
         if (kind.type === 'list')    return c.v1.timelines.list.$select(kind.id).list(listParams)
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
@@ -240,4 +261,18 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       return run('instance', (c) => c.v2.instance.fetch())
     },
   }
+}
+
+function nextMaxIdFromLink(link: string | null): string | null {
+  if (!link) return null
+  for (const part of link.split(',')) {
+    const m = /<([^>]+)>\s*;\s*rel="?next"?/.exec(part)
+    if (!m) continue
+    try {
+      return new URL(m[1]!).searchParams.get('max_id')
+    } catch {
+      return null
+    }
+  }
+  return null
 }
