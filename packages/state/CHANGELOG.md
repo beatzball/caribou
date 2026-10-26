@@ -1,5 +1,12 @@
 # @beatzball/caribou-state
 
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [[`3ba56a9`](https://github.com/beatzball/caribou/commit/3ba56a9b5aa4c851d8d0a699c0ff395fa4d46fe7)]:
+  - @beatzball/caribou-mastodon-client@0.3.0
+
 ## 0.2.2
 
 ### Patch Changes
