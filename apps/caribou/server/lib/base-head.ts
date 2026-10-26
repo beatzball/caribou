@@ -8,4 +8,10 @@
 // `:host`.
 const BASE_CSS = `litro-outlet > [hidden] { display: none; }`
 
-export const BASE_HEAD = `<style id="caribou-base">${BASE_CSS}</style>`
+// Litro's shell writes its own viewport meta first; the last one wins. With
+// viewport-fit=cover the page reaches the screen edges and `env(safe-area-*)`
+// reports the home indicator and notch, so the mobile nav bar and the shell
+// can keep their controls out of those zones.
+const VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />'
+
+export const BASE_HEAD = `${VIEWPORT}<style id="caribou-base">${BASE_CSS}</style>`

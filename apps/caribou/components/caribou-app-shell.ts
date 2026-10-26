@@ -14,10 +14,18 @@ export class CaribouAppShell extends LitElement {
       grid-template-columns: 1fr;
       grid-template-areas: "main";
       min-height: 100vh;
+      /* viewport-fit=cover lets the page run under the notch in landscape. */
+      padding-left: env(safe-area-inset-left, 0px);
+      padding-right: env(safe-area-inset-right, 0px);
     }
     caribou-nav-rail   { grid-area: nav;   }
     caribou-right-rail { grid-area: right; display: none; }
     main { grid-area: main; max-width: 640px; margin: 0 auto; width: 100%; padding: var(--space-4) 0 calc(var(--space-6) * 2); }
+    /* Room for the fixed bottom nav bar: 44px items, 8px padding each side,
+       the home indicator inset, and the usual end space. */
+    @media (max-width: 767px) {
+      main { padding-bottom: calc(60px + var(--space-6) + env(safe-area-inset-bottom, 0px)); }
+    }
     @media (min-width: 768px) {
       .shell-grid { grid-template-columns: 56px 1fr; grid-template-areas: "nav main"; }
     }

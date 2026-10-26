@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const isCI = !!process.env.CI
+const MOBILE = /\.mobile\.spec\.ts$/
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -24,9 +25,10 @@ export default defineConfig({
       },
   projects: isCI
     ? [
-        { name: 'chromium', use: devices['Desktop Chrome'] },
+        { name: 'chromium', use: devices['Desktop Chrome'], testIgnore: MOBILE },
         {
           name: 'firefox',
+          testIgnore: MOBILE,
           use: {
             ...devices['Desktop Firefox'],
             // Playwright's Firefox sends localhost traffic through the
@@ -38,9 +40,13 @@ export default defineConfig({
             launchOptions: { firefoxUserPrefs: { 'network.proxy.type': 0 } },
           },
         },
-        { name: 'webkit',   use: devices['Desktop Safari'] },
+        { name: 'webkit',   use: devices['Desktop Safari'], testIgnore: MOBILE },
+        // A phone: touch, small screen, the bottom nav bar. Only
+        // `*.mobile.spec.ts` runs here, and only here.
+        { name: 'mobile-webkit', use: devices['iPhone 15'], testMatch: MOBILE },
       ]
     : [
-        { name: 'chromium', use: devices['Desktop Chrome'] },
+        { name: 'chromium', use: devices['Desktop Chrome'], testIgnore: MOBILE },
+        { name: 'mobile-webkit', use: devices['iPhone 15'], testMatch: MOBILE },
       ],
 })

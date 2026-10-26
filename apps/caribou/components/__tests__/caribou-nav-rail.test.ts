@@ -105,6 +105,36 @@ describe('caribou-nav-rail', () => {
     expect(goSpy).toHaveBeenCalledWith('/home')
   })
 
+  it('marks the item being navigated to as pending, and leaves aria-current on the shown page', async () => {
+    happyDOM.setURL('http://localhost/public')
+    const el = await mount()
+    // What LitroRouter.go does: push the URL, then fire popstate.
+    happyDOM.setURL('http://localhost/local')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('a[data-pending]')?.getAttribute('href')).toBe('/local')
+    expect(el.shadowRoot!.querySelector('a[aria-current="page"]')?.getAttribute('href')).toBe('/public')
+
+    // Back to the shown page: nothing is pending any more.
+    happyDOM.setURL('http://localhost/public')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('a[data-pending]')).toBeNull()
+  })
+
+  it('clears the pending mark when a navigation fails', async () => {
+    happyDOM.setURL('http://localhost/public')
+    const el = await mount()
+    happyDOM.setURL('http://localhost/@me/posts')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('a[data-pending]')?.getAttribute('href')).toBe('/@me')
+
+    window.dispatchEvent(new Event('unhandledrejection'))
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('a[data-pending]')).toBeNull()
+  })
+
   it('leaves modified and non-primary clicks to the browser', async () => {
     const el = await mount()
     const a = el.shadowRoot!.querySelector<HTMLAnchorElement>('a[href="/home"]')!

@@ -38,7 +38,7 @@ export class CaribouNavRail extends LitElement {
       font: inherit; text-align: left;
     }
     a:hover, .signout-btn:hover { background: var(--bg-1); }
-    a[aria-current="page"] { background: var(--bg-2); color: var(--fg-0); }
+    a[aria-current="page"], a[data-pending] { background: var(--bg-2); color: var(--fg-0); }
     .signout-form { display: contents; }
     /* Composing needs a session and JS. The server never sets
        can-compose, so without both the button is not shown at all. */
@@ -66,12 +66,19 @@ export class CaribouNavRail extends LitElement {
       a, .signout-btn, .compose-btn::part(button) { justify-content: center; padding: var(--space-2); }
     }
 
-    /* Mobile: nav becomes a fixed bottom bar; row-flex. */
+    /* Mobile: nav becomes a fixed bottom bar; row-flex.
+       Items are 44px square, the touch size iOS asks for. The bar keeps
+       clear of the home indicator: on iOS Safari a tap at the very bottom
+       edge can bring back the browser toolbar instead of reaching the page.
+       The inset is 0 unless the viewport meta says viewport-fit=cover. */
     @media (max-width: 767px) {
       nav { flex-direction: row; justify-content: space-around;
             position: fixed; bottom: 0; left: 0; right: 0;
-            background: var(--bg-1); border-top: 1px solid var(--border); padding: var(--space-2); }
-      a, .signout-btn, .compose-btn::part(button) { padding: var(--space-2); justify-content: center; }
+            background: var(--bg-1); border-top: 1px solid var(--border); padding: var(--space-2);
+            padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom, 0px)); }
+      a, .signout-btn, .compose-btn::part(button) {
+        min-width: 44px; min-height: 44px; padding: var(--space-2); justify-content: center;
+      }
       /* One item among the others in the bar, not a full-width row. */
       .compose-btn { width: auto; }
     }
@@ -87,17 +94,36 @@ export class CaribouNavRail extends LitElement {
 
   private _unsubscribe?: () => void
 
+  // The router keeps the old page, and this rail with it, on screen until the
+  // next page has fetched its data and rendered — up to seconds on a phone.
+  // It fires popstate the moment a link is followed, so the tapped item gets a
+  // pending look at once instead of looking like the tap was lost.
+  // `aria-current` stays on the page that is shown. The swap removes this rail
+  // with its page; a failed navigation leaves it, so a rejection clears the mark.
+  @state() private pending = ''
+
+  private _onPopState = () => {
+    const to = window.location.pathname
+    this.pending = to === (this.current || this.path) ? '' : to
+  }
+
+  private _onRejection = () => { this.pending = '' }
+
   override connectedCallback() {
     super.connectedCallback()
     this._unsubscribe = effect(() => {
       this.toggleAttribute('signed-out', activeUserKey.value === null)
       this.toggleAttribute('can-compose', activeUserKey.value !== null)
     })
+    window.addEventListener('popstate', this._onPopState)
+    window.addEventListener('unhandledrejection', this._onRejection)
   }
 
   override disconnectedCallback() {
     this._unsubscribe?.()
     this._unsubscribe = undefined
+    window.removeEventListener('popstate', this._onPopState)
+    window.removeEventListener('unhandledrejection', this._onRejection)
     super.disconnectedCallback()
   }
 
@@ -111,7 +137,9 @@ export class CaribouNavRail extends LitElement {
       <nav aria-label="Primary">
         ${ITEMS.map((it) => {
           const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
-          return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing} @click=${spaClick}
+          const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
+          return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
+            ?data-pending=${isPending} @click=${spaClick}
             ><caribou-icon class="icon" name=${it.icon}></caribou-icon><span class="label">${it.label}</span></a>`
         })}
         <caribou-button variant="primary" class="compose-btn" @click=${openCompose}
