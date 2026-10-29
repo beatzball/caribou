@@ -71,5 +71,11 @@ gh run list --branch changeset-release/main --limit 1
 # action_required = the token is expired or missing; renew it
 ```
 
-Renew the token before 2026-11-30 and update the secret. Do not change the
-fallback line in `release.yml`.
+The token is used in two places in `release.yml`: by `actions/checkout`
+(so the `git push` of the release branch is by the token's owner) and by
+`changesets/action` (so the pull request is opened by the token's owner).
+Both are needed: if checkout uses `GITHUB_TOKEN`, a new release PR starts
+its checks, but every later update to it waits for approval.
+
+Renew the token before 2026-11-30 and update the secret. Keep the
+`|| secrets.GITHUB_TOKEN` fallback in both places.

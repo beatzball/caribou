@@ -16,8 +16,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # changesets/action pushes the release branch with git, and git uses
+      # the credential that checkout stored. With the default GITHUB_TOKEN
+      # that push is by github-actions[bot], so an update to an open release
+      # PR waits for "Approve and run". Check out with the same token.
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: pnpm/action-setup@v4
         with: { version: 10.28.0 }
       - uses: actions/setup-node@v4
