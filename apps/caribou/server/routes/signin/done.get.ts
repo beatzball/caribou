@@ -1,10 +1,12 @@
 import { defineEventHandler, setResponseHeader } from 'h3'
+import { ICONS_HEAD, PAGE_TITLE } from '../../lib/brand-head.js'
 
 const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Signing in…</title>
+  <title>Signing in · ${PAGE_TITLE}</title>
+  ${ICONS_HEAD}
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: system-ui, sans-serif; padding: 2rem; color: #e4e4e7; background: #0d0d12; }

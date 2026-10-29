@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { resolveOrigin } from '../../server/routes/api/signin/start.post.js'
+import { resolveOrigin } from '../../server/lib/public-origin.js'
 
 function fakeEvent(host: string, proto: string = 'http'): Parameters<typeof resolveOrigin>[0] {
   return {

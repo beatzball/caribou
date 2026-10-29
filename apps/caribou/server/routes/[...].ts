@@ -5,6 +5,8 @@ import { TOKENS_HEAD } from '../lib/tokens-head.js';
 import { BASE_HEAD } from '../lib/base-head.js';
 import { matchRoute } from '../lib/match-route.js';
 import { APP_SCRIPT_URL } from '../lib/app-entry.js';
+import { ICONS_HEAD, PAGE_TITLE, brandHead } from '../lib/brand-head.js';
+import { resolveOrigin } from '../lib/public-origin.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
 // not every client encodes, so escape it rather than trust that.
@@ -21,7 +23,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     setResponseHeader(event, 'content-type', 'text/html; charset=utf-8');
     return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><title>404</title></head>
+<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}</head>
 <body><h1>404 — Not Found</h1><p>No page matched <code>${escapeHtml(pathname)}</code>.</p></body>
 </html>`;
   }
@@ -41,7 +43,8 @@ export default defineEventHandler(async (event) => {
     //     Custom properties inherit through shadow roots, so every
     //     component's `static styles` can use them.
     //   • BASE_HEAD   — document-level rules that no shadow root owns.
-    routeMeta: { head: TOKENS_HEAD + BASE_HEAD },
+    // brandHead adds the icons, the manifest and the link-preview tags.
+    routeMeta: { title: PAGE_TITLE, head: TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)) },
     appScriptUrl: APP_SCRIPT_URL,
   });
   return handler(event);

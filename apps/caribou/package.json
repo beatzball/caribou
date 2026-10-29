@@ -14,6 +14,7 @@
     "preview": "litro preview",
     "preview:portless": "portless run litro preview",
     "generate": "litro generate",
+    "icons": "node scripts/build-icons.mjs",
     "typecheck": "pnpm build-meta && tsc --noEmit",
     "lint": "eslint .",
     "test": "pnpm build-meta && vitest run",

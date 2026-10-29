@@ -88,6 +88,10 @@ function serverOnlyClientStubPlugin(rules: StubRule[]): Plugin {
 
 export default defineConfig({
   base: '/_litro/',
+  // Nitro serves public/ at the site root (`publicAssets` in nitro.config.ts).
+  // Vite would also copy it into dist/client, which Nitro serves again under
+  // /_litro/: a second copy of every icon in the image.
+  publicDir: false,
   plugins: [serverOnlyClientStubPlugin(STUB_RULES)],
   resolve: {
     conditions: ['browser', 'module', 'import', 'default'],
