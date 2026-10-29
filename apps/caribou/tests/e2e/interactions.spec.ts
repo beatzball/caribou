@@ -130,3 +130,40 @@ test('a 500 rolls the favourite back and shows an error toast', async ({ page })
   await expect(alert).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+// Link-hint tools (Vimium) skip a control unless a hit test at its centre
+// or a corner lands inside it. They walk down through shadow roots with
+// `elementsFromPoint`, then ask `button.contains(hit)`, which does not cross
+// a shadow boundary. The corners are rounded, so the centre must land on the
+// button itself, not in the icon's own shadow root.
+async function centreHit(page: Page, label: string) {
+  const host = page.locator(`caribou-icon-button[label="${label}"]`).first()
+  await expect(host).toBeVisible()
+  return host.evaluate((el) => {
+    const btn = el.shadowRoot!.querySelector('button')!
+    const r = btn.getBoundingClientRect()
+    const x = r.left + r.width / 2
+    const y = r.top + r.height / 2
+    let root: Document | ShadowRoot = document
+    const seen: Element[] = []
+    for (;;) {
+      const hit: Element | undefined = root.elementsFromPoint(x, y)[0]
+      if (!hit || seen.includes(hit)) return hit === btn || !!hit && btn.contains(hit)
+      seen.push(hit)
+      if (!hit.shadowRoot) return hit === btn || btn.contains(hit)
+      root = hit.shadowRoot
+    }
+  })
+}
+
+test('a hit test at an icon button\'s centre lands inside its button', async ({ page }) => {
+  await gotoSettled(page, '/home')
+  for (const label of ['Reply', 'Boost', 'Favourite', 'Bookmark']) {
+    expect(await centreHit(page, label), label).toBe(true)
+  }
+  await page.getByRole('button', { name: 'New post' }).click()
+  await expect(page.getByRole('dialog', { name: 'New post' })).toBeVisible()
+  for (const label of ['Add images or video', 'Content warning']) {
+    expect(await centreHit(page, label), label).toBe(true)
+  }
+})
