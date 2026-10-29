@@ -80,6 +80,20 @@ export class CaribouStatusMedia extends LitElement {
       padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
       color: #fff; background: rgb(0 0 0 / 0.7);
     }
+    .gifv-toggle {
+      position: relative; display: block; width: 100%; height: 100%;
+      padding: 0; border-radius: 0; background: none;
+    }
+    .gif-badge {
+      position: absolute; inset-block-start: var(--space-2); inset-inline-start: var(--space-2);
+      padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
+      color: #fff; background: rgb(0 0 0 / 0.7); border-radius: var(--radius-sm);
+    }
+    /* Without the Popover API a [popover] is an ordinary element; keep the
+       description out of the grid then. The image alt still carries it. */
+    @supports not selector(:popover-open) {
+      [popover] { display: none; }
+    }
     .alt-text {
       max-width: min(32rem, calc(100vw - 2rem)); padding: var(--space-3);
       color: var(--fg-0); background: var(--bg-1);
@@ -114,9 +128,12 @@ export class CaribouStatusMedia extends LitElement {
 
   @state() private revealed = false
   // The server cannot know the reader's motion setting, so the server and
-  // the first client render both show gifv with controls and no autoplay.
-  // `firstUpdated` decides.
+  // the first client render both show each gifv paused. `firstUpdated`
+  // decides.
   @state() private motionOk = false
+  // A gifv the reader paused or played by hand, by index. It wins over the
+  // motion setting (WCAG 2.2.2: a looping animation needs a way to stop).
+  @state() private gifChoice: ReadonlyMap<number, boolean> = new Map()
   // The image the lightbox shows, by index.
   @state() private viewing = -1
 
@@ -125,6 +142,16 @@ export class CaribouStatusMedia extends LitElement {
   private opener: HTMLElement | null = null
   private motionQuery: MediaQueryList | null = null
 
+  // Listen on every connect, so an element moved in the DOM keeps following
+  // the setting. Before the first render only the listener is added:
+  // `motionOk` must stay false until hydration is done.
+  override connectedCallback() {
+    super.connectedCallback()
+    this.motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    this.motionQuery.addEventListener('change', this.onMotionChange)
+    if (this.hasUpdated) this.onMotionChange()
+  }
+
   override disconnectedCallback() {
     this.motionQuery?.removeEventListener('change', this.onMotionChange)
     this.motionQuery = null
@@ -132,25 +159,42 @@ export class CaribouStatusMedia extends LitElement {
   }
 
   protected override firstUpdated() {
-    this.motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
-    this.motionQuery.addEventListener('change', this.onMotionChange)
     this.onMotionChange()
   }
 
   protected override willUpdate(changed: Map<PropertyKey, unknown>) {
-    // Another post in the same card starts hidden again.
-    if (changed.has('media') && changed.get('media') !== undefined) this.revealed = false
+    // Another post in the same card starts hidden again, and its gifs follow
+    // the motion setting again.
+    if (changed.has('media') && changed.get('media') !== undefined) {
+      this.revealed = false
+      this.gifChoice = new Map()
+    }
   }
 
   protected override updated() {
     for (const v of this.renderRoot.querySelectorAll<HTMLVideoElement>('video.gifv')) {
-      if (this.motionOk) void v.play().catch(() => { /* the browser refused; controls stay off, the poster shows */ })
-      else v.pause()
+      if (this.gifPlaying(Number(v.dataset.index))) {
+        void v.play().catch(() => { /* the browser refused; the poster shows */ })
+      } else {
+        v.pause()
+      }
     }
   }
 
+  private gifPlaying(index: number): boolean {
+    return this.gifChoice.get(index) ?? this.motionOk
+  }
+
+  private toggleGif(index: number) {
+    this.gifChoice = new Map(this.gifChoice).set(index, !this.gifPlaying(index))
+  }
+
+  // A new setting is the reader's latest word: it overrides their earlier
+  // clicks on each gif.
   private onMotionChange = () => {
-    this.motionOk = !(this.motionQuery?.matches ?? true)
+    const ok = !(this.motionQuery?.matches ?? true)
+    if (ok !== this.motionOk && this.hasUpdated) this.gifChoice = new Map()
+    this.motionOk = ok
   }
 
   // A plain click opens the lightbox; a modifier click or no JavaScript
@@ -169,9 +213,14 @@ export class CaribouStatusMedia extends LitElement {
     this.opener = null
   }
 
-  // A click on the backdrop lands on the dialog itself.
+  // A click on the backdrop lands on the dialog itself, and so does one on
+  // its padding; only a point outside the dialog's box closes it.
   private onDialogClick = (e: MouseEvent) => {
-    if (e.target === this.dialog) this.dialog?.close()
+    const dialog = this.dialog
+    if (!dialog || e.target !== dialog) return
+    const r = dialog.getBoundingClientRect()
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    if (!inside) dialog.close()
   }
 
   // The button clicked goes away; keep focus on the one that takes its place.
@@ -203,13 +252,20 @@ export class CaribouStatusMedia extends LitElement {
             <img src=${ifDefined(preview ?? full)} alt=${alt} loading="lazy" decoding="async" />
           </a>
         `
-      case 'gifv':
+      case 'gifv': {
+        // The whole gif is a toggle button, as on Mastodon. A video with no
+        // `controls` is not interactive, so it may sit inside a button.
+        const playing = this.gifPlaying(index)
         return html`
-          <video class="gifv" src=${ifDefined(full)} poster=${ifDefined(preview)}
-            aria-label=${ifDefined(alt || undefined)}
-            muted loop playsinline preload=${this.motionOk ? 'auto' : 'none'}
-            ?controls=${!this.motionOk}></video>
+          <button type="button" class="gifv-toggle" aria-pressed=${playing ? 'true' : 'false'}
+            aria-label=${alt ? `Play GIF: ${alt}` : 'Play GIF'}
+            @click=${() => this.toggleGif(index)}>
+            <video class="gifv" data-index=${index} src=${ifDefined(full)} poster=${ifDefined(preview)}
+              muted loop playsinline preload=${playing ? 'auto' : 'none'}></video>
+            ${playing ? nothing : html`<span class="gif-badge" aria-hidden="true">▶ GIF</span>`}
+          </button>
         `
+      }
       case 'video':
         return html`
           <video src=${ifDefined(full)} poster=${ifDefined(preview)}
@@ -235,7 +291,7 @@ export class CaribouStatusMedia extends LitElement {
     const m = this.viewing >= 0 ? items[this.viewing] : undefined
     const alt = m?.description ?? ''
     return html`
-      <dialog aria-label="Image" @close=${this.onDialogClose} @click=${this.onDialogClick}>
+      <dialog aria-label=${alt || 'Image'} @close=${this.onDialogClose} @click=${this.onDialogClick}>
         ${m
           ? html`
               <form method="dialog"><button class="close">Close</button></form>

@@ -29,17 +29,20 @@ export const SSR_STATUS_MEDIA = String.raw`<caribou-status-media ><template shad
             </div>
           <!--/lit-part--><!--lit-part h8bSd7XYJcM=-->
             <!--lit-node 0--><div class="item" data-type="gifv" style="--ar: 1.7777777777777777">
-              <!--lit-part f6AnDHJHUKE=-->
-          <!--lit-node 0--><video class="gifv" src="https://files.example.social/m2.mp4" poster="https://files.example.social/m2-small.png"
-            
-            muted loop playsinline preload="none"
-            controls></video>
+              <!--lit-part /2XlG8BfQVg=-->
+          <!--lit-node 0--><button type="button" class="gifv-toggle" aria-pressed="false"
+            aria-label="Play GIF"
+            >
+            <!--lit-node 1--><video class="gifv" data-index="1" src="https://files.example.social/m2.mp4" poster="https://files.example.social/m2-small.png"
+              muted loop playsinline preload="none"></video>
+            <!--lit-part gByHETVSTYE=--><span class="gif-badge" aria-hidden="true">▶ GIF</span><!--/lit-part-->
+          </button>
         <!--/lit-part--><!--lit-part--><!--/lit-part-->
             </div>
           <!--/lit-part--><!--/lit-part-->
         </div>
         <!--lit-part--><!--/lit-part-->
-        <!--lit-part 7gJOWFPxTCM=-->
+        <!--lit-part r2Gyk3UKu5E=-->
       <!--lit-node 0--><dialog aria-label="Image"  >
         <!--lit-part--><!--/lit-part-->
       </dialog>

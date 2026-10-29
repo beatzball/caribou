@@ -36,6 +36,6 @@ test('server-rendered media hydrates without a second copy', async ({ page }) =>
     }
   }, { markup: SSR_STATUS_MEDIA, media: SSR_MEDIA })
 
-  expect(result).toEqual({ kept: true, count: 6, deferred: false })
+  expect(result).toEqual({ kept: true, count: 7, deferred: false })
   expect(errors).toEqual([])
 })

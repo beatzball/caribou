@@ -94,12 +94,58 @@ describe('<caribou-status-media>', () => {
     expect(v.getAttribute('preload')).toBe('none')
   })
 
-  it('a gifv is a muted loop', async () => {
-    const el = await mount([media('g', { type: 'gifv', url: 'https://files.example.social/g.mp4' })])
+  it('a gifv is a muted loop inside a play/pause toggle button', async () => {
+    const el = await mount([media('g', { type: 'gifv', url: 'https://files.example.social/g.mp4', description: 'A cat' })])
     const v = $(el, 'video.gifv')!
     expect(v.hasAttribute('muted')).toBe(true)
     expect(v.hasAttribute('loop')).toBe(true)
+    expect(v.hasAttribute('controls')).toBe(false)
     expect(v.getAttribute('poster')).toBe('https://files.example.social/g-small.png')
+    const toggle = $(el, 'button.gifv-toggle') as HTMLButtonElement
+    expect(toggle.contains(v)).toBe(true)
+    expect(toggle.getAttribute('aria-label')).toBe('Play GIF: A cat')
+    // No reduced-motion preference here: it plays after mount.
+    await el.updateComplete
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    expect($(el, '.gif-badge')).toBeNull()
+    toggle.click()
+    await el.updateComplete
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect($(el, '.gif-badge')!.textContent).toContain('GIF')
+    toggle.click()
+    await el.updateComplete
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('keeps following the motion setting after a move in the DOM', async () => {
+    const queries: Array<{ matches: boolean; fire: () => void }> = []
+    const real = window.matchMedia
+    let reduce = false
+    window.matchMedia = ((q: string) => {
+      const listeners: Array<() => void> = []
+      const mq = {
+        media: q, get matches() { return reduce },
+        addEventListener: (_: string, f: () => void) => { listeners.push(f) },
+        removeEventListener: (_: string, f: () => void) => { listeners.splice(listeners.indexOf(f), 1) },
+        fire: () => { for (const f of [...listeners]) f() },
+      }
+      queries.push(mq)
+      return mq
+    }) as unknown as typeof window.matchMedia
+    try {
+      const el = await mount([media('g', { type: 'gifv' })])
+      await el.updateComplete
+      const pressed = () => $(el, 'button.gifv-toggle')!.getAttribute('aria-pressed')
+      expect(pressed()).toBe('true')
+      el.remove()
+      document.body.appendChild(el)
+      reduce = true
+      queries.at(-1)!.fire()
+      await el.updateComplete
+      expect(pressed()).toBe('false')
+    } finally {
+      window.matchMedia = real
+    }
   })
 
   it('audio has controls', async () => {

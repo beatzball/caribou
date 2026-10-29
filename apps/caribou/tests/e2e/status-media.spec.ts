@@ -90,6 +90,12 @@ test('a post with four images shows a grid, an ALT popover, and a lightbox that 
   await expect(dialog).toBeVisible()
   await expect(dialog.locator('img')).toHaveAttribute('src', `${FILES}/m1.png`)
   await expect(dialog.locator('p')).toHaveText('A red fox in the snow')
+  await expect(dialog).toHaveAccessibleName('A red fox in the snow')
+  // A click on the dialog's padding, or on the description, leaves it open.
+  const box = (await dialog.boundingBox())!
+  await page.mouse.click(box.x + 3, box.y + box.height / 2)
+  await dialog.locator('p').click()
+  await expect(dialog).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
   await expect(thumb).toBeFocused()
@@ -98,6 +104,12 @@ test('a post with four images shows a grid, an ALT popover, and a lightbox that 
   await media.getByRole('link', { name: 'Open image' }).nth(1).click()
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+
+  // A click on the backdrop closes it.
+  await media.getByRole('link', { name: 'Open image' }).nth(1).click()
+  await expect(dialog).toBeVisible()
+  await page.mouse.click(5, 5)
   await expect(dialog).toBeHidden()
   // Still on the timeline: the click did not follow the link.
   expect(new URL(page.url()).pathname).toBe('/home')
@@ -145,17 +157,79 @@ test('sensitive media stays hidden until the reader shows it, and hides again', 
   await expect(show).toBeFocused()
 })
 
-test('a gifv loops muted, and under reduced motion it waits with controls', async ({ page }) => {
-  await page.route(`${FILES}/**`, (route) => route.fulfill({ status: 204 }))
-  const gif = attachment('g', { type: 'gifv', url: `${FILES}/g.mp4` })
+// A short real video, made in this browser, in a format this browser plays
+// (WebM in Chromium and Firefox, MP4 in WebKit). A 204 would leave the video
+// paused whatever the component did.
+async function recordClip(page: Page): Promise<{ type: string; body: Buffer }> {
+  await page.setContent('<canvas width="16" height="16"></canvas>')
+  const clip = await page.evaluate(async () => {
+    const type = ['video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t))!
+    const canvas = document.querySelector('canvas')!
+    const ctx = canvas.getContext('2d')!
+    const rec = new MediaRecorder(canvas.captureStream(10), { mimeType: type })
+    const chunks: Blob[] = []
+    rec.ondataavailable = (e) => chunks.push(e.data)
+    const done = new Promise((r) => { rec.onstop = r })
+    rec.start()
+    for (let i = 0; i < 10; i++) {
+      ctx.fillStyle = i % 2 ? '#c00' : '#00c'
+      ctx.fillRect(0, 0, 16, 16)
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    rec.stop()
+    await done
+    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer())
+    return { type, bytes: Array.from(bytes) }
+  })
+  return { type: clip.type, body: Buffer.from(clip.bytes) }
+}
+
+test('a gifv plays muted on a loop, pauses on click, and stops under reduced motion', async ({ page }) => {
+  const clip = await recordClip(page)
+  await page.route(`${FILES}/**`, (route) => route.request().url().endsWith('.vid')
+    ? route.fulfill({ status: 200, contentType: clip.type, body: clip.body })
+    : route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
+  const gif = attachment('g', { type: 'gifv', url: `${FILES}/g.vid`, description: 'A cat' })
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   await openHome(page, [status('a', [gif])])
-  const video = page.locator('caribou-status-media video.gifv')
+
+  const toggle = page.locator('caribou-status-media').getByRole('button', { name: 'Play GIF: A cat' })
+  const video = toggle.locator('video.gifv')
   await expect(video).toHaveAttribute('loop', '')
   await expect(video).not.toHaveAttribute('controls', /.*/)
   expect(await video.evaluate((v: HTMLVideoElement) => v.muted)).toBe(true)
+  const playing = () => video.evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 0)
 
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await expect(video).toHaveAttribute('controls', '')
+  // Plays after mount.
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(playing).toBe(true)
+
+  // The reader can stop it, and start it again, with the keyboard too.
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
   expect(await video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true)
+  await toggle.focus()
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(playing).toBe(true)
+
+  // Turning on reduced motion stops it.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true)
+})
+
+test('a gifv waits, paused, when the reader already asked for reduced motion', async ({ page }) => {
+  const clip = await recordClip(page)
+  await page.route(`${FILES}/**`, (route) => route.request().url().endsWith('.vid')
+    ? route.fulfill({ status: 200, contentType: clip.type, body: clip.body })
+    : route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await openHome(page, [status('a', [attachment('g', { type: 'gifv', url: `${FILES}/g.vid` })])])
+  const toggle = page.locator('caribou-status-media').getByRole('button', { name: 'Play GIF' })
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await page.waitForTimeout(300)
+  expect(await toggle.locator('video').evaluate((v: HTMLVideoElement) => v.paused)).toBe(true)
+  // Play on request.
+  await toggle.click()
+  await expect.poll(() => toggle.locator('video').evaluate((v: HTMLVideoElement) => !v.paused && v.currentTime > 0)).toBe(true)
 })
