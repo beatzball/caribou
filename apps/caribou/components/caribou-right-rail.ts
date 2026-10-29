@@ -17,6 +17,8 @@ export class CaribouRightRail extends LitElement {
     .card a:hover, .card litro-link:hover { color: var(--accent); }
     .links { list-style: none; margin: 0; padding: 0; }
     .links litro-link { display: block; padding: var(--space-2) 0; }
+    .brand { display: flex; align-items: center; gap: var(--space-2); }
+    .brand img { flex: none; }
     .session { color: var(--fg-1); margin-top: var(--space-2); }
     .session strong { color: var(--fg-0); }
     .signout-btn { background: transparent; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; }
@@ -49,7 +51,7 @@ export class CaribouRightRail extends LitElement {
     const inst = this.instance
     return html`
       <div class="card">
-        <strong>${APP_NAME}</strong>
+        <strong class="brand"><img src="/logo.png" alt="" width="24" height="24" />${APP_NAME}</strong>
         <div>v${PACKAGE_VERSION}</div>
         <a href=${REPO_URL} rel="noopener" target="_blank">GitHub</a>
       </div>

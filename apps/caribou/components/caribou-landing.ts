@@ -9,14 +9,15 @@ export class CaribouLanding extends LitElement {
   static override styles = [boxReset, css`
     :host { display: block; }
     main { max-width: 640px; margin: 0 auto; padding: var(--space-6) var(--space-4); }
-    h1 { font-size: 2rem; margin: 0 0 var(--space-2) 0; }
+    h1 { display: flex; align-items: center; gap: var(--space-3); font-size: 2rem; margin: 0 0 var(--space-2) 0; }
+    h1 img { flex: none; }
     p { color: var(--fg-1); margin: 0 0 var(--space-5) 0; }
   `]
 
   override render() {
     return html`
       <main>
-        <h1>Caribou</h1>
+        <h1><img src="/logo.png" alt="" width="48" height="48" />Caribou</h1>
         <p>
           A Mastodon client. Enter your instance to sign in.
         </p>

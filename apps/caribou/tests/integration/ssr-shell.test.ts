@@ -19,6 +19,11 @@ describe('caribou-app-shell SSR', () => {
     expect(out).toMatch(/Signed in to <strong><!--lit-part-->example\.social/)
   })
 
+  it('shows the logo beside the app name in the right rail, sized so nothing moves', async () => {
+    const out = await ssr(html`<caribou-app-shell></caribou-app-shell>`)
+    expect(out).toMatch(/<strong class="brand"><img src="\/logo\.png" alt="" width="24" height="24"[^>]*>/)
+  })
+
   it('server-renders real anchors for the nav rail', async () => {
     const out = await ssr(html`<caribou-app-shell></caribou-app-shell>`)
     for (const href of ['/home', '/local', '/public', '/@me']) {
