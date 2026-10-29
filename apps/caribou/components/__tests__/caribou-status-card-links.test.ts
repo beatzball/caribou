@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LitroRouter } from '@beatzball/litro-router'
 import '../caribou-status-card.js'
-import type { CaribouStatusCard } from '../caribou-status-card.js'
+import { profilePath, type CaribouStatusCard } from '../caribou-status-card.js'
 
 // Spy on the real router: the click handler reaches it through a dynamic
 // import, and both import forms must observe the same callable.
@@ -132,5 +132,85 @@ describe('<caribou-status-card> body links', () => {
     const el = await mount()
     const html = el.shadowRoot!.querySelector('.status-content')!.innerHTML.replace(/<!--[\s\S]*?-->/g, '')
     expect(html).toBe(post()!.content)
+  })
+})
+
+describe('profilePath', () => {
+  it('adds the host to a local acct', () => {
+    expect(profilePath('alice', 'example.social')).toBe('/@alice@example.social')
+  })
+  it('keeps a remote acct as it is', () => {
+    expect(profilePath('bob@other.example', 'example.social')).toBe('/@bob@other.example')
+  })
+  it('keeps the bare handle when no host is known', () => {
+    expect(profilePath('alice', '')).toBe('/@alice')
+  })
+})
+
+describe('<caribou-status-card> author link', () => {
+  const author = (el: CaribouStatusCard) => el.shadowRoot!.querySelector<HTMLAnchorElement>('header a.author')!
+  const press = (target: Element, init: MouseEventInit = {}) => {
+    const e = new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0, ...init })
+    target.dispatchEvent(e)
+    return e
+  }
+
+  beforeEach(() => {
+    document.body.replaceChildren()
+    goSpy.mockClear()
+  })
+
+  it('is one link around avatar, name and acct, beside the permalink', async () => {
+    const el = await mount()
+    const a = author(el)
+    expect(a.getAttribute('href')).toBe('/@dave@example.social')
+    expect(a.querySelector('img')!.getAttribute('alt')).toBe('')
+    expect(a.querySelector('strong')!.textContent).toBe('Dave')
+    expect(a.querySelector('.acct')!.textContent).toBe('@dave')
+    expect(el.shadowRoot!.querySelectorAll('header a')).toHaveLength(1)
+    expect(a.querySelector('litro-link')).toBeNull()
+    expect(a.closest('litro-link')).toBeNull()
+  })
+
+  it('keeps a remote author\'s acct as it is', async () => {
+    const remote = post({ account: { id: '5', acct: 'erin@other.example', username: 'erin', displayName: 'Erin', avatar: '', avatarStatic: '' } })
+    const el = await mount(remote)
+    expect(author(el).getAttribute('href')).toBe('/@erin@other.example')
+  })
+
+  it('takes a local author\'s host from the account URL when no instance is known', async () => {
+    const local = post({ account: { id: '1', acct: 'dave', username: 'dave', displayName: 'Dave', avatar: '', avatarStatic: '', url: 'https://example.social/@dave' } })
+    const el = await mount(local, '')
+    expect(author(el).getAttribute('href')).toBe('/@dave@example.social')
+  })
+
+  it('links the inner post\'s author on a boost, and the booster in the boost line', async () => {
+    const booster = { id: '7', acct: 'frank', username: 'frank', displayName: 'Frank', avatar: '', avatarStatic: '' }
+    const el = await mount(post({ id: '9', content: '', mentions: [], account: booster, reblog: post() }))
+    expect(author(el).getAttribute('href')).toBe('/@dave@example.social')
+    const line = el.shadowRoot!.querySelector('.boost-attribution a')!
+    expect(line.getAttribute('href')).toBe('/@frank@example.social')
+    expect(line.textContent).toBe('Frank')
+  })
+
+  it('routes a plain click on the avatar or the name inside Caribou', async () => {
+    const el = await mount()
+    for (const target of [author(el).querySelector('img')!, author(el).querySelector('strong')!]) {
+      goSpy.mockClear()
+      const e = press(target)
+      await flush()
+      expect(e.defaultPrevented).toBe(true)
+      expect(goSpy).toHaveBeenCalledWith('/@dave@example.social')
+    }
+  })
+
+  it('leaves a modified or middle click to the browser', async () => {
+    const el = await mount()
+    for (const init of [{ metaKey: true }, { ctrlKey: true }, { button: 1 }]) {
+      const e = press(author(el).querySelector('strong')!, init)
+      e.preventDefault()
+      await flush()
+    }
+    expect(goSpy).not.toHaveBeenCalled()
   })
 })

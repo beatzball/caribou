@@ -10,6 +10,7 @@ import {
   activeClient, activeUser, isOwnAccount, statusCache,
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
+import { spaClick } from './_spa-link.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
 
@@ -104,6 +105,13 @@ function hostOf(url: string): string {
   try { return new URL(url).host } catch { return '' }
 }
 
+// Caribou's own profile page for an account. `acct` is relative to the
+// instance the data came from: a local account has no `@host` part, so add
+// the host. With no host known, the bare handle is the best there is.
+export function profilePath(acct: string, host: string): string {
+  return `/@${acct.includes('@') || !host ? acct : `${acct}@${host}`}`
+}
+
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
   return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
 }
@@ -113,12 +121,29 @@ export class CaribouStatusCard extends LitElement {
   static override styles = css`
     :host { display: block; }
     article { padding: var(--space-4); border-bottom: 1px solid var(--border); }
-    .row { display: flex; gap: var(--space-3); }
-    img { border-radius: var(--radius-md); flex-shrink: 0; }
-    .body { min-width: 0; flex: 1; }
+    /* The avatar sits in the gutter beside the body, but it is part of the
+       author link in the header, so one link holds avatar, name and acct.
+       The link's own box is the name line, which is what a link-hint tool
+       labels; the focus ring goes around it and the avatar. */
+    .row {
+      position: relative; min-height: 48px;
+      padding-inline-start: calc(48px + var(--space-3));
+    }
+    .author img {
+      position: absolute; inset-inline-start: 0; top: 0;
+      border-radius: var(--radius-md);
+    }
+    .body { min-width: 0; }
     header { display: flex; gap: var(--space-2); align-items: baseline; flex-wrap: wrap; }
-    header strong { color: var(--fg-0); }
-    .acct { color: var(--fg-muted); }
+    .author {
+      display: inline-flex; gap: var(--space-2); align-items: baseline; flex-wrap: wrap;
+      min-width: 0; color: inherit; text-decoration: none; border-radius: var(--radius-sm);
+    }
+    .author:hover strong { text-decoration: underline; }
+    .author:focus-visible,
+    .author:focus-visible img { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .author strong { color: var(--fg-0); }
+    .acct { color: var(--fg-muted); overflow-wrap: anywhere; }
     .status-content { color: var(--fg-0); margin-top: var(--space-2); }
     .status-content,
     .status-content > p,
@@ -162,6 +187,9 @@ export class CaribouStatusCard extends LitElement {
       padding: 0 0 var(--space-2) var(--space-2);
       color: var(--fg-muted); font-size: 0.875rem;
     }
+    .boost-attribution a { color: inherit; text-decoration: none; }
+    .boost-attribution a:hover { text-decoration: underline; }
+    .boost-attribution a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   `
 
   @property({ attribute: false }) status: mastodon.v1.Status | null = null
@@ -183,6 +211,11 @@ export class CaribouStatusCard extends LitElement {
   // the clock. The first client render repeats it; after that the card
   // switches to the relative form.
   @state() private relativeTime = false
+
+  // The shell's instance, read after mount. The server cannot walk up to the
+  // shell, so the first render takes the host from the account URL like the
+  // server did, and the next render uses this.
+  @state() private shellInstance = ''
 
   // True when the shadow root came from the server (declarative shadow DOM)
   // and the first render hydrates it instead of creating it.
@@ -222,6 +255,7 @@ export class CaribouStatusCard extends LitElement {
   }
 
   private bindActions() {
+    this.shellInstance = findShell(this)?.getAttribute('instance') ?? ''
     // The shell's `instance` is an attribute, not a signal; watch it so a
     // change re-decides whether this card can act.
     if (!this.instance) {
@@ -381,15 +415,18 @@ export class CaribouStatusCard extends LitElement {
     const display = this.status?.reblog ?? this.status
     const mention = display?.mentions?.find((m) => sameUrl(m.url, a.href))
     if (!mention) return
-    // `acct` is relative to the instance the status came from: a local
-    // account has no `@host` part. The mention URL's host is a last resort
-    // for a card that knows no instance: on a server whose web domain differs
-    // from its account domain it names the wrong host, and the profile lookup
-    // then fails the way a mistyped handle does.
-    const host = this.instance || findShell(this)?.getAttribute('instance') || hostOf(mention.url)
-    const acct = mention.acct.includes('@') ? mention.acct : `${mention.acct}@${host}`
     e.preventDefault()
-    void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(`/@${acct}`))
+    const href = this.profileHref(mention)
+    void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
+  }
+
+  // `acct` is relative to the instance the status came from. The account
+  // URL's host is a last resort for a card that knows no instance: on a
+  // server whose web domain differs from its account domain it names the
+  // wrong host, and the profile lookup then fails the way a mistyped handle
+  // does.
+  private profileHref(account: { acct: string; url?: string | null }): string {
+    return profilePath(account.acct, this.instance || this.shellInstance || hostOf(account.url ?? ''))
   }
 
   // The page's `pageData` pre-sanitizes on the server with the jsdom-backed
@@ -423,31 +460,38 @@ export class CaribouStatusCard extends LitElement {
     const dt = display.createdAt
     const timeLabel = this.relativeTime ? formatRelativeTime(dt) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
+    const authorName = display.account.displayName || display.account.username
     // Permalink: anchor on the timestamp, not the whole article — wrapping the
     // <article> would put the post-content links (hashtags, mentions, external
     // urls) inside an <a>, and the HTML parser closes the outer anchor when
     // it sees the inner one. The timestamp anchor is the no-JS-safe primitive.
     // `<litro-link>` keeps that anchor (the server renders it) and turns a
     // plain click into a client-side navigation to the thread.
+    //
+    // The author link is a sibling of the permalink, never around it: avatar,
+    // name and acct are one link, so a keyboard user tabs once and a screen
+    // reader hears the name once (the avatar's `alt` is empty).
     return html`
       <article data-variant=${this.variant}>
         ${boostName
           ? html`<div class="boost-attribution">
                    <caribou-icon class="boost-icon" name="repeat2"></caribou-icon>
-                   <span>${boostName} boosted</span>
+                   <span><a href=${this.profileHref(s.account)} @click=${spaClick}>${boostName}</a> boosted</span>
                  </div>`
           : nothing}
         <div class="row">
-          <img src=${display.account.avatarStatic || display.account.avatar}
-               alt=""
-               width="48" height="48"
-               loading="lazy"
-               decoding="async"
-               @error=${this.onAvatarError} />
           <div class="body">
             <header>
-              <strong>${display.account.displayName || display.account.username}</strong>
-              <span class="acct">@${display.account.acct}</span>
+              <a class="author" href=${this.profileHref(display.account)} @click=${spaClick}>
+                <img src=${display.account.avatarStatic || display.account.avatar}
+                     alt=""
+                     width="48" height="48"
+                     loading="lazy"
+                     decoding="async"
+                     @error=${this.onAvatarError} />
+                <strong>${authorName}</strong>
+                <span class="acct">@${display.account.acct}</span>
+              </a>
               <litro-link class="permalink" href=${statusPermalink(display)}>
                 <time datetime=${dt}>${timeLabel}</time>
               </litro-link>

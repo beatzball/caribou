@@ -8,39 +8,43 @@
 // time zone, and hydration does not compare text.
 export const SSR_STATUS = {
   id: 'w1', content: '', createdAt: '2026-04-28T13:00:00Z', visibility: 'public',
-  account: { id: '2', acct: 'bob', username: 'bob', displayName: 'Bob', avatar: '', avatarStatic: '' },
+  account: { id: '2', acct: 'bob', username: 'bob', displayName: 'Bob', avatar: '', avatarStatic: '',
+             url: 'https://example.social/@bob' },
   reblog: {
     id: '42', content: '<p>hello</p>', createdAt: '2026-04-28T12:00:00Z', visibility: 'public',
-    account: { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' },
+    account: { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '',
+               url: 'https://example.social/@alice' },
     favourited: true, favouritesCount: 5, reblogged: false, reblogsCount: 0,
     bookmarked: false, repliesCount: 2,
   },
 }
 
-export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part MxHs2aOlVmU=-->
+export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part VE5uKZpZbeE=-->
       <!--lit-node 0--><article data-variant="timeline">
-        <!--lit-part xI1yegC+b3I=--><div class="boost-attribution">
+        <!--lit-part jsefPjIxCJQ=--><div class="boost-attribution">
                    <!--lit-node 1--><caribou-icon   class="boost-icon" name="repeat2" defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part 5qecDuV0+bI=--><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
     width="1em" height="1em" aria-hidden="true"
     style="display:inline-block;vertical-align:-0.125em"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m2 9l3-3l3 3"/><path d="M13 18H7a2 2 0 0 1-2-2V6m17 9l-3 3l-3-3"/><path d="M11 6h6a2 2 0 0 1 2 2v10"/></g></svg><!--/lit-part--></template></caribou-icon>
-                   <span><!--lit-part-->Bob<!--/lit-part--> boosted</span>
+                   <span><!--lit-node 3--><a href="/@bob@example.social" ><!--lit-part-->Bob<!--/lit-part--></a> boosted</span>
                  </div><!--/lit-part-->
         <div class="row">
-          <!--lit-node 3--><img src=""
-               alt=""
-               width="48" height="48"
-               loading="lazy"
-               decoding="async"
-                />
           <div class="body">
             <header>
-              <strong><!--lit-part-->Alice<!--/lit-part--></strong>
-              <span class="acct">@<!--lit-part-->alice<!--/lit-part--></span>
-              <!--lit-node 10--><litro-link class="permalink" href="/@alice/42">
-                <!--lit-node 11--><time datetime="2026-04-28T12:00:00Z"><!--lit-part--><!--/lit-part--></time>
+              <!--lit-node 5--><a class="author" href="/@alice@example.social" >
+                <!--lit-node 6--><img src=""
+                     alt=""
+                     width="48" height="48"
+                     loading="lazy"
+                     decoding="async"
+                      />
+                <strong><!--lit-part-->Alice<!--/lit-part--></strong>
+                <span class="acct">@<!--lit-part-->alice<!--/lit-part--></span>
+              </a>
+              <!--lit-node 11--><litro-link class="permalink" href="/@alice/42">
+                <!--lit-node 12--><time datetime="2026-04-28T12:00:00Z"><!--lit-part--><!--/lit-part--></time>
               </litro-link>
             </header>
-            <!--lit-node 13--><div class="status-content" ><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div>
+            <!--lit-node 14--><div class="status-content" ><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div>
             <!--lit-part x0gb5fvNV/0=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button    
