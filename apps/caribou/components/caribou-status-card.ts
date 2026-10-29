@@ -12,9 +12,11 @@ import {
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
+import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
 import './caribou-status-media.js'
+import './caribou-status-link-card.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -113,7 +115,7 @@ export function statusPermalink(s: { id: string; account: { acct: string } }): s
 
 @customElement('caribou-status-card')
 export class CaribouStatusCard extends LitElement {
-  static override styles = css`
+  static override styles = [mastodonLinkText, css`
     :host { display: block; }
     article { padding: var(--space-4); border-bottom: 1px solid var(--border); }
     /* The avatar sits in the gutter beside the body, but it is part of the
@@ -185,7 +187,7 @@ export class CaribouStatusCard extends LitElement {
     .boost-attribution a { color: inherit; text-decoration: none; }
     .boost-attribution a:hover { text-decoration: underline; }
     .boost-attribution a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  `
+  `]
 
   @property({ attribute: false }) status: mastodon.v1.Status | null = null
   @property({ reflect: true }) variant: StatusCardVariant = 'timeline'
@@ -493,6 +495,7 @@ export class CaribouStatusCard extends LitElement {
             </header>
             <div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
             ${display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true}></caribou-status-media>` : nothing}
+            ${display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
             ${this.renderActions(display)}
           </div>
         </div>

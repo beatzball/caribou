@@ -7,6 +7,8 @@ import {
 import '../caribou-profile-header.js'
 import type { CaribouProfileHeader } from '../caribou-profile-header.js'
 import type { CaribouButton } from '../caribou-button.js'
+import { mastodonLinkText } from '../_shared-styles.js'
+import { CaribouStatusCard } from '../caribou-status-card.js'
 
 const ACCOUNT = {
   id: '42', acct: 'alice@example.social', username: 'alice', displayName: 'Alice',
@@ -30,6 +32,13 @@ describe('<caribou-profile-header>', () => {
     relationshipCache.value = new Map()
     localStorage.clear()
     vi.restoreAllMocks()
+  })
+
+  // A link in a bio is shortened the same way as one in a post.
+  it('shares the Mastodon link-text styles with the status card', () => {
+    const header = customElements.get('caribou-profile-header') as unknown as typeof CaribouProfileHeader
+    expect(header.styles).toContain(mastodonLinkText)
+    expect(CaribouStatusCard.styles).toContain(mastodonLinkText)
   })
 
   it('renders avatar, display name, handle, bio, counts', async () => {

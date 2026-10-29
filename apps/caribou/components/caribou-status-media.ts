@@ -3,24 +3,12 @@ import { customElement, property, query, state } from 'lit/decorators.js'
 import { ifDefined } from 'lit/directives/if-defined.js'
 import type { mastodon } from 'masto'
 import { boxReset } from './_shared-styles.js'
+import { httpUrl } from './_http-url.js'
 
 type Media = mastodon.v1.MediaAttachment
 
 // Mastodon shows at most four attachments on a post.
 const MAX_ITEMS = 4
-
-// Every URL here comes from a remote server. Lit escapes attribute values,
-// so a URL cannot break out of `src` or `href`; this keeps out the schemes
-// that would still run or embed something (`javascript:`, `data:`).
-export function httpUrl(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined
-  try {
-    const u = new URL(raw)
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : undefined
-  } catch {
-    return undefined
-  }
-}
 
 // Width over height from the preview's size, then the original's. A box
 // sized from it holds its place before the file arrives.

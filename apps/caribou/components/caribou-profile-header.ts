@@ -9,6 +9,7 @@ import {
   activeClient, activeUser, isOwnAccount, loadRelationship, relationshipCache, relationshipKey, toggleFollow,
   type UserSession,
 } from '@beatzball/caribou-state'
+import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-button.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
@@ -18,7 +19,7 @@ if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
 
 @customElement('caribou-profile-header')
 export class CaribouProfileHeader extends LitElement {
-  static override styles = css`
+  static override styles = [mastodonLinkText, css`
     :host { display: block; border-bottom: 1px solid var(--border); }
     .banner { aspect-ratio: 3/1; background: var(--bg-2); }
     .row    { display: flex; gap: var(--space-3); padding: var(--space-3); }
@@ -39,7 +40,7 @@ export class CaribouProfileHeader extends LitElement {
     caribou-button.follow .hover { display: none; }
     caribou-button.follow[data-state="following"]:is(:hover, [data-focus-visible]) .idle { display: none; }
     caribou-button.follow[data-state="following"]:is(:hover, [data-focus-visible]) .hover { display: inline; }
-  `
+  `]
 
   @property({ attribute: false }) account: Account | null = null
   // The host the account came from, which is also the host its id belongs
