@@ -19,7 +19,7 @@ export const SSR_STATUS = {
   },
 }
 
-export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part VE5uKZpZbeE=-->
+export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part HssZYhrjmPw=-->
       <!--lit-node 0--><article data-variant="timeline">
         <!--lit-part jsefPjIxCJQ=--><div class="boost-attribution">
                    <!--lit-node 1--><caribou-icon   class="boost-icon" name="repeat2" defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part 5qecDuV0+bI=--><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
@@ -45,6 +45,7 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
               </litro-link>
             </header>
             <!--lit-node 14--><div class="status-content" ><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div>
+            <!--lit-part--><!--/lit-part-->
             <!--lit-part x0gb5fvNV/0=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button    

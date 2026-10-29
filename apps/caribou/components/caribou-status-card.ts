@@ -14,6 +14,7 @@ import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
+import './caribou-status-media.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -491,6 +492,7 @@ export class CaribouStatusCard extends LitElement {
               </litro-link>
             </header>
             <div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
+            ${display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true}></caribou-status-media>` : nothing}
             ${this.renderActions(display)}
           </div>
         </div>
