@@ -55,7 +55,10 @@ export class CaribouIconButton extends LitElement {
         min-block-size: var(--caribou-icon-button-size, 44px);
       }
     }
-    caribou-icon { font-size: var(--caribou-icon-button-icon-size, 1.25em); }
+    /* A hit test at the button's centre must land on the button, not in the
+       icon's own shadow root: button.contains() does not cross into it, so
+       link-hint tools (Vimium) decide the button is covered and skip it. */
+    caribou-icon { font-size: var(--caribou-icon-button-icon-size, 1.25em); pointer-events: none; }
     .count { font-variant-numeric: tabular-nums; }
     button:hover:not(:disabled) { background: var(--bg-2); }
     button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
