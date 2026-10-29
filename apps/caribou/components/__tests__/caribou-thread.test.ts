@@ -171,3 +171,14 @@ describe('<caribou-thread> — next revisit', () => {
     expect(cards(again).map((c) => c.getAttribute('data-id'))).toEqual(['f', 'r1', 'r2', 'child'])
   })
 })
+
+describe('<caribou-thread> content warnings', () => {
+  it('each card in the thread collapses its own content warning', async () => {
+    const cw = (s: Status) => ({ ...s, spoilerText: `cw ${s.id}` }) as unknown as Status
+    const el = await mount({ focused: cw(F), ancestors: [A], descendants: [cw(C)] })
+    const all = cards(el)
+    await Promise.all(all.map((c) => c.updateComplete))
+    expect(all.map((c) => c.shadowRoot!.querySelector('.spoiler')?.textContent ?? null)).toEqual([null, 'cw f', 'cw c'])
+    expect(all.map((c) => c.shadowRoot!.querySelector('.status-content') !== null)).toEqual([true, false, false])
+  })
+})

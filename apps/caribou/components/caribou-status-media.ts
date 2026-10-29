@@ -113,8 +113,12 @@ export class CaribouStatusMedia extends LitElement {
 
   @property({ attribute: false }) media: Media[] = []
   @property({ type: Boolean }) sensitive = false
+  // The reader opened the post's content warning, so sensitive media starts
+  // shown. The Hide button still hides it.
+  @property({ type: Boolean }) revealed = false
 
-  @state() private revealed = false
+  // The reader's own click on Show or Hide; null follows `revealed`.
+  @state() private shown: boolean | null = null
   // The server cannot know the reader's motion setting, so the server and
   // the first client render both show each gifv paused. `firstUpdated`
   // decides.
@@ -151,10 +155,10 @@ export class CaribouStatusMedia extends LitElement {
   }
 
   protected override willUpdate(changed: Map<PropertyKey, unknown>) {
-    // Another post in the same card starts hidden again, and its gifs follow
+    // Another post in the same card starts at `revealed` again, and its gifs follow
     // the motion setting again.
     if (changed.has('media') && changed.get('media') !== undefined) {
-      this.revealed = false
+      this.shown = null
       this.gifChoice = new Map()
     }
   }
@@ -212,10 +216,10 @@ export class CaribouStatusMedia extends LitElement {
   }
 
   // The button clicked goes away; keep focus on the one that takes its place.
-  private setRevealed(revealed: boolean) {
-    this.revealed = revealed
+  private setShown(shown: boolean) {
+    this.shown = shown
     void this.updateComplete.then(() =>
-      this.renderRoot.querySelector<HTMLElement>(revealed ? '.hide' : '.reveal')?.focus())
+      this.renderRoot.querySelector<HTMLElement>(shown ? '.hide' : '.reveal')?.focus())
   }
 
   private renderAlt(m: Media, index: number) {
@@ -294,7 +298,7 @@ export class CaribouStatusMedia extends LitElement {
   override render() {
     const items = this.media.slice(0, MAX_ITEMS)
     if (items.length === 0) return nothing
-    const hidden = this.sensitive && !this.revealed
+    const hidden = this.sensitive && !(this.shown ?? this.revealed)
     return html`
       <div class="media">
         <div class="grid" data-count=${items.length}>
@@ -307,8 +311,8 @@ export class CaribouStatusMedia extends LitElement {
         ${!this.sensitive
           ? nothing
           : hidden
-            ? html`<button type="button" class="reveal" @click=${() => this.setRevealed(true)}>Show sensitive media</button>`
-            : html`<button type="button" class="hide" @click=${() => this.setRevealed(false)}>Hide</button>`}
+            ? html`<button type="button" class="reveal" @click=${() => this.setShown(true)}>Show sensitive media</button>`
+            : html`<button type="button" class="hide" @click=${() => this.setShown(false)}>Hide</button>`}
         ${hidden ? nothing : this.renderLightbox(items)}
       </div>
     `

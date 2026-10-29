@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { SSR_STATUS, SSR_STATUS_CARD } from './_status-card-ssr.js'
+import { SSR_CW_STATUS, SSR_CW_STATUS_CARD, SSR_STATUS, SSR_STATUS_CARD } from './_status-card-ssr.js'
 
 // The status card is the first shared-control consumer the server renders:
 // four `<caribou-icon-button>`s per card, each with a nested `<caribou-icon>`,
@@ -26,13 +26,18 @@ interface Hydrated {
 }
 
 // Replays the card into `#replay` and reports what hydration did to it.
-async function replay(page: Page): Promise<Hydrated> {
+async function replay(
+  page: Page,
+  fixture: { markup: string; status: unknown } = { markup: SSR_STATUS_CARD, status: SSR_STATUS },
+  before?: () => Promise<void>,
+): Promise<Hydrated> {
   // The link card's image does not exist; answer so no load error is logged.
   await page.route('https://files.example.social/**', (route) =>
     route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
   await page.goto('/local')
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   await page.waitForFunction(() => customElements.get('caribou-status-card') !== undefined)
+  await before?.()
 
   return page.evaluate(async ({ markup, status }) => {
     type Lit = HTMLElement & { updateComplete: Promise<boolean> }
@@ -64,7 +69,7 @@ async function replay(page: Page): Promise<Hydrated> {
     const card = box.querySelector('caribou-status-card') as Lit & { status: unknown }
     // `<litro-link>` makes its anchor on the client, so plain `a` is not
     // watched; the link card's link carries `data-layout`.
-    const watched = 'caribou-icon-button, caribou-icon, button, svg, caribou-status-link-card, a[data-layout], img'
+    const watched = 'caribou-icon-button, caribou-icon, button, svg, caribou-status-link-card, a[data-layout], img, .warning, #status-body'
     const sent = deep(card.shadowRoot!, watched)
     document.body.append(box)
     card.status = status
@@ -88,7 +93,7 @@ async function replay(page: Page): Promise<Hydrated> {
         return [b.getAttribute('aria-label'), b.getAttribute('aria-pressed'), b.getAttribute('aria-disabled'), b.getAttribute('title')]
       }),
     }
-  }, { markup: SSR_STATUS_CARD, status: SSR_STATUS })
+  }, fixture)
 }
 
 function collectErrors(page: Page): string[] {
@@ -202,4 +207,66 @@ test('a pressed boost keeps its success colour under the pointer', async ({ page
     const hover = await colours(cls)
     expect(hover.colour, `${cls} on hover`).toBe(rest.expected)
   }
+})
+
+test('a server-rendered post behind a content warning hydrates collapsed, then opens', async ({ page }) => {
+  const errors = collectErrors(page)
+  const files: string[] = []
+  page.on('request', (r) => { if (r.url().includes('files.example.social')) files.push(r.url()) })
+  const result = await replay(page, { markup: SSR_CW_STATUS_CARD, status: SSR_CW_STATUS })
+  expect(result.kept).toBe(true)
+  expect(result.deferred).toEqual([])
+
+  const card = page.locator('#replay caribou-status-card')
+  const toggle = card.getByRole('button', { name: 'Show more' })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(card.locator('.status-content')).toHaveCount(0)
+  await expect(card.locator('caribou-status-media')).toHaveCount(0)
+  expect(files).toEqual([])
+
+  await toggle.click()
+  const less = card.getByRole('button', { name: 'Show less' })
+  await expect(less).toHaveAttribute('aria-expanded', 'true')
+  await expect(card.locator('.status-content')).toHaveText('the butler did it')
+  // The reveal opens the sensitive media too.
+  await expect(card.locator('caribou-status-media img')).toHaveCount(1)
+  await expect(card.locator('caribou-status-media').getByRole('button', { name: 'Hide' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+// The card remembers an opened warning for the page session. A card that
+// hydrates server markup must still render collapsed, like the server did,
+// or hydration would not match.
+test('a server-rendered post hydrates collapsed even after the reader opened it in this page', async ({ page }) => {
+  const errors = collectErrors(page)
+  const result = await replay(page, { markup: SSR_CW_STATUS_CARD, status: SSR_CW_STATUS }, async () => {
+    // Open the same post in a client-rendered card, then check that a new
+    // client card for it starts open: the memory is seeded.
+    const seeded = await page.evaluate(async (status) => {
+      type Card = HTMLElement & { status: unknown; updateComplete: Promise<boolean> }
+      const mount = async () => {
+        const card = document.createElement('caribou-status-card') as Card
+        card.status = status
+        document.body.append(card)
+        await card.updateComplete
+        return card
+      }
+      const first = await mount()
+      ;(first.shadowRoot!.querySelector('button.cw-toggle') as HTMLButtonElement).click()
+      await first.updateComplete
+      first.remove()
+      const second = await mount()
+      const open = second.shadowRoot!.querySelector('button.cw-toggle')!.getAttribute('aria-expanded')
+      second.remove()
+      return open
+    }, SSR_CW_STATUS)
+    expect(seeded).toBe('true')
+  })
+  expect(result.kept).toBe(true)
+  expect(result.deferred).toEqual([])
+  const card = page.locator('#replay caribou-status-card')
+  await expect(card.getByRole('button', { name: 'Show more' })).toHaveAttribute('aria-expanded', 'false')
+  await expect(card.locator('.status-content')).toHaveCount(0)
+  await expect(card.locator('caribou-status-media')).toHaveCount(0)
+  expect(errors).toEqual([])
 })
