@@ -16,14 +16,8 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # changesets/action pushes the release branch with git, and git uses
-      # the credential that checkout stored. With the default GITHUB_TOKEN
-      # that push is by github-actions[bot], so an update to an open release
-      # PR waits for "Approve and run". Check out with the same token.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.CHANGESETS_TOKEN || secrets.GITHUB_TOKEN }}
+        with: { fetch-depth: 0 }
       - uses: pnpm/action-setup@v4
         with: { version: 10.28.0 }
       - uses: actions/setup-node@v4
@@ -34,6 +28,10 @@ jobs:
           version: pnpm changeset version
           commit: "chore: version packages"
           title: "chore: version packages"
+          # Commit through the GitHub API, not a git push. The commit is then
+          # by the owner of GITHUB_TOKEN below, so an update to an open
+          # release PR starts its checks. No token is stored in git config.
+          commitMode: "github-api"
         env:
           # PRs/pushes authored with CHANGESETS_TOKEN (a fine-grained PAT)
           # are attributed to the token's owner, so GitHub triggers CI on
