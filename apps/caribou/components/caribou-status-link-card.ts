@@ -15,7 +15,9 @@ const LARGE_MIN_WIDTH = 400
 export function cardLayout(card: LinkCard): LinkCardLayout {
   if (!httpUrl(card.image)) return 'text'
   const wide = (card.width ?? 0) >= LARGE_MIN_WIDTH
-  return wide && (card.type === 'link' || card.type === 'video') ? 'large' : 'compact'
+  // As on Mastodon: a wide link, video or photo card is large; a rich card
+  // (an embed with no fixed shape) stays compact.
+  return wide && card.type !== 'rich' ? 'large' : 'compact'
 }
 
 // Width over height, so the image box holds its place before the file

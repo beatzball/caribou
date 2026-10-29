@@ -6,6 +6,8 @@
 // Stylesheets are left out (they sit outside Lit's template markers), and so
 // is the timestamp's text (`withoutTime`): the server prints it in its own
 // time zone, and hydration does not compare text.
+import { SSR_LINK_CARD } from './_status-link-card-ssr.js'
+
 export const SSR_STATUS = {
   id: 'w1', content: '', createdAt: '2026-04-28T13:00:00Z', visibility: 'public',
   account: { id: '2', acct: 'bob', username: 'bob', displayName: 'Bob', avatar: '', avatarStatic: '',
@@ -15,7 +17,7 @@ export const SSR_STATUS = {
     account: { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '',
                url: 'https://example.social/@alice' },
     favourited: true, favouritesCount: 5, reblogged: false, reblogsCount: 0,
-    bookmarked: false, repliesCount: 2,
+    bookmarked: false, repliesCount: 2, mediaAttachments: [], card: SSR_LINK_CARD,
   },
 }
 
@@ -46,7 +48,23 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
             </header>
             <!--lit-node 14--><div class="status-content" ><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div>
             <!--lit-part--><!--/lit-part-->
-            <!--lit-part--><!--/lit-part-->
+            <!--lit-part g9S4Cqs5ZuI=--><!--lit-node 0--><caribou-status-link-card  defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part uT7q81/2cXo=-->
+      <!--lit-node 0--><a href="https://news.example/story" target="_blank" rel="noopener noreferrer" data-layout="large"
+        aria-labelledby="title" aria-describedby="details">
+        <!--lit-part jtby1oTaaQ4=-->
+          <!--lit-node 0--><div class="image" style="--ar: 2">
+            <!--lit-node 1--><img src="https://files.example.social/card.png" alt="A chart" loading="lazy" decoding="async" />
+          </div>
+        <!--/lit-part-->
+        <div class="text">
+          <span class="title" id="title"><!--lit-part-->A story<!--/lit-part--></span>
+          <span class="details" id="details">
+            <!--lit-part kuZohChXnHk=--><span class="description"><!--lit-part-->What happened today.<!--/lit-part--></span><!--/lit-part-->
+            <span class="byline"><!--lit-part-->Example News<!--/lit-part--></span>
+          </span>
+        </div>
+      </a>
+    <!--/lit-part--></template></caribou-status-link-card><!--/lit-part-->
             <!--lit-part x0gb5fvNV/0=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button    

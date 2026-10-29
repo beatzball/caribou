@@ -11,15 +11,25 @@ import { SSR_STATUS, SSR_STATUS_CARD } from './_status-card-ssr.js'
 
 const ACTIONS = ['reply', 'boost', 'favourite', 'bookmark']
 
+// 1×1 transparent PNG.
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+)
+
 interface Hydrated {
   kept: boolean
   buttonsPerControl: number[]
   deferred: string[]
+  linkCard: string[]
   actions: Array<Array<string | null>>
 }
 
 // Replays the card into `#replay` and reports what hydration did to it.
 async function replay(page: Page): Promise<Hydrated> {
+  // The link card's image does not exist; answer so no load error is logged.
+  await page.route('https://files.example.social/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
   await page.goto('/local')
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   await page.waitForFunction(() => customElements.get('caribou-status-card') !== undefined)
@@ -52,7 +62,9 @@ async function replay(page: Page): Promise<Hydrated> {
       if (host.shadowRoot && styles) host.shadowRoot.adoptedStyleSheets = styles.flatMap((c) => c.styleSheet ?? [])
     }
     const card = box.querySelector('caribou-status-card') as Lit & { status: unknown }
-    const watched = 'caribou-icon-button, caribou-icon, button, svg'
+    // `<litro-link>` makes its anchor on the client, so plain `a` is not
+    // watched; the link card's link carries `data-layout`.
+    const watched = 'caribou-icon-button, caribou-icon, button, svg, caribou-status-link-card, a[data-layout], img'
     const sent = deep(card.shadowRoot!, watched)
     document.body.append(box)
     card.status = status
@@ -68,6 +80,9 @@ async function replay(page: Page): Promise<Hydrated> {
       kept: now.length === sent.length && now.every((el, i) => el === sent[i]),
       buttonsPerControl: hosts.map((h) => h.shadowRoot!.querySelectorAll('button').length),
       deferred: deep(card.shadowRoot!, '[defer-hydration]').map((el) => el.localName),
+      // The displayed post's link card, with its link and image in place.
+      linkCard: [...card.shadowRoot!.querySelector('caribou-status-link-card')?.shadowRoot?.querySelectorAll('a, img') ?? []]
+        .map((el) => el.getAttribute('href') ?? el.getAttribute('src') ?? ''),
       actions: hosts.map((h) => {
         const b = h.shadowRoot!.querySelector('button')!
         return [b.getAttribute('aria-label'), b.getAttribute('aria-pressed'), b.getAttribute('aria-disabled'), b.getAttribute('title')]
@@ -88,10 +103,12 @@ const action = (page: Page, cls: string) => page.locator(`#replay caribou-icon-b
 test('a server-rendered status card hydrates its action buttons and icons without a second copy', async ({ page }) => {
   const errors = collectErrors(page)
   expect(await replay(page)).toEqual({
-    // Every host, nested icon, native button and SVG is the node the server sent.
+    // Every host, nested icon, native button, SVG, link and image is the node
+    // the server sent, the link card's included.
     kept: true,
     buttonsPerControl: [1, 1, 1, 1],
     deferred: [],
+    linkCard: ['https://news.example/story', 'https://files.example.social/card.png'],
     // Signed out: every action is soft-disabled with its sign-in hint.
     actions: [
       ['Reply', null, 'true', 'Sign in to reply'],

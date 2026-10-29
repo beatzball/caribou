@@ -142,7 +142,7 @@ test('a small image is a compact row, a post with media has no card, and no imag
   await expect(cards.nth(2).locator('caribou-status-link-card img')).toHaveCount(0)
 })
 
-test('a long link in the post text is shortened, and keeps its full href', async ({ page }) => {
+test('a long link in the post text is shortened, and keeps its full URL as its name', async ({ page }) => {
   const href = 'https://www.news.example/2026/10/a-very-long-path-to-the-story'
   const content = `<p>read <a href="${href}" target="_blank" rel="nofollow noopener noreferrer">`
     + '<span class="invisible">https://www.</span><span class="ellipsis">news.example/2026/10/a-very-lo</span>'
@@ -150,9 +150,16 @@ test('a long link in the post text is shortened, and keeps its full href', async
   await openHome(page, [status('a', { content, card: null })])
   const a = page.locator('caribou-status-card .status-content a')
   await expect(a).toHaveAttribute('href', href)
-  // innerText leaves out hidden text and generated content, so the "…" is
-  // checked on its own.
-  await expect(a).toHaveJSProperty('innerText', 'news.example/2026/10/a-very-lo')
+  // The hidden parts stay in the text: a screen reader, and a copy of the
+  // link text, get the whole URL.
+  await expect(a).toHaveAccessibleName(href)
+  // Only the shown part takes up room, followed by "…".
+  const parts = await a.locator('span').evaluateAll((spans) => spans.map((el) => {
+    const r = el.getBoundingClientRect()
+    return [el.className, r.width > 0 && r.height > 0]
+  }))
+  expect(parts).toEqual([['invisible', false], ['ellipsis', true], ['invisible', false]])
   const after = await a.locator('.ellipsis').evaluate((el) => getComputedStyle(el, '::after').content)
-  expect(after).toBe('"…"')
+  // Serialized as `"…" / ""` where the alt-text form is supported.
+  expect(after).toMatch(/^"…"/)
 })

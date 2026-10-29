@@ -54,8 +54,8 @@ describe('<caribou-status-link-card>', () => {
     expect($(el, '.byline')!.textContent).toBe('Example News')
   })
 
-  it('a small image, or a photo or rich card, is a compact row', async () => {
-    for (const card of [linkCard({ width: 200, height: 200 }), linkCard({ type: 'photo' }), linkCard({ type: 'rich' })]) {
+  it('a small image, or a rich card, is a compact row', async () => {
+    for (const card of [linkCard({ width: 200, height: 200 }), linkCard({ type: 'photo', width: 200, height: 200 }), linkCard({ type: 'rich' })]) {
       document.body.replaceChildren()
       const el = await mount(card)
       expect($(el, 'a')!.getAttribute('data-layout')).toBe('compact')
@@ -103,6 +103,8 @@ describe('<caribou-status-link-card>', () => {
   it('layout and aspect helpers', () => {
     expect(cardLayout(linkCard({ width: 400 }))).toBe('large')
     expect(cardLayout(linkCard({ width: 399 }))).toBe('compact')
+    expect(cardLayout(linkCard({ type: 'photo', width: 1200 }))).toBe('large')
+    expect(cardLayout(linkCard({ type: 'video', width: 400 }))).toBe('large')
     expect(cardAspect(linkCard({ width: null, height: null }))).toBeCloseTo(1200 / 630)
   })
 })

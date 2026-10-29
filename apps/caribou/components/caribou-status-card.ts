@@ -12,6 +12,7 @@ import {
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
+import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
 import './caribou-status-media.js'
@@ -114,7 +115,7 @@ export function statusPermalink(s: { id: string; account: { acct: string } }): s
 
 @customElement('caribou-status-card')
 export class CaribouStatusCard extends LitElement {
-  static override styles = css`
+  static override styles = [mastodonLinkText, css`
     :host { display: block; }
     article { padding: var(--space-4); border-bottom: 1px solid var(--border); }
     /* The avatar sits in the gutter beside the body, but it is part of the
@@ -156,12 +157,6 @@ export class CaribouStatusCard extends LitElement {
     .status-content a + a {
       margin-inline-start: 0.25em;
     }
-    /* Mastodon wraps a link's text in spans: the scheme and \`www.\` in
-       \`.invisible\`, the shown part in \`.ellipsis\` when it cut a long path.
-       Hide the first and mark the cut, as Mastodon and elk do; the href keeps
-       the full URL. */
-    .status-content .invisible { display: none; }
-    .status-content .ellipsis::after { content: "…"; }
     /* Focused post emphasis: bigger body type only. The accent border was
        visually load-bearing in the wrong direction — readers mistook the
        blue 1px outline for an "older posts" affordance. Ancestor opacity
@@ -192,7 +187,7 @@ export class CaribouStatusCard extends LitElement {
     .boost-attribution a { color: inherit; text-decoration: none; }
     .boost-attribution a:hover { text-decoration: underline; }
     .boost-attribution a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  `
+  `]
 
   @property({ attribute: false }) status: mastodon.v1.Status | null = null
   @property({ reflect: true }) variant: StatusCardVariant = 'timeline'
