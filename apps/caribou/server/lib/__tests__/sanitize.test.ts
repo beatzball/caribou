@@ -36,6 +36,15 @@ describe('sanitizeStatus', () => {
     expect(sanitizeStatus({ id: '1', content: '<p>a</p>', reblog: null }).reblog).toBeNull()
   })
 
+  // The server render prints the media, so the page data must carry it to
+  // the client unchanged, or the first client render would differ.
+  it('passes media through, on the post and on the boosted post', () => {
+    const media = [{ id: 'm', type: 'image', previewUrl: 'https://x.example/m.png', description: 'alt' }]
+    const out = sanitizeStatus({ id: '2', content: '', mediaAttachments: media, reblog: { id: '1', content: '', mediaAttachments: media } })
+    expect(out.mediaAttachments).toEqual(media)
+    expect(out.reblog.mediaAttachments).toEqual(media)
+  })
+
   it('turns null content into an empty string', () => {
     expect(sanitizeStatus({ id: '1', content: null }).content).toBe('')
   })
