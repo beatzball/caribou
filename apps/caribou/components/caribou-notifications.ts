@@ -7,11 +7,12 @@ import {
   activeClient, activeUser, createNotificationsStore, markNotificationsSeen, startPolling,
   unreadNotificationCount, NOTIFICATIONS_POLL_MS, type NotificationFilter, type NotificationsStore,
 } from '@beatzball/caribou-state'
+import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
 import './caribou-icon.js'
-import { profilePath } from './caribou-status-card.js'
+import './caribou-status-card.js'
 
 type Notification = mastodon.v1.Notification
 

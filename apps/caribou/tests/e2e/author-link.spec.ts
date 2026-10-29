@@ -132,19 +132,25 @@ test('a modifier click on the author is left to the browser', async ({ page }) =
   await expect(page).toHaveURL(/\/home$/)
 })
 
-test('the author block is one tab stop', async ({ page }) => {
+// Safari moves between links on Option-Tab; plain Tab skips them by default.
+test('the author block is one tab stop, and Tab reaches it', async ({ page, browserName }) => {
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
   await gotoSettled(page, '/home')
-  const card = page.locator('page-home caribou-status-card').first()
-  await authorLink(page, 0).focus()
-  await page.keyboard.press('Tab')
-  // The next stop is past the author block: the permalink, or in Safari,
-  // which skips links on Tab by default, the first action.
-  const next = await card.evaluate((el) => {
+  const card = page.locator('page-home caribou-status-card').nth(1)
+  const focused = () => card.evaluate((el) => {
     const active = el.shadowRoot!.activeElement
     const author = el.shadowRoot!.querySelector('a.author')!
-    return active === null ? 'outside' : active === author || author.contains(active) ? 'author' : 'next'
+    if (active === null) return 'outside'
+    if (active === author) return 'author'
+    return author.contains(active) ? 'inside author' : 'next'
   })
-  expect(next).toBe('next')
+  // From the boost line, Tab goes into the author link...
+  await card.locator('.boost-attribution a').focus()
+  await page.keyboard.press(tab)
+  expect(await focused()).toBe('author')
+  // ...and the next Tab leaves the author block.
+  await page.keyboard.press(tab)
+  expect(await focused()).toBe('next')
 })
 
 // Link-hint tools (Vimium) keep a link only if a hit test at its centre,

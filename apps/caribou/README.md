@@ -96,7 +96,10 @@ clean up in `disconnectedCallback`, and wait for
 a real anchor in its own shadow root, so style the `litro-link` element (color
 and text decoration inherit into the anchor). When the anchor itself must carry
 state — `aria-current`, a class — write a plain `<a href>` and bind
-`@click=${spaClick}` from `components/_spa-link.ts`.
+`@click=${spaClick}` from `components/_spa-link.ts`. The status card's author
+link is one: avatar, name and acct are children of one `<a class="author">`.
+Build every profile path with `profilePath` from `components/_profile-path.ts`;
+it adds the instance host to a local acct.
 
 **Links inside a post body** are the author's server HTML; never rewrite them.
 `<caribou-status-card>` has one delegated click on `.status-content`: a plain

@@ -10,6 +10,7 @@ import {
   activeClient, activeUser, isOwnAccount, statusCache,
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
+import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
@@ -103,13 +104,6 @@ function sameUrl(raw: string, href: string): boolean {
 
 function hostOf(url: string): string {
   try { return new URL(url).host } catch { return '' }
-}
-
-// Caribou's own profile page for an account. `acct` is relative to the
-// instance the data came from: a local account has no `@host` part, so add
-// the host. With no host known, the bare handle is the best there is.
-export function profilePath(acct: string, host: string): string {
-  return `/@${acct.includes('@') || !host ? acct : `${acct}@${host}`}`
 }
 
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {

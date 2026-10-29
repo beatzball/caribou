@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LitroRouter } from '@beatzball/litro-router'
+import { html, render } from 'lit'
 import '../caribou-status-card.js'
-import { profilePath, type CaribouStatusCard } from '../caribou-status-card.js'
+import '../caribou-app-shell.js'
+import type { CaribouStatusCard } from '../caribou-status-card.js'
+import { profilePath } from '../_profile-path.js'
 
 // Spy on the real router: the click handler reaches it through a dynamic
 // import, and both import forms must observe the same callable.
@@ -182,6 +185,16 @@ describe('<caribou-status-card> author link', () => {
     const local = post({ account: { id: '1', acct: 'dave', username: 'dave', displayName: 'Dave', avatar: '', avatarStatic: '', url: 'https://example.social/@dave' } })
     const el = await mount(local, '')
     expect(author(el).getAttribute('href')).toBe('/@dave@example.social')
+  })
+
+  it('takes a local author\'s host from the shell after mount, over the account URL', async () => {
+    const local = post({ account: { id: '1', acct: 'dave', username: 'dave', displayName: 'Dave', avatar: '', avatarStatic: '', url: 'https://web.example/@dave' } })
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    render(html`<caribou-app-shell instance="shell.example"><caribou-status-card .status=${local}></caribou-status-card></caribou-app-shell>`, host)
+    const el = host.querySelector('caribou-status-card') as CaribouStatusCard
+    while (!(await el.updateComplete)) { /* settle */ }
+    expect(author(el).getAttribute('href')).toBe('/@dave@shell.example')
   })
 
   it('links the inner post\'s author on a boost, and the booster in the boost line', async () => {
