@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { expect, test, type Page } from './_fixtures.js'
 
 const INSTANCE = 'example.social'
@@ -157,35 +158,27 @@ test('sensitive media stays hidden until the reader shows it, and hides again', 
   await expect(show).toBeFocused()
 })
 
-// A short real video, made in this browser, in a format this browser plays
-// (WebM in Chromium and Firefox, MP4 in WebKit). A 204 would leave the video
-// paused whatever the component did.
-async function recordClip(page: Page): Promise<{ type: string; body: Buffer }> {
-  await page.setContent('<canvas width="16" height="16"></canvas>')
-  const clip = await page.evaluate(async () => {
-    const type = ['video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t))!
-    const canvas = document.querySelector('canvas')!
-    const ctx = canvas.getContext('2d')!
-    const rec = new MediaRecorder(canvas.captureStream(10), { mimeType: type })
-    const chunks: Blob[] = []
-    rec.ondataavailable = (e) => chunks.push(e.data)
-    const done = new Promise((r) => { rec.onstop = r })
-    rec.start()
-    for (let i = 0; i < 10; i++) {
-      ctx.fillStyle = i % 2 ? '#c00' : '#00c'
-      ctx.fillRect(0, 0, 16, 16)
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    rec.stop()
-    await done
-    const bytes = new Uint8Array(await new Blob(chunks).arrayBuffer())
-    return { type, bytes: Array.from(bytes) }
-  })
-  return { type: clip.type, body: Buffer.from(clip.bytes) }
+// A one-second 16×16 clip, recorded once with MediaRecorder: WebM from
+// Chromium, MP4 from WebKit. A 204 would leave the video paused whatever the
+// component did, so the test needs a file the browser really plays.
+const CLIPS = [
+  { type: 'video/webm', body: readFileSync(new URL('./fixtures/gifv.webm', import.meta.url)) },
+  { type: 'video/mp4', body: readFileSync(new URL('./fixtures/gifv.mp4', import.meta.url)) },
+]
+
+async function pickClip(page: Page): Promise<{ type: string; body: Buffer } | undefined> {
+  await page.setContent('<video></video>')
+  const types = await page.evaluate((all) => {
+    const v = document.querySelector('video')!
+    return all.filter((t) => v.canPlayType(t) !== '')
+  }, CLIPS.map((c) => c.type))
+  return CLIPS.find((c) => types.includes(c.type))
 }
 
 test('a gifv plays muted on a loop, pauses on click, and stops under reduced motion', async ({ page }) => {
-  const clip = await recordClip(page)
+  const clip = await pickClip(page)
+  test.skip(!clip, 'This browser plays neither WebM nor MP4')
+  if (!clip) return
   await page.route(`${FILES}/**`, (route) => route.request().url().endsWith('.vid')
     ? route.fulfill({ status: 200, contentType: clip.type, body: clip.body })
     : route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
@@ -219,7 +212,9 @@ test('a gifv plays muted on a loop, pauses on click, and stops under reduced mot
 })
 
 test('a gifv waits, paused, when the reader already asked for reduced motion', async ({ page }) => {
-  const clip = await recordClip(page)
+  const clip = await pickClip(page)
+  test.skip(!clip, 'This browser plays neither WebM nor MP4')
+  if (!clip) return
   await page.route(`${FILES}/**`, (route) => route.request().url().endsWith('.vid')
     ? route.fulfill({ status: 200, contentType: clip.type, body: clip.body })
     : route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL }))
