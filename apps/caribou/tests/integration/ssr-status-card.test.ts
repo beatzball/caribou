@@ -49,7 +49,7 @@ describe('caribou-status-card SSR', () => {
     const out = await ssr(html`<caribou-status-card variant="focused" .status=${boost}></caribou-status-card>`)
     expect(out).toContain('data-variant="focused"')
     expect(out).toContain('class="boost-attribution"')
-    expect(out).toMatch(/Bob<!--\/lit-part--> boosted/)
+    expect(out).toMatch(/<a href="\/@bob"[^>]*><!--lit-part-->Bob<!--\/lit-part--><\/a> boosted/)
     expect(out).toContain('href="/@alice/42"')
   })
 

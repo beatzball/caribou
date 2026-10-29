@@ -7,6 +7,7 @@ import {
   activeClient, activeUser, createNotificationsStore, markNotificationsSeen, startPolling,
   unreadNotificationCount, NOTIFICATIONS_POLL_MS, type NotificationFilter, type NotificationsStore,
 } from '@beatzball/caribou-state'
+import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
@@ -206,8 +207,7 @@ export class CaribouNotifications extends LitElement {
 
   // `acct` is relative to the user's own server for a local account.
   private profileHref(a: mastodon.v1.Account): string {
-    const host = activeUser.value?.server ?? ''
-    return `/@${a.acct.includes('@') || !host ? a.acct : `${a.acct}@${host}`}`
+    return profilePath(a.acct, activeUser.value?.server ?? '')
   }
 
   private renderLine(icon: IconName, account: mastodon.v1.Account | undefined, text: string) {
