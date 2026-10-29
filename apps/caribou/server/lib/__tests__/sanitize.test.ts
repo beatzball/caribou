@@ -45,6 +45,15 @@ describe('sanitizeStatus', () => {
     expect(out.reblog.mediaAttachments).toEqual(media)
   })
 
+  // The server render prints the link card, so it must reach the client as
+  // it came. Its strings are rendered as text, so they are not sanitized.
+  it('passes the link card through, on the post and on the boosted post', () => {
+    const card = { url: 'https://news.example/a', title: '<b>A</b>', description: 'd', image: 'https://x.example/c.png', width: 1200, height: 600 }
+    const out = sanitizeStatus({ id: '2', content: '', card, reblog: { id: '1', content: '', card } })
+    expect(out.card).toEqual(card)
+    expect(out.reblog.card).toEqual(card)
+  })
+
   it('turns null content into an empty string', () => {
     expect(sanitizeStatus({ id: '1', content: null }).content).toBe('')
   })

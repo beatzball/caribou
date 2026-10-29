@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import '../caribou-status-card.js'
 import '../caribou-status-media.js'
-import { aspectOf, httpUrl, type CaribouStatusMedia } from '../caribou-status-media.js'
+import { aspectOf, type CaribouStatusMedia } from '../caribou-status-media.js'
+import { httpUrl } from '../_http-url.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
 type Media = CaribouStatusMedia['media'][number]

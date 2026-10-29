@@ -15,6 +15,7 @@ import { spaClick } from './_spa-link.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
 import './caribou-status-media.js'
+import './caribou-status-link-card.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -155,6 +156,12 @@ export class CaribouStatusCard extends LitElement {
     .status-content a + a {
       margin-inline-start: 0.25em;
     }
+    /* Mastodon wraps a link's text in spans: the scheme and \`www.\` in
+       \`.invisible\`, the shown part in \`.ellipsis\` when it cut a long path.
+       Hide the first and mark the cut, as Mastodon and elk do; the href keeps
+       the full URL. */
+    .status-content .invisible { display: none; }
+    .status-content .ellipsis::after { content: "…"; }
     /* Focused post emphasis: bigger body type only. The accent border was
        visually load-bearing in the wrong direction — readers mistook the
        blue 1px outline for an "older posts" affordance. Ancestor opacity
@@ -493,6 +500,7 @@ export class CaribouStatusCard extends LitElement {
             </header>
             <div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
             ${display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true}></caribou-status-media>` : nothing}
+            ${display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
             ${this.renderActions(display)}
           </div>
         </div>
