@@ -7,7 +7,7 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, isOwnAccount, statusCache,
+  activeClient, activeUser, createKeepAlive, isOwnAccount, statusCache,
   toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
@@ -109,6 +109,15 @@ function hostOf(url: string): string {
   try { return new URL(url).host } catch { return '' }
 }
 
+// Posts whose content warning the reader opened. Module scope, so a card the
+// page cache paints again stays open. Only a click adds to it, so the server
+// render and the first client render are both collapsed.
+//
+// A status id is minted per instance, so the key is the instance the status
+// came from plus its id: another instance's post with the same id stays
+// collapsed. A keep-alive empties itself when the active account changes.
+const openedWarnings = createKeepAlive<boolean>(500)
+
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
   return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
 }
@@ -179,6 +188,18 @@ export class CaribouStatusCard extends LitElement {
       --caribou-icon-button-pressed-fg: var(--success);
       --caribou-icon-fill: none;
     }
+    .warning { margin-top: var(--space-2); }
+    .spoiler {
+      margin: 0; color: var(--fg-0); white-space: pre-wrap; overflow-wrap: anywhere;
+    }
+    .cw-toggle {
+      margin-top: var(--space-2); padding: var(--space-1) var(--space-3);
+      font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer;
+      color: var(--fg-0); background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+    }
+    .cw-toggle:hover { background: var(--bg-1); }
+    .cw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .boost-attribution {
       display: flex; gap: var(--space-2); align-items: center;
       padding: 0 0 var(--space-2) var(--space-2);
@@ -213,6 +234,9 @@ export class CaribouStatusCard extends LitElement {
   // shell, so the first render takes the host from the account URL like the
   // server did, and the next render uses this.
   @state() private shellInstance = ''
+
+  // The reader opened this post's content warning.
+  @state() private warningOpen = false
 
   // True when the shadow root came from the server (declarative shadow DOM)
   // and the first render hydrates it instead of creating it.
@@ -297,6 +321,31 @@ export class CaribouStatusCard extends LitElement {
     if ((changed.has('status') || changed.has('instance')) && this.disposeActions) {
       this.rebindActions()
     }
+    // The server and a hydrating render are collapsed; the server has no
+    // DOM to find the shell in, and keep-alives are client only.
+    if (changed.has('status')) {
+      const hydrating = this.adoptedServerRender && !this.hasUpdated
+      const key = typeof window === 'undefined' || hydrating ? null : this.warningKey()
+      this.warningOpen = key !== null && openedWarnings.get(key) === true
+    }
+  }
+
+  // The instance the shown post came from, the same order `profileHref`
+  // uses, then its id. The status cache is home-instance only, so the shell
+  // is read here directly: on the first render `shellInstance` is not set.
+  private warningKey(): string | null {
+    const post = this.status?.reblog ?? this.status
+    if (!post) return null
+    const instance = this.instance || (findShell(this)?.getAttribute('instance') ?? '') || hostOf(post.account.url ?? '')
+    return `${instance.toLowerCase()} ${post.id}`
+  }
+
+  // The button stays where it is and only its text changes, so focus stays
+  // on it.
+  private onToggleWarning = () => {
+    const key = this.warningKey()
+    this.warningOpen = !this.warningOpen
+    if (key !== null) openedWarnings.set(key, this.warningOpen)
   }
 
   private onReply = () => {
@@ -458,6 +507,11 @@ export class CaribouStatusCard extends LitElement {
     const timeLabel = this.relativeTime ? formatRelativeTime(dt) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
     const authorName = display.account.displayName || display.account.username
+    // A post with a content warning shows only the warning until the reader
+    // opens it. The body region is empty until then, so no media or link
+    // card loads.
+    const warning = display.spoilerText ?? ''
+    const bodyShown = warning === '' || this.warningOpen
     // Permalink: anchor on the timestamp, not the whole article — wrapping the
     // <article> would put the post-content links (hashtags, mentions, external
     // urls) inside an <a>, and the HTML parser closes the outer anchor when
@@ -493,9 +547,19 @@ export class CaribouStatusCard extends LitElement {
                 <time datetime=${dt}>${timeLabel}</time>
               </litro-link>
             </header>
-            <div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>
-            ${display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true}></caribou-status-media>` : nothing}
-            ${display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
+            ${warning
+              ? html`<div class="warning">
+                       <p class="spoiler">${warning}</p>
+                       <button type="button" class="cw-toggle" aria-controls="status-body"
+                         aria-expanded=${this.warningOpen ? 'true' : 'false'}
+                         @click=${this.onToggleWarning}>${this.warningOpen ? 'Show less' : 'Show more'}</button>
+                     </div>`
+              : nothing}
+            <div class="status-body" id="status-body" ?hidden=${!bodyShown}>
+              ${bodyShown ? html`<div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
+              ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
+              ${bodyShown && display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
+            </div>
             ${this.renderActions(display)}
           </div>
         </div>

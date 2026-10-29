@@ -109,6 +109,16 @@ calls DOMPurify installs `installPurifyHooks` from
 `@beatzball/caribou-mastodon-client/sanitize-opts`, so the server and the client
 output stay the same string.
 
+**A content warning hides the post body.** When the shown post (the boosted
+one, for a boost) has a `spoilerText`, the card renders the warning and a
+Show more button, and `#status-body` stays empty until the reader opens it,
+so its media and link card load nothing. Anything else that belongs to the
+body goes inside that region, behind the same `bodyShown` check. Opened
+posts are remembered per page session by source instance and id, and the
+memory empties on an account change. Without JavaScript a post with a
+content warning cannot be opened: the server sends the collapsed card and
+no fallback. Read such a post on its home instance.
+
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
 header. The client returns it as the page's `nextMaxId`, and the timeline

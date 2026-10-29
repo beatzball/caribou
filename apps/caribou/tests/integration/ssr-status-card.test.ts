@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { html } from 'lit'
 import { ssr } from './_ssr.js'
 import '../../components/caribou-status-card.js'
-import { SSR_STATUS, SSR_STATUS_CARD, withoutTime } from '../e2e/_status-card-ssr.js'
+import { SSR_CW_STATUS, SSR_CW_STATUS_CARD, SSR_STATUS, SSR_STATUS_CARD, withoutTime } from '../e2e/_status-card-ssr.js'
 
 const STATUS = {
   id: '42',
@@ -69,10 +69,35 @@ describe('caribou-status-card SSR', () => {
   })
 })
 
+describe('caribou-status-card SSR content warning', () => {
+  it('prints the warning collapsed: escaped text, a Show more button, an empty region, no media', async () => {
+    const out = await ssr(html`<caribou-status-card .status=${SSR_CW_STATUS}></caribou-status-card>`)
+    expect(out).toContain('<p class="spoiler"><!--lit-part-->Spoilers &amp; &lt;b&gt;plot&lt;/b&gt;<!--/lit-part--></p>')
+    expect(out).toMatch(/<button type="button" class="cw-toggle" aria-controls="status-body"\s*aria-expanded="false"\s*><!--lit-part-->Show more/)
+    expect(out).toMatch(/<div class="status-body" id="status-body" hidden>/)
+    expect(out).not.toContain('the butler did it')
+    expect(out).not.toContain('caribou-status-media')
+    expect(out).not.toContain('files.example.social')
+  })
+
+  it('a post without a warning prints no toggle', async () => {
+    const out = await ssr(html`<caribou-status-card .status=${STATUS}></caribou-status-card>`)
+    expect(out).not.toContain('class="cw-toggle"')
+    expect(out).toMatch(/<div class="status-body" id="status-body" >/)
+  })
+})
+
 describe('the server markup the e2e card hydration spec replays', () => {
+  const cut = (out: string) => withoutTime(out
+    .slice(out.indexOf('<caribou-status-card'), out.lastIndexOf('</caribou-status-card>') + '</caribou-status-card>'.length)
+    .replace(/<style>[\s\S]*?<\/style>/g, '')
+    .replace(/[ \t]+$/gm, ''))
+
   it('matches a fresh server render', async () => {
-    const out = await ssr(html`<caribou-status-card .status=${SSR_STATUS}></caribou-status-card>`)
-    const el = out.slice(out.indexOf('<caribou-status-card'), out.lastIndexOf('</caribou-status-card>') + '</caribou-status-card>'.length)
-    expect(withoutTime(el.replace(/<style>[\s\S]*?<\/style>/g, ''))).toBe(SSR_STATUS_CARD)
+    expect(cut(await ssr(html`<caribou-status-card .status=${SSR_STATUS}></caribou-status-card>`))).toBe(SSR_STATUS_CARD)
+  })
+
+  it('matches a fresh server render of the post with a content warning', async () => {
+    expect(cut(await ssr(html`<caribou-status-card .status=${SSR_CW_STATUS}></caribou-status-card>`))).toBe(SSR_CW_STATUS_CARD)
   })
 })
