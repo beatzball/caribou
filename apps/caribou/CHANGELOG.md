@@ -1,5 +1,13 @@
 # caribou-app
 
+## 0.7.0
+
+### Minor Changes
+
+- [#115](https://github.com/beatzball/caribou/pull/115) [`f06f20c`](https://github.com/beatzball/caribou/commit/f06f20cdba6f0d0ad57ae9ad3baaddcd718d764f) Thanks [@beatzball](https://github.com/beatzball)! - A post's author is now a link. A click on the avatar, the display name or the @handle opens the author's profile inside Caribou, without a full page load. On a boost, the booster's name in the "boosted" line opens the booster's profile. The author block is one real link: middle-click, Cmd-click, copy-link and no-JavaScript all work, a keyboard user tabs to it once, and a screen reader hears the display name and handle.
+
+- [#116](https://github.com/beatzball/caribou/pull/116) [`6f04cc2`](https://github.com/beatzball/caribou/commit/6f04cc22e89869e3b18eb81a22e235df8ea087ed) Thanks [@beatzball](https://github.com/beatzball)! - Posts now show their media under the text: images, video, GIFs (gifv) and audio. One item is full width; two to four share a grid. Each box keeps its size before the file arrives, so the list does not jump. A click on an image opens it large in a lightbox (Esc or Close shuts it, and focus goes back to the image). Media with a description has an ALT button that shows the text. A GIF plays muted on a loop; a click or Enter on it pauses and plays it again. It waits, paused, when the reader asks for reduced motion. Media on a sensitive post stays hidden until the reader clicks "Show sensitive media". Boosts show the boosted post's media, and the server render of `/local` and `/public` includes the media.
+
 ## 0.6.1
 
 ### Patch Changes
