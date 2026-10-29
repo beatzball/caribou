@@ -1,5 +1,13 @@
 # caribou-app
 
+## 0.8.0
+
+### Minor Changes
+
+- [#122](https://github.com/beatzball/caribou/pull/122) [`0f92f0f`](https://github.com/beatzball/caribou/commit/0f92f0fea3441a8a922e91adb5d6846f856b3e45) Thanks [@beatzball](https://github.com/beatzball)! - A post with a content warning now shows only the warning and a "Show more" button. The text, media and link card stay hidden, and load nothing, until the reader clicks it. "Show less" hides them again, and focus stays on the button. The button tells screen readers if the post is open (`aria-expanded`). Show more also shows sensitive media, which keeps its own Hide button. A boost uses the warning of the boosted post. An opened post stays open when the reader comes back to a cached page; a post with the same id from another instance does not, and a switch of account closes them all. The server renders the post closed, the same as the first client render. Without JavaScript a post with a content warning cannot be opened.
+
+- [#121](https://github.com/beatzball/caribou/pull/121) [`a2cb1d2`](https://github.com/beatzball/caribou/commit/a2cb1d2ff6b230bb1f6b45f30c8c9d69490e7569) Thanks [@beatzball](https://github.com/beatzball)! - Posts with a link now show its preview card under the text: the image, the title, a short description and the site name. A wide image (on a link, video or photo card) goes on top, full width; a small one sits beside the text; a card with no image is text only. The whole card is one link that opens in a new tab, named by its title. The image box keeps its size before the file arrives, so the list does not jump. A post with media shows no card, as on Mastodon. Long links in post text and in profile bios are shortened the way Mastodon and elk show them (no `https://www.`, an ellipsis on a long path). The link still goes to the full URL, a screen reader still reads the full URL, and copying the link text still gives the full URL. The server render of `/local` and `/public` includes the card.
+
 ## 0.7.0
 
 ### Minor Changes
