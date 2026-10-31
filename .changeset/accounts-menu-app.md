@@ -11,3 +11,5 @@ account. The menu also has "Add account" (for now, the sign-in page) and
 without JavaScript. On a phone the same items are at the end of the More menu.
 The rail now stays in view beside the page, so the button is always at the
 foot of the window.
+A switch does nothing while a sign-out, an expired session or another switch
+is already reloading the page, and Sign out does nothing while a switch is.
