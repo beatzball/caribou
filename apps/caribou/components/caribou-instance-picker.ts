@@ -56,19 +56,41 @@ export class CaribouInstancePicker extends LitElement {
   // the field takes focus. Not `autofocus`: a browser honours it only once
   // per document, and a client-side navigation inserts the form later.
   //
-  // The router renders the next page hidden, shows it, and then focuses
-  // its outlet (`<litro-outlet>`) so keyboard users start at the top. The
-  // field takes the focus after that. A form the swap removed, such as the
-  // server-rendered one on a first load, is no longer connected and does
-  // nothing.
+  // On a client-side navigation the router renders the next page hidden,
+  // shows it, and then focuses its outlet (`<litro-outlet>`) so keyboard
+  // users start at the top. The field takes the focus once the page is
+  // shown: a MutationObserver callback runs after the router's synchronous
+  // `removeAttribute('hidden')` + `outlet.focus()`. Not the outlet's
+  // `focus` event: it does not fire when the outlet already has the focus,
+  // as in Safari after a mouse click on a menu button (Safari does not
+  // focus a clicked button). A page that is never shown (a newer
+  // navigation won) never takes the focus.
+  private _shown?: MutationObserver
+
   override connectedCallback() {
     super.connectedCallback()
     if (!this.add) return
     const focusField = () => {
       if (this.isConnected) this.renderRoot.querySelector<HTMLInputElement>('input[name="server"]')?.focus()
     }
-    void this.updateComplete.then(focusField)
-    document.querySelector('litro-outlet')?.addEventListener('focus', focusField, { once: true })
+    const page = routedPage(this)
+    if (page?.hasAttribute('hidden')) {
+      this._shown = new MutationObserver(() => {
+        if (page.hasAttribute('hidden')) return
+        this._shown?.disconnect()
+        this._shown = undefined
+        void this.updateComplete.then(focusField)
+      })
+      this._shown.observe(page, { attributes: true, attributeFilter: ['hidden'] })
+    } else {
+      void this.updateComplete.then(focusField)
+    }
+  }
+
+  override disconnectedCallback() {
+    this._shown?.disconnect()
+    this._shown = undefined
+    super.disconnectedCallback()
   }
 
   override render() {
@@ -88,4 +110,15 @@ export class CaribouInstancePicker extends LitElement {
       </form>
     `
   }
+}
+
+/** The page element `node` is in: the child of `<litro-outlet>`, across shadow roots. */
+function routedPage(node: Node): Element | null {
+  let n: Node | null = node
+  while (n) {
+    const parent: Node | null = n.parentNode
+    if (parent instanceof Element && parent.localName === 'litro-outlet') return n as Element
+    n = parent instanceof ShadowRoot ? parent.host : parent
+  }
+  return null
 }

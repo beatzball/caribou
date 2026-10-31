@@ -3,15 +3,15 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Response } from '@playwright/test'
 import { expect, test, type BrowserContext, type Page } from './_fixtures.js'
+import { authorizeSignsIn } from './_signin.js'
 
 // "Add account" while signed in (#58, phase 3). The account menu links to
 // `/?add`: a sign-in form that keeps the accounts already stored.
 //
 // The real sign-in runs to the user's server and back. The token exchange
 // is a request from this server to that one, which a test cannot answer, so
-// a successful sign-in jumps from the authorize page straight to
-// `/signin/done` with a token, as the server would. A denial goes through
-// the real `/api/signin/callback`.
+// a successful callback is answered with the real completion page
+// (`_signin.ts`). A denial goes through the real `/api/signin/callback`.
 
 // Sign-in start and the cookie endpoint need an app registered for the
 // server, so the test writes registrations into the server's storage (as
@@ -95,9 +95,6 @@ async function authorizeThen(page: Page, server: string, next: (state: string) =
   })
 }
 
-const signedInWith = (token: string, server: string, userKey: string) => () =>
-  `/signin/done#${new URLSearchParams({ token, server, userKey, vapidKey: '' })}`
-
 async function gotoSettled(page: Page, path: string) {
   await page.goto(path)
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
@@ -153,7 +150,7 @@ test('the add form names the signed-in account, focuses the field and has Cancel
 
 test('add a second account on another server: both stored, the new one active, cookie on its server', async ({ page, context, browserName }) => {
   await setup(page, context, [ALICE])
-  await authorizeThen(page, TWO, signedInWith('NEW-BOB', TWO, BOB))
+  await authorizeSignsIn(page, ORIGIN, TWO, { token: 'NEW-BOB', server: TWO, userKey: BOB })
   await gotoSettled(page, '/?add')
 
   const posted = cookiePost(page)
@@ -167,7 +164,7 @@ test('add a second account on another server: both stored, the new one active, c
 
 test('add the same account again: no duplicate, the new token replaces the old, it becomes active', async ({ page, context, browserName }) => {
   await setup(page, context, [ALICE, BOB])
-  await authorizeThen(page, ONE, signedInWith('NEW-ALICE', ONE, ALICE))
+  await authorizeSignsIn(page, ORIGIN, ONE, { token: 'NEW-ALICE', server: ONE, userKey: ALICE })
   // Bob is active, and the cookie names Alice's server: put it on Bob's
   // first, so the sign-in has to move it back.
   await context.addCookies([{

@@ -99,7 +99,13 @@ async function checkFeedRoute() {
 async function checkSigninStart() {
   const res = await fetchWithTimeout(`${BASE}/api/signin/start`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    // The route accepts same-origin requests only; send what the app's own
+    // page sends.
+    headers: {
+      'content-type': 'application/json',
+      origin: new URL(BASE).origin,
+      'sec-fetch-site': 'same-origin',
+    },
     body: JSON.stringify({ server: 'caribou-probe-nonexistent.invalid' }),
   })
   if (res.status !== 502) {

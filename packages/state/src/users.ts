@@ -12,7 +12,7 @@ export interface UserSession {
   token: string
   vapidKey: string
   // Null until it is loaded: sign-in stores the session before the app has
-  // the account (`server/routes/signin/done.get.ts`). `loadActiveAccount`
+  // the account (`server/lib/signin-complete-page.ts`). `loadActiveAccount`
   // fills it in. Code that needs the user's handle uses `userName()`.
   account: mastodon.v1.Account | null
   createdAt: number

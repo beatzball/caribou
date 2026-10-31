@@ -101,10 +101,32 @@ describe('caribou-landing', () => {
         .toBe('You are signed in as @alice@one.example.')
     })
 
-    it('signed out: the who line stays empty', async () => {
+    it('signed out (a stale link): the plain landing after hydration', async () => {
       const el = await mount(true)
       await el.updateComplete
-      expect(el.shadowRoot!.querySelector('.who')!.textContent!.trim()).toBe('')
+      expect(el.shadowRoot!.querySelector('h1')!.textContent).toBe('Caribou')
+      expect(el.shadowRoot!.querySelector('.who')).toBeNull()
+      expect(el.shadowRoot!.querySelector('.cancel')).toBeNull()
+      expect(el.shadowRoot!.querySelector<CaribouInstancePicker>('caribou-instance-picker')!.add).toBe(false)
+    })
+
+    it('the last account signs out elsewhere: the add form becomes the plain landing', async () => {
+      seed(session('bob', 'two.example'))
+      const el = await mount(true)
+      await el.updateComplete
+      expect(el.shadowRoot!.querySelector('h1')!.textContent).toBe('Add an account')
+      seed()
+      await el.updateComplete
+      expect(el.shadowRoot!.querySelector('h1')!.textContent).toBe('Caribou')
+    })
+
+    it('the who line carries the full text in its title (a long handle may be cut)', async () => {
+      seed(session('a-very-long-username-indeed', 'social.example-instance.org'))
+      const el = await mount(true)
+      await el.updateComplete
+      const who = el.shadowRoot!.querySelector('.who')!
+      expect(who.getAttribute('title')).toBe('You are signed in as @a-very-long-username-indeed@social.example-instance.org.')
+      expect(who.textContent!.trim()).toBe(who.getAttribute('title'))
     })
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { startSignin, type StartSigninDeps } from '../../server/lib/signin-start.js'
+import { hashNonce, nonceMatches } from '../../server/lib/signin-binding.js'
 
 function mem(): Pick<StartSigninDeps, 'storage'> {
   const store = new Map<string, unknown>()
@@ -19,6 +20,7 @@ function deps(overrides: Partial<StartSigninDeps> = {}): StartSigninDeps {
       client_id: 'CID', client_secret: 'SECRET', vapid_key: 'VK',
     })),
     generateState: () => 'STATE-TOKEN',
+    generateNonce: () => 'NONCE',
     now: () => 1_700_000_000_000,
     ...overrides,
   } as StartSigninDeps
@@ -77,11 +79,32 @@ describe('startSignin', () => {
     const d = deps()
     await startSignin({ server: 's', origin: 'https://c', add: true }, d)
     expect(await d.storage.getItem('state:STATE-TOKEN')).toEqual({
-      server: 's', origin: 'https://c', createdAt: 1_700_000_000_000, add: true,
+      server: 's', origin: 'https://c', createdAt: 1_700_000_000_000, add: true, nonceHash: hashNonce('NONCE'),
     })
     await startSignin({ server: 's', origin: 'https://c', add: false }, d)
     expect(await d.storage.getItem('state:STATE-TOKEN')).toEqual({
-      server: 's', origin: 'https://c', createdAt: 1_700_000_000_000,
+      server: 's', origin: 'https://c', createdAt: 1_700_000_000_000, nonceHash: hashNonce('NONCE'),
     })
+  })
+
+  it('returns a nonce for the cookie and stores only its hash', async () => {
+    const d = deps({ generateNonce: undefined })
+    const res = await startSignin({ server: 's', origin: 'https://c' }, d)
+    expect(res.nonce).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    const entry = await d.storage.getItem<{ nonceHash: string }>('state:STATE-TOKEN')
+    expect(JSON.stringify(entry)).not.toContain(res.nonce)
+    expect(nonceMatches(res.nonce, entry!.nonceHash)).toBe(true)
+  })
+})
+
+describe('nonceMatches', () => {
+  it('matches only the nonce whose hash is stored', () => {
+    const hash = hashNonce('abc')
+    expect(nonceMatches('abc', hash)).toBe(true)
+    expect(nonceMatches('abd', hash)).toBe(false)
+    expect(nonceMatches(undefined, hash)).toBe(false)
+    expect(nonceMatches('', hash)).toBe(false)
+    expect(nonceMatches('abc', undefined)).toBe(false)
+    expect(nonceMatches('abc', 'not-hex')).toBe(false)
   })
 })

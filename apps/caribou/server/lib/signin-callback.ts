@@ -1,4 +1,6 @@
 import { toUserKey } from '@beatzball/caribou-auth'
+import { nonceMatches } from './signin-binding.js'
+import type { CompletedSession } from './signin-complete-page.js'
 import { STATE_TTL_MS, appKey, stateKey, type OAuthApp, type StateEntry } from './storage.js'
 
 export interface CompleteSigninDeps {
@@ -17,27 +19,42 @@ export interface CompleteSigninDeps {
 }
 
 export type CompleteSigninResult =
-  | { kind: 'ok';    location: string; server: string }
+  // The route answers with the completion page (`signin-complete-page.ts`).
+  // The session never goes into a URL.
+  | { kind: 'ok';    session: CompletedSession; server: string }
   | { kind: 'error'; location: string }
 
 export interface CompleteSigninInput {
   code?: string
   state?: string
   error?: string
+  // From the browser's `caribou.signin` cookie (`signin-binding.ts`).
+  nonce?: string
 }
 
 export async function completeSignin(input: CompleteSigninInput, deps: CompleteSigninDeps): Promise<CompleteSigninResult> {
   // The state entry is read (and used up) first, also for an error: it says
   // whether the reader was adding an account. Mastodon sends `state` back
   // with a denial too.
-  const stateData = input.state ? await deps.storage.getItem<StateEntry>(stateKey(input.state)) : null
+  const stored = input.state ? await deps.storage.getItem<StateEntry>(stateKey(input.state)) : null
   if (input.state) await deps.storage.removeItem(stateKey(input.state))
-  // An add keeps the reader on the add form, signed in as before.
+  // The state counts only in the browser that started the sign-in (its
+  // `caribou.signin` cookie). Otherwise a stranger could start a sign-in to
+  // their own account and hand the callback URL to this reader, whose
+  // browser would store and activate the stranger's account. A state that
+  // fails this check is still used up, and no token exchange runs.
+  const stateData = stored && nonceMatches(input.nonce, stored.nonceHash) ? stored : null
+  // An add keeps the reader on the add form, signed in as before (also on a
+  // mismatch: the stored entry asked for it, and the target is a fixed path).
   const fail = (code: string) => ({
-    kind: 'error' as const, location: `/?${stateData?.add ? 'add&' : ''}error=${code}`,
+    kind: 'error' as const, location: `/?${stored?.add ? 'add&' : ''}error=${code}`,
   })
 
   if (input.error) return fail('denied')
+  // No sign-in cookie at all: most often a browser that blocks cookies, or a
+  // sign-in that the user's server finished in another browser. Its own code
+  // tells the reader what to do; it tells a stranger nothing new.
+  if (!input.nonce) return fail('no_cookie')
   if (!input.code || !stateData) return fail('state_mismatch')
 
   const now = (deps.now ?? Date.now)()
@@ -68,14 +85,7 @@ export async function completeSignin(input: CompleteSigninInput, deps: CompleteS
   }
 
   const userKey = toUserKey(account.username, server)
-  const fragment = new URLSearchParams({
-    token,
-    server,
-    userKey,
-    vapidKey: app.vapid_key,
-  }).toString()
-
-  return { kind: 'ok', location: `/signin/done#${fragment}`, server }
+  return { kind: 'ok', session: { token, server, userKey, vapidKey: app.vapid_key }, server }
 }
 
 export async function exchangeCodeForToken(input: {

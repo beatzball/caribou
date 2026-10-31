@@ -203,31 +203,56 @@ describe('caribou-instance-picker', () => {
       expect(el.shadowRoot!.activeElement).toBeNull()
     })
 
-    // The router focuses its outlet after it shows the page; the field
-    // takes the focus back.
-    it('takes the focus back after the router focuses the outlet', async () => {
+    // On a client-side navigation the router renders the page hidden, shows
+    // it, then focuses its outlet. The field takes the focus after that.
+    function routed() {
       const outlet = document.createElement('litro-outlet')
       outlet.tabIndex = -1
       document.body.appendChild(outlet)
+      const page = document.createElement('div')
+      page.setAttribute('hidden', '')
+      const root = page.attachShadow({ mode: 'open' })
       const el = document.createElement('caribou-instance-picker') as CaribouInstancePicker
       el.add = true
-      outlet.appendChild(el)
-      await el.updateComplete
+      root.appendChild(el)
+      outlet.appendChild(page)
+      return { outlet, page, el }
+    }
+
+    // What the router does: show the page, then focus the outlet, in one go.
+    function show(outlet: HTMLElement, page: HTMLElement) {
+      page.removeAttribute('hidden')
       outlet.focus()
+    }
+
+    const flush = () => new Promise((r) => setTimeout(r, 0))
+
+    it('takes the focus once the router shows the page and focuses the outlet', async () => {
+      const { outlet, page, el } = routed()
+      await el.updateComplete
+      expect(el.shadowRoot!.activeElement).toBeNull()
+      show(outlet, page)
+      await flush()
       expect(el.shadowRoot!.activeElement).toBe(parts(el).input)
     })
 
-    it('a removed form does not take the focus when the outlet is focused', async () => {
-      const outlet = document.createElement('litro-outlet')
-      outlet.tabIndex = -1
-      document.body.appendChild(outlet)
-      const el = document.createElement('caribou-instance-picker') as CaribouInstancePicker
-      el.add = true
-      outlet.appendChild(el)
-      await el.updateComplete
-      el.remove()
+    it('also when the outlet already had the focus (Safari after a click)', async () => {
+      const { outlet, page, el } = routed()
       outlet.focus()
+      await el.updateComplete
+      show(outlet, page)
+      await flush()
+      expect(el.shadowRoot!.activeElement).toBe(parts(el).input)
+    })
+
+    it('a page that is removed before it is shown does not take the focus', async () => {
+      const { outlet, page, el } = routed()
+      await el.updateComplete
+      page.remove()
+      outlet.focus()
+      await flush()
       expect(document.activeElement).toBe(outlet)
+      expect(el.shadowRoot!.activeElement).toBeNull()
     })
   })
 })
