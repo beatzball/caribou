@@ -262,3 +262,14 @@ test('at medium width the button is the avatar only, and the open menu still sho
   await expect(accountMenu(page).locator('.account-item .who-acct').first()).toBeVisible()
   await expect(accountMenu(page).locator('.account-item .who-acct').first()).toHaveText(BOB_HANDLE)
 })
+
+test('in a short window the rail scrolls, so the account menu stays reachable', async ({ page, context }) => {
+  await page.setViewportSize({ width: 1280, height: 340 })
+  await setup(page, context, [ALICE, BOB])
+  await gotoSettled(page, '/home')
+  await accountTrigger(page).scrollIntoViewIfNeeded()
+  const box = (await accountTrigger(page).boundingBox())!
+  expect(box.y + box.height).toBeLessThanOrEqual(340)
+  await accountTrigger(page).click()
+  await expect(accountMenu(page).getByRole('button', { name: `Sign out of ${BOB_HANDLE}`, exact: true })).toBeInViewport()
+})

@@ -144,22 +144,28 @@ export class CaribouNavRail extends LitElement {
       nav { padding: var(--space-2); }
       a, .signout-btn, .compose-btn::part(button) { justify-content: center; padding: var(--space-2); }
       .account::part(trigger) { justify-content: center; padding: var(--space-2); }
-      .account { --caribou-menu-left: var(--space-2); --caribou-menu-bottom: calc(2 * var(--space-2) + 48px); }
     }
 
     /* Beside the page, the rail stays in view, so the account button is at
        the foot of the window and not at the end of a long timeline. The
        account menu opens above it, on the left. */
     @media (min-width: 768px) {
+      /* A short window cannot fit every row; the rail then scrolls on its
+         own, so the account button (and Sign out) stays reachable. */
       nav {
         position: sticky; top: 0; box-sizing: border-box;
         height: 100vh; height: 100dvh;
+        overflow-y: auto; overscroll-behavior: contain;
       }
       .account {
         --caribou-menu-right: auto;
         --caribou-menu-left: var(--space-3);
         --caribou-menu-bottom: calc(var(--space-3) + 54px + var(--space-2));
       }
+    }
+    /* After the block above, so the narrow rail's offsets win there. */
+    @media (min-width: 768px) and (max-width: 1023px) {
+      .account { --caribou-menu-left: var(--space-2); --caribou-menu-bottom: calc(2 * var(--space-2) + 48px); }
     }
 
     /* Mobile: nav becomes a fixed bottom bar; row-flex.
