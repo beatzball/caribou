@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, activeUser,
-  addUserSession, removeActiveUser, removeSession, isOwnAccount, userName, loadActiveAccount,
+  addUserSession, removeActiveUser, removeSession, switchAccount, signOutActive, nextAccountKey, isOwnAccount, userName, loadActiveAccount,
   loadFromStorage, saveToStorage,
   type UserSession,
 } from '../users.js'
@@ -297,5 +297,81 @@ describe('the 401 event', () => {
       globalThis.fetch = originalFetch
       window.removeEventListener('caribou:unauthorized', listener)
     }
+  })
+})
+
+describe('several accounts', () => {
+  const a = toUserKey('alice', 'example.social')
+  const b = toUserKey('bob', 'other.example')
+  const c = toUserKey('carol', 'example.social')
+  function s(userKey: typeof a, server: string): UserSession {
+    return { userKey, server, token: `T-${userKey}`, vapidKey: 'V', account: null, createdAt: 1 }
+  }
+  function seed(...keys: (typeof a)[]): void {
+    for (const k of keys) addUserSession(s(k, k.slice(k.indexOf('@') + 1)))
+  }
+
+  it('switchAccount makes a stored account active and saves it', () => {
+    seed(a, b)
+    expect(activeUserKey.value).toBe(b)
+    expect(switchAccount(a)).toBe(true)
+    expect(activeUserKey.value).toBe(a)
+    expect(localStorage.getItem('caribou.activeUserKey')).toBe(JSON.stringify(a))
+    expect(users.value.size).toBe(2)
+  })
+
+  it('switchAccount refuses an account that is not stored', () => {
+    seed(a)
+    expect(switchAccount(b)).toBe(false)
+    expect(activeUserKey.value).toBe(a)
+  })
+
+  it('signOutActive with no active account does nothing', () => {
+    expect(signOutActive()).toBeNull()
+    expect(users.value.size).toBe(0)
+  })
+
+  it('signOutActive of the only account leaves none active', () => {
+    seed(a)
+    localStorage.setItem(`caribou.drafts.${a}`, '{}')
+    expect(signOutActive()).toBeNull()
+    expect(users.value.size).toBe(0)
+    expect(activeUserKey.value).toBeNull()
+    expect(localStorage.getItem('caribou.activeUserKey')).toBe('null')
+    expect(localStorage.getItem(`caribou.drafts.${a}`)).toBeNull()
+  })
+
+  it('signOutActive with one other account makes that one active', () => {
+    seed(a, b)
+    localStorage.setItem(`caribou.prefs.${a}`, '{}')
+    const next = signOutActive()
+    expect(next?.userKey).toBe(a)
+    expect(next?.server).toBe('example.social')
+    expect(activeUserKey.value).toBe(a)
+    expect(Array.from(users.value.keys())).toEqual([a])
+    expect(localStorage.getItem('caribou.activeUserKey')).toBe(JSON.stringify(a))
+    // Only the signed-out account's local data goes.
+    expect(localStorage.getItem(`caribou.prefs.${a}`)).toBe('{}')
+  })
+
+  it('signOutActive with two others picks the next one in the list', () => {
+    seed(a, b, c)
+    switchAccount(b)
+    expect(signOutActive()?.userKey).toBe(c)
+    expect(Array.from(users.value.keys())).toEqual([a, c])
+  })
+
+  it('signOutActive of the last in the list wraps to the first', () => {
+    seed(a, b, c)
+    expect(signOutActive()?.userKey).toBe(a)
+    expect(Array.from(users.value.keys())).toEqual([a, b])
+  })
+
+  it('nextAccountKey picks the next one, wraps, and is null when alone', () => {
+    expect(nextAccountKey([a, b, c], a)).toBe(b)
+    expect(nextAccountKey([a, b, c], c)).toBe(a)
+    expect(nextAccountKey([a], a)).toBeNull()
+    expect(nextAccountKey([], a)).toBeNull()
+    expect(nextAccountKey([b, c], a)).toBe(b)
   })
 })

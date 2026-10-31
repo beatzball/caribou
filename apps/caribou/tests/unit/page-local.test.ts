@@ -54,7 +54,7 @@ describe('/local pageData', () => {
       kind: 'ok',
       statuses: fixture,
       nextMaxId: '10',
-      shell: { instance: 'example.social' },
+      shell: { instance: 'example.social', source: 'cookie' },
     })
     expect(fetchPublicTimeline).toHaveBeenCalledWith(
       { kind: 'local', instance: 'example.social', maxId: undefined },

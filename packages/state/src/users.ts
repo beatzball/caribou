@@ -98,16 +98,66 @@ export async function loadActiveAccount(): Promise<void> {
   saveToStorage()
 }
 
-export function removeActiveUser(): void {
-  const key = activeUserKey.value
-  if (!key) return
+// Drops a session and the local data kept for it. It does not touch
+// `activeUserKey`; the caller decides what is active next.
+function dropSession(key: UserKey): void {
   const next = new Map(users.value)
   next.delete(key)
   users.value = next
-  activeUserKey.value = null
   localStorage.removeItem(`caribou.prefs.${key}`)
   localStorage.removeItem(`caribou.drafts.${key}`)
+}
+
+export function removeActiveUser(): void {
+  const key = activeUserKey.value
+  if (!key) return
+  dropSession(key)
+  activeUserKey.value = null
   saveToStorage()
+}
+
+/**
+ * Makes `userKey` the active account and saves it. This is the state part of
+ * a switch only: the app then sets the instance cookie and reloads the page
+ * (`apps/caribou/components/_switch-account.ts`), so nothing here resets the
+ * stores. Returns false, and changes nothing, when there is no such session.
+ *
+ * A live switch (no reload) can be built on this later: `ownerGeneration()`
+ * already changes with the active key, so keep-alive caches and in-flight
+ * results drop themselves.
+ */
+export function switchAccount(userKey: UserKey): boolean {
+  if (!users.value.has(userKey)) return false
+  activeUserKey.value = userKey
+  saveToStorage()
+  return true
+}
+
+/**
+ * The account that follows `removed` in `keys` (the list before removal):
+ * the next one, or the first one when `removed` was the last. Null when no
+ * other account is in the list.
+ */
+export function nextAccountKey(keys: readonly UserKey[], removed: UserKey): UserKey | null {
+  const at = keys.indexOf(removed)
+  const rest = keys.filter((k) => k !== removed)
+  if (rest.length === 0) return null
+  return rest[at < 0 ? 0 : at % rest.length]!
+}
+
+/**
+ * Signs out of the active account only. The account after it in the list
+ * becomes active, or the first one when it was the last; with no account left
+ * nothing is active. Returns the new active session, or null.
+ */
+export function signOutActive(): UserSession | null {
+  const key = activeUserKey.value
+  if (!key) return null
+  const nextKey = nextAccountKey(Array.from(users.value.keys()), key)
+  dropSession(key)
+  activeUserKey.value = nextKey
+  saveToStorage()
+  return nextKey ? users.value.get(nextKey) ?? null : null
 }
 
 /**
@@ -118,13 +168,9 @@ export function removeActiveUser(): void {
 export function removeSession(userKey: UserKey, token: string): 'active' | 'inactive' | 'stale' {
   const current = users.value.get(userKey)
   if (!current || current.token !== token) return 'stale'
-  const next = new Map(users.value)
-  next.delete(userKey)
-  users.value = next
+  dropSession(userKey)
   const wasActive = activeUserKey.value === userKey
   if (wasActive) activeUserKey.value = null
-  localStorage.removeItem(`caribou.prefs.${userKey}`)
-  localStorage.removeItem(`caribou.drafts.${userKey}`)
   saveToStorage()
   return wasActive ? 'active' : 'inactive'
 }

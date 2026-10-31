@@ -3,6 +3,7 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, addUserSession, type UserSession,
 } from '@beatzball/caribou-state'
+import { resetLanding } from '../_switch-account.js'
 import '../caribou-signout-form.js'
 import type { CaribouSignoutForm } from '../caribou-signout-form.js'
 
@@ -41,6 +42,7 @@ function submit(form: HTMLFormElement): SubmitEvent {
 
 describe('caribou-signout-form', () => {
   beforeEach(() => {
+    resetLanding()
     users.value = new Map()
     activeUserKey.value = null
     localStorage.clear()
@@ -101,6 +103,60 @@ describe('caribou-signout-form', () => {
 
     await new Promise((r) => setTimeout(r, 0))
     expect(replaceSpy).toHaveBeenCalledWith('/')
+  })
+
+  it('with another account left, signs out of the current one only and lands as the other', async () => {
+    const other = toUserKey('bob', 'other.example')
+    addUserSession({ ...sampleSession(), userKey: other, server: 'other.example', token: 'TOKEN-2' })
+    addUserSession(sampleSession())
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    const replaceSpy = vi.spyOn(location, 'replace').mockImplementation(() => {})
+
+    const { form } = await mount()
+    submit(form)
+    expect(activeUserKey.value).toBe(other)
+    expect(Array.from(users.value.keys())).toEqual([other])
+
+    await vi.waitFor(() => expect(replaceSpy).toHaveBeenCalled())
+    const calls = fetchSpy.mock.calls.map(([url]) => String(url))
+    expect(calls[0]).toMatch(/\/api\/signout$/)
+    expect(calls[1]).toBe('/api/instance')
+    expect(fetchSpy.mock.calls[1]![1]).toMatchObject({ method: 'POST', body: '{"server":"other.example"}' })
+    expect(replaceSpy).not.toHaveBeenCalledWith('/')
+  })
+
+  it('signs out once until the reload, across every mounted form', async () => {
+    const other = toUserKey('bob', 'other.example')
+    addUserSession({ ...sampleSession(), userKey: other, server: 'other.example', token: 'TOKEN-2' })
+    localStorage.setItem(`caribou.prefs.${other}`, '{"x":1}')
+    localStorage.setItem(`caribou.drafts.${other}`, '{"d":"hi"}')
+    addUserSession(sampleSession())
+    // The sign-out POST stays pending, so the reload has not happened yet.
+    let release!: (r: Response) => void
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      () => new Promise<Response>((r) => { release = r }),
+    )
+    const replaceSpy = vi.spyOn(location, 'replace').mockImplementation(() => {})
+
+    const { form } = await mount()
+    const { form: secondForm } = await mount()
+    submit(form)
+    const again = submit(form)
+    const fromOther = submit(secondForm)
+
+    // The repeats are still kept from posting natively, but do nothing else.
+    expect(again.defaultPrevented).toBe(true)
+    expect(fromOther.defaultPrevented).toBe(true)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(activeUserKey.value).toBe(other)
+    expect(Array.from(users.value.keys())).toEqual([other])
+    expect(localStorage.getItem(`caribou.prefs.${other}`)).toBe('{"x":1}')
+    expect(localStorage.getItem(`caribou.drafts.${other}`)).toBe('{"d":"hi"}')
+
+    fetchSpy.mockResolvedValue(new Response(null, { status: 204 }))
+    release(new Response(null, { status: 204 }))
+    await vi.waitFor(() => expect(replaceSpy).toHaveBeenCalledOnce())
+    expect(Array.from(users.value.keys())).toEqual([other])
   })
 
   it('stops intercepting once disconnected', async () => {

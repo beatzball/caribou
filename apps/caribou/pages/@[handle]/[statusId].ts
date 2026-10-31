@@ -42,7 +42,7 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
   // Elk's `/{home-instance}/@{user}@{host}/{home-id}` model — Caribou
   // ties the home instance to the cookie instead of the URL.
   const cookieHost = await getInstance(event, { storage: getStorage() })
-  const shell: ShellInfo = { instance: cookieHost ?? null }
+  const shell: ShellInfo = cookieHost ? { instance: cookieHost, source: 'cookie' } : { instance: null }
   if (!cookieHost) {
     return { kind: 'auth-required', shell, statusId, handle } as StatusPageData
   }

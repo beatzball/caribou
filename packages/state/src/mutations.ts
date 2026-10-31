@@ -2,6 +2,7 @@ import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
 import { statusCache } from './caches.js'
 import { inflight } from './inflight.js'
+import { ownerGeneration } from './keep-alive.js'
 import { activeClient } from './users.js'
 
 type Status = mastodon.v1.Status
@@ -76,16 +77,24 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   // starts from the post as the cache holds it at that moment. A poll, a
   // page load or another action may write the same post while the request
   // is out; their fields must survive this one finishing.
+  //
+  // The flags in the cache belong to the active account. A result that
+  // lands after the account changed is the old account's, so it writes
+  // nothing, not even the rollback: the change already dropped the
+  // optimistic flag (`forgetReaderFields`).
+  const generation = ownerGeneration()
   inflight.add(key)
   writePost(id, (post) => shift(post, flag, !wasOn, count, delta))
   try {
     const fresh = await client[method](id)
+    if (generation !== ownerGeneration()) return
     writePost(id, (post) => ({
       ...post,
       [flag]: fresh[flag],
       ...(count ? { [count]: fresh[count] } : {}),
     }))
   } catch {
+    if (generation !== ownerGeneration()) return
     // Undo only what this click did. If the flag no longer holds the
     // optimistic value, a newer write already set it from the server.
     writePost(id, (post) => post[flag] === !wasOn ? shift(post, flag, wasOn, count, -delta) : post)

@@ -10,9 +10,18 @@ export interface InstanceDeps {
 export async function getInstance(event: H3Event, deps: InstanceDeps): Promise<string | undefined> {
   const raw = getCookie(event, 'caribou.instance')
   if (!raw) return undefined
-  if (!HOSTNAME_PATTERN.test(raw)) return undefined
-  const keys = await deps.storage.getKeys(`apps:${raw}:`)
-  return keys.length > 0 ? raw : undefined
+  return await isRegisteredInstance(raw, deps) ? raw : undefined
+}
+
+/**
+ * Whether `hostname` is a server this deployment has an app registered with.
+ * The format check runs first so a bad value never reaches storage. Only such
+ * a server may be named by the cookie, because SSR fetches from it.
+ */
+export async function isRegisteredInstance(hostname: string, deps: InstanceDeps): Promise<boolean> {
+  if (!HOSTNAME_PATTERN.test(hostname)) return false
+  const keys = await deps.storage.getKeys(`apps:${hostname}:`)
+  return keys.length > 0
 }
 
 export function setInstance(event: H3Event, hostname: string): void {

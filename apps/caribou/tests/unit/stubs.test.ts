@@ -24,7 +24,7 @@ describe('/privacy and /about stubs', () => {
     const { pageData } = await import('../../pages/privacy.js')
     const event = {} as Parameters<typeof pageData.fetcher>[0]
     const result = await pageData.fetcher(event)
-    expect(result).toEqual({ shell: { instance: 'example.social' } })
+    expect(result).toEqual({ shell: { instance: 'example.social', source: 'cookie' } })
   })
 
   it('/about returns shell only', async () => {

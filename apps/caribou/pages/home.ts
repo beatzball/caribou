@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js'
 import { LitroPage, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
+import { shellInfo } from '../server/lib/shell-info.js'
 import { getStorage } from '../server/lib/storage.js'
 import type { ShellInfo } from '../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
@@ -17,7 +18,7 @@ export interface HomeData {
 
 export const pageData = definePageData<HomeData>(async (event) => {
   const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
-  return { kind: 'auth-required', shell: { instance: resolution.instance } }
+  return { kind: 'auth-required', shell: shellInfo(resolution) }
 })
 
 @customElement('page-home')

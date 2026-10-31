@@ -52,7 +52,7 @@ export function isDraftEmpty(d: ComposeDraft): boolean {
   return d.text.trim() === '' && d.spoilerText.trim() === '' && d.media.length === 0
 }
 
-// `removeActiveUser` clears this key on sign-out.
+// Sign-out (`signOutActive`, `removeSession`) clears this key.
 function storageKey(userKey: UserKey): string {
   return `caribou.drafts.${userKey}`
 }
