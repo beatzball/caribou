@@ -1,5 +1,67 @@
 # caribou-app
 
+## 0.10.0
+
+### Minor Changes
+
+- [#130](https://github.com/beatzball/caribou/pull/130) [`1e09e37`](https://github.com/beatzball/caribou/commit/1e09e374c00146757deff637bf01a8180147541e) Thanks [@beatzball](https://github.com/beatzball)! - Add an account while signed in (#58, part 3). The account menu's "Add account" link opens `/?add`: a sign-in form with the heading "Add an account", a line that names the account you are signed in as, and a Cancel link back to `/home`. The server field takes the focus when the form opens.
+  - Signing in there keeps the accounts you have. The new account becomes active, and the page goes to `/home`.
+  - Signing in again to an account you already have does not add it twice. The new token replaces the old one, and the account becomes active.
+  - When you cancel or deny at your server, or the sign-in fails, you come back to the add form with a message. Your accounts and the active account do not change.
+  - The "signed in as" line fills in after the page loads. Its space is kept from the start, so nothing moves.
+  - Plain `/` does not change.
+
+- [#132](https://github.com/beatzball/caribou/pull/132) [`d9da610`](https://github.com/beatzball/caribou/commit/d9da610be8ca29eb3bd9e76b3dc87cc0dbe59841) Thanks [@beatzball](https://github.com/beatzball)! - Finish multi-account (#58, part 4).
+  - Sign-in is now bound to the browser that started it. `/api/signin/start` sets a short-lived `caribou.signin` cookie (HttpOnly, SameSite=Lax, path `/api/signin`, Secure on https) with a random nonce, and the OAuth state keeps only its hash. The callback checks it before any token exchange. A sign-in link opened in another browser goes to `/?error=state_mismatch` and changes nothing, so nobody can slip their own account into your browser. Only one sign-in at a time per browser: starting a second one makes the first one's link fail.
+  - A sign-in now finishes in the callback's own response: the session is in that page, never in a URL. `/signin/done#token=…` no longer signs anyone in (it only offers "Return to start"), so a link from someone else cannot switch you to their account. The page is `no-store`, `no-referrer`, and has a strict CSP.
+  - `/api/signin/start` refuses a request from another site (`403`).
+  - A callback with no sign-in cookie at all now says "Finish sign-in in the same browser you started it in, with cookies allowed." (`?error=no_cookie`).
+  - "Add account" in the account menu now opens the add form without a full page load, and the server field gets the focus in Safari too.
+  - `/?add` with no account signed in (an old link) shows the plain sign-in page.
+  - A long handle in "You are signed in as …" wraps to a second line instead of being cut; the full text is also in its tooltip.
+
+- [#127](https://github.com/beatzball/caribou/pull/127) [`e07d7a0`](https://github.com/beatzball/caribou/commit/e07d7a05b7eaecb8e41dbedff2710f3652b1b4b1) Thanks [@beatzball](https://github.com/beatzball)! - Sign-out with more than one account signed in now signs out of the current
+  account only. The next account becomes active and the page reloads as that
+  account, on the same page when it means the same for any account (home,
+  notifications, bookmarks, your profile, the public feeds), else on home. The
+  last sign-out goes to `/` as before. A second click while sign-out is still
+  running does nothing, so it can no longer sign out of the next account too.
+  An expired session (a 401) with another account still signed in now moves to
+  that account instead of signing out completely. Sign-out and 401s that happen
+  together end in one reload, as the account that is left, with the cookie set
+  to its server. When the server changes, a public feed keeps its filters but
+  not its page position (`max_id`, `min_id`, `since_id`). A 401 that comes after
+  that reload started, but before the new page shows, reloads again as the
+  account that is left. A Sign out click in that window does nothing: the old
+  page still shows the account that is gone. A page brought back with the browser's
+  Back button can sign out again.
+
+  A new `POST /api/instance` sets the instance cookie to a server this
+  deployment has an app for, from a same-origin page only; the app uses it to
+  point SSR of the public feeds and profiles at the new account's server. When
+  that fails twice, the reload goes to home rather than to a public feed of the
+  old server. On a full page load, a cookie that names another server than the
+  current account's is set to that account's server, so the next load of a
+  public feed shows the right server; a reload that starts meanwhile waits for
+  it, so the reload's cookie wins. Sign-out still never clears the cookie. Sign-in now saves the
+  server name in lower case.
+
+- [#129](https://github.com/beatzball/caribou/pull/129) [`d747558`](https://github.com/beatzball/caribou/commit/d74755853e9ac8936df62a0f1fc5c76f33162b0f) Thanks [@beatzball](https://github.com/beatzball)! - An account menu at the foot of the nav rail. The button shows the current
+  account (avatar, name and `@name@server`; only the avatar on a narrow rail).
+  It opens a list of the stored accounts, the current one first with a check
+  mark. Choosing another account switches to it and reloads the page as that
+  account. The menu also has "Add account" (for now, the sign-in page) and
+  "Sign out of @name", which replaces the rail's Sign out button. On a phone the same items are at the end of the More menu.
+  The rail now stays in view beside the page, so the button is always at the
+  foot of the window; in a short window the rail scrolls on its own.
+  A switch does nothing while a sign-out, an expired session or another switch
+  is already reloading the page, and Sign out does nothing while a switch is.
+
+### Patch Changes
+
+- Updated dependencies [[`e07d7a0`](https://github.com/beatzball/caribou/commit/e07d7a05b7eaecb8e41dbedff2710f3652b1b4b1)]:
+  - @beatzball/caribou-state@0.4.0
+
 ## 0.9.0
 
 ### Minor Changes

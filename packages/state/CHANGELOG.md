@@ -1,5 +1,17 @@
 # @beatzball/caribou-state
 
+## 0.4.0
+
+### Minor Changes
+
+- [#127](https://github.com/beatzball/caribou/pull/127) [`e07d7a0`](https://github.com/beatzball/caribou/commit/e07d7a05b7eaecb8e41dbedff2710f3652b1b4b1) Thanks [@beatzball](https://github.com/beatzball)! - Groundwork for more than one account (#58). `switchAccount(userKey)` makes a
+  stored account active and saves it. `signOutActive()` signs out of the active
+  account only and makes the next stored account active, or none when it was the
+  last; it returns the new active session. `nextAccountKey(keys, removed)` is the
+  rule both use to pick the next account. A favourite, boost or bookmark that
+  finishes after the active account changed no longer writes the old account's
+  flag into the status cache, and no longer shows its error toast (#108 item 5).
+
 ## 0.3.0
 
 ### Minor Changes
