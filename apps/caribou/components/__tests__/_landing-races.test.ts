@@ -5,7 +5,7 @@ import { toUserKey, type UserKey } from '@beatzball/caribou-auth'
 import {
   activeUserKey, addUserSession, switchAccount, users, type UserSession,
 } from '@beatzball/caribou-state'
-import { installRestoreHandler, land, resetLanding } from '../_switch-account.js'
+import { healInstanceCookie, installRestoreHandler, land, resetLanding } from '../_switch-account.js'
 import { installUnauthorizedHandler } from '../_unauthorized.js'
 import '../caribou-signout-form.js'
 
@@ -242,7 +242,7 @@ describe('a state change after the landing navigated (round 3)', () => {
     return { net, replace, target }
   }
 
-  it('A, B, C: 401 A lands as B, then Sign out lands as C with C\'s cookie', async () => {
+  it('A, B, C: 401 A lands as B, then Sign out does nothing (round 4)', async () => {
     store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
     const { net, replace, target } = setup()
     const submit = await mountForm()
@@ -253,37 +253,13 @@ describe('a state change after the landing navigated (round 3)', () => {
     expect(replace).toHaveBeenCalledOnce()
     expect(replace).toHaveBeenLastCalledWith('/local')
 
+    // The old document still shows A; this click means A, which is gone.
     submit()
-    expect(activeUserKey.value).toBe(C)
-    expect(net.calls[1]!.url).toMatch(/\/api\/signout$/)
-    await net.release(1)
-    expect(net.cookieServers()).toEqual(['two.example', 'three.example'])
-    expect(replace).toHaveBeenCalledOnce()
-    await net.release(2)
-
-    expect(replace).toHaveBeenCalledTimes(2)
-    expect(replace).toHaveBeenLastCalledWith('/local')
-    expect([...users.value.keys()]).toEqual([C])
-  })
-
-  it('A, B: 401 A lands as B, then Sign out goes to / without the banner', async () => {
-    store([A, 'one.example'], [B, 'two.example'])
-    const { net, replace, target } = setup()
-    const submit = await mountForm()
-
-    fire(target, A)
     await tick()
-    await net.release(0)
+    expect(net.calls).toHaveLength(1)
+    expect(activeUserKey.value).toBe(B)
+    expect([...users.value.keys()]).toEqual([B, C])
     expect(replace).toHaveBeenCalledOnce()
-
-    submit()
-    expect(activeUserKey.value).toBeNull()
-    await net.release(1)
-
-    expect(net.cookieServers()).toEqual(['two.example'])
-    expect(replace).toHaveBeenCalledTimes(2)
-    expect(replace).toHaveBeenLastCalledWith('/')
-    expect(sessionStorage.getItem('caribou.error')).toBeNull()
   })
 
   it('A, B, C: 401 A lands as B, then a 401 for B lands as C', async () => {
@@ -333,6 +309,59 @@ describe('a state change after the landing navigated (round 3)', () => {
     await tick()
     expect(net.calls).toHaveLength(1)
     expect(replace).toHaveBeenCalledOnce()
+  })
+})
+
+describe('the start-up cookie repair and a landing (round 4)', () => {
+  async function mountForm() {
+    const wrapper = document.createElement('caribou-signout-form')
+    const form = document.createElement('form')
+    form.setAttribute('action', '/api/signout')
+    wrapper.appendChild(form)
+    document.body.appendChild(wrapper)
+    await (wrapper as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    return () => form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }))
+  }
+
+  it('a landing waits for a running repair, so its cookie write is the last one', async () => {
+    // A on one.example; B and C on two.example. The cookie names another server.
+    store([A, 'one.example'], [B, 'two.example'], [C, 'two.example'])
+    history.replaceState(null, '', '/local')
+    const net = heldFetch()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(net.fn as unknown as typeof fetch)
+    const replace = vi.spyOn(location, 'replace').mockImplementation(() => {})
+    const target = new EventTarget()
+    installUnauthorizedHandler(target, (req) => { void land(req) })
+    const submit = await mountForm()
+
+    const heal = healInstanceCookie({ instance: 'zero.example', source: 'cookie' })
+    expect(net.cookieServers()).toEqual(['one.example'])
+
+    // A's token expires while the repair is in flight: B is active.
+    fire(target, A)
+    await tick()
+    // The landing waits for the repair; it writes nothing yet.
+    expect(net.cookieServers()).toEqual(['one.example'])
+
+    // Sign out of B while the landing waits: C is active.
+    submit()
+    expect(activeUserKey.value).toBe(C)
+    expect(net.calls[1]!.url).toMatch(/\/api\/signout$/)
+
+    // The repair's response arrives after the landing would have written.
+    await net.release(0)
+    expect(await heal).toBe(true)
+    expect(net.cookieServers()).toEqual(['one.example'])
+    await net.release(1)
+    expect(net.cookieServers()).toEqual(['one.example', 'two.example'])
+    expect(replace).not.toHaveBeenCalled()
+
+    await net.release(2)
+    // The landing's write for C's server came after the repair's.
+    expect(net.calls.map((c) => c.url.replace(/^.*\/api\//, ''))).toEqual(['instance', 'signout', 'instance'])
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/local')
+    expect([...users.value.keys()]).toEqual([C])
   })
 })
 

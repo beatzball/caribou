@@ -98,6 +98,9 @@ interface Landing {
 }
 let landing: Landing | null = null
 let signingOut = false
+// The start-up cookie repair while its POST is in flight. A landing waits for
+// it before its first cookie write, so the landing's write is the last one.
+let healing: Promise<unknown> | null = null
 
 async function settle(gates: Set<Promise<unknown>>): Promise<void> {
   // A gate can be added while we wait for the others.
@@ -134,6 +137,10 @@ async function drive(l: Landing): Promise<void> {
   // Nothing awaits from here on, so this is the final state.
   const session = activeUser.value
   l.navigatedAs = activeUserKey.value
+  // The document is leaving, but until the new one commits its rail still
+  // shows the old account. A Sign out click there would act on the account
+  // this landing chose, which the reader never saw, so it does nothing.
+  signingOut = true
   if (!session) {
     if (l.expired) {
       // Signal the error via sessionStorage instead of `?error=` on the
@@ -171,6 +178,7 @@ export function land(req: LandRequest = {}, deps: LandDeps = {}): Promise<void> 
   const l = landing ??= { run: null, from: req.from ?? null, expired: false, gates: new Set(), deps }
   if (req.expired) l.expired = true
   if (req.after) l.gates.add(req.after.then(() => {}, () => {}))
+  if (healing) l.gates.add(healing)
   return l.run ??= drive(l)
 }
 
@@ -193,8 +201,9 @@ export function readShellInfo(doc: Document): ShellInfo | null {
  * failed, or a cookie changed in another tab, leaves it stale, and the next
  * full load of /local or /public would show the old server. This page is not
  * reloaded; the next full load uses the healed cookie. Nothing happens while
- * a landing runs, since the landing writes the cookie itself. Resolves true
- * when it wrote the cookie.
+ * a landing runs, since the landing writes the cookie itself. A landing that
+ * starts while this POST is in flight waits for it, so the landing's cookie
+ * write comes after it. Resolves true when it wrote the cookie.
  */
 export async function healInstanceCookie(
   shell: ShellInfo | null,
@@ -203,7 +212,13 @@ export async function healInstanceCookie(
   const session = activeUser.value
   if (!session || landing || shell?.source !== 'cookie' || !shell.instance) return false
   if (shell.instance.toLowerCase() === session.server.toLowerCase()) return false
-  return setInstanceCookie(session.server, deps.fetch ?? fetch)
+  const post = setInstanceCookie(session.server, deps.fetch ?? fetch)
+  healing = post
+  try {
+    return await post
+  } finally {
+    if (healing === post) healing = null
+  }
 }
 
 /**
@@ -225,11 +240,11 @@ export async function switchToAccount(userKey: UserKey, deps: LandDeps = {}): Pr
  * click, a repeated Enter, or another mounted sign-out form) would sign out
  * of the survivor too.
  *
- * A navigated landing does not re-arm it. Until the new document commits,
- * the old one still shows the account that was signed out, so a Sign out
- * click there means that account, which is gone already; acting on it would
- * sign out of the survivor. A landing that a 401 started never claimed it,
- * so Sign out still works while that navigation is pending.
+ * Any landing that navigated (sign-out, 401 or switch) claims it too. Until
+ * the new document commits, the old one still shows the account it had, so
+ * a Sign out click there means that account, which is gone already; acting
+ * on it would sign out of the account the landing chose. A 401 for that
+ * account still starts a new landing (see `land`).
  */
 export function claimSignOut(): boolean {
   if (signingOut) return false
@@ -246,6 +261,7 @@ export function resetLanding(): LandRequest | null {
   const l = landing
   landing = null
   signingOut = false
+  healing = null
   if (!l || l.navigatedAs !== undefined) return null
   return { from: l.from, expired: l.expired }
 }
