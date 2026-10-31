@@ -4,8 +4,8 @@ import { expect, test, type Page } from '@playwright/test'
 // more-menu.mobile.spec.ts.
 
 const rail = (page: Page) => page.locator('page-local caribou-nav-rail')
-const trigger = (page: Page) => rail(page).locator('caribou-menu .trigger')
-const panel = (page: Page) => rail(page).locator('caribou-menu .panel')
+const trigger = (page: Page) => rail(page).locator('caribou-menu.more .trigger')
+const panel = (page: Page) => rail(page).locator('caribou-menu.more .panel')
 
 async function openLocal(page: Page, width = 360) {
   await page.setViewportSize({ width, height: 700 })
@@ -30,8 +30,11 @@ test('Enter opens More and focuses the first item; Tab walks the items; Escape c
 
   await page.keyboard.press(tab)
   await expect(rail(page).getByRole('link', { name: 'Bookmarks', exact: true })).toBeFocused()
+  // No account is stored here, so the account part is Add account and Sign out.
   await page.keyboard.press(tab)
-  await expect(rail(page).getByRole('button', { name: 'Sign out', exact: true })).toBeFocused()
+  await expect(rail(page).locator('caribou-menu.more').getByRole('link', { name: 'Add account', exact: true })).toBeFocused()
+  await page.keyboard.press(tab)
+  await expect(rail(page).locator('caribou-menu.more').getByRole('button', { name: 'Sign out', exact: true })).toBeFocused()
 
   await page.keyboard.press('Escape')
   await expect(panel(page)).toBeHidden()
@@ -46,12 +49,12 @@ test('Tab past the last item never leaves More open behind focus', async ({ page
   await page.keyboard.press('Enter')
   // The menu focuses its first item once it has opened; wait for that.
   await expect(rail(page).getByRole('link', { name: 'Public', exact: true })).toBeFocused()
-  await rail(page).getByRole('button', { name: 'Sign out', exact: true }).focus()
+  await rail(page).locator('caribou-menu.more').getByRole('button', { name: 'Sign out', exact: true }).focus()
   await page.keyboard.press(tab)
   // Chromium and WebKit move focus on to the page, and the menu closes.
   // Firefox wraps Tab inside an open popover, back to its first item, so
   // the menu stays open with focus still in it. Never open with focus out.
-  await expect.poll(() => rail(page).locator('caribou-menu').evaluate((m) => {
+  await expect.poll(() => rail(page).locator('caribou-menu.more').evaluate((m) => {
     const open = m.shadowRoot!.querySelector('.panel')!.matches(':popover-open')
     return open ? m.matches(':focus-within') : true
   })).toBe(true)
@@ -89,10 +92,12 @@ test('from 768px up every item is in the rail and More is gone', async ({ page }
   await openLocal(page, 900)
   await expect(trigger(page)).toBeHidden()
   await expect(rail(page).locator('nav > a[href="/public"]')).toBeVisible()
-  await expect(rail(page).locator('nav > caribou-signout-form .signout-btn')).toBeVisible()
+  await expect(rail(page).locator('caribou-menu.account .trigger')).toBeVisible()
   const tree = await rail(page).ariaSnapshot()
   expect(tree).not.toContain('More')
-  expect(tree.match(/Sign out/g)).toHaveLength(1)
+  // Sign out is in the closed account menu.
+  expect(tree).toContain('button "Accounts"')
+  expect(tree).not.toContain('Sign out')
   expect(tree.match(/link "Public"/g)).toHaveLength(1)
 })
 
@@ -106,11 +111,11 @@ test.describe('without JavaScript', () => {
     const more = nav.getByRole('button', { name: 'More', exact: true })
     await expect(more).toBeVisible()
     await more.click()
-    await expect(nav.locator('caribou-menu .panel')).toBeVisible()
-    await expect(nav.locator('caribou-menu a.menu-item[href="/public"]')).toBeVisible()
-    await expect(nav.locator('caribou-menu a.menu-item[href="/bookmarks"]')).toBeVisible()
-    await expect(nav.locator('caribou-menu form[action="/api/signout"][method="post"] button[type="submit"]')).toBeVisible()
+    await expect(nav.locator('caribou-menu.more .panel')).toBeVisible()
+    await expect(nav.locator('caribou-menu.more a.menu-item[href="/public"]')).toBeVisible()
+    await expect(nav.locator('caribou-menu.more a.menu-item[href="/bookmarks"]')).toBeVisible()
+    await expect(nav.locator('caribou-menu.more form[action="/api/signout"][method="post"] button[type="submit"]')).toBeVisible()
     await page.keyboard.press('Escape')
-    await expect(nav.locator('caribou-menu .panel')).toBeHidden()
+    await expect(nav.locator('caribou-menu.more .panel')).toBeHidden()
   })
 })
