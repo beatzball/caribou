@@ -155,7 +155,7 @@ export class CaribouNavRail extends LitElement {
       nav {
         position: sticky; top: 0; box-sizing: border-box;
         height: 100vh; height: 100dvh;
-        overflow-y: auto; overscroll-behavior: contain;
+        overflow-y: auto;
       }
       .account {
         --caribou-menu-right: auto;
