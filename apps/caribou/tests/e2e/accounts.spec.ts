@@ -82,7 +82,8 @@ async function gotoSettled(page: Page, path: string) {
 }
 
 async function signOut(page: Page) {
-  const button = page.locator('caribou-nav-rail').locator('nav > caribou-signout-form button.signout-btn')
+  await page.locator('caribou-nav-rail').getByRole('button', { name: /^Accounts/ }).click()
+  const button = page.locator('caribou-nav-rail caribou-menu.account caribou-signout-form button.signout-btn')
   await button.waitFor({ state: 'visible' })
   await button.click()
 }
@@ -147,4 +148,128 @@ test('sign-out of the last account goes to / and keeps the cookie', async ({ pag
   expect(posts).toEqual(['/api/signout'])
   expect(await instanceCookie(context)).toBe(browserName === 'webkit' ? TWO : ONE)
   await expect(page.locator('caribou-landing')).toHaveCount(1)
+})
+
+// The account menu (#58 phase 2): the account button at the foot of the rail
+// opens a list of the stored accounts, the current one first.
+
+const BOB_HANDLE = `@bob@${TWO}`
+const ALICE_HANDLE = `@alice@${ONE}`
+const accountMenu = (page: Page) => page.locator('caribou-nav-rail caribou-menu.account')
+const accountTrigger = (page: Page) => accountMenu(page).locator('.trigger')
+const accountPanel = (page: Page) => accountMenu(page).locator('.panel')
+
+test('the account menu lists both accounts, current first, and works from the keyboard', async ({ page, context, browserName }) => {
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+  await setup(page, context, [ALICE, BOB])
+  await gotoSettled(page, '/home')
+  // The active account is loaded; the button shows it.
+  await expect(accountTrigger(page)).toHaveAccessibleName(`Accounts bob ${BOB_HANDLE}`)
+
+  await accountTrigger(page).focus()
+  await page.keyboard.press('Enter')
+  await expect(accountPanel(page)).toBeVisible()
+  const current = accountMenu(page).getByRole('link', { name: `Signed in as bob ${BOB_HANDLE}`, exact: true })
+  await expect(current).toBeFocused()
+  await expect(current).toHaveAttribute('aria-current', 'true')
+  await page.keyboard.press(tab)
+  // Alice is not loaded (only the active account is), so her handle names her.
+  await expect(accountMenu(page).getByRole('button', { name: `Switch to alice ${ALICE_HANDLE}`, exact: true })).toBeFocused()
+  await page.keyboard.press(tab)
+  await expect(accountMenu(page).getByRole('link', { name: 'Add account', exact: true })).toBeFocused()
+  await page.keyboard.press(tab)
+  await expect(accountMenu(page).getByRole('button', { name: `Sign out of ${BOB_HANDLE}`, exact: true })).toBeFocused()
+
+  await page.keyboard.press('Escape')
+  await expect(accountPanel(page)).toBeHidden()
+  await expect(accountTrigger(page)).toBeFocused()
+
+  // Link hints (Vimium, #111) test the element at the button's center.
+  const hit = await accountMenu(page).evaluate((m) => {
+    const t = m.shadowRoot!.querySelector('.trigger')!
+    const r = t.getBoundingClientRect()
+    return m.shadowRoot!.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === t
+  })
+  expect(hit).toBe(true)
+})
+
+// Switches through `menu` and waits for the reload as the other account.
+async function switchTo(page: Page, item: ReturnType<Page['locator']>, path: string) {
+  const loaded = page.waitForResponse((res) =>
+    res.request().resourceType() === 'document' && new URL(res.url()).pathname === path)
+  const instancePost = page.waitForResponse(
+    (res) => res.request().method() === 'POST' && new URL(res.url()).pathname === '/api/instance',
+  )
+  await item.click()
+  const posted = await instancePost
+  await loaded
+  await page.waitForLoadState('load')
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  return posted
+}
+
+test('switching reloads the page as the other account, with the cookie on its server', async ({ page, context, browserName }) => {
+  await setup(page, context, [ALICE, BOB])
+  await gotoSettled(page, '/notifications')
+  await accountTrigger(page).click()
+  const posted = await switchTo(page,
+    accountMenu(page).getByRole('button', { name: `Switch to alice ${ALICE_HANDLE}`, exact: true }), '/notifications')
+
+  expect(posted.status()).toBe(204)
+  expect(posted.request().postDataJSON()).toEqual({ server: ONE })
+  expect(await posted.headerValue('set-cookie')).toMatch(new RegExp(`^caribou\\.instance=${ONE.replace(/\./g, '\\.')};`))
+  expect(await active(page)).toBe(ALICE)
+  // A switch keeps both accounts.
+  expect(await stored(page)).toEqual([ALICE, BOB])
+  if (browserName !== 'webkit') expect(await instanceCookie(context)).toBe(ONE)
+  // The new page shows Alice as current.
+  await expect(accountTrigger(page)).toHaveAccessibleName(`Accounts alice ${ALICE_HANDLE}`)
+  await accountTrigger(page).click()
+  await expect(accountMenu(page).locator('.account-item').first()).toHaveAccessibleName(`Signed in as alice ${ALICE_HANDLE}`)
+})
+
+test('at phone width the accounts are at the end of More, and switching works there', async ({ page, context }) => {
+  await page.setViewportSize({ width: 360, height: 700 })
+  await setup(page, context, [ALICE, BOB])
+  await gotoSettled(page, '/home')
+  await expect(accountMenu(page)).toBeHidden()
+
+  const more = page.locator('caribou-nav-rail caribou-menu.more')
+  await more.getByRole('button', { name: 'More', exact: true }).click()
+  const items = more.locator('.account-item')
+  await expect(items).toHaveCount(2)
+  await expect(items.nth(0)).toHaveAccessibleName(`Signed in as bob ${BOB_HANDLE}`)
+  await expect(items.nth(1)).toHaveAccessibleName(`Switch to alice ${ALICE_HANDLE}`)
+  await expect(more.getByRole('link', { name: 'Add account', exact: true })).toBeVisible()
+  await expect(more.getByRole('button', { name: `Sign out of ${BOB_HANDLE}`, exact: true })).toBeVisible()
+  for (const item of await items.all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+
+  await switchTo(page, items.nth(1), '/home')
+  expect(await active(page)).toBe(ALICE)
+})
+
+test('at medium width the button is the avatar only, and the open menu still shows the names', async ({ page, context }) => {
+  await page.setViewportSize({ width: 900, height: 700 })
+  await setup(page, context, [ALICE, BOB])
+  await gotoSettled(page, '/home')
+  await expect(accountTrigger(page)).toHaveAccessibleName(`Accounts bob ${BOB_HANDLE}`)
+  // The name and handle are clipped, still in the button's name.
+  const text = (await accountMenu(page).locator('[slot="trigger"] .who-text').boundingBox())!
+  expect(text.width).toBeLessThanOrEqual(1)
+  const box = (await accountTrigger(page).boundingBox())!
+  expect(box.width).toBeLessThanOrEqual(56)
+  await accountTrigger(page).click()
+  await expect(accountMenu(page).locator('.account-item .who-acct').first()).toBeVisible()
+  await expect(accountMenu(page).locator('.account-item .who-acct').first()).toHaveText(BOB_HANDLE)
+})
+
+test('in a short window the rail scrolls, so the account menu stays reachable', async ({ page, context }) => {
+  await page.setViewportSize({ width: 1280, height: 340 })
+  await setup(page, context, [ALICE, BOB])
+  await gotoSettled(page, '/home')
+  await accountTrigger(page).scrollIntoViewIfNeeded()
+  const box = (await accountTrigger(page).boundingBox())!
+  expect(box.y + box.height).toBeLessThanOrEqual(340)
+  await accountTrigger(page).click()
+  await expect(accountMenu(page).getByRole('button', { name: `Sign out of ${BOB_HANDLE}`, exact: true })).toBeInViewport()
 })

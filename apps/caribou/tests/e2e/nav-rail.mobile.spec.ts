@@ -56,7 +56,7 @@ test('bottom bar items are at least 44px square', async ({ page }) => {
     '/home': item(page, '/home'), '/local': item(page, '/local'),
     '/notifications': item(page, '/notifications'),
     'New post': rail(page).locator('.compose-btn'), '/@me': item(page, '/@me'),
-    'More': rail(page).locator('caribou-menu .trigger'),
+    'More': rail(page).locator('caribou-menu.more .trigger'),
   }
   for (const [name, loc] of Object.entries(items)) {
     await expect(loc, name).toBeVisible()

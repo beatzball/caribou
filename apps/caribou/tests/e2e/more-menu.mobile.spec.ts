@@ -5,8 +5,8 @@ import { expect, test, type Page } from './_fixtures.js'
 // in More.
 
 const rail = (page: Page) => page.locator('litro-outlet > :not([hidden]) caribou-nav-rail')
-const trigger = (page: Page) => rail(page).locator('caribou-menu .trigger')
-const panel = (page: Page) => rail(page).locator('caribou-menu .panel')
+const trigger = (page: Page) => rail(page).locator('caribou-menu.more .trigger')
+const panel = (page: Page) => rail(page).locator('caribou-menu.more .panel')
 
 async function signedIn(page: Page) {
   await page.addInitScript(() => {
@@ -57,7 +57,7 @@ for (const width of [320, 360, 393]) {
     // Moved into More: not shown, and so not in the accessibility tree.
     await expect(rail(page).locator('nav > a[href="/public"]')).toBeHidden()
     await expect(rail(page).locator('nav > a[href="/bookmarks"]')).toBeHidden()
-    await expect(rail(page).locator('nav > caribou-signout-form .signout-btn')).toBeHidden()
+    await expect(rail(page).locator('caribou-menu.account')).toBeHidden()
     // getByRole still finds a slotted item in the closed panel (its own
     // style is not display: none); the accessibility snapshot does not.
     const tree = await rail(page).ariaSnapshot()
@@ -65,6 +65,7 @@ for (const width of [320, 360, 393]) {
     expect(tree).not.toContain('Public')
     expect(tree).not.toContain('Bookmarks')
     expect(tree).not.toContain('Sign out')
+    expect(tree).not.toContain('Accounts')
   })
 }
 
@@ -88,9 +89,15 @@ test('a tap opens More above the bar, inside the viewport, with 44px items', asy
     await expect(link).toBeVisible()
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   }
-  const signOut = rail(page).getByRole('button', { name: 'Sign out', exact: true })
-  await expect(signOut).toBeVisible()
-  expect((await signOut.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  const more = rail(page).locator('caribou-menu.more')
+  for (const item of [
+    more.getByRole('link', { name: 'Signed in as alice @alice@example.social', exact: true }),
+    more.getByRole('link', { name: 'Add account', exact: true }),
+    more.getByRole('button', { name: 'Sign out of @alice@example.social', exact: true }),
+  ]) {
+    await expect(item).toBeVisible()
+    expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+  }
 })
 
 test('More shows the current mark while a page from its menu is shown', async ({ page }) => {

@@ -5,7 +5,9 @@ import { toUserKey, type UserKey } from '@beatzball/caribou-auth'
 import {
   activeUserKey, addUserSession, switchAccount, users, type UserSession,
 } from '@beatzball/caribou-state'
-import { healInstanceCookie, installRestoreHandler, land, resetLanding } from '../_switch-account.js'
+import {
+  healInstanceCookie, installRestoreHandler, land, resetLanding, switchToAccount,
+} from '../_switch-account.js'
 import { installUnauthorizedHandler } from '../_unauthorized.js'
 import '../caribou-signout-form.js'
 
@@ -440,6 +442,102 @@ describe('a restore while a landing is still running (round 3)', () => {
     expect(replace).toHaveBeenCalledOnce()
     target.dispatchEvent(pageshow(true))
     await tick()
+    expect(net.calls).toHaveLength(1)
+    expect(replace).toHaveBeenCalledOnce()
+  })
+})
+
+// The account menu's switch is a transition too. While another one runs, the
+// active account may already be one the reader did not pick, and the page is
+// about to leave: a switch does nothing, and a switch blocks a Sign out.
+describe('a switch from the account menu during a landing (phase 2)', () => {
+  function mountForm(): HTMLFormElement {
+    const wrapper = document.createElement('caribou-signout-form')
+    const form = document.createElement('form')
+    form.setAttribute('action', '/api/signout')
+    wrapper.appendChild(form)
+    document.body.appendChild(wrapper)
+    return form
+  }
+  const submit = (form: HTMLFormElement) =>
+    form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }))
+
+  function spies() {
+    history.replaceState(null, '', '/local')
+    const net = heldFetch()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(net.fn as unknown as typeof fetch)
+    const replace = vi.spyOn(location, 'replace').mockImplementation(() => {})
+    return { net, replace }
+  }
+
+  it('during a sign-out POST: does nothing; the sign-out lands as the next account', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace } = spies()
+
+    submit(mountForm())
+    expect(activeUserKey.value).toBe(B)
+    expect(await switchToAccount(C)).toBe(false)
+    expect(activeUserKey.value).toBe(B)
+
+    await net.release(0)
+    expect(net.cookieServers()).toEqual(['two.example'])
+    await net.release(1)
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/local')
+    expect(activeUserKey.value).toBe(B)
+    expect([...users.value.keys()]).toEqual([B, C])
+  })
+
+  it('during a 401 landing: does nothing', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace } = spies()
+    const target = new EventTarget()
+    installUnauthorizedHandler(target, (req) => { void land(req) })
+
+    fire(target, A)
+    expect(activeUserKey.value).toBe(B)
+    expect(await switchToAccount(C)).toBe(false)
+    expect(activeUserKey.value).toBe(B)
+
+    await net.release(0)
+    expect(net.cookieServers()).toEqual(['two.example'])
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/local')
+  })
+
+  it('while its own cookie write is pending: a second switch and a Sign out do nothing', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace } = spies()
+
+    const first = switchToAccount(B)
+    expect(activeUserKey.value).toBe(B)
+    expect(await switchToAccount(C)).toBe(false)
+    submit(mountForm())
+    await tick()
+
+    // Only the switch's cookie write: no sign-out POST.
+    expect(net.calls.map((c) => c.url)).toEqual(['/api/instance'])
+    expect(activeUserKey.value).toBe(B)
+    expect([...users.value.keys()]).toEqual([A, B, C])
+
+    await net.release(0)
+    expect(await first).toBe(true)
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/local')
+  })
+
+  it('after a landing navigated: does nothing', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace } = spies()
+
+    const first = switchToAccount(B)
+    await tick()
+    await net.release(0)
+    await first
+    expect(replace).toHaveBeenCalledOnce()
+
+    expect(await switchToAccount(C)).toBe(false)
+    expect(activeUserKey.value).toBe(B)
     expect(net.calls).toHaveLength(1)
     expect(replace).toHaveBeenCalledOnce()
   })

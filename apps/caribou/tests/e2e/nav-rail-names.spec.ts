@@ -30,18 +30,23 @@ for (const { width, layout } of [
     for (const name of inBar) expect(tree).toContain(`link "${name}"`)
     expect(tree).toContain('button "New post"')
     if (layout !== 'mobile') {
-      expect(tree).toContain('button "Sign out"')
+      // Sign out is in the account menu, closed until it is opened.
+      expect(tree).toContain('button "Accounts"')
+      await rail.getByRole('button', { name: 'Accounts', exact: true }).click()
+      await expect(rail.locator('caribou-menu.account').getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
       return
     }
     // Before More opens, its items are nowhere in the tree.
     expect(tree).toContain('button "More"')
-    for (const name of ['link "Public"', 'link "Bookmarks"', 'button "Sign out"']) {
+    expect(tree).not.toContain('Accounts')
+    for (const name of ['link "Public"', 'link "Bookmarks"', 'link "Add account"', 'button "Sign out"']) {
       expect(tree).not.toContain(name)
     }
     await rail.getByRole('button', { name: 'More', exact: true }).click()
     for (const name of ['Public', 'Bookmarks']) {
       await expect(rail.getByRole('link', { name, exact: true })).toBeVisible()
     }
-    await expect(rail.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
+    await expect(rail.locator('caribou-menu.more').getByRole('link', { name: 'Add account', exact: true })).toBeVisible()
+    await expect(rail.locator('caribou-menu.more').getByRole('button', { name: 'Sign out', exact: true })).toBeVisible()
   })
 }

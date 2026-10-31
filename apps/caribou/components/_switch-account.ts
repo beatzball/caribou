@@ -228,11 +228,21 @@ export async function healInstanceCookie(
  * Switches to the stored account `userKey`: saves it as active, points the
  * instance cookie at its server, and reloads. The owner chose a reload over a
  * live store reset; `switchAccount` in the state package is the part a live
- * switch would reuse. Returns false when there is no such account.
+ * switch would reuse. Returns false when there is no such account, and when
+ * a transition already runs.
+ *
+ * One transition per document. While a landing runs (a sign-out, a 401, an
+ * earlier switch) or after it navigated, the active account may already be
+ * one the reader did not choose, and the document is about to leave; a switch
+ * then does nothing. A switch also claims sign-out: a Sign out click while
+ * its cookie write is pending would sign out of the account just switched to,
+ * which the page has not loaded yet.
  */
 export async function switchToAccount(userKey: UserKey, deps: LandDeps = {}): Promise<boolean> {
+  if (landing || signingOut) return false
   const from = activeUser.value?.server ?? null
   if (!switchAccount(userKey)) return false
+  signingOut = true
   await land({ from }, deps)
   return true
 }

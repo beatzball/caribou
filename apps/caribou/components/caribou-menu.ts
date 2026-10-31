@@ -27,7 +27,12 @@ import './caribou-icon.js'
 //
 // The panel is fixed to the viewport's bottom-right corner, where the phone
 // nav bar puts its trigger. `--caribou-menu-bottom` and
-// `--caribou-menu-right` move it; it never grows past the viewport.
+// `--caribou-menu-right` move it; set `--caribou-menu-right: auto` and
+// `--caribou-menu-left` to put it on the left. It never grows past the viewport.
+//
+// The `trigger` slot replaces the icon inside the trigger, for a trigger that
+// shows more than an icon (the account button). The label is still the
+// trigger's name, read before the slotted content.
 //
 // Parts: `trigger`, `icon`, `panel`.
 @customElement('caribou-menu')
@@ -50,6 +55,10 @@ export class CaribouMenu extends LitElement {
     .trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .trigger[aria-expanded="true"] { background: var(--bg-2); color: var(--fg-0); }
     caribou-icon { font-size: 20px; }
+    /* Link-hint tools (Vimium) test the element at the trigger's center. A
+       nested shadow root or a slotted node there reads as covering the
+       button, so the hint is lost (#111). Clicks go to the button itself. */
+    .trigger caribou-icon, ::slotted([slot="trigger"]) { pointer-events: none; }
     .label {
       position: absolute; width: 1px; height: 1px; overflow: hidden;
       clip-path: inset(50%); white-space: nowrap;
@@ -59,7 +68,7 @@ export class CaribouMenu extends LitElement {
          :popover-open would drop the whole list and never show the panel. */
       display: none; flex-direction: column; gap: var(--space-1);
       position: fixed; margin: 0;
-      inset: auto var(--caribou-menu-right, var(--space-2)) var(--caribou-menu-bottom, var(--space-2)) auto;
+      inset: auto var(--caribou-menu-right, var(--space-2)) var(--caribou-menu-bottom, var(--space-2)) var(--caribou-menu-left, auto);
       min-inline-size: min(12rem, calc(100vw - 2 * var(--space-2)));
       max-inline-size: calc(100vw - 2 * var(--space-2));
       max-block-size: calc(100vh - var(--caribou-menu-bottom, var(--space-2)) - var(--space-2));
@@ -189,8 +198,8 @@ export class CaribouMenu extends LitElement {
 
   override render() {
     return html`<button type="button" class="trigger" part="trigger" popovertarget="panel"
-      aria-controls="panel" @click=${this.onTriggerClick}><caribou-icon part="icon"
-      name=${this.icon}></caribou-icon><span class="label">${this.label}</span></button><div
+      aria-controls="panel" @click=${this.onTriggerClick}><span class="label">${this.label}</span><slot
+      name="trigger"><caribou-icon part="icon" name=${this.icon}></caribou-icon></slot></button><div
       id="panel" class="panel" part="panel" popover @beforetoggle=${this.onBeforeToggle}
       @toggle=${this.onToggle}><slot></slot></div>`
   }

@@ -61,4 +61,7 @@ export const ICONS = {
   atSign: html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
     width="1em" height="1em" aria-hidden="true"
     style="display:inline-block;vertical-align:-0.125em"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></g></svg>`,
+  check: html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+    width="1em" height="1em" aria-hidden="true"
+    style="display:inline-block;vertical-align:-0.125em"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 6L9 17l-5-5"/></svg>`,
 }

@@ -44,12 +44,21 @@ async function gotoSettled(page: Page, path: string) {
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
 }
 
+// Sign out is in the account menu at the foot of the rail.
+const accountSignOut = (page: Page) =>
+  page.locator('caribou-nav-rail caribou-menu.account caribou-signout-form button.signout-btn')
+
+async function openAccountMenu(page: Page) {
+  await page.locator('caribou-nav-rail').getByRole('button', { name: /^Accounts/ }).click()
+}
+
 test('signout clears localStorage, preserves the instance cookie, and redirects to /', async ({ page, context }) => {
   await setupSignedIn(page, context)
 
   await gotoSettled(page, START_PATH)
 
-  const signOut = page.locator('caribou-nav-rail').locator('nav > caribou-signout-form button.signout-btn')
+  await openAccountMenu(page)
+  const signOut = accountSignOut(page)
   await signOut.waitFor({ state: 'visible' })
 
   const signoutPost = page.waitForRequest(
@@ -79,7 +88,7 @@ test('at phone width, sign-out through More signs out', async ({ page, context }
 
   const rail = page.locator('caribou-nav-rail')
   await rail.getByRole('button', { name: 'More', exact: true }).click()
-  const signOut = rail.locator('caribou-menu button.signout-btn')
+  const signOut = rail.locator('caribou-menu.more button.signout-btn')
   await expect(signOut).toBeVisible()
 
   const signoutPost = page.waitForRequest(
@@ -103,7 +112,9 @@ test('with a session, neither rail is [signed-out] and sign-out is offered', asy
 
   await expect(page.locator('caribou-nav-rail')).not.toHaveAttribute('signed-out', /.*/)
   await expect(page.locator('caribou-right-rail')).not.toHaveAttribute('signed-out', /.*/)
-  await expect(page.locator('caribou-nav-rail nav > caribou-signout-form button.signout-btn')).toBeVisible()
+  await expect(page.locator('caribou-nav-rail caribou-menu.account')).toBeVisible()
+  await openAccountMenu(page)
+  await expect(accountSignOut(page)).toBeVisible()
 })
 
 test('without a session, both rails are [signed-out] and sign-out is hidden', async ({ page }) => {
@@ -111,5 +122,5 @@ test('without a session, both rails are [signed-out] and sign-out is hidden', as
 
   await expect(page.locator('caribou-nav-rail')).toHaveAttribute('signed-out', '')
   await expect(page.locator('caribou-right-rail')).toHaveAttribute('signed-out', '')
-  await expect(page.locator('caribou-nav-rail nav > caribou-signout-form button.signout-btn')).toBeHidden()
+  await expect(page.locator('caribou-nav-rail caribou-menu.account')).toBeHidden()
 })
