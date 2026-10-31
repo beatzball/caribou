@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, statusCache } from '../caches.js'
+import { toUserKey } from '@beatzball/caribou-auth'
+import { activeUserKey } from '../users.js'
+import { ownerGeneration } from '../keep-alive.js'
 import {
   _testOnlyResetMutations, toggleBookmark, toggleFavourite, toggleReblog,
 } from '../mutations.js'
@@ -302,5 +305,61 @@ describe('server side', () => {
     }
     expect(toasts).toHaveLength(0)
     expect(get('1').favourited).toBe(false)
+  })
+})
+
+// #108 item 5: a result that lands after the active account changed belongs
+// to the old account and must not write its flag into the shared cache.
+describe('a toggle that finishes after an account change', () => {
+  const a = toUserKey('alice', 'example.social')
+  const b = toUserKey('bob', 'example.social')
+  beforeEach(() => {
+    activeUserKey.value = a
+    ownerGeneration()
+  })
+  afterEach(() => { activeUserKey.value = null })
+
+  it('drops the success result', async () => {
+    cacheStatus(makeStatus('1', { favouritesCount: 4 }))
+    const d = deferred<Status>()
+    const p = toggleFavourite(get('1'), { clientSource: () => fakeClient({ favourite: () => d.promise }) })
+    expect(get('1').favourited).toBe(true)
+
+    activeUserKey.value = b
+    // The change already dropped the reader flags; the new account loads
+    // its own. Stand in for that load.
+    cacheStatus(makeStatus('1', { favourited: false, favouritesCount: 9 }))
+
+    d.resolve(makeStatus('1', { favourited: true, favouritesCount: 5 }))
+    await p
+    expect(get('1').favourited).toBe(false)
+    expect(get('1').favouritesCount).toBe(9)
+  })
+
+  it('drops the rollback and the toast on failure', async () => {
+    cacheStatus(makeStatus('1', { bookmarked: false }))
+    const d = deferred<Status>()
+    const p = toggleBookmark(get('1'), { clientSource: () => fakeClient({ bookmark: () => d.promise }) })
+    activeUserKey.value = b
+    cacheStatus(makeStatus('1', { bookmarked: true }))
+
+    d.reject(new Error('boom'))
+    await p
+    expect(get('1').bookmarked).toBe(true)
+    expect(toasts).toHaveLength(0)
+  })
+
+  it('drops the result after a change and back (A to B to A)', async () => {
+    cacheStatus(makeStatus('1'))
+    const d = deferred<Status>()
+    const p = toggleReblog(get('1'), { clientSource: () => fakeClient({ reblog: () => d.promise }) })
+    activeUserKey.value = b
+    activeUserKey.value = a
+    cacheStatus(makeStatus('1', { reblogged: false, reblogsCount: 0 }))
+
+    d.resolve(makeStatus('1', { reblogged: true, reblogsCount: 1 }))
+    await p
+    // A to B to A is a new generation: the result is dropped.
+    expect(get('1').reblogged).toBe(false)
   })
 })

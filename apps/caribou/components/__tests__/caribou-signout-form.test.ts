@@ -103,6 +103,26 @@ describe('caribou-signout-form', () => {
     expect(replaceSpy).toHaveBeenCalledWith('/')
   })
 
+  it('with another account left, signs out of the current one only and lands as the other', async () => {
+    const other = toUserKey('bob', 'other.example')
+    addUserSession({ ...sampleSession(), userKey: other, server: 'other.example', token: 'TOKEN-2' })
+    addUserSession(sampleSession())
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    const replaceSpy = vi.spyOn(location, 'replace').mockImplementation(() => {})
+
+    const { form } = await mount()
+    submit(form)
+    expect(activeUserKey.value).toBe(other)
+    expect(Array.from(users.value.keys())).toEqual([other])
+
+    await vi.waitFor(() => expect(replaceSpy).toHaveBeenCalled())
+    const calls = fetchSpy.mock.calls.map(([url]) => String(url))
+    expect(calls[0]).toMatch(/\/api\/signout$/)
+    expect(calls[1]).toBe('/api/instance')
+    expect(fetchSpy.mock.calls[1]![1]).toMatchObject({ method: 'POST', body: '{"server":"other.example"}' })
+    expect(replaceSpy).not.toHaveBeenCalledWith('/')
+  })
+
   it('stops intercepting once disconnected', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
     vi.spyOn(location, 'replace').mockImplementation(() => {})
