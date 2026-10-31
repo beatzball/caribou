@@ -2,6 +2,7 @@ import { defineEventHandler, readBody, createError } from 'h3'
 import { startSignin, registerMastodonApp } from '../../../lib/signin-start.js'
 import { getStorage } from '../../../lib/storage.js'
 import { resolveOrigin } from '../../../lib/public-origin.js'
+import { setSigninCookie } from '../../../lib/signin-binding.js'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ server?: string; add?: unknown }>(event)
@@ -10,10 +11,13 @@ export default defineEventHandler(async (event) => {
   }
   const origin = resolveOrigin(event)
   try {
-    return await startSignin({ server: body.server, origin, add: body.add === true }, {
+    const { authorizeUrl, nonce } = await startSignin({ server: body.server, origin, add: body.add === true }, {
       storage: getStorage(),
       registerApp: registerMastodonApp,
     })
+    // Binds the state to this browser; the callback checks it.
+    setSigninCookie(event, nonce)
+    return { authorizeUrl }
   } catch (err) {
     throw createError({
       statusCode: 502,

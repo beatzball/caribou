@@ -21,6 +21,9 @@ export interface StateEntry {
   server: string
   origin: string
   createdAt: number
+  // SHA-256 (hex) of the nonce in the starting browser's `caribou.signin`
+  // cookie. The callback must bring that cookie (`signin-binding.ts`).
+  nonceHash: string
   // Set when a signed-in reader adds another account (`/?add`). An error
   // then goes back to the add form, not the plain landing.
   add?: true

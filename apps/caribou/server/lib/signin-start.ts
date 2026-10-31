@@ -1,4 +1,5 @@
 import { buildAuthorizeUrl, generateState as defaultGenerateState } from '@beatzball/caribou-auth'
+import { hashNonce, newNonce } from './signin-binding.js'
 import { APP_TTL_MS, STATE_TTL_MS, appKey, stateKey, type OAuthApp, type StateEntry } from './storage.js'
 
 export interface StartSigninDeps {
@@ -11,6 +12,7 @@ export interface StartSigninDeps {
     client_id: string; client_secret: string; vapid_key: string;
   }>
   generateState?: () => string
+  generateNonce?: () => string
   now?: () => number
 }
 
@@ -23,6 +25,9 @@ export interface StartSigninInput {
 
 export interface StartSigninOutput {
   authorizeUrl: string
+  // For the starting browser's `caribou.signin` cookie. Only its hash is
+  // stored; the callback needs the nonce itself.
+  nonce: string
 }
 
 const SCOPES = 'read write follow push'
@@ -46,7 +51,9 @@ export async function startSignin(input: StartSigninInput, deps: StartSigninDeps
   }
 
   const state = (deps.generateState ?? defaultGenerateState)()
-  const stateEntry: StateEntry = { server, origin, createdAt: now, ...(input.add ? { add: true as const } : {}) }
+  const nonce = (deps.generateNonce ?? newNonce)()
+  const stateEntry: StateEntry = {
+    server, origin, createdAt: now, nonceHash: hashNonce(nonce), ...(input.add ? { add: true as const } : {}) }
   await deps.storage.setItem(stateKey(state), stateEntry)
 
   const authorizeUrl = buildAuthorizeUrl({
@@ -59,7 +66,7 @@ export async function startSignin(input: StartSigninInput, deps: StartSigninDeps
 
   void STATE_TTL_MS
 
-  return { authorizeUrl }
+  return { authorizeUrl, nonce }
 }
 
 export async function registerMastodonApp(input: { server: string; redirectUri: string }) {

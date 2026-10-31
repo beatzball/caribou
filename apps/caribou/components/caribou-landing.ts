@@ -8,8 +8,8 @@ import './caribou-error-banner.js'
 import './caribou-instance-picker.js'
 
 /**
- * "You are signed in as @bob@two.example." Only the active account: the
- * line stays one line at phone width, and the account menu lists the rest.
+ * "You are signed in as @bob@two.example." Only the active account; the
+ * account menu lists the rest.
  */
 export function signedInAs(active: UserSession | null): string {
   return active ? `You are signed in as @${userName(active)}@${active.server}.` : ''
@@ -24,11 +24,15 @@ export class CaribouLanding extends LitElement {
     h1 img { flex: none; }
     p { color: var(--fg-1); margin: 0 0 var(--space-5) 0; }
     /* The accounts live in the browser, so this line fills in after
-       hydration. It keeps one line's height from the start, and stays one
-       line, so nothing below it moves. */
+       hydration. It keeps two lines' height from the start, so nothing
+       below it moves. A long handle wraps (anywhere: a handle has no
+       spaces) onto the second line; past two lines it is cut, and the full
+       text is in its title. */
     p.who {
-      margin-top: calc(-1 * var(--space-3)); line-height: 1.5; min-height: 1.5em;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-top: calc(-1 * var(--space-3)); line-height: 1.5; min-height: 3em;
+      overflow-wrap: anywhere;
+      display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+      overflow: hidden;
     }
     .cancel { max-width: 400px; margin: var(--space-4) auto 0; text-align: center; }
     .cancel a {
@@ -43,13 +47,17 @@ export class CaribouLanding extends LitElement {
   // Empty on the server and in the first client render, which must match.
   @state() private who = ''
 
+  // `/?add` with no account (a stale link): known only after hydration.
+  // Then the page is the plain landing, as there is nothing to add to.
+  @state() private signedOut = false
+
   private _unsubscribe?: () => void
 
   override connectedCallback() {
     super.connectedCallback()
     this._unsubscribe = effect(() => {
-      const who = signedInAs(activeUser.value)
-      if (this.hasUpdated) this.who = who
+      const active = activeUser.value
+      if (this.hasUpdated) this.follow(active)
     })
   }
 
@@ -60,11 +68,16 @@ export class CaribouLanding extends LitElement {
   }
 
   protected override firstUpdated() {
-    this.who = signedInAs(activeUser.value)
+    this.follow(activeUser.value)
+  }
+
+  private follow(active: UserSession | null) {
+    this.who = signedInAs(active)
+    this.signedOut = active === null
   }
 
   override render() {
-    if (!this.add) {
+    if (!this.add || this.signedOut) {
       return html`
         <main>
           <h1><img src="/logo.png" alt="" width="48" height="48" />Caribou</h1>
@@ -80,7 +93,7 @@ export class CaribouLanding extends LitElement {
       <main>
         <h1><img src="/logo.png" alt="" width="48" height="48" />Add an account</h1>
         <p>Sign in to another Mastodon account. Enter its instance.</p>
-        <p class="who">${this.who || nothing}</p>
+        <p class="who" title=${this.who || nothing}>${this.who || nothing}</p>
         <caribou-error-banner></caribou-error-banner>
         <caribou-instance-picker add></caribou-instance-picker>
         <p class="cancel"><a href="/home" @click=${spaClick}>Cancel</a></p>

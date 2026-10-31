@@ -338,9 +338,8 @@ export class CaribouNavRail extends LitElement {
   // with a check, and goes to its profile; another account switches to it,
   // which reloads the page as that account.
   //
-  // "Add account" goes to `/?add`. Phase 3 of #58 builds the add-account form
-  // there; until then it is the landing page's sign-in form, which adds the
-  // new account to the stored ones.
+  // "Add account" goes to `/?add`, the add-account form (a sign-in that
+  // keeps the accounts already stored).
   //
   // A list of one-element templates, not one template with several roots:
   // happy-dom misplaces a binding at the top level of a template, so the
@@ -354,7 +353,7 @@ export class CaribouNavRail extends LitElement {
             name="check"></caribou-icon></a>`
         : html`<button type="button" class="switch-btn menu-item account-item signed-in-only"
             @click=${() => { void switchToAccount(u.userKey) }}>${this.renderWho(u, 'Switch to')}</button>`),
-      html`<a href="/?add" class="menu-item signed-in-only"
+      html`<a href="/?add" class="menu-item signed-in-only" @click=${spaClick}
         ><caribou-icon class="icon" name="userPlus"></caribou-icon>Add account</a>`,
       html`<caribou-signout-form>
         <form action="/api/signout" method="post" class="signout-form">
