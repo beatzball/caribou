@@ -5,6 +5,7 @@ import { definePageData } from '@beatzball/litro'
 import { getQuery, getRouterParams } from 'h3'
 import { activeUserKey } from '@beatzball/caribou-state'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
+import { shellInfo } from '../server/lib/shell-info.js'
 import {
   fetchAccountByHandle, fetchAccountStatuses,
 } from '../server/lib/mastodon-public.js'
@@ -27,7 +28,7 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string }
   const handle = String(params.handle ?? '')
   const resolution = await resolveInstanceForRoute(event, { handle }, { storage: getStorage() })
-  const shell: ShellInfo = { instance: resolution.instance }
+  const shell: ShellInfo = shellInfo(resolution)
   // /@me is auth-required (Plan 3 design §8.8): the user's own profile is
   // gated by the access token that lives only in localStorage, so the server
   // never performs a public lookup for `me`. It renders a placeholder; the

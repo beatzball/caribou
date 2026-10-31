@@ -4,6 +4,7 @@ import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runti
 import { definePageData } from '@beatzball/litro'
 import { getQuery } from 'h3'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
+import { shellInfo } from '../server/lib/shell-info.js'
 import { fetchPublicTimeline } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
 import type { TimelinePageData, ShellInfo } from '../server/lib/page-data-types.js'
@@ -16,7 +17,7 @@ export type PublicPageData = TimelinePageData & { shell: ShellInfo }
 
 export const pageData = definePageData<PublicPageData>(async (event) => {
   const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
-  const shell: ShellInfo = { instance: resolution.instance }
+  const shell: ShellInfo = shellInfo(resolution)
   if (!resolution.instance) return { kind: 'auth-required', shell }
   const query = getQuery(event)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined

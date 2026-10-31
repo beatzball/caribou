@@ -3,6 +3,7 @@ import { customElement } from 'lit/decorators.js'
 import { LitroPage, pageReset } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
+import { shellInfo } from '../server/lib/shell-info.js'
 import { getStorage } from '../server/lib/storage.js'
 import type { ShellInfo } from '../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
@@ -11,7 +12,7 @@ export interface PrivacyData { shell: ShellInfo }
 
 export const pageData = definePageData<PrivacyData>(async (event) => {
   const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
-  return { shell: { instance: resolution.instance } }
+  return { shell: shellInfo(resolution) }
 })
 
 @customElement('page-privacy')

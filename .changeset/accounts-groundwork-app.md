@@ -12,12 +12,16 @@ An expired session (a 401) with another account still signed in now moves to
 that account instead of signing out completely. Sign-out and 401s that happen
 together end in one reload, as the account that is left, with the cookie set
 to its server. When the server changes, a public feed keeps its filters but
-not its page position (`max_id`, `min_id`, `since_id`). A page brought back
-with the browser's Back button can sign out again.
+not its page position (`max_id`, `min_id`, `since_id`). A sign-out or a 401
+that comes after that reload started, but before the new page shows, reloads
+again as the account that is left. A page brought back with the browser's
+Back button can sign out again.
 
 A new `POST /api/instance` sets the instance cookie to a server this
 deployment has an app for, from a same-origin page only; the app uses it to
 point SSR of the public feeds and profiles at the new account's server. When
 that fails twice, the reload goes to home rather than to a public feed of the
-old server. Sign-out still never clears the cookie. Sign-in now saves the
+old server. On a full page load, a cookie that names another server than the
+current account's is set to that account's server, so the next load of a
+public feed shows the right server. Sign-out still never clears the cookie. Sign-in now saves the
 server name in lower case.

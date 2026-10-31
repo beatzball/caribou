@@ -13,7 +13,9 @@ import {
   activeUserKey, loadActiveAccount, loadFromStorage, startUnreadNotifications,
 } from '@beatzball/caribou-state'
 import { installUnauthorizedHandler } from './components/_unauthorized.js'
-import { installRestoreHandler, land } from './components/_switch-account.js'
+import {
+  healInstanceCookie, installRestoreHandler, land, readShellInfo,
+} from './components/_switch-account.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
@@ -30,6 +32,9 @@ if (typeof window !== 'undefined') {
   // A page restored from the back-forward cache forgets its landing and
   // reads the accounts again.
   installRestoreHandler(window)
+  // A stale instance cookie (it names another server than the active
+  // account's) is pointed at the active account's server, once.
+  void healInstanceCookie(readShellInfo(document))
   // A tab open across a deploy asks for chunks the new build no longer has.
   installPreloadErrorReload(window)
   // The nav rail's unread badge. One poll for the app, not one per rail:

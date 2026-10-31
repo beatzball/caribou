@@ -217,3 +217,175 @@ describe('a page restored from the back-forward cache', () => {
     expect(users.value.size).toBe(0)
   })
 })
+
+// `replace()` only asks for a navigation; the old document stays until the
+// new one commits, or for good when the reader stops the load. These tests
+// keep it (replace is a spy) and change the state after it.
+describe('a state change after the landing navigated (round 3)', () => {
+  async function mountForm() {
+    const wrapper = document.createElement('caribou-signout-form')
+    const form = document.createElement('form')
+    form.setAttribute('action', '/api/signout')
+    wrapper.appendChild(form)
+    document.body.appendChild(wrapper)
+    await (wrapper as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    return () => form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }))
+  }
+
+  function setup() {
+    history.replaceState(null, '', '/local')
+    const net = heldFetch()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(net.fn as unknown as typeof fetch)
+    const replace = vi.spyOn(location, 'replace').mockImplementation(() => {})
+    const target = new EventTarget()
+    installUnauthorizedHandler(target, (req) => { void land(req) })
+    return { net, replace, target }
+  }
+
+  it('A, B, C: 401 A lands as B, then Sign out lands as C with C\'s cookie', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace, target } = setup()
+    const submit = await mountForm()
+
+    fire(target, A)
+    await tick()
+    await net.release(0)
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenLastCalledWith('/local')
+
+    submit()
+    expect(activeUserKey.value).toBe(C)
+    expect(net.calls[1]!.url).toMatch(/\/api\/signout$/)
+    await net.release(1)
+    expect(net.cookieServers()).toEqual(['two.example', 'three.example'])
+    expect(replace).toHaveBeenCalledOnce()
+    await net.release(2)
+
+    expect(replace).toHaveBeenCalledTimes(2)
+    expect(replace).toHaveBeenLastCalledWith('/local')
+    expect([...users.value.keys()]).toEqual([C])
+  })
+
+  it('A, B: 401 A lands as B, then Sign out goes to / without the banner', async () => {
+    store([A, 'one.example'], [B, 'two.example'])
+    const { net, replace, target } = setup()
+    const submit = await mountForm()
+
+    fire(target, A)
+    await tick()
+    await net.release(0)
+    expect(replace).toHaveBeenCalledOnce()
+
+    submit()
+    expect(activeUserKey.value).toBeNull()
+    await net.release(1)
+
+    expect(net.cookieServers()).toEqual(['two.example'])
+    expect(replace).toHaveBeenCalledTimes(2)
+    expect(replace).toHaveBeenLastCalledWith('/')
+    expect(sessionStorage.getItem('caribou.error')).toBeNull()
+  })
+
+  it('A, B, C: 401 A lands as B, then a 401 for B lands as C', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace, target } = setup()
+
+    fire(target, A)
+    await tick()
+    await net.release(0)
+    expect(replace).toHaveBeenCalledOnce()
+
+    fire(target, B)
+    await tick()
+    expect(net.cookieServers()).toEqual(['two.example', 'three.example'])
+    await net.release(1)
+    expect(replace).toHaveBeenCalledTimes(2)
+    expect(replace).toHaveBeenLastCalledWith('/local')
+  })
+
+  it('a repeat Sign out after the sign-out landing navigated does nothing', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const { net, replace } = setup()
+    const submit = await mountForm()
+
+    submit()
+    await net.release(0)
+    await net.release(1)
+    expect(replace).toHaveBeenCalledOnce()
+
+    // The old document still shows A; this click means A, which is gone.
+    submit()
+    await tick()
+    expect(net.calls).toHaveLength(2)
+    expect(activeUserKey.value).toBe(B)
+    expect(replace).toHaveBeenCalledOnce()
+  })
+
+  it('a repeat request with no state change after the navigation does nothing', async () => {
+    store([A, 'one.example'], [B, 'two.example'])
+    const { net, replace, target } = setup()
+    fire(target, A)
+    await tick()
+    await net.release(0)
+    // The same 401 again: the token check drops it, and nothing changed.
+    fire(target, A)
+    await land({})
+    await tick()
+    expect(net.calls).toHaveLength(1)
+    expect(replace).toHaveBeenCalledOnce()
+  })
+})
+
+describe('a restore while a landing is still running (round 3)', () => {
+  it('stops the old landing and starts one for the state read again', async () => {
+    store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])
+    const net = heldFetch()
+    const replace = vi.fn()
+    const deps = { fetch: net.fn as unknown as typeof fetch, replace, path: '/local' }
+    const target = new EventTarget()
+    installUnauthorizedHandler(target, (req) => { void land(req, deps) })
+    installRestoreHandler(target, deps)
+
+    fire(target, A)
+    await tick()
+    expect(net.cookieServers()).toEqual(['two.example'])
+
+    // Restored with B's cookie write still pending.
+    target.dispatchEvent(pageshow(true))
+    expect(activeUserKey.value).toBe(B)
+    await tick()
+    expect(net.cookieServers()).toEqual(['two.example', 'two.example'])
+
+    fire(target, B)
+    expect(activeUserKey.value).toBe(C)
+
+    await net.release(1)
+    expect(net.cookieServers()).toEqual(['two.example', 'two.example', 'three.example'])
+    // The old landing's write finishes late: it writes and navigates nothing.
+    await net.release(0)
+    expect(net.cookieServers()).toHaveLength(3)
+    expect(replace).not.toHaveBeenCalled()
+
+    await net.release(2)
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/local')
+  })
+
+  it('a restore after the landing navigated starts nothing', async () => {
+    store([A, 'one.example'], [B, 'two.example'])
+    const net = heldFetch()
+    const replace = vi.fn()
+    const deps = { fetch: net.fn as unknown as typeof fetch, replace, path: '/local' }
+    const target = new EventTarget()
+    installUnauthorizedHandler(target, (req) => { void land(req, deps) })
+    installRestoreHandler(target, deps)
+    fire(target, A)
+    await tick()
+    await net.release(0)
+    expect(replace).toHaveBeenCalledOnce()
+    target.dispatchEvent(pageshow(true))
+    await tick()
+    expect(net.calls).toHaveLength(1)
+    expect(replace).toHaveBeenCalledOnce()
+  })
+})

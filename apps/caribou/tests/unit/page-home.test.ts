@@ -28,7 +28,7 @@ describe('/home pageData', () => {
     const result = await pageData.fetcher({} as Parameters<typeof pageData.fetcher>[0])
     expect(result).toEqual({
       kind: 'auth-required',
-      shell: { instance: 'example.social' },
+      shell: { instance: 'example.social', source: 'cookie' },
     })
   })
 

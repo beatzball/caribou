@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { activeUserKey, addUserSession, users, type UserSession } from '@beatzball/caribou-state'
 import {
-  land, pathAfterSwitch, resetLanding, switchToAccount, type LandDeps,
+  healInstanceCookie, land, pathAfterSwitch, readShellInfo, resetLanding, switchToAccount,
+  type LandDeps,
 } from '../_switch-account.js'
 
 const a = toUserKey('alice', 'example.social')
@@ -195,5 +196,86 @@ describe('one landing per document', () => {
     await run
     expect(fetch).toHaveBeenCalledOnce()
     expect(replace).toHaveBeenCalledWith('/home')
+  })
+})
+
+describe('a rejected `after` gate (Fable 3)', () => {
+  it('with an account left: still writes the cookie and keeps the path', async () => {
+    addUserSession(s(b, 'other.example'))
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const replace = vi.fn()
+    await land(
+      { from: 'example.social', after: Promise.reject(new Error('offline')) },
+      { fetch: fetch as unknown as typeof globalThis.fetch, replace, path: '/local' },
+    )
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(JSON.parse((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)).toEqual({ server: 'other.example' })
+    expect(replace).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/local')
+  })
+})
+
+describe('healInstanceCookie', () => {
+  const ok = () => vi.fn(async () => new Response(null, { status: 204 }))
+
+  it('writes the active server once when the cookie names another server', async () => {
+    addUserSession(s(b, 'other.example'))
+    const fetch = ok()
+    expect(await healInstanceCookie({ instance: 'example.social', source: 'cookie' }, { fetch: fetch as unknown as typeof globalThis.fetch })).toBe(true)
+    expect(fetch).toHaveBeenCalledOnce()
+    const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('/api/instance')
+    expect(JSON.parse(init.body as string)).toEqual({ server: 'other.example' })
+  })
+
+  it.each([
+    ['the cookie matches', { instance: 'other.example', source: 'cookie' as const }],
+    ['the cookie matches in another case', { instance: 'Other.Example', source: 'cookie' as const }],
+    ['the instance comes from the path', { instance: 'example.social', source: 'path' as const }],
+    ['there is no instance', { instance: null }],
+    ['there is no shell info', null],
+  ])('does nothing when %s', async (_name, shell) => {
+    addUserSession(s(b, 'other.example'))
+    const fetch = ok()
+    expect(await healInstanceCookie(shell, { fetch: fetch as unknown as typeof globalThis.fetch })).toBe(false)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('does nothing with no active account', async () => {
+    const fetch = ok()
+    expect(await healInstanceCookie({ instance: 'example.social', source: 'cookie' }, { fetch: fetch as unknown as typeof globalThis.fetch })).toBe(false)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('does nothing while a landing runs', async () => {
+    addUserSession(s(b, 'other.example'))
+    const fetch = ok()
+    const run = land({ from: 'example.social' }, { fetch: fetch as unknown as typeof globalThis.fetch, replace: vi.fn(), path: '/home' })
+    expect(await healInstanceCookie({ instance: 'example.social', source: 'cookie' }, { fetch: fetch as unknown as typeof globalThis.fetch })).toBe(false)
+    await run
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+})
+
+describe('readShellInfo', () => {
+  function doc(text: string | null): Document {
+    const d = document.implementation.createHTMLDocument('')
+    if (text !== null) {
+      const el = d.createElement('script')
+      el.type = 'application/json'
+      el.id = '__litro_data__'
+      el.textContent = text
+      d.body.append(el)
+    }
+    return d
+  }
+
+  it('reads the shell of the page data', () => {
+    expect(readShellInfo(doc('{"kind":"ok","shell":{"instance":"example.social","source":"cookie"}}')))
+      .toEqual({ instance: 'example.social', source: 'cookie' })
+  })
+
+  it.each([['no data', null], ['bad JSON', '{'], ['no shell', '{"kind":"ok"}'], ['null', 'null']])('null for %s', (_n, text) => {
+    expect(readShellInfo(doc(text))).toBeNull()
   })
 })
