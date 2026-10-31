@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { activeUserKey, addUserSession, switchAccount, users, type UserSession } from '@beatzball/caribou-state'
+import type { LandRequest } from '../_switch-account.js'
 import { installUnauthorizedHandler } from '../_unauthorized.js'
 
 const bob = toUserKey('bob', 'example.social')
@@ -18,7 +19,7 @@ function fire(target: EventTarget, userKey: string, token: string): void {
 
 describe('installUnauthorizedHandler', () => {
   let target: EventTarget
-  let redirect: ReturnType<typeof vi.fn<(next: UserSession | null) => void>>
+  let redirect: ReturnType<typeof vi.fn<(req: LandRequest) => void>>
 
   beforeEach(() => {
     users.value = new Map()
@@ -26,17 +27,17 @@ describe('installUnauthorizedHandler', () => {
     localStorage.clear()
     sessionStorage.clear()
     target = new EventTarget()
-    redirect = vi.fn<(next: UserSession | null) => void>()
+    redirect = vi.fn<(req: LandRequest) => void>()
     installUnauthorizedHandler(target, redirect)
   })
 
-  it('signs out and redirects with the banner when the active session gets a 401', () => {
+  it('signs out and asks for a landing with the banner when the active session gets a 401', () => {
     addUserSession(session(bob, 'B1'))
     fire(target, bob, 'B1')
     expect(users.value.size).toBe(0)
-    expect(sessionStorage.getItem('caribou.error')).toBe('unauthorized')
+    expect(activeUserKey.value).toBeNull()
     expect(redirect).toHaveBeenCalledOnce()
-    expect(redirect).toHaveBeenCalledWith(null)
+    expect(redirect).toHaveBeenCalledWith({ from: 'example.social', expired: true })
   })
 
   it('lands as the next stored account when the active one gets a 401', () => {
@@ -51,9 +52,8 @@ describe('installUnauthorizedHandler', () => {
     expect(activeUserKey.value).toBe(carol)
     expect(JSON.parse(localStorage.getItem('caribou.activeUserKey')!)).toBe(carol)
     expect(redirect).toHaveBeenCalledOnce()
-    expect(redirect.mock.calls[0]![0]?.userKey).toBe(carol)
     // No "signed out" banner: the reader is still signed in.
-    expect(sessionStorage.getItem('caribou.error')).toBeNull()
+    expect(redirect).toHaveBeenCalledWith({ from: 'example.social', expired: false })
   })
 
   it('still checks the token before it moves to the next account', () => {
@@ -65,21 +65,25 @@ describe('installUnauthorizedHandler', () => {
     expect(redirect).not.toHaveBeenCalled()
   })
 
-  it('redirects once when two timelines get a 401 at the same time', () => {
+  it('asks once when two timelines get a 401 for the same session', () => {
     addUserSession(session(bob, 'B1'))
     fire(target, bob, 'B1')
     fire(target, bob, 'B1')
     expect(redirect).toHaveBeenCalledOnce()
   })
 
-  it('does not start a second redirect for a session made active after the first began', () => {
-    addUserSession(session(bob, 'B1'))
-    fire(target, bob, 'B1')
+  it('still picks the next account for a second active 401 (the landing joins them)', () => {
+    const carol = toUserKey('carol', 'example.social')
     addUserSession(session(alice, 'A1'))
+    addUserSession(session(bob, 'B1'))
+    addUserSession(session(carol, 'C1'))
+    switchAccount(alice)
     fire(target, alice, 'A1')
-    expect(users.value.size).toBe(0)
-    expect(activeUserKey.value).toBeNull()
-    expect(redirect).toHaveBeenCalledOnce()
+    expect(activeUserKey.value).toBe(bob)
+    fire(target, bob, 'B1')
+    expect(activeUserKey.value).toBe(carol)
+    expect(redirect).toHaveBeenCalledTimes(2)
+    expect(redirect).toHaveBeenLastCalledWith({ from: 'example.social', expired: false })
   })
 
   it('removes only the other session, silently, when a non-active session gets a 401', () => {
@@ -88,7 +92,6 @@ describe('installUnauthorizedHandler', () => {
     fire(target, alice, 'A1')
     expect([...users.value.keys()]).toEqual([bob])
     expect(activeUserKey.value).toBe(bob)
-    expect(sessionStorage.getItem('caribou.error')).toBeNull()
     expect(redirect).not.toHaveBeenCalled()
   })
 

@@ -9,7 +9,11 @@ notifications, bookmarks, your profile, the public feeds), else on home. The
 last sign-out goes to `/` as before. A second click while sign-out is still
 running does nothing, so it can no longer sign out of the next account too.
 An expired session (a 401) with another account still signed in now moves to
-that account instead of signing out completely.
+that account instead of signing out completely. Sign-out and 401s that happen
+together end in one reload, as the account that is left, with the cookie set
+to its server. When the server changes, a public feed keeps its filters but
+not its page position (`max_id`, `min_id`, `since_id`). A page brought back
+with the browser's Back button can sign out again.
 
 A new `POST /api/instance` sets the instance cookie to a server this
 deployment has an app for, from a same-origin page only; the app uses it to

@@ -3,7 +3,8 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, addUserSession, type UserSession,
 } from '@beatzball/caribou-state'
-import { resetSignOutForTests } from '../caribou-signout-form.js'
+import { resetLanding } from '../_switch-account.js'
+import '../caribou-signout-form.js'
 import type { CaribouSignoutForm } from '../caribou-signout-form.js'
 
 const key = toUserKey('alice', 'example.social')
@@ -41,7 +42,7 @@ function submit(form: HTMLFormElement): SubmitEvent {
 
 describe('caribou-signout-form', () => {
   beforeEach(() => {
-    resetSignOutForTests()
+    resetLanding()
     users.value = new Map()
     activeUserKey.value = null
     localStorage.clear()

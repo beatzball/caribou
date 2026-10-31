@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { activeUserKey, addUserSession, users, type UserSession } from '@beatzball/caribou-state'
-import { landAs, pathAfterSwitch, switchToAccount } from '../_switch-account.js'
+import {
+  land, pathAfterSwitch, resetLanding, switchToAccount, type LandDeps,
+} from '../_switch-account.js'
 
 const a = toUserKey('alice', 'example.social')
 const b = toUserKey('bob', 'other.example')
@@ -9,7 +11,17 @@ function s(userKey: typeof a, server: string): UserSession {
   return { userKey, server, token: 'T', vapidKey: 'V', account: null, createdAt: 1 }
 }
 
+// Lands as `session` the way a caller does: make it the only active account,
+// then ask for a landing.
+async function landAs(session: { server: string } | null, deps: LandDeps): Promise<void> {
+  users.value = new Map()
+  activeUserKey.value = null
+  if (session) addUserSession(s(b, session.server))
+  await land({ from: 'example.social' }, deps)
+}
+
 beforeEach(() => {
+  resetLanding()
   users.value = new Map()
   activeUserKey.value = null
   localStorage.clear()
@@ -39,7 +51,7 @@ describe('pathAfterSwitch', () => {
   })
 })
 
-describe('landAs', () => {
+describe('land', () => {
   it('sets the cookie to the session server, then loads the kept path', async () => {
     const order: string[] = []
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -73,6 +85,7 @@ describe('landAs', () => {
     it.each(failures)('%s: a page that renders from the cookie server goes to /home', async (_, fail) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       for (const path of ['/local', '/public?max_id=9']) {
+        resetLanding()
         const replace = vi.fn()
         const fetch = vi.fn(fail)
         await landAs({ server: 'other.example' }, { fetch: fetch as unknown as typeof globalThis.fetch, replace, path })
@@ -86,6 +99,7 @@ describe('landAs', () => {
     it.each(failures)('%s: a page that does not read the cookie is kept', async (_, fail) => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       for (const path of ['/notifications', '/@me', '/@carol@example.social']) {
+        resetLanding()
         const replace = vi.fn()
         await landAs({ server: 'other.example' }, { fetch: vi.fn(fail) as unknown as typeof globalThis.fetch, replace, path })
         expect(replace).toHaveBeenCalledWith(path)
@@ -121,5 +135,65 @@ describe('switchToAccount', () => {
     expect(await switchToAccount(a, { replace })).toBe(false)
     expect(activeUserKey.value).toBe(b)
     expect(replace).not.toHaveBeenCalled()
+  })
+})
+
+describe('pathAfterSwitch across servers', () => {
+  it.each([
+    ['/local?max_id=9', '/local'],
+    ['/public?local=true&min_id=3&since_id=2', '/public?local=true'],
+    ['/@carol@example.social?tab=media&max_id=9', '/@carol@example.social?tab=media'],
+    ['/@carol@example.social?tab=media', '/@carol@example.social?tab=media'],
+    ['/@carol/109999?max_id=9', '/home'],
+  ])('%s -> %s', (from, to) => {
+    expect(pathAfterSwitch(from, true)).toBe(to)
+  })
+
+  it('keeps the cursor when the server stays the same', () => {
+    expect(pathAfterSwitch('/local?max_id=9', false)).toBe('/local?max_id=9')
+  })
+
+  it('land drops the cursor only when the server changed', async () => {
+    const ok = async () => new Response(null, { status: 204 })
+    let replace = vi.fn()
+    await landAs({ server: 'other.example' }, { fetch: vi.fn(ok) as unknown as typeof globalThis.fetch, replace, path: '/local?max_id=9' })
+    expect(replace).toHaveBeenCalledWith('/local')
+
+    resetLanding()
+    replace = vi.fn()
+    await landAs({ server: 'example.social' }, { fetch: vi.fn(ok) as unknown as typeof globalThis.fetch, replace, path: '/local?max_id=9' })
+    expect(replace).toHaveBeenCalledWith('/local?max_id=9')
+  })
+})
+
+describe('one landing per document', () => {
+  it('a second request joins the first and navigates once', async () => {
+    addUserSession(s(b, 'other.example'))
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const replace = vi.fn()
+    const deps = { fetch: fetch as unknown as typeof globalThis.fetch, replace, path: '/home' }
+    const first = land({ from: 'example.social' }, deps)
+    const second = land({}, deps)
+    await Promise.all([first, second])
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledOnce()
+    // A request after the navigation does nothing more.
+    await land({}, deps)
+    expect(replace).toHaveBeenCalledOnce()
+  })
+
+  it('waits for `after` before it writes the cookie', async () => {
+    addUserSession(s(b, 'other.example'))
+    let done!: () => void
+    const after = new Promise<void>((r) => { done = r })
+    const fetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const replace = vi.fn()
+    const run = land({ from: 'example.social', after }, { fetch: fetch as unknown as typeof globalThis.fetch, replace, path: '/home' })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fetch).not.toHaveBeenCalled()
+    done()
+    await run
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(replace).toHaveBeenCalledWith('/home')
   })
 })
