@@ -1,36 +1,24 @@
 import { expect, test } from './_fixtures.js'
 
-test('signin-done shim parses fragment → writes localStorage → navigates /feed', async ({ page }) => {
-  // Intercept /feed so the test does not depend on the home timeline or a live
-  // Mastodon backend; we only care that the shim reached /feed.
-  await page.route('**/feed', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'text/html',
-      body: '<!doctype html><html><body><p id="feed-stub">feed reached</p></body></html>',
-    }),
-  )
+// `/signin/done` once finished a sign-in from the session in its URL
+// fragment, so any link could sign a reader in to someone else's account.
+// Now the callback's own response finishes a sign-in, and this page only
+// offers the way back, whatever its URL holds.
 
-  await page.goto(
-    '/signin/done#token=TOK&server=example.social&userKey=alice%40example.social&vapidKey=VK',
-  )
-  await page.waitForSelector('#feed-stub')
-
-  const ls = await page.evaluate(() => ({
-    users: localStorage.getItem('caribou.users'),
-    active: localStorage.getItem('caribou.activeUserKey'),
-  }))
-  expect(ls.active).toBe('"alice@example.social"')
-  expect(ls.users).toContain('"token":"TOK"')
-  expect(ls.users).toContain('"server":"example.social"')
-})
-
-test('signin-done shows fallback when fragment is missing', async ({ page }) => {
-  await page.goto('/signin/done')
-  await expect(page.getByText(/something went wrong/i)).toBeVisible()
-})
-
-test('signin-done shows fallback when userKey is malformed', async ({ page }) => {
-  await page.goto('/signin/done#token=TOK&server=example.social&userKey=bogus&vapidKey=VK')
-  await expect(page.getByText(/something went wrong/i)).toBeVisible()
-})
+for (const [name, path] of [
+  ['no fragment', '/signin/done'],
+  ['a full session in the fragment', '/signin/done#token=TOK&server=example.social&userKey=alice%40example.social&vapidKey=VK'],
+  ['a malformed fragment', '/signin/done#token=TOK&server=example.social&userKey=bogus&vapidKey=VK'],
+] as const) {
+  test(`signin-done with ${name} shows the fallback and stores nothing`, async ({ page }) => {
+    await page.goto(path)
+    await expect(page.getByText(/something went wrong/i)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Return to start' })).toHaveAttribute('href', '/')
+    const ls = await page.evaluate(() => ({
+      users: localStorage.getItem('caribou.users'),
+      active: localStorage.getItem('caribou.activeUserKey'),
+    }))
+    expect(ls).toEqual({ users: null, active: null })
+    expect(new URL(page.url()).pathname).toBe('/signin/done')
+  })
+}

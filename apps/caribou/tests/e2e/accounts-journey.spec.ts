@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Browser, Response } from '@playwright/test'
 import { expect, test, type BrowserContext, type Page } from './_fixtures.js'
+import { authorizeSignsIn } from './_signin.js'
 
 // The whole multi-account feature (#58), through the real UI: signed in as
 // Alice, add Bob on another server from the account menu, switch back to
@@ -10,11 +11,12 @@ import { expect, test, type BrowserContext, type Page } from './_fixtures.js'
 // binding: a callback URL works only in the browser that started it.
 //
 // The token exchange is a request from this server to the user's server,
-// which a test cannot answer. So a successful sign-in jumps from the mocked
-// authorize page straight to `/signin/done` (as `accounts-add.spec.ts`
-// does), and the binding is checked by where the real callback sends a
-// browser: the starting browser gets as far as the exchange
-// (`exchange_failed`), any other browser stops at `state_mismatch`.
+// which a test cannot answer. So a successful callback is answered with the
+// real completion page (`_signin.ts`, as `accounts-add.spec.ts` does), and
+// the binding is checked by where the real callback sends a browser: the
+// starting browser gets as far as the exchange (`exchange_failed`), any
+// other browser stops at `state_mismatch`. A completion link someone sends
+// (the old `/signin/done#token=…`) signs nobody in.
 
 test.skip(!!process.env.E2E_BASE_URL && !process.env.E2E_STORAGE_DIR,
   'Needs E2E_STORAGE_DIR to seed app registrations for an external server')
@@ -90,20 +92,6 @@ async function setup(page: Page, context: BrowserContext, keys: string[]) {
   }
 }
 
-// The user's server: its authorize page sends the browser on at once.
-async function authorizeThen(page: Page, server: string, next: (state: string) => string) {
-  await page.route(`https://${server}/oauth/authorize**`, (route) => {
-    const state = new URL(route.request().url()).searchParams.get('state') ?? ''
-    return route.fulfill({
-      status: 200, contentType: 'text/html',
-      body: `<!doctype html><script>location.replace(${JSON.stringify(ORIGIN + next(state))})</script>`,
-    })
-  })
-}
-
-const signedInWith = (token: string, server: string, userKey: string) => () =>
-  `/signin/done#${new URLSearchParams({ token, server, userKey, vapidKey: '' })}`
-
 const settled = (page: Page) => page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
 
 async function gotoSettled(page: Page, path: string) {
@@ -158,7 +146,7 @@ test('two accounts on two servers: add, switch, reload, sign out, 401', async ({
   // Carol (on Alice's server) is stored too, so that after Alice signs out
   // there is still an account that is not active, for the 401.
   await setup(page, context, [CAROL, ALICE])
-  await authorizeThen(page, TWO, signedInWith('NEW-BOB', TWO, BOB))
+  await authorizeSignsIn(page, ORIGIN, TWO, { token: 'NEW-BOB', server: TWO, userKey: BOB })
   await gotoSettled(page, '/home')
   await expect(accountTrigger(page)).toHaveAccessibleName(`Accounts alice ${handle(ALICE)}`)
 
@@ -277,9 +265,17 @@ test('a sign-in callback works only in the browser that started it', async ({ br
   const attacker = await newPage(browser)
   const victim = await newPage(browser)
   try {
-    const callback = await startedCallback(attacker.page)
+    // A browser that never started a sign-in has no `caribou.signin`
+    // cookie: it stops before any token exchange, with its own message.
+    const first = await startedCallback(attacker.page)
+    const fresh = await callbackTarget(victim.page, first)
+    expect(fresh.searchParams.get('error')).toBe('no_cookie')
+    expect(await victim.page.evaluate(() => localStorage.getItem('caribou.users'))).toBeNull()
 
-    // Another browser that opens it stops before any token exchange.
+    // A browser with a sign-in of its own open has another nonce: it stops
+    // at `state_mismatch`, also before any token exchange.
+    await startedCallback(victim.page)
+    const callback = await startedCallback(attacker.page)
     const there = await callbackTarget(victim.page, callback)
     expect(there.searchParams.get('error')).toBe('state_mismatch')
     expect(await victim.page.evaluate(() => localStorage.getItem('caribou.users'))).toBeNull()
@@ -297,5 +293,42 @@ test('a sign-in callback works only in the browser that started it', async ({ br
   } finally {
     await attacker.context.close()
     await victim.context.close()
+  }
+})
+
+test('a completion link someone sends signs nobody in', async ({ browser }) => {
+  // The old way to finish a sign-in: the session in the URL fragment. A
+  // stranger with a token for their own account could send this link.
+  const link = `/signin/done#${new URLSearchParams({
+    token: 'STRANGER-TOKEN', server: TWO, userKey: BOB, vapidKey: '',
+  })}`
+
+  // A browser with no account.
+  const fresh = await newPage(browser)
+  // A browser signed in as Alice.
+  const alice = await newPage(browser)
+  try {
+    for (const { page } of [fresh, alice]) {
+      if (page === alice.page) {
+        await page.addInitScript((key) => {
+          if (localStorage.getItem('caribou.__seeded__') === '1') return
+          const session = { userKey: key, server: key.split('@')[1], token: 'TOKEN-A', vapidKey: '', account: null, createdAt: 0 }
+          localStorage.setItem('caribou.users', JSON.stringify([[key, session]]))
+          localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+          localStorage.setItem('caribou.__seeded__', '1')
+        }, ALICE)
+      }
+      await page.goto(link)
+      await expect(page.getByText(/something went wrong completing sign-in/i)).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Return to start' })).toHaveAttribute('href', '/')
+      expect(new URL(page.url()).pathname).toBe('/signin/done')
+    }
+    expect(await fresh.page.evaluate(() => localStorage.getItem('caribou.users'))).toBeNull()
+    expect(await fresh.page.evaluate(() => localStorage.getItem('caribou.activeUserKey'))).toBeNull()
+    expect(await stored(alice.page)).toEqual([ALICE])
+    expect(await active(alice.page)).toBe(ALICE)
+  } finally {
+    await fresh.context.close()
+    await alice.context.close()
   }
 })

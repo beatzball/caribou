@@ -42,7 +42,7 @@ async function gotoSettled(page: Page, path: string) {
   await expect(page.locator('litro-outlet > *')).toHaveCount(1)
 }
 
-// `account: null` is what sign-in stores (`server/routes/signin/done.get.ts`);
+// `account: null` is what sign-in stores (`server/lib/signin-complete-page.ts`);
 // the app loads the account afterwards.
 async function seedSession(page: Page, account: typeof ALICE | null = ALICE) {
   const session = {

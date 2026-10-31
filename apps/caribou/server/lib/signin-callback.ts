@@ -1,5 +1,6 @@
 import { toUserKey } from '@beatzball/caribou-auth'
 import { nonceMatches } from './signin-binding.js'
+import type { CompletedSession } from './signin-complete-page.js'
 import { STATE_TTL_MS, appKey, stateKey, type OAuthApp, type StateEntry } from './storage.js'
 
 export interface CompleteSigninDeps {
@@ -18,7 +19,9 @@ export interface CompleteSigninDeps {
 }
 
 export type CompleteSigninResult =
-  | { kind: 'ok';    location: string; server: string }
+  // The route answers with the completion page (`signin-complete-page.ts`).
+  // The session never goes into a URL.
+  | { kind: 'ok';    session: CompletedSession; server: string }
   | { kind: 'error'; location: string }
 
 export interface CompleteSigninInput {
@@ -48,6 +51,10 @@ export async function completeSignin(input: CompleteSigninInput, deps: CompleteS
   })
 
   if (input.error) return fail('denied')
+  // No sign-in cookie at all: most often a browser that blocks cookies, or a
+  // sign-in that the user's server finished in another browser. Its own code
+  // tells the reader what to do; it tells a stranger nothing new.
+  if (!input.nonce) return fail('no_cookie')
   if (!input.code || !stateData) return fail('state_mismatch')
 
   const now = (deps.now ?? Date.now)()
@@ -78,14 +85,7 @@ export async function completeSignin(input: CompleteSigninInput, deps: CompleteS
   }
 
   const userKey = toUserKey(account.username, server)
-  const fragment = new URLSearchParams({
-    token,
-    server,
-    userKey,
-    vapidKey: app.vapid_key,
-  }).toString()
-
-  return { kind: 'ok', location: `/signin/done#${fragment}`, server }
+  return { kind: 'ok', session: { token, server, userKey, vapidKey: app.vapid_key }, server }
 }
 
 export async function exchangeCodeForToken(input: {

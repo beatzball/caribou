@@ -39,6 +39,7 @@ describe('caribou-error-banner', () => {
   it.each([
     ['denied', 'Sign-in was cancelled.'],
     ['state_mismatch', 'Sign-in expired or was tampered with. Try again.'],
+    ['no_cookie', 'Finish sign-in in the same browser you started it in, with cookies allowed.'],
     ['exchange_failed', "Couldn't complete sign-in with that instance. Try again."],
     ['verify_failed', "Couldn't verify your account with the instance. Try again."],
     ['unauthorized', 'Your session expired. Sign in again.'],

@@ -188,20 +188,35 @@ account that is not active removes only that account, with no reload.
 **The instance cookie** (`caribou.instance`, httpOnly) names the server that SSR
 reads `/local`, `/public` and threads from (`server/lib/instance-cookie.ts`).
 The browser cannot write it, so the app asks `POST /api/instance` with
-`{ server }`: same-origin only, and only for a server this deployment has an
-app registered with (else `400`). Sign-out never clears it, so the public
+`{ server }`. A cross-site request gets `403`; a server this deployment has
+no app registered with gets `400`. Sign-out never clears it, so the public
 feeds keep their server. At start, `app-main.ts` heals a stale cookie: when
 the page's instance came from the cookie and differs from the active
 account's server, it posts once (`healInstanceCookie`).
 
 **Sign-in is bound to the browser that started it.** `POST /api/signin/start`
-sets a random nonce in a `caribou.signin` cookie (HttpOnly, SameSite=Lax,
-path `/api/signin`, 10 minutes, Secure on https) and keeps only its SHA-256
-in the OAuth state entry. `/api/signin/callback` compares them in constant
-time before any token exchange, uses the state up either way, and clears the
-cookie (`server/lib/signin-binding.ts`). A callback URL opened in another
-browser goes to `/?error=state_mismatch`. One sign-in at a time per browser:
-starting a second one replaces the cookie, so the first one's callback fails.
+is same-origin only (else `403`). It sets a random nonce in a `caribou.signin`
+cookie (HttpOnly, SameSite=Lax, path `/api/signin`, 10 minutes, Secure on
+https) and keeps only its SHA-256 in the OAuth state entry.
+`/api/signin/callback` compares them in constant time before any token
+exchange, uses the state up either way, and clears the cookie
+(`server/lib/signin-binding.ts`). A callback URL opened in another browser
+goes to `/?error=state_mismatch`; a callback with no `caribou.signin` cookie
+at all (cookies blocked, or finished in another browser) goes to
+`/?error=no_cookie`. One sign-in at a time per browser: starting a second one
+replaces the cookie, so the first one's callback fails.
+
+**Completing a sign-in.** On success the callback does not redirect. It
+answers `200` with the completion page itself
+(`server/lib/signin-complete-page.ts`): the session (token, server, `userKey`,
+VAPID key) sits in a `<script type="application/json">` block, and the page's
+one script stores it in `caribou.users`, makes it active, takes the callback
+URL out of history and goes to `/feed`. The response sets the instance cookie
+and has `cache-control: no-store`, `referrer-policy: no-referrer` and a CSP
+that lets only that script and style run. The token is never in a URL, so a
+link cannot sign a reader in to someone else's account. `/signin/done`, where
+sign-in used to end with the session in the URL fragment, now only shows
+"Something went wrong… Return to start" and stores nothing.
 
 **Adding an account** is `/?add`: the sign-in form, which keeps the stored
 accounts. The new account becomes active; signing in to one already stored
