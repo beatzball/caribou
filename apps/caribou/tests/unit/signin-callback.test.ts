@@ -74,4 +74,52 @@ describe('completeSignin', () => {
     const res = await completeSignin({ code: 'C1', state: 'S1' }, d)
     expect(res.location).toBe('/?error=exchange_failed&instance=fosstodon.org')
   })
+
+  describe('adding an account (state has add)', () => {
+    function addDeps(overrides: Partial<CompleteSigninDeps> = {}) {
+      const d = deps(overrides)
+      void d.storage.setItem('state:ADD', {
+        server: 'fosstodon.org', origin: 'https://caribou.quest', createdAt: 1, add: true,
+      })
+      return d
+    }
+
+    it('a denial goes back to the add form and uses up the state', async () => {
+      const d = addDeps()
+      const res = await completeSignin({ error: 'access_denied', state: 'ADD' }, d)
+      expect(res).toEqual({ kind: 'error', location: '/?add&error=denied' })
+      expect(await d.storage.getItem('state:ADD')).toBeNull()
+    })
+
+    it('a denial with a plain state goes to the plain landing', async () => {
+      const d = deps()
+      const res = await completeSignin({ error: 'access_denied', state: 'S1' }, d)
+      expect(res).toEqual({ kind: 'error', location: '/?error=denied' })
+      expect(await d.storage.getItem('state:S1')).toBeNull()
+    })
+
+    it('a failed exchange or verify goes back to the add form', async () => {
+      const ex = addDeps({ exchangeCode: vi.fn(async () => { throw new Error('boom') }) as CompleteSigninDeps['exchangeCode'] })
+      expect((await completeSignin({ code: 'C1', state: 'ADD' }, ex)).location)
+        .toBe('/?add&error=exchange_failed&instance=fosstodon.org')
+      const ve = addDeps({ verifyCredentials: vi.fn(async () => { throw new Error('nope') }) as CompleteSigninDeps['verifyCredentials'] })
+      expect((await completeSignin({ code: 'C1', state: 'ADD' }, ve)).location).toBe('/?add&error=verify_failed')
+    })
+
+    it('a missing code goes back to the add form', async () => {
+      const res = await completeSignin({ state: 'ADD' }, addDeps())
+      expect(res).toEqual({ kind: 'error', location: '/?add&error=state_mismatch' })
+    })
+
+    it('an expired add state goes back to the add form', async () => {
+      const res = await completeSignin({ code: 'C1', state: 'ADD' }, addDeps({ now: () => 1 + 11 * 60 * 1000 }))
+      expect(res).toEqual({ kind: 'error', location: '/?add&error=state_mismatch' })
+    })
+
+    it('success is the same as a first sign-in', async () => {
+      const res = await completeSignin({ code: 'C1', state: 'ADD' }, addDeps())
+      expect(res.kind).toBe('ok')
+      expect(res.location).toMatch(/^\/signin\/done#token=ACCESS-TOKEN-1&server=fosstodon\.org&userKey=beatzball%40fosstodon\.org/)
+    })
+  })
 })

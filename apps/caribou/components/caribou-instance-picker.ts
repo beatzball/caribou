@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from 'lit'
-import { customElement, state } from 'lit/decorators.js'
+import { customElement, property, state } from 'lit/decorators.js'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 
@@ -17,6 +17,10 @@ export class CaribouInstancePicker extends LitElement {
     [role="alert"] { color: var(--danger); margin: 0; }
   `]
 
+  // Adds an account while signed in: the server sends an error back to
+  // `/?add`, and the field takes focus when the form opens.
+  @property({ type: Boolean }) add = false
+
   @state() private submitting = false
   @state() private error: string | null = null
 
@@ -33,7 +37,7 @@ export class CaribouInstancePicker extends LitElement {
       const res = await fetch('/api/signin/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ server }),
+        body: JSON.stringify(this.add ? { server, add: true } : { server }),
       })
       if (!res.ok) {
         this.error = 'Could not reach that instance. Check the spelling and try again.'
@@ -46,6 +50,25 @@ export class CaribouInstancePicker extends LitElement {
     } finally {
       this.submitting = false
     }
+  }
+
+  // The account menu's "Add account" link opens this form to type in, so
+  // the field takes focus. Not `autofocus`: a browser honours it only once
+  // per document, and a client-side navigation inserts the form later.
+  //
+  // The router renders the next page hidden, shows it, and then focuses
+  // its outlet (`<litro-outlet>`) so keyboard users start at the top. The
+  // field takes the focus after that. A form the swap removed, such as the
+  // server-rendered one on a first load, is no longer connected and does
+  // nothing.
+  override connectedCallback() {
+    super.connectedCallback()
+    if (!this.add) return
+    const focusField = () => {
+      if (this.isConnected) this.renderRoot.querySelector<HTMLInputElement>('input[name="server"]')?.focus()
+    }
+    void this.updateComplete.then(focusField)
+    document.querySelector('litro-outlet')?.addEventListener('focus', focusField, { once: true })
   }
 
   override render() {

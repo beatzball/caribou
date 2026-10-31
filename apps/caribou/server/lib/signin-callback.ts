@@ -27,18 +27,25 @@ export interface CompleteSigninInput {
 }
 
 export async function completeSignin(input: CompleteSigninInput, deps: CompleteSigninDeps): Promise<CompleteSigninResult> {
-  if (input.error) return { kind: 'error', location: '/?error=denied' }
-  if (!input.code || !input.state) return { kind: 'error', location: '/?error=state_mismatch' }
+  // The state entry is read (and used up) first, also for an error: it says
+  // whether the reader was adding an account. Mastodon sends `state` back
+  // with a denial too.
+  const stateData = input.state ? await deps.storage.getItem<StateEntry>(stateKey(input.state)) : null
+  if (input.state) await deps.storage.removeItem(stateKey(input.state))
+  // An add keeps the reader on the add form, signed in as before.
+  const fail = (code: string) => ({
+    kind: 'error' as const, location: `/?${stateData?.add ? 'add&' : ''}error=${code}`,
+  })
+
+  if (input.error) return fail('denied')
+  if (!input.code || !stateData) return fail('state_mismatch')
 
   const now = (deps.now ?? Date.now)()
-  const stateData = await deps.storage.getItem<StateEntry>(stateKey(input.state))
-  await deps.storage.removeItem(stateKey(input.state))
-  if (!stateData) return { kind: 'error', location: '/?error=state_mismatch' }
-  if ((now - stateData.createdAt) > STATE_TTL_MS) return { kind: 'error', location: '/?error=state_mismatch' }
+  if ((now - stateData.createdAt) > STATE_TTL_MS) return fail('state_mismatch')
 
   const { server, origin } = stateData
   const app = await deps.storage.getItem<OAuthApp>(appKey(server, origin))
-  if (!app) return { kind: 'error', location: `/?error=exchange_failed&instance=${encodeURIComponent(server)}` }
+  if (!app) return fail(`exchange_failed&instance=${encodeURIComponent(server)}`)
 
   let token: string
   try {
@@ -50,14 +57,14 @@ export async function completeSignin(input: CompleteSigninInput, deps: CompleteS
       redirectUri: `${origin}/api/signin/callback`,
     })
   } catch {
-    return { kind: 'error', location: `/?error=exchange_failed&instance=${encodeURIComponent(server)}` }
+    return fail(`exchange_failed&instance=${encodeURIComponent(server)}`)
   }
 
   let account: Awaited<ReturnType<CompleteSigninDeps['verifyCredentials']>>
   try {
     account = await deps.verifyCredentials({ server, token })
   } catch {
-    return { kind: 'error', location: '/?error=verify_failed' }
+    return fail('verify_failed')
   }
 
   const userKey = toUserKey(account.username, server)
