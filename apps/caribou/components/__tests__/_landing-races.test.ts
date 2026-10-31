@@ -365,6 +365,32 @@ describe('the start-up cookie repair and a landing (round 4)', () => {
   })
 })
 
+describe('a repair that hangs (round 5)', () => {
+  it('holds the last sign-out for a bounded time only', async () => {
+    vi.useFakeTimers()
+    try {
+      store([A, 'one.example'])
+      const net = heldFetch()
+      const replace = vi.fn()
+      void healInstanceCookie({ instance: 'zero.example', source: 'cookie' }, { fetch: net.fn as unknown as typeof fetch })
+      expect(net.cookieServers()).toEqual(['one.example'])
+
+      // The last account signs out; its POST is done at once. The repair never answers.
+      users.value = new Map()
+      activeUserKey.value = null
+      void land({ after: Promise.resolve() }, { fetch: net.fn as unknown as typeof fetch, replace, path: '/local' })
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(replace).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(replace).toHaveBeenCalledOnce()
+      expect(replace).toHaveBeenCalledWith('/')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('a restore while a landing is still running (round 3)', () => {
   it('stops the old landing and starts one for the state read again', async () => {
     store([A, 'one.example'], [B, 'two.example'], [C, 'three.example'])

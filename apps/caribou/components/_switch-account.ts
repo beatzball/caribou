@@ -100,7 +100,9 @@ let landing: Landing | null = null
 let signingOut = false
 // The start-up cookie repair while its POST is in flight. A landing waits for
 // it before its first cookie write, so the landing's write is the last one.
+// The wait is bounded: a repair that hangs must not hold a sign-out.
 let healing: Promise<unknown> | null = null
+const HEAL_WAIT_MS = 5000
 
 async function settle(gates: Set<Promise<unknown>>): Promise<void> {
   // A gate can be added while we wait for the others.
@@ -213,11 +215,12 @@ export async function healInstanceCookie(
   if (!session || landing || shell?.source !== 'cookie' || !shell.instance) return false
   if (shell.instance.toLowerCase() === session.server.toLowerCase()) return false
   const post = setInstanceCookie(session.server, deps.fetch ?? fetch)
-  healing = post
+  const gate = Promise.race([post, new Promise((r) => setTimeout(r, HEAL_WAIT_MS))])
+  healing = gate
   try {
     return await post
   } finally {
-    if (healing === post) healing = null
+    if (healing === gate) healing = null
   }
 }
 
