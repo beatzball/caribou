@@ -72,4 +72,16 @@ describe('startSignin', () => {
     const d = deps()
     await expect(startSignin({ server: '', origin: 'https://c' }, d)).rejects.toThrow(/server/i)
   })
+
+  it('marks the state of an add, and only of an add', async () => {
+    const d = deps()
+    await startSignin({ server: 's', origin: 'https://c', add: true }, d)
+    expect(await d.storage.getItem('state:STATE-TOKEN')).toEqual({
+      server: 's', origin: 'https://c', createdAt: 1_700_000_000_000, add: true,
+    })
+    await startSignin({ server: 's', origin: 'https://c', add: false }, d)
+    expect(await d.storage.getItem('state:STATE-TOKEN')).toEqual({
+      server: 's', origin: 'https://c', createdAt: 1_700_000_000_000,
+    })
+  })
 })

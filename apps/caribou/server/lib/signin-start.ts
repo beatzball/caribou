@@ -17,6 +17,8 @@ export interface StartSigninDeps {
 export interface StartSigninInput {
   server: string
   origin: string
+  // The reader is signed in and adds another account.
+  add?: boolean
 }
 
 export interface StartSigninOutput {
@@ -44,7 +46,7 @@ export async function startSignin(input: StartSigninInput, deps: StartSigninDeps
   }
 
   const state = (deps.generateState ?? defaultGenerateState)()
-  const stateEntry: StateEntry = { server, origin, createdAt: now }
+  const stateEntry: StateEntry = { server, origin, createdAt: now, ...(input.add ? { add: true as const } : {}) }
   await deps.storage.setItem(stateKey(state), stateEntry)
 
   const authorizeUrl = buildAuthorizeUrl({

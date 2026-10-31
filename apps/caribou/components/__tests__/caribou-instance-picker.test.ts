@@ -173,4 +173,61 @@ describe('caribou-instance-picker', () => {
     await el.updateComplete
     expect(parts(el).alert).toBeNull()
   })
+
+  describe('add', () => {
+    async function mountAdd(): Promise<CaribouInstancePicker> {
+      const el = document.createElement('caribou-instance-picker') as CaribouInstancePicker
+      el.add = true
+      document.body.appendChild(el)
+      await el.updateComplete
+      return el
+    }
+
+    it('POSTs add: true with the server', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(okResponse())
+      const el = await mountAdd()
+      submit(el, 'two.example')
+      await settle(el)
+      const init = fetchSpy.mock.calls[0]![1]!
+      expect(JSON.parse(init.body as string)).toEqual({ server: 'two.example', add: true })
+      expect(fakeLocation.href).toBe('https://example.social/oauth/authorize?x=1')
+    })
+
+    it('focuses the server field when it opens', async () => {
+      const el = await mountAdd()
+      expect(el.shadowRoot!.activeElement).toBe(parts(el).input)
+    })
+
+    it('does not take focus without add', async () => {
+      const el = await mount()
+      expect(el.shadowRoot!.activeElement).toBeNull()
+    })
+
+    // The router focuses its outlet after it shows the page; the field
+    // takes the focus back.
+    it('takes the focus back after the router focuses the outlet', async () => {
+      const outlet = document.createElement('litro-outlet')
+      outlet.tabIndex = -1
+      document.body.appendChild(outlet)
+      const el = document.createElement('caribou-instance-picker') as CaribouInstancePicker
+      el.add = true
+      outlet.appendChild(el)
+      await el.updateComplete
+      outlet.focus()
+      expect(el.shadowRoot!.activeElement).toBe(parts(el).input)
+    })
+
+    it('a removed form does not take the focus when the outlet is focused', async () => {
+      const outlet = document.createElement('litro-outlet')
+      outlet.tabIndex = -1
+      document.body.appendChild(outlet)
+      const el = document.createElement('caribou-instance-picker') as CaribouInstancePicker
+      el.add = true
+      outlet.appendChild(el)
+      await el.updateComplete
+      el.remove()
+      outlet.focus()
+      expect(document.activeElement).toBe(outlet)
+    })
+  })
 })

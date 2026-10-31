@@ -21,6 +21,9 @@ export interface StateEntry {
   server: string
   origin: string
   createdAt: number
+  // Set when a signed-in reader adds another account (`/?add`). An error
+  // then goes back to the add form, not the plain landing.
+  add?: true
 }
 
 export const APP_TTL_MS   = 7 * 24 * 60 * 60 * 1000
