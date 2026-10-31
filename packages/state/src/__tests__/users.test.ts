@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, activeUser,
-  addUserSession, removeActiveUser, removeSession, switchAccount, signOutActive, isOwnAccount, userName, loadActiveAccount,
+  addUserSession, removeActiveUser, removeSession, switchAccount, signOutActive, nextAccountKey, isOwnAccount, userName, loadActiveAccount,
   loadFromStorage, saveToStorage,
   type UserSession,
 } from '../users.js'
@@ -365,5 +365,13 @@ describe('several accounts', () => {
     seed(a, b, c)
     expect(signOutActive()?.userKey).toBe(a)
     expect(Array.from(users.value.keys())).toEqual([a, b])
+  })
+
+  it('nextAccountKey picks the next one, wraps, and is null when alone', () => {
+    expect(nextAccountKey([a, b, c], a)).toBe(b)
+    expect(nextAccountKey([a, b, c], c)).toBe(a)
+    expect(nextAccountKey([a], a)).toBeNull()
+    expect(nextAccountKey([], a)).toBeNull()
+    expect(nextAccountKey([b, c], a)).toBe(b)
   })
 })

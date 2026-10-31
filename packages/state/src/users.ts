@@ -134,6 +134,18 @@ export function switchAccount(userKey: UserKey): boolean {
 }
 
 /**
+ * The account that follows `removed` in `keys` (the list before removal):
+ * the next one, or the first one when `removed` was the last. Null when no
+ * other account is in the list.
+ */
+export function nextAccountKey(keys: readonly UserKey[], removed: UserKey): UserKey | null {
+  const at = keys.indexOf(removed)
+  const rest = keys.filter((k) => k !== removed)
+  if (rest.length === 0) return null
+  return rest[at < 0 ? 0 : at % rest.length]!
+}
+
+/**
  * Signs out of the active account only. The account after it in the list
  * becomes active, or the first one when it was the last; with no account left
  * nothing is active. Returns the new active session, or null.
@@ -141,11 +153,8 @@ export function switchAccount(userKey: UserKey): boolean {
 export function signOutActive(): UserSession | null {
   const key = activeUserKey.value
   if (!key) return null
-  const keys = Array.from(users.value.keys())
-  const at = keys.indexOf(key)
+  const nextKey = nextAccountKey(Array.from(users.value.keys()), key)
   dropSession(key)
-  const rest = keys.filter((k) => k !== key)
-  const nextKey = rest.length === 0 ? null : rest[at < 0 ? 0 : at % rest.length]!
   activeUserKey.value = nextKey
   saveToStorage()
   return nextKey ? users.value.get(nextKey) ?? null : null

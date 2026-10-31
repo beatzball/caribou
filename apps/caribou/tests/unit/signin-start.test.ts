@@ -61,6 +61,13 @@ describe('startSignin', () => {
     expect(res.authorizeUrl.startsWith('https://fosstodon.org/oauth/authorize?')).toBe(true)
   })
 
+  it('lower-cases the server so the app is stored under one name', async () => {
+    const d = deps()
+    const res = await startSignin({ server: 'Fosstodon.ORG', origin: 'https://c' }, d)
+    expect(res.authorizeUrl.startsWith('https://fosstodon.org/oauth/authorize?')).toBe(true)
+    expect(d.registerApp).toHaveBeenCalledWith(expect.objectContaining({ server: 'fosstodon.org' }))
+  })
+
   it('rejects empty server input', async () => {
     const d = deps()
     await expect(startSignin({ server: '', origin: 'https://c' }, d)).rejects.toThrow(/server/i)

@@ -18,10 +18,15 @@ export async function handleSetInstance(
   if (!isSameOrigin(event)) return { ok: false, status: 403, message: 'cross-site request' }
   const server = (body as { server?: unknown } | null)?.server
   if (typeof server !== 'string') return { ok: false, status: 400, message: 'server is required' }
-  const hostname = server.trim()
-  if (!await isRegisteredInstance(hostname, deps)) {
-    return { ok: false, status: 400, message: 'unknown server' }
-  }
+  // Hostnames are not case-sensitive, but storage keys are on Linux. Sign-in
+  // now saves the lower-case name; a session from before that may still
+  // carry the name as typed, so that spelling is tried second.
+  const given = server.trim()
+  const lower = given.toLowerCase()
+  let hostname: string | null = null
+  if (await isRegisteredInstance(lower, deps)) hostname = lower
+  else if (given !== lower && await isRegisteredInstance(given, deps)) hostname = given
+  if (!hostname) return { ok: false, status: 400, message: 'unknown server' }
   setInstance(event, hostname)
   return { ok: true }
 }

@@ -1,8 +1,9 @@
 import { expect, test, type Page } from './_fixtures.js'
 
 // A 401 names the session of the client that got it (issue #76). Only a 401
-// for the active session signs the user out; one for another stored session,
-// or for a token that was replaced, must not touch the active one.
+// for the active session signs the user out of it (to the next stored
+// account, or to `/` when none is left); one for another stored session, or
+// for a token that was replaced, must not touch the active one.
 
 const INSTANCE = 'example.social'
 const ALICE = `alice@${INSTANCE}`
@@ -84,17 +85,30 @@ test('a 401 for the non-active session removes only that session, without a redi
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
-test('a 401 for a replaced token changes nothing, and a later real 401 still signs out', async ({ page }) => {
+test('a 401 for a replaced token changes nothing; a real one moves to the other account, then to /', async ({ page }) => {
   await unauthorized(page, BOB, 'TOKEN-OLD')
   expect(await stored(page)).toEqual({
     keys: [ALICE, BOB], active: BOB, aliceDrafts: '[]', bobDrafts: '[]',
   })
   await expect(page.getByText('bob was here')).toBeVisible()
 
+  // A real 401 for the active account: alice is still stored, so the page
+  // reloads signed in as alice, with no "signed out" banner.
+  const reloaded = page.waitForEvent('framenavigated', (f) => f === page.mainFrame())
   await unauthorized(page, BOB, 'TOKEN-B')
+  await reloaded
+  expect(await stored(page)).toEqual({
+    keys: [ALICE], active: ALICE, aliceDrafts: '[]', bobDrafts: null,
+  })
+  expect(new URL(page.url()).pathname).toBe('/home')
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  // A 401 for the last account signs out to the landing page.
+  await unauthorized(page, ALICE, 'TOKEN-A')
   await expect.poll(() => new URL(page.url()).pathname).toBe('/')
   await expect(page.getByRole('alert')).toContainText(/session expired|sign in again/i)
   expect(await stored(page)).toEqual({
-    keys: [ALICE], active: null, aliceDrafts: '[]', bobDrafts: null,
+    keys: [], active: null, aliceDrafts: null, bobDrafts: null,
   })
 })

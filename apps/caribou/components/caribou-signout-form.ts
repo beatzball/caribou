@@ -15,12 +15,27 @@ import { landAs } from './_switch-account.js'
  *
  * Without JavaScript the form posts natively and the server redirects.
  */
+// One sign-out per document. The first submit removes the current account
+// and makes the next one active at once, then waits for the network before
+// it reloads. A second submit in that wait (a double click, a repeated Enter,
+// or the other mounted sign-out form) would sign out of the survivor too. The
+// flag is module-level so it covers every <caribou-signout-form>, and it is
+// never cleared: the reload ends this document.
+let signingOut = false
+
+/** Test only: lets the next submit sign out again. */
+export function resetSignOutForTests(): void {
+  signingOut = false
+}
+
 @customElement('caribou-signout-form')
 export class CaribouSignoutForm extends LitElement {
   static override styles = css`:host { display: contents; }`
 
   private onSubmit = (e: Event) => {
     e.preventDefault()
+    if (signingOut) return
+    signingOut = true
     const form = e.target as HTMLFormElement
     const action = form.action || '/api/signout'
     const next = signOutActive()

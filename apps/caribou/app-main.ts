@@ -13,6 +13,7 @@ import {
   activeUserKey, loadActiveAccount, loadFromStorage, startUnreadNotifications,
 } from '@beatzball/caribou-state'
 import { installUnauthorizedHandler } from './components/_unauthorized.js'
+import { landAs } from './components/_switch-account.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
@@ -24,7 +25,8 @@ if (typeof window !== 'undefined') {
   // now and whenever the active user changes.
   activeUserKey.subscribe(() => { void loadActiveAccount() })
   // A client that gets a 401 fires `caribou:unauthorized` with its session.
-  installUnauthorizedHandler(window, () => { location.replace('/') })
+  // Land as the next stored account, or on `/` when none is left.
+  installUnauthorizedHandler(window, (next) => { void landAs(next) })
   // A tab open across a deploy asks for chunks the new build no longer has.
   installPreloadErrorReload(window)
   // The nav rail's unread badge. One poll for the app, not one per rail:

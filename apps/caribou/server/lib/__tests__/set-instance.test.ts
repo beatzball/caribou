@@ -42,6 +42,21 @@ describe('handleSetInstance', () => {
     expect(c).toMatch(/HttpOnly/)
   })
 
+  it('lower-cases the server before it looks for the app', async () => {
+    const event = mockEvent(SAME)
+    expect(await handleSetInstance(event, { server: ' Other.EXAMPLE ' }, deps)).toEqual({ ok: true })
+    expect(cookie(event)).toMatch(/^caribou\.instance=other\.example;/)
+  })
+
+  it('accepts an app stored under the name as typed (before sign-in lower-cased it)', async () => {
+    const legacy = { storage: { async getKeys(prefix?: string) {
+      return ['apps:Legacy.example:http://caribou.local'].filter((k) => !prefix || k.startsWith(prefix))
+    } } }
+    const event = mockEvent(SAME)
+    expect(await handleSetInstance(event, { server: 'Legacy.example' }, legacy)).toEqual({ ok: true })
+    expect(cookie(event)).toMatch(/^caribou\.instance=Legacy\.example;/)
+  })
+
   it('rejects a server with no registered app (400)', async () => {
     const event = mockEvent(SAME)
     expect(await handleSetInstance(event, { server: 'evil.example' }, deps))
@@ -78,6 +93,7 @@ describe('isSameOrigin', () => {
     ['typed into the address bar', { 'sec-fetch-site': 'none' }, false],
     ['Origin matches the host', { origin: 'http://caribou.local' }, true],
     ['Origin is another site', { origin: 'https://evil.example' }, false],
+    ['Origin: null (sandboxed frame, some redirects)', { origin: 'null' }, false],
     ['no headers at all', {}, false],
   ])('%s', (_, headers, expected) => {
     expect(isSameOrigin(mockEvent(headers))).toBe(expected)

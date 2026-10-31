@@ -5,8 +5,15 @@
 Sign-out with more than one account signed in now signs out of the current
 account only. The next account becomes active and the page reloads as that
 account, on the same page when it means the same for any account (home,
-notifications, bookmarks, the public feeds), else on home. The last sign-out
-goes to `/` as before. A new `POST /api/instance` sets the instance cookie to
-a server this deployment has an app for, from a same-origin page only; the
-app uses it to point SSR of the public feeds and profiles at the new account's
-server. Sign-out still never clears the cookie.
+notifications, bookmarks, your profile, the public feeds), else on home. The
+last sign-out goes to `/` as before. A second click while sign-out is still
+running does nothing, so it can no longer sign out of the next account too.
+An expired session (a 401) with another account still signed in now moves to
+that account instead of signing out completely.
+
+A new `POST /api/instance` sets the instance cookie to a server this
+deployment has an app for, from a same-origin page only; the app uses it to
+point SSR of the public feeds and profiles at the new account's server. When
+that fails twice, the reload goes to home rather than to a public feed of the
+old server. Sign-out still never clears the cookie. Sign-in now saves the
+server name in lower case.

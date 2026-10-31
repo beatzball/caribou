@@ -26,7 +26,9 @@ export interface StartSigninOutput {
 const SCOPES = 'read write follow push'
 
 export async function startSignin(input: StartSigninInput, deps: StartSigninDeps): Promise<StartSigninOutput> {
-  const server = input.server.replace(/^https?:\/\//, '').trim()
+  // Lower case: storage keys are case-sensitive on Linux, and
+  // `/api/instance` looks the app up by the lower-case name.
+  const server = input.server.trim().replace(/^https?:\/\//i, '').toLowerCase()
   if (!server) throw new Error('startSignin: server is required')
   const origin = input.origin
   if (!origin) throw new Error('startSignin: origin is required')
