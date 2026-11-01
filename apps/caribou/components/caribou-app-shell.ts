@@ -11,7 +11,10 @@ export class CaribouAppShell extends LitElement {
     :host { display: block; min-height: 100vh; background: var(--bg-0); color: var(--fg-0); }
     .shell-grid {
       display: grid;
-      grid-template-columns: 1fr;
+      /* minmax(0, …): a track's least width is otherwise its content's
+         min-content width, so one wide item (a link card's byline, which
+         does not wrap) makes the page wider than a phone. */
+      grid-template-columns: minmax(0, 1fr);
       grid-template-areas: "main";
       min-height: 100vh;
       /* viewport-fit=cover lets the page run under the notch in landscape. */
@@ -27,10 +30,10 @@ export class CaribouAppShell extends LitElement {
       main { padding-bottom: calc(60px + var(--space-6) + env(safe-area-inset-bottom, 0px)); }
     }
     @media (min-width: 768px) {
-      .shell-grid { grid-template-columns: 56px 1fr; grid-template-areas: "nav main"; }
+      .shell-grid { grid-template-columns: 56px minmax(0, 1fr); grid-template-areas: "nav main"; }
     }
     @media (min-width: 1024px) {
-      .shell-grid { grid-template-columns: 200px 1fr 280px; grid-template-areas: "nav main right"; }
+      .shell-grid { grid-template-columns: 200px minmax(0, 1fr) 280px; grid-template-areas: "nav main right"; }
       caribou-right-rail { display: block; }
     }
   `
