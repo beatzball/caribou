@@ -73,8 +73,27 @@ test('a link card with a long byline does not make the page wider than the phone
 test('the bottom bar is above the posts under it', async ({ page }) => {
   await openHome(page)
   const rail = page.locator('litro-outlet > :not([hidden]) caribou-nav-rail')
+  // Put a card image under the bar. Plain text under it would not show the
+  // bug: only positioned boxes (the image) paint over a bar with no z-index.
+  const under = await rail.evaluate((host) => {
+    const bar = host.shadowRoot!.querySelector('nav')!.getBoundingClientRect()
+    // The last card's image is below the bar, so the page can scroll it up.
+    const images: Element[] = []
+    const find = (root: Document | ShadowRoot) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.tagName === 'CARIBOU-STATUS-LINK-CARD') images.push(el.shadowRoot!.querySelector('.image')!)
+        else if (el.shadowRoot) find(el.shadowRoot)
+      }
+    }
+    find(document)
+    const image = images[images.length - 1]!
+    window.scrollBy(0, image.getBoundingClientRect().top - bar.top + 4)
+    const r = image.getBoundingClientRect()
+    return r.top <= bar.top && r.bottom >= bar.bottom
+  })
+  expect(under, 'a card image is under the bar').toBe(true)
   // The hit test at each item's center, walking down through shadow roots,
-  // must land inside the bar and not on a card image under it.
+  // must land inside the bar and not on the card image under it.
   const hits = await rail.evaluate((host) => {
     const nav = host.shadowRoot!.querySelector('nav')!
     // Items moved into the More menu are not shown in the bar.

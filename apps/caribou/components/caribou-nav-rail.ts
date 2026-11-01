@@ -176,7 +176,10 @@ export class CaribouNavRail extends LitElement {
     @media (max-width: 767px) {
       /* The z-index keeps the bar above positioned parts of the page (card
          and media images), which come later in the DOM and would paint over
-         it and take its taps. It stays under the toaster and update notice. */
+         it and take its taps. It stays under the toaster and update notice.
+         It also makes the bar a stacking context: where there is no Popover
+         API (Safari < 17, Firefox < 125) the More menu's panel stays at this
+         level too, so a toast can cover it. */
       nav { flex-direction: row; justify-content: space-around;
             position: fixed; bottom: 0; left: 0; right: 0; z-index: 2;
             background: var(--bg-1); border-top: 1px solid var(--border); padding: var(--space-2);

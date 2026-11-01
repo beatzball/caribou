@@ -67,13 +67,9 @@ export class CaribouStatusLinkCard extends LitElement {
     .title, .description { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
     .title { -webkit-line-clamp: 2; line-clamp: 2; color: var(--fg-0); font-weight: 600; }
     .description { -webkit-line-clamp: 3; line-clamp: 3; color: var(--fg-1); font-size: 0.875rem; }
-    /* One line, cut with an ellipsis. contain: inline-size keeps the unwrapped
-       text out of the card's min-content width: without it a long author list
-       made the card, and the page with it, wider than a phone. */
     .byline {
       color: var(--fg-muted); font-size: 0.75rem;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      contain: inline-size;
     }
   `]
 

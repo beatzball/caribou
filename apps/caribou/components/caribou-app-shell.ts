@@ -12,8 +12,8 @@ export class CaribouAppShell extends LitElement {
     .shell-grid {
       display: grid;
       /* minmax(0, …): a track's least width is otherwise its content's
-         min-content width, so one wide item (a card image capped in height
-         keeps its aspect ratio) makes the page wider than a phone. */
+         min-content width, so one wide item (a link card's byline, which
+         does not wrap) makes the page wider than a phone. */
       grid-template-columns: minmax(0, 1fr);
       grid-template-areas: "main";
       min-height: 100vh;
