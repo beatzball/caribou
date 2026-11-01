@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.10.1
+
+### Patch Changes
+
+- [#133](https://github.com/beatzball/caribou/pull/133) [`af2f8a8`](https://github.com/beatzball/caribou/commit/af2f8a8b16199131a1de8e6362f3c54c7f63bc15) Thanks [@beatzball](https://github.com/beatzball)! - Fix two phone layout bugs. A link card with a long byline (site and authors) no longer makes the page wider than the screen: the page column no longer grows to fit a wide item. The bottom navigation bar now stays above card and media images, so its items take taps again.
+
 ## 0.10.0
 
 ### Minor Changes
