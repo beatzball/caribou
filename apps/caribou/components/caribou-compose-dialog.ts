@@ -59,6 +59,16 @@ interface PendingMedia {
   mediaId?: string
 }
 
+// What a Remove or Retry button says after its verb, so that each one has
+// its own name: the file name, or else the kind and place, "image 2".
+function mediaLabel(name: string | undefined, kind: string, position: number): string {
+  if (name) return name
+  const noun = kind.startsWith('image') || kind === 'gifv' ? 'image'
+    : kind.startsWith('video') ? 'video'
+    : kind.startsWith('audio') ? 'audio' : 'file'
+  return `${noun} ${position}`
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -381,7 +391,7 @@ export class CaribouComposeDialog extends LitElement {
       URL.revokeObjectURL(current.previewUrl)
       const media: DraftMedia = {
         id: m.id, type: m.type, url: m.url ?? '', previewUrl: m.previewUrl ?? null,
-        description: current.description,
+        description: current.description, name: current.file.name,
       }
       this.syncedAlt.set(m.id, m.description ?? '')
       this.patchDraft({ media: [...this.draft.media, media] })
@@ -465,7 +475,9 @@ export class CaribouComposeDialog extends LitElement {
             @input=${(e: Event) => this.patchDraft({ text: (e.target as HTMLTextAreaElement).value })}></textarea>
           ${mediaCount > 0 ? html`
             <ul class="media" aria-label="Attachments">
-              ${d.media.map((m) => html`
+              ${d.media.map((m, i) => {
+                const label = mediaLabel(m.name, m.type, i + 1)
+                return html`
                 <li data-media=${m.id}>
                   ${m.type === 'image' || m.type === 'gifv'
                     ? html`<img src=${m.previewUrl ?? m.url} alt="">`
@@ -477,9 +489,12 @@ export class CaribouComposeDialog extends LitElement {
                         ? { ...x, description: (e.target as HTMLInputElement).value } : x),
                     })}
                     @change=${(e: Event) => this.saveAltOrToast(m.id, (e.target as HTMLInputElement).value)}>
-                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeMedia(m.id)}>Remove</caribou-button>
-                </li>`)}
-              ${this.pending.map((p) => html`
+                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeMedia(m.id)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
+                </li>`
+              })}
+              ${this.pending.map((p, i) => {
+                const label = mediaLabel(p.file.name, p.file.type, d.media.length + i + 1)
+                return html`
                 <li data-pending=${p.localId}>
                   ${p.file.type.startsWith('image/')
                     ? html`<img src=${p.previewUrl} alt="">`
@@ -494,10 +509,11 @@ export class CaribouComposeDialog extends LitElement {
                       this.pending = this.pending.map((x) => x.localId === p.localId ? { ...x, description } : x)
                     }}>
                   ${p.state === 'failed'
-                    ? html`<caribou-button data-action="retry-media" @click=${() => void this.upload(p.file, p)}>Retry</caribou-button>`
+                    ? html`<caribou-button data-action="retry-media" @click=${() => void this.upload(p.file, p)}>Retry<span class="visually-hidden"> ${label}</span></caribou-button>`
                     : nothing}
-                  <caribou-button data-action="remove-media" @click=${() => this.removePending(p.localId)}>Remove</caribou-button>
-                </li>`)}
+                  <caribou-button data-action="remove-media" @click=${() => this.removePending(p.localId)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
+                </li>`
+              })}
             </ul>` : nothing}
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space
