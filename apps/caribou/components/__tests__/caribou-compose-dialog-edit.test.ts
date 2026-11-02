@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUserKey, addUserSession, emptyDraft, loadDraft, saveDraft, statusCache, users,
+  activeClient, activeUserKey, addUserSession, emptyDraft, findRedraftSlot, loadDraft, saveDraft, statusCache, users,
   type UserSession,
 } from '@beatzball/caribou-state'
 import '../caribou-compose-dialog.js'
@@ -206,7 +206,7 @@ describe('caribou-compose-dialog edit mode', () => {
     expect(editStatus.mock.calls[0]![1]).toMatchObject({ language: 'de', mediaIds: ['m1', 'm9'] })
   })
 
-  it('a redraft never overwrites an unsent draft in its slot; posting it leaves that draft', async () => {
+  it('a redraft never overwrites an unsent draft; it is kept on its own and opens first next time', async () => {
     const client = signIn()
     vi.spyOn(client, 'createStatus').mockResolvedValue(own({ id: '8' }))
     saveDraft(KEY, 'new', emptyDraft({ text: 'precious existing draft' }))
@@ -214,11 +214,45 @@ describe('caribou-compose-dialog edit mode', () => {
     window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { redraft: emptyDraft({ text: 'from the deleted post' }) } }))
     await settle(el)
     expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
-    expect($(el, '[data-redraft-note]')!.textContent).toContain('not kept as a draft')
-    await type(el, 'from the deleted post, again')
+    expect($(el, '[data-redraft-note]')!.textContent).toContain('opens first')
+    // Stored at once, so Esc, Cancel or a reload loses nothing.
+    const slot = findRedraftSlot(KEY)!
+    expect(slot).toMatch(/^redraft:/)
+    expect(loadDraft(KEY, slot)?.text).toBe('from the deleted post')
+    await type(el, 'redraft, again')
+    expect(loadDraft(KEY, slot)?.text).toBe('redraft, again')
     expect(loadDraft(KEY, 'new')?.text).toBe('precious existing draft')
+
+    // Esc: closed, kept. The next new post opens it.
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    $<HTMLDialogElement>(el, 'dialog')!.dispatchEvent(new Event('close'))
+    await settle(el)
+    await compose(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('redraft, again')
     postButton(el).click()
     await settle(el)
+    expect(findRedraftSlot(KEY)).toBeNull()
+    expect(loadDraft(KEY, 'new')?.text).toBe('precious existing draft')
+
+    // Then the other draft, as it was.
+    await compose(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('precious existing draft')
+  })
+
+  it('an account switch while a kept redraft is open says where it went, truthfully', async () => {
+    signIn()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'precious existing draft' }))
+    const el = await mount()
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { redraft: emptyDraft({ text: 'from the deleted post' }) } }))
+    await settle(el)
+    activeUserKey.value = null
+    await settle(el)
+    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect(toasts).toContainEqual({
+      kind: 'info',
+      message: 'Your redraft is saved for the account you started it with. It opens the next time you write a new post there.',
+    })
+    expect(loadDraft(KEY, findRedraftSlot(KEY)!)?.text).toBe('from the deleted post')
     expect(loadDraft(KEY, 'new')?.text).toBe('precious existing draft')
   })
 

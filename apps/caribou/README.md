@@ -217,9 +217,12 @@ toast. An account change drops the marks and every cached copy of a
 deleted post with them. Delete & redraft opens a new post filled from the
 server's answer (`text`, content warning, visibility, sensitive,
 language, reply, media), kept as a draft, and with the post it replied
-to when the page has it. An unsent draft already in that slot is never
-overwritten: the redraft then lives only in the open dialog, which says
-so. An edited post shows "edited"
+to when the page has it. The deleted post is nowhere else, so the redraft
+is stored at once. An unsent draft already in its slot is never
+overwritten: the redraft then goes in its own `redraft:<key>` slot
+(`findRedraftSlot`), the dialog says so, and the next new post opens it
+first, then the other draft. Esc, Cancel, a reload or an account switch
+loses neither. An edited post shows "edited"
 after its time: plain text in the server render, a button after mount
 for a reader on the same server. It opens `<caribou-status-history>`
 with every version, newest first, each sanitized like a post. A result

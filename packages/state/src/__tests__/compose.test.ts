@@ -3,7 +3,7 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
 import {
-  clearDraft, draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
+  clearDraft, draftSlot, emptyDraft, findRedraftSlot, loadDraft, postDraft, saveDraft,
 } from '../compose.js'
 import { statusCache } from '../caches.js'
 import { activeUserKey, addUserSession, removeActiveUser, users, type UserSession } from '../users.js'
@@ -118,5 +118,18 @@ describe('postDraft', () => {
     saveDraft(alice, 'new', d)
     await expect(postDraft(fakeClient(alice, create), 'new', d)).rejects.toThrow('boom')
     expect(loadDraft(alice, 'new')?.text).toBe('keep me')
+  })
+})
+
+describe('findRedraftSlot', () => {
+  it('names a kept redraft, oldest first, and nothing when there is none', () => {
+    expect(findRedraftSlot(alice)).toBeNull()
+    saveDraft(alice, 'new', emptyDraft({ text: 'plain' }))
+    expect(findRedraftSlot(alice)).toBeNull()
+    saveDraft(alice, 'redraft:a', emptyDraft({ text: 'one' }))
+    saveDraft(alice, 'redraft:b', emptyDraft({ text: 'two' }))
+    expect(findRedraftSlot(alice)).toBe('redraft:a')
+    clearDraft(alice, 'redraft:a')
+    expect(findRedraftSlot(alice)).toBe('redraft:b')
   })
 })

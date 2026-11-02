@@ -32,9 +32,10 @@ export interface ComposeDraft {
 
 // A new post and each reply keep their own draft, so opening a reply does
 // not overwrite a half-written post, and the reverse.
-// `redraft` is a delete-and-redraft opened while its own slot held an
-// unsent draft: it lives only in the open dialog and is never stored.
-export type DraftSlot = 'new' | `reply:${string}` | 'redraft'
+// `redraft:<key>` holds a delete-and-redraft opened while its own slot held
+// an unsent draft. The deleted post exists nowhere else, so it is stored
+// like any draft, beside the one it must not overwrite.
+export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}`
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'
@@ -98,6 +99,19 @@ export function saveDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft
   if (isDraftEmpty(draft)) delete all[slot]
   else all[slot] = draft
   writeAll(userKey, all)
+}
+
+/**
+ * The slot of the oldest kept redraft (`redraft:<key>`), or null. A new
+ * post opens it before the plain `new` draft, so it cannot be forgotten.
+ */
+export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
+  for (const [slot, d] of Object.entries(readAll(userKey))) {
+    if (slot.startsWith('redraft:') && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
+      return slot as DraftSlot
+    }
+  }
+  return null
 }
 
 export function clearDraft(userKey: UserKey, slot: DraftSlot): void {

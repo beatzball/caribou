@@ -3,7 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser, activeUserKey, userName, editOwnStatus, isDraftEmpty, newestKnownStatus, olderEdit,
+  activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
   type ComposeDraft, type DraftMedia, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
@@ -204,9 +204,12 @@ export class CaribouComposeDialog extends LitElement {
       const key = activeUserKey.value
       if (this.open && this.client && key !== this.client.userKey) {
         const editing = this.editing !== null
+        const keptRedraft = this.keptRedraft
         this.close()
         toast('info', editing
           ? 'The edit was not saved: you switched accounts.'
+          : keptRedraft
+          ? 'Your redraft is saved for the account you started it with. It opens the next time you write a new post there.'
           : 'Your draft is saved for the account you started it with.')
       }
     })
@@ -313,10 +316,17 @@ export class CaribouComposeDialog extends LitElement {
     this.finishOpen()
   }
 
+  // The open draft is a redraft kept beside another draft (`redraft:<key>`).
+  private get keptRedraft(): boolean {
+    return this.draftKey.startsWith('redraft:')
+  }
+
   /**
-   * Opens a new post filled from a deleted one. It is kept as a draft in
-   * its slot, unless that slot holds an unsent draft: that one is never
-   * overwritten, and the redraft then lives only in the open dialog.
+   * Opens a new post filled from a deleted one, stored as a draft at once:
+   * the deleted post is nowhere else. It goes in its own slot, unless that
+   * slot holds an unsent draft. That one is never overwritten; the redraft
+   * is then kept in a `redraft:<key>` slot, which the next new post opens
+   * first.
    */
   showRedraft(draft: ComposeDraft, inReplyTo: mastodon.v1.Status | null = null): void {
     if (!this.begin()) return
@@ -325,12 +335,8 @@ export class CaribouComposeDialog extends LitElement {
     const held = loadDraft(client.userKey, slot)
     this.replyTo = inReplyTo && inReplyTo.id === draft.inReplyToId ? inReplyTo : null
     this.draft = draft
-    if (held && !isDraftEmpty(held)) {
-      this.draftKey = 'redraft'
-    } else {
-      this.draftKey = slot
-      saveDraft(client.userKey, slot, draft)
-    }
+    this.draftKey = held && !isDraftEmpty(held) ? `redraft:${draft.idempotencyKey}` : slot
+    saveDraft(client.userKey, this.draftKey, draft)
     this.finishOpen()
   }
 
@@ -339,7 +345,10 @@ export class CaribouComposeDialog extends LitElement {
     if (!this.begin()) return
     const user = activeUser.value!
     const client = this.client!
-    this.draftKey = draftSlot(inReplyTo?.id)
+    // A kept redraft opens before a plain new post, so the deleted post's
+    // text is never left behind unseen.
+    const redraft = inReplyTo ? null : findRedraftSlot(client.userKey)
+    this.draftKey = redraft ?? draftSlot(inReplyTo?.id)
     this.replyTo = inReplyTo
     const visibility = defaultVisibility(user)
     this.draft = loadDraft(client.userKey, this.draftKey) ?? (inReplyTo
@@ -376,7 +385,7 @@ export class CaribouComposeDialog extends LitElement {
     // the draft that is being sent, or be cleared with it.
     if (this.posting || !this.client) return
     this.draft = { ...this.draft, ...patch }
-    if (!this.editing && this.draftKey !== 'redraft') saveDraft(this.client.userKey, this.draftKey, this.draft)
+    if (!this.editing) saveDraft(this.client.userKey, this.draftKey, this.draft)
   }
 
   private get count(): number {
@@ -584,8 +593,8 @@ export class CaribouComposeDialog extends LitElement {
               <span class="acct">@${this.replyTo.account.acct}</span>
               <div>${plainText(this.replyTo.content)}</div>
             </div>` : nothing}
-          ${this.draftKey === 'redraft' ? html`
-            <p class="note" data-redraft-note>This redraft is not kept as a draft: you already have an unsent draft here, and it stays as it is.</p>` : nothing}
+          ${this.keptRedraft ? html`
+            <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
           ${d.cw ? html`
             <label class="visually-hidden" for="compose-cw">Content warning</label>
             <input id="compose-cw" type="text" name="spoiler" placeholder="Content warning"
