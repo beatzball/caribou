@@ -151,3 +151,13 @@ describe('<caribou-toaster> action', () => {
     expect(el.shadowRoot!.querySelector('caribou-button.action')).toBeNull()
   })
 })
+
+it('an Undo toast is never pushed out by later toasts (codex P3, fable 5)', async () => {
+  const el = await mount()
+  toast({ kind: 'info', message: 'Removed @bob.', action: { label: 'Undo', run: () => {} } })
+  for (let i = 1; i <= 6; i++) toast({ kind: 'info', message: `Note ${i}` })
+  await el.updateComplete
+  const shown = messages(el, 'status')
+  expect(shown).toContain('Removed @bob.')
+  expect(shown.length).toBeLessThanOrEqual(4)
+})

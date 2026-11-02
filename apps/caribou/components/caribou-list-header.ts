@@ -12,7 +12,7 @@ import {
 import { boxReset } from './_shared-styles.js'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
-import { editListFlow } from './_list-flows.js'
+import { editListFlow, toastRemoved } from './_list-flows.js'
 import './caribou-button.js'
 
 type Members = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; items: mastodon.v1.Account[] }
@@ -174,15 +174,7 @@ export class CaribouListHeader extends LitElement {
     // A failure puts the row back and the store's toast says so. A removal
     // that worked says so too, with Undo, since it is quick to do by mistake.
     if (!(await done) || activeUserKey.peek() !== client.userKey) return
-    const listId = this.list
-    const title = this.known ? `the list "${this.known.title}"` : 'the list'
-    window.dispatchEvent(new CustomEvent('caribou:toast', { detail: {
-      kind: 'info', message: `Removed @${account.acct} from ${title}.`,
-      action: { label: 'Undo', run: () => {
-        if (activeUserKey.peek() !== client.userKey) return
-        void setListMember(listId, account, true, { clientSource: () => client, at })
-      } },
-    } }))
+    toastRemoved(client, this.list, account, at)
   }
 
   private renderMembers() {

@@ -396,3 +396,59 @@ describe('review round 1', () => {
     expect(el.shadowRoot!.activeElement).toBe($(el, 'li[data-list-id="9"] a.title'))
   })
 })
+
+describe('review round 2', () => {
+  it('unchecking a list in the picker offers Undo, which checks it again (codex 6, picker)', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchLists').mockResolvedValue([list('1', 'Friends')])
+    vi.spyOn(client, 'fetchAccountLists').mockResolvedValue([list('1', 'Friends')])
+    const remove = vi.spyOn(client, 'removeListAccounts').mockResolvedValue()
+    const add = vi.spyOn(client, 'addListAccounts').mockResolvedValue()
+    const details: { kind: string; message: string; action?: { label: string; run: () => void } }[] = []
+    const grab = (e: Event) => details.push((e as CustomEvent).detail)
+    window.addEventListener('caribou:toast', grab)
+    try {
+      void openListPicker(account('7', 'bob'), true)
+      const el = await dialogOf<CaribouListPicker>('caribou-list-picker')
+      await settle(el)
+      const box = $(el, 'input[type="checkbox"]') as HTMLInputElement
+      expect(box.checked).toBe(true)
+      box.click()
+      await settle(el)
+      expect(remove).toHaveBeenCalledWith('1', ['7'])
+      const info = details.find((d) => d.kind === 'info')!
+      expect(info.message).toBe('Removed @bob from the list "Friends".')
+      info.action!.run()
+      await settle(el)
+      expect(add).toHaveBeenCalledWith('1', ['7'])
+      expect(($(el, 'input[type="checkbox"]') as HTMLInputElement).checked).toBe(true)
+    } finally {
+      window.removeEventListener('caribou:toast', grab)
+    }
+  })
+
+  it('a picker Undo after an account switch does nothing', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchLists').mockResolvedValue([list('1', 'Friends')])
+    vi.spyOn(client, 'fetchAccountLists').mockResolvedValue([list('1', 'Friends')])
+    vi.spyOn(client, 'removeListAccounts').mockResolvedValue()
+    const add = vi.spyOn(client, 'addListAccounts').mockResolvedValue()
+    const details: { kind: string; action?: { run: () => void } }[] = []
+    const grab = (e: Event) => details.push((e as CustomEvent).detail)
+    window.addEventListener('caribou:toast', grab)
+    try {
+      void openListPicker(account('7', 'bob'), true)
+      const el = await dialogOf<CaribouListPicker>('caribou-list-picker')
+      await settle(el)
+      ;($(el, 'input[type="checkbox"]') as HTMLInputElement).click()
+      await settle(el)
+      vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => {}))
+      signIn('carol')
+      details.find((d) => d.kind === 'info')!.action!.run()
+      await flush()
+      expect(add).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener('caribou:toast', grab)
+    }
+  })
+})

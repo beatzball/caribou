@@ -9,7 +9,7 @@ import {
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import { spaClick } from './_spa-link.js'
-import { newListFlow } from './_list-flows.js'
+import { newListFlow, toastRemoved } from './_list-flows.js'
 import './caribou-button.js'
 
 type Loaded = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready' }
@@ -112,7 +112,12 @@ export class CaribouListPicker extends LitElement {
   private onChange = (list: mastodon.v1.List, e: Event) => {
     const client = activeClient.peek()
     if (!client || !this.account) return
-    void setListMember(list.id, this.account, (e.target as HTMLInputElement).checked, { clientSource: () => client })
+    const account = this.account
+    const member = (e.target as HTMLInputElement).checked
+    // A removal that worked says so, with Undo, as on the list's page.
+    void setListMember(list.id, account, member, { clientSource: () => client }).then((ok) => {
+      if (ok && !member && activeUserKey.peek() === client.userKey) toastRemoved(client, list.id, account)
+    })
   }
 
   private onNew = async () => {

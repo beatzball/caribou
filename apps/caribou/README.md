@@ -201,9 +201,12 @@ earlier account is dropped (`ownerGeneration()`). A list timeline is
 `<caribou-timeline kind="list" list=<id>>`, kept per list, and filtered in
 the home context, as Mastodon does. New members come from a profile's menu
 ("Add to lists", `<caribou-list-picker>`); the server takes only accounts
-the reader follows. The Members panel on the list removes them, with
-Undo in the toast (`action: { label, run }` on a `caribou:toast` event;
-such a toast stays until it is used or dismissed). Writes to one list or
+the reader follows. The Members panel on the list and an unchecked box in
+the picker remove them, with Undo in the toast (`toastRemoved` in
+`components/_list-flows.ts`; `action: { label, run }` on a
+`caribou:toast` event). Such a toast stays until it is used or dismissed,
+and later toasts never push it out. A read that crosses a write five
+times in a row fails with Retry. Writes to one list or
 one membership run in order; a read that crosses a write waits for it and
 asks again, so it never undoes a change still on its way.
 `/lists` is kept on an account switch; `/lists/<id>` is not (ids are per

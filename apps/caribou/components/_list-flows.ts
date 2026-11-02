@@ -1,5 +1,6 @@
 import type { mastodon } from 'masto'
-import { activeClient, createList, updateList } from '@beatzball/caribou-state'
+import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { activeClient, activeUserKey, createList, listById, setListMember, updateList } from '@beatzball/caribou-state'
 import { listDialog } from './caribou-list-dialog.js'
 
 // The New list and Edit list dialogs and what follows them, shared by
@@ -27,4 +28,22 @@ export async function editListFlow(list: mastodon.v1.List, lists: readonly masto
   })
   if (!input || !client || activeClient.peek()?.userKey !== client.userKey) return
   await updateList(list.id, input, { clientSource: () => client })
+}
+
+/**
+ * Says a member removal worked, with Undo. Undo adds the account back (at
+ * `at` in the list's members) through the same account's client, and does
+ * nothing once another account is active. Used by the list's Members panel
+ * and the profile's list picker.
+ */
+export function toastRemoved(client: CaribouClient, listId: string, account: mastodon.v1.Account, at = -1): void {
+  const list = listById(listId, client.userKey)
+  const title = list ? `the list "${list.title}"` : 'the list'
+  window.dispatchEvent(new CustomEvent('caribou:toast', { detail: {
+    kind: 'info', message: `Removed @${account.acct} from ${title}.`,
+    action: { label: 'Undo', run: () => {
+      if (activeUserKey.peek() !== client.userKey) return
+      void setListMember(listId, account, true, { clientSource: () => client, at })
+    } },
+  } }))
 }
