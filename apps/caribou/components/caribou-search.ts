@@ -1,0 +1,401 @@
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
+import { customElement, property, query, state } from 'lit/decorators.js'
+import { repeat } from 'lit/directives/repeat.js'
+import { batch, effect } from '@preact/signals-core'
+import type { mastodon } from 'masto'
+import { searchPublic, type SearchType } from '@beatzball/caribou-mastodon-client'
+import {
+  activeClient, activeUser, isOwnAccount, loadRelationships, mergeStatus, ownerGeneration,
+  relationshipCache, relationshipFor, toggleFollow,
+} from '@beatzball/caribou-state'
+import { boxReset } from './_shared-styles.js'
+import { profilePath } from './_profile-path.js'
+import { spaClick } from './_spa-link.js'
+import { tagPath } from './_tag-path.js'
+import {
+  SEARCH_TABS, isUrlQuery, parseSearch, resolvedPath, searchPath,
+} from './_search-query.js'
+import './caribou-auth-required.js'
+import './caribou-button.js'
+import './caribou-icon.js'
+import './caribou-status-card.js'
+
+type Search = mastodon.v2.Search
+type Account = mastodon.v1.Account
+
+// What the results area shows. `pending` is the server's render and the
+// first client one: neither knows yet who is reading, so both say
+// "Searching…" for a query.
+type Results =
+  | { kind: 'empty' }
+  | { kind: 'pending' }
+  | { kind: 'loading'; q: string }
+  | { kind: 'ok'; q: string; data: Search; host: string; signedIn: boolean; resolved: boolean }
+  | { kind: 'error'; q: string }
+  | { kind: 'no-instance' }
+  | { kind: 'refused'; q: string }
+
+const DEBOUNCE_MS = 300
+const LIMIT = 20
+
+// One template each, whichever state shows it, so the element the server
+// sent stays in place when the state changes after mount.
+const hint = () => html`<p class="notice">Search for people, hashtags and posts.</p>`
+const searching = () => html`<p class="notice" role="status">Searching…</p>`
+
+function fullAcct(acct: string, host: string): string {
+  return acct.includes('@') || !host ? acct : `${acct}@${host}`
+}
+
+// Uses in the days the server counts (a week), from the tag's history.
+function weeklyUses(tag: mastodon.v1.Tag): number | null {
+  if (!tag.history || tag.history.length === 0) return null
+  return tag.history.reduce((n, day) => n + (Number(day.uses) || 0), 0)
+}
+
+/**
+ * The /search page body: the box, the People / Hashtags / Posts tabs and
+ * the results. `q` and `type` come from the address; the element keeps the
+ * address in step as the reader types (see `commit`).
+ *
+ * A signed-in reader searches their own server with their token, and a
+ * pasted web address is resolved there. A reader who is not signed in
+ * searches `instance` (the server the public timelines use) with no token:
+ * Mastodon then finds accounts and hashtags, but no posts, and resolves no
+ * address.
+ */
+@customElement('caribou-search')
+export class CaribouSearch extends LitElement {
+  static override styles = [boxReset, css`
+    :host { display: block; }
+    form { display: flex; gap: var(--space-2); padding: 0 var(--space-3) var(--space-3); }
+    input {
+      flex: 1; min-width: 0; font: inherit; color: var(--fg-0);
+      background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md);
+      padding: var(--space-2) var(--space-3); min-height: 44px;
+    }
+    input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .submit {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 44px; min-height: 44px; font-size: 20px; color: var(--fg-1);
+      background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;
+    }
+    .submit:hover { color: var(--fg-0); }
+    .submit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .tabs { display: flex; border-bottom: 1px solid var(--border); }
+    .tabs a {
+      flex: 1; text-align: center; padding: var(--space-3) var(--space-2);
+      color: var(--fg-1); text-decoration: none; min-height: 44px;
+    }
+    .tabs a:hover { color: var(--fg-0); background: var(--bg-1); }
+    .tabs a[aria-current="page"] { color: var(--fg-0); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+    .notice { padding: var(--space-4) var(--space-3); color: var(--fg-muted); margin: 0; }
+    .notice button {
+      font: inherit; color: var(--accent); background: none; border: 0; padding: 0;
+      text-decoration: underline; cursor: pointer;
+    }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { border-bottom: 1px solid var(--border); }
+    .account { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); }
+    .who { display: flex; align-items: center; gap: var(--space-3); min-width: 0; flex: 1; color: inherit; text-decoration: none; }
+    .who:hover .name { text-decoration: underline; }
+    .avatar { width: 44px; height: 44px; flex: none; border-radius: var(--radius-md); object-fit: cover; background: var(--bg-2); }
+    .names { display: flex; flex-direction: column; min-width: 0; }
+    .name, .acct { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .name { color: var(--fg-0); font-weight: 600; }
+    .acct { color: var(--fg-muted); font-size: 0.9em; }
+    caribou-button.follow { flex: none; }
+    .tag { display: flex; flex-direction: column; padding: var(--space-3); color: var(--fg-0); text-decoration: none; }
+    .tag:hover .tag-name { text-decoration: underline; }
+    .tag-name { font-weight: 600; overflow-wrap: anywhere; }
+    .tag-uses { color: var(--fg-muted); font-size: 0.9em; }
+    .vh {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
+  `]
+
+  /** The query in the address, as the server read it. */
+  @property() q = ''
+  @property() type: SearchType = 'accounts'
+  /** The server a reader who is not signed in searches; empty when none is known. */
+  @property() instance = ''
+
+  @state() private results: Results = { kind: 'pending' }
+  // The tab and the query shown; they follow the address after mount.
+  @state() private tab: SearchType | null = null
+  @state() private shownQ: string | null = null
+
+  @query('input') private input!: HTMLInputElement
+
+  // Each search takes a number. Only the newest one may change the results,
+  // so a slow answer to an earlier query never replaces a newer one.
+  private seq = 0
+  private timer: ReturnType<typeof setTimeout> | undefined
+  // The current history entry holds a search the reader settled on (a
+  // deep link, Enter, a tab, Back): the next typed query gets an entry of
+  // its own, so Back returns to this one.
+  private settled = false
+  private disposers: (() => void)[] = []
+  private lastProps: string | null = null
+
+  private get currentTab(): SearchType { return this.tab ?? this.type }
+  private get currentQ(): string { return this.shownQ ?? this.q }
+
+  override connectedCallback() {
+    super.connectedCallback()
+    window.addEventListener('popstate', this.onPopState)
+  }
+
+  override disconnectedCallback() {
+    window.removeEventListener('popstate', this.onPopState)
+    clearTimeout(this.timer)
+    for (const d of this.disposers.splice(0)) d()
+    // An answer still on its way belongs to no one now.
+    this.seq++
+    super.disconnectedCallback()
+  }
+
+  protected override firstUpdated() {
+    this.settled = this.q.trim() !== ''
+    let first = true
+    // A change of account searches again, as the new reader.
+    this.disposers.push(effect(() => {
+      void activeClient.value
+      if (first) { first = false; return }
+      void this.run(this.currentQ, false)
+    }))
+    // The follow buttons follow the cache.
+    this.disposers.push(effect(() => {
+      void relationshipCache.value
+      this.requestUpdate()
+    }))
+    void this.run(this.q, true)
+  }
+
+  protected override updated(changed: PropertyValues<this>) {
+    // The page hands a new query when the router reuses the element.
+    const props = `${this.type} ${this.q}`
+    if (this.lastProps !== null && props !== this.lastProps && (changed.has('q') || changed.has('type'))) {
+      this.tab = null
+      this.shownQ = null
+      if (this.input) this.input.value = this.q
+      void this.run(this.q, true)
+    }
+    this.lastProps = props
+  }
+
+  private async run(raw: string, resolve: boolean): Promise<void> {
+    const q = raw.trim()
+    const seq = ++this.seq
+    const generation = ownerGeneration()
+    if (!q) { this.results = { kind: 'empty' }; return }
+    const client = activeClient.peek()
+    const user = activeUser.peek()
+    if (!client && !this.instance) { this.results = { kind: 'no-instance' }; return }
+    this.results = { kind: 'loading', q }
+    const current = () => seq === this.seq && generation === ownerGeneration()
+    let data: Search
+    let host: string
+    try {
+      if (client && user) {
+        host = user.server
+        data = await client.search({ q, resolve: resolve && isUrlQuery(q), limit: LIMIT })
+      } else {
+        host = this.instance
+        data = await searchPublic(this.instance, { q, limit: LIMIT })
+      }
+    } catch (err) {
+      if (!current()) return
+      const code = (err as { code?: string }).code
+      this.results = !client && code === 'unauthorized' ? { kind: 'refused', q } : { kind: 'error', q }
+      return
+    }
+    if (!current()) return
+    if (resolve && this.goToResolved(q, data, host)) return
+    if (client) {
+      const statuses = batch(() => data.statuses.map((s) => mergeStatus(s)))
+      data = { ...data, statuses }
+      void loadRelationships(data.accounts.map((a) => a.id))
+    }
+    this.results = { kind: 'ok', q, data, host, signedIn: !!client, resolved: !!client && resolve }
+  }
+
+  // A pasted address that names one post or one account opens it. The
+  // search entry is replaced, so Back does not land on a search that would
+  // open the same page again.
+  private goToResolved(q: string, data: Search, host: string): boolean {
+    const path = resolvedPath(q, data, host)
+    // Only the page at the address moves: a full load mounts this page
+    // twice, and the second copy must not navigate again.
+    if (!path || location.pathname !== '/search' || parseSearch(location.search).q.trim() !== q) return false
+    history.replaceState(null, '', path)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    return true
+  }
+
+  // Puts the query in the address and searches. A typed query replaces the
+  // entry it started from, unless that entry holds a settled search.
+  private commit(opts: { push: boolean; resolve: boolean }) {
+    clearTimeout(this.timer)
+    const q = this.input.value
+    const path = searchPath(q.trim(), this.currentTab)
+    const here = location.pathname + location.search
+    if (path !== here) {
+      if (opts.push || this.settled) history.pushState(null, '', path)
+      else history.replaceState(null, '', path)
+    }
+    this.settled = opts.push
+    this.shownQ = q
+    void this.run(q, opts.resolve)
+  }
+
+  private onInput = (e: InputEvent) => {
+    clearTimeout(this.timer)
+    // A pasted address resolves at once.
+    if (e.inputType === 'insertFromPaste' && isUrlQuery(this.input.value)) {
+      this.commit({ push: true, resolve: true })
+      return
+    }
+    this.timer = setTimeout(() => this.commit({ push: false, resolve: false }), DEBOUNCE_MS)
+  }
+
+  private onSubmit = (e: Event) => {
+    e.preventDefault()
+    this.commit({ push: true, resolve: true })
+  }
+
+  private onTab = (e: MouseEvent, type: SearchType) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    if (type === this.currentTab) return
+    const q = (this.input?.value ?? this.currentQ).trim()
+    history.pushState(null, '', searchPath(q, type))
+    this.settled = true
+    this.tab = type
+    // The results hold all three kinds; a changed query searches again.
+    if (this.results.kind !== 'ok' || this.results.q !== q) {
+      this.shownQ = q
+      void this.run(q, false)
+    }
+  }
+
+  // Back and Forward between searches. The router may also build a new
+  // page for the entry; this one keeps up in case it does not.
+  private onPopState = () => {
+    if (location.pathname !== '/search') return
+    clearTimeout(this.timer)
+    const { q, type } = parseSearch(location.search)
+    this.tab = type
+    this.settled = true
+    if (this.input) this.input.value = q
+    const shown = this.results.kind === 'ok' || this.results.kind === 'loading' ? this.results.q : null
+    this.shownQ = q
+    if (shown !== q.trim()) void this.run(q, false)
+  }
+
+  private retry = () => { void this.run(this.currentQ, false) }
+
+  override render() {
+    const q = this.currentQ
+    const tab = this.currentTab
+    return html`
+      <form role="search" action="/search" method="get" @submit=${this.onSubmit}>
+        <label class="vh" for="search-q">Search</label>
+        <input id="search-q" type="search" name="q" value=${q} autocomplete="off" enterkeyhint="search"
+          placeholder="Search people, hashtags, posts" @input=${this.onInput} />
+        ${tab === 'accounts' ? nothing : html`<input type="hidden" name="type" value=${tab} />`}
+        <button class="submit" type="submit" aria-label="Search"><caribou-icon name="search"></caribou-icon></button>
+      </form>
+      <nav class="tabs" aria-label="Result type">
+        ${SEARCH_TABS.map((t) => html`<a href=${searchPath(q.trim(), t.type)}
+          aria-current=${t.type === tab ? 'page' : nothing}
+          @click=${(e: MouseEvent) => this.onTab(e, t.type)}>${t.label}</a>`)}
+      </nav>
+      <div class="results">${this.renderResults(tab)}</div>
+    `
+  }
+
+  private renderResults(tab: SearchType) {
+    const r = this.results
+    switch (r.kind) {
+      case 'empty':
+        return hint()
+      case 'pending':
+        return this.q.trim() ? searching() : hint()
+      case 'loading':
+        return searching()
+      case 'no-instance':
+        return html`<caribou-auth-required
+          label="Search needs to know which server to ask. Sign in once and Caribou will remember."></caribou-auth-required>`
+      case 'refused':
+        return html`<caribou-auth-required
+          label="This server searches only for signed-in readers."></caribou-auth-required>`
+      case 'error':
+        return html`<p class="notice" role="alert">Search failed. <button type="button" @click=${this.retry}>Retry</button></p>`
+      case 'ok':
+        return this.renderOk(r, tab)
+    }
+  }
+
+  private renderOk(r: Extract<Results, { kind: 'ok' }>, tab: SearchType) {
+    // An address the server did not open. Signed out, it cannot look one up.
+    const urlNote = isUrlQuery(r.q)
+      ? html`<p class="notice" role="status">${!r.signedIn
+          ? 'Sign in to open a post or profile from another server.'
+          : r.resolved ? 'Nothing found at that address.' : 'Press Enter to look up this address.'}</p>`
+      : nothing
+    if (tab === 'accounts') {
+      if (r.data.accounts.length === 0) return html`${urlNote}<p class="notice" role="status">No people found for “${r.q}”.</p>`
+      return html`<ul class="accounts">${repeat(r.data.accounts, (a) => a.id, (a) => this.renderAccount(a, r))}</ul>`
+    }
+    if (tab === 'hashtags') {
+      if (r.data.hashtags.length === 0) return html`${urlNote}<p class="notice" role="status">No hashtags found for “${r.q}”.</p>`
+      return html`<ul class="hashtags">${repeat(r.data.hashtags, (t) => t.name, (t) => {
+        const uses = weeklyUses(t)
+        return html`<li><a class="tag" href=${tagPath(t.name)} @click=${spaClick}>
+          <span class="tag-name">#${t.name}</span>
+          ${uses === null ? nothing : html`<span class="tag-uses">${uses} ${uses === 1 ? 'post' : 'posts'} this week</span>`}
+        </a></li>`
+      })}</ul>`
+    }
+    if (!r.signedIn) {
+      return html`<p class="notice" role="status">Sign in to search posts. Mastodon finds posts only for a signed-in reader.</p>`
+    }
+    if (r.data.statuses.length === 0) return html`${urlNote}<p class="notice" role="status">No posts found for “${r.q}”.</p>`
+    return html`<ul class="statuses">${repeat(r.data.statuses, (s) => s.id, (s) => html`<li>
+      <caribou-status-card .status=${s} instance=${r.host}></caribou-status-card>
+    </li>`)}</ul>`
+  }
+
+  private renderAccount(a: Account, r: Extract<Results, { kind: 'ok' }>) {
+    const acct = fullAcct(a.acct, r.host)
+    return html`<li class="account" data-account-id=${a.id}>
+      <a class="who" href=${profilePath(a.acct, r.host)} @click=${spaClick}>
+        <img class="avatar" src=${a.avatarStatic || a.avatar} alt="" width="44" height="44" loading="lazy" decoding="async" />
+        <span class="names">
+          <span class="name">${a.displayName || a.username}</span>
+          <span class="acct">@${acct}</span>
+        </span>
+      </a>
+      ${r.signedIn ? this.renderFollow(a, acct) : nothing}
+    </li>`
+  }
+
+  // The account ids are the reader's server's, so the button acts on them
+  // directly. Shown once the relationship is known.
+  private renderFollow(a: Account, acct: string) {
+    const user = activeUser.peek()
+    if (!user || isOwnAccount(user, a)) return nothing
+    const rel = relationshipFor(a.id)
+    if (!rel || rel.blocking) return nothing
+    const label = rel.following ? 'Following' : rel.requested ? 'Requested' : 'Follow'
+    return html`<caribou-button class="follow" data-state=${label.toLowerCase()}
+      variant=${label === 'Follow' ? 'primary' : 'secondary'}
+      @click=${() => void toggleFollow(a)}>${label}<span class="vh"> @${acct}</span></caribou-button>`
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap { 'caribou-search': CaribouSearch }
+}

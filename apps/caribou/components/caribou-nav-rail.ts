@@ -24,6 +24,7 @@ const ITEMS: NavItem[] = [
   { label: 'Home',    icon: 'home',  href: '/home' },
   { label: 'Local',   icon: 'users', href: '/local' },
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
+  { label: 'Search',  icon: 'search', href: '/search', more: true },
   { label: 'Public',  icon: 'globe', href: '/public', more: true },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },

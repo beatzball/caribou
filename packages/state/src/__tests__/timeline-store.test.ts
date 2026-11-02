@@ -53,6 +53,7 @@ function fakeClient(impl?: FetchImpl): FakeClient {
     updateMedia: unused as CaribouClient['updateMedia'],
     fetchInstance: unused as CaribouClient['fetchInstance'],
     fetchNotifications: unused as CaribouClient['fetchNotifications'],
+    search: unused as CaribouClient['search'],
   }
 }
 

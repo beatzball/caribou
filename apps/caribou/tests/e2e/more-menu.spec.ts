@@ -25,9 +25,11 @@ test('Enter opens More and focuses the first item; Tab walks the items; Escape c
   await page.keyboard.press('Enter')
   await expect(panel(page)).toBeVisible()
   await expect(trigger(page)).toHaveAttribute('aria-expanded', 'true')
-  const publicLink = rail(page).getByRole('link', { name: 'Public', exact: true })
-  await expect(publicLink).toBeFocused()
+  const searchLink = rail(page).getByRole('link', { name: 'Search', exact: true })
+  await expect(searchLink).toBeFocused()
 
+  await page.keyboard.press(tab)
+  await expect(rail(page).getByRole('link', { name: 'Public', exact: true })).toBeFocused()
   await page.keyboard.press(tab)
   await expect(rail(page).getByRole('link', { name: 'Bookmarks', exact: true })).toBeFocused()
   await page.keyboard.press(tab)
@@ -50,7 +52,7 @@ test('Tab past the last item never leaves More open behind focus', async ({ page
   await trigger(page).focus()
   await page.keyboard.press('Enter')
   // The menu focuses its first item once it has opened; wait for that.
-  await expect(rail(page).getByRole('link', { name: 'Public', exact: true })).toBeFocused()
+  await expect(rail(page).getByRole('link', { name: 'Search', exact: true })).toBeFocused()
   await rail(page).locator('caribou-menu.more').getByRole('button', { name: 'Sign out', exact: true }).focus()
   await page.keyboard.press(tab)
   // Chromium and WebKit move focus on to the page, and the menu closes.

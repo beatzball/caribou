@@ -38,6 +38,7 @@ const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/public', adds: [] },
   { route: '/notifications', adds: [] },
   { route: '/@alice@example.social/123', adds: [] },
+  { route: '/search', adds: [] },
 ]
 
 function collectErrors(page: Page): string[] {
