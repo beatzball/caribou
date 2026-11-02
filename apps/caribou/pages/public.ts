@@ -1,4 +1,4 @@
-import { html, css } from 'lit'
+import { html, css, type PropertyValues } from 'lit'
 import { customElement } from 'lit/decorators.js'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
@@ -12,6 +12,7 @@ import '../components/caribou-app-shell.js'
 import '../components/caribou-timeline.js'
 import '../components/caribou-auth-required.js'
 import { enterWithCache } from '../components/_page-cache.js'
+import { settleSplash } from '../components/_splash.js'
 
 export type PublicPageData = TimelinePageData & { shell: ShellInfo }
 
@@ -48,6 +49,15 @@ export class PublicPage extends LitroPage {
     return enterWithCache(this, location, () => super.onBeforeEnter(location), {
       onFresh: (fresh) => { this.serverData = fresh },
     })
+  }
+
+  // With no timeline (a placeholder or an error) the page has all it will
+  // show: the loading screen of a forward from `/` goes. The timeline
+  // removes it otherwise.
+  protected override updated(changed: PropertyValues<this>) {
+    super.updated(changed)
+    const data = this.serverData as PublicPageData | undefined
+    if (data?.kind !== 'ok') settleSplash('/public')
   }
 
   override render() {

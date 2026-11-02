@@ -114,9 +114,10 @@ test('signed in, a stashed sign-in error on / stays, so the banner is seen', asy
   await expect(page.locator('page-home')).toHaveCount(0)
 })
 
-// The head script decides before the app runs: `/` is left while the parser
-// is still in its head, so the landing is never parsed and the app (which
-// would forward too, a moment later) never starts.
+// The head script decides before the app runs: it ends `/` as hidden text
+// while the parser is still in its head, so the landing is never parsed and
+// the app (which would forward too, a moment later) never starts. Only the
+// loading screen is there, and the browser paints it.
 test('signed in, / leaves before the app or the landing runs', async ({ page, context }) => {
   await signIn(page, context)
   let release!: () => void
@@ -135,15 +136,20 @@ test('signed in, / leaves before the app or the landing runs', async ({ page, co
   await page.addInitScript(() => {
     if (location.pathname !== '/') return
     setInterval(() => console.warn('PROBE ' + JSON.stringify({
-      body: document.body !== null,
-      landing: document.querySelector('caribou-landing') !== null,
+      splash: document.getElementById('caribou-splash') !== null,
+      // Chromium paints nothing of a page whose parser a navigation stopped
+      // in the head; the forward ends `/` as hidden text so the screen paints.
+      painted: performance.getEntriesByType('paint').length > 0,
+      // Any of the rest of `/` parsed as markup: the head's manifest link, the
+      // router outlet, the page.
+      landing: document.querySelector('link[rel="manifest"], litro-outlet, page-index') !== null,
       app: customElements.get('litro-outlet') !== undefined,
     })), 100)
   })
   await page.goto('/', { waitUntil: 'commit' })
   await asked
   await expect.poll(() => probes.length).toBeGreaterThan(2)
-  expect(new Set(probes)).toEqual(new Set([JSON.stringify({ body: false, landing: false, app: false })]))
+  expect(new Set(probes)).toEqual(new Set([JSON.stringify({ splash: true, painted: true, landing: false, app: false })]))
   release()
   await page.waitForURL('**/home')
   await expect(page.locator('page-home')).toBeVisible()
@@ -158,7 +164,14 @@ test('signed in, a stopped /home load leaves links to go on', async ({ page, con
     if (location.pathname === '/') setTimeout(() => window.stop(), 1000)
   })
   await page.goto('/', { waitUntil: 'commit' })
-  await expect(page.getByText('Opening your timeline…')).toBeVisible({ timeout: 6000 })
+  // The loading screen shows the way out after 3 s …
+  const splash = page.locator('#caribou-splash')
+  await expect(splash.getByRole('link', { name: 'Open your timeline' })).toBeVisible({ timeout: 6000 })
+  await expect(splash.getByRole('link', { name: 'Open your timeline' })).toHaveAttribute('href', '/home')
+  await expect(splash.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/?add')
+  // … and a plain page with the same links takes its place at the limit.
+  await expect(page.getByText('Opening your timeline…')).toBeVisible({ timeout: 12000 })
+  await expect(splash).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Open your timeline' })).toHaveAttribute('href', '/home')
   await expect(page.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/?add')
   expect(pathname(page)).toBe('/')

@@ -262,9 +262,25 @@ sign-in used to end with the session in the URL fragment, now only shows
 (the accounts are in the browser), so it renders the sign-in page for every
 reader. On `/` only, an inline script in the head
 (`server/lib/root-forward-head.ts`) reads the stored accounts before the
-first paint and calls `location.replace('/home')`, so `/` leaves no history
-entry. The browser then stops reading `/`, so the tab is empty until `/home`
-commits; after 3 s it shows links to `/home` and to sign in. When the script
+first paint and calls `location.replace()` with that timeline, so `/` leaves
+no history entry.
+
+Before it leaves it shows the loading screen (`components/_splash.ts`): the
+logo, a creeping ring and "Loading…". Chromium never paints a page whose
+parser a navigation stopped in the head, so the script first ends `/` with
+`document.write('<plaintext hidden>')`: the rest of `/` becomes hidden text,
+nothing in it runs, and the screen paints. The theme head script runs before
+it on `/`, so the screen has the reader's colors. The target timeline goes on
+with the same screen (`server/lib/timeline-splash-head.ts`, a child of
+`<html>` outside the rendered page, so hydration does not see it) until it
+shows posts, an error, the empty notice or a placeholder (`settleSplash`). A
+client-side forward shows it too. While it is up the body is `inert`, so
+keyboard focus stays on the screen; leaving the timeline (Back, a link)
+removes it at once. After 3 s it shows links to the timeline and to sign in;
+after 10 s it goes, whatever happens. With reduced motion the ring stands
+still and there is no fade.
+
+When the script
 keeps the reader on `/`, it marks `<html>` with `data-caribou-root`, and the
 router does not check that load again (the error banner may have consumed a
 stashed error by then). A client-side navigation to `/` is checked in

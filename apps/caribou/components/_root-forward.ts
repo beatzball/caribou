@@ -1,3 +1,5 @@
+import { showSplash } from './_splash.js'
+
 // `/` goes to the active account's default timeline when an account is
 // active (issue 135): `/home`, or `/local` or `/public` when chosen on
 // /settings (`defaultTimeline` in `caribou.prefs.<userKey>`, issue 49).
@@ -63,8 +65,12 @@ function defaultTimeline(local: Pick<Storage, 'getItem'>, key: string): string {
  * one Back press seems to do nothing; no signed-in page links to `/` today.
  * The router has no replace navigation, so it treats this as Back/Forward
  * and restores the saved scroll offset of `/home` instead of the top.
+ *
+ * It shows the loading screen, as the head script of `/` does, until the
+ * timeline has something to show (`settleSplash` in `_splash.ts`).
  */
 export function replaceWithTimeline(path: string): void {
+  showSplash(path)
   // The SSR data of the first page is read once, by the first page the
   // router enters. If any is left, it is not the timeline's: it must not read it.
   document.getElementById('__litro_data__')?.remove()
