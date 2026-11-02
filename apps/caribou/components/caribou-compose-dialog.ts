@@ -3,7 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser, activeUserKey, userName,
+  activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
   type ComposeDraft, type DraftMedia, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
@@ -12,8 +12,19 @@ import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 import './caribou-icon-button.js'
 import { countChars, plainText, replyMentions, replyVisibility } from './_compose-text.js'
+import { draftMediaOf, POLL_EDIT_REFUSED } from './_redraft.js'
 
-export interface ComposeDetail { inReplyTo?: mastodon.v1.Status }
+/**
+ * What `caribou:compose` asks for: a new post, a reply to `inReplyTo`, an
+ * edit of the reader's own post (`edit`, with its source text), or a new
+ * post filled from a deleted one (`redraft`, with `inReplyTo` when the
+ * page has the post it replied to).
+ */
+export interface ComposeDetail {
+  inReplyTo?: mastodon.v1.Status
+  edit?: { status: mastodon.v1.Status; source: mastodon.v1.StatusSource }
+  redraft?: ComposeDraft
+}
 
 interface Limits { maxChars: number; maxMedia: number; accept: string }
 
@@ -140,6 +151,7 @@ export class CaribouComposeDialog extends LitElement {
     .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
     .toolbar select { width: auto; }
     .spacer { flex: 1; }
+    .note { margin: 0; color: var(--fg-muted); font-size: 0.875rem; }
     .count { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
     .count[data-over] { color: var(--danger); }
     .toolbar select { min-block-size: 2.25rem; }
@@ -156,6 +168,9 @@ export class CaribouComposeDialog extends LitElement {
   private open = false
   @state() private draft: ComposeDraft = emptyDraft()
   @state() private replyTo: mastodon.v1.Status | null = null
+  // The reader's own post being edited. An edit is not kept as a draft,
+  // keeps the post's visibility (Mastodon cannot change it) and its media.
+  @state() private editing: mastodon.v1.Status | null = null
   @state() private pending: PendingMedia[] = []
   @state() private posting = false
   // Counts openings, so a post that finishes after its dialog closed knows
@@ -188,8 +203,14 @@ export class CaribouComposeDialog extends LitElement {
     this.unwatchUser = effect(() => {
       const key = activeUserKey.value
       if (this.open && this.client && key !== this.client.userKey) {
+        const editing = this.editing !== null
+        const keptRedraft = this.keptRedraft
         this.close()
-        toast('info', 'Your draft is saved for the account you started it with.')
+        toast('info', editing
+          ? 'The edit was not saved: you switched accounts.'
+          : keptRedraft
+          ? 'Your redraft is saved for the account you started it with. It opens the next time you write a new post there.'
+          : 'Your draft is saved for the account you started it with.')
       }
     })
   }
@@ -231,7 +252,9 @@ export class CaribouComposeDialog extends LitElement {
   private onCompose = (e: Event) => {
     if (!this.isActive()) return
     const detail = (e as CustomEvent<ComposeDetail | undefined>).detail
-    this.show(detail?.inReplyTo ?? null)
+    if (detail?.edit) this.showEdit(detail.edit.status, detail.edit.source)
+    else if (detail?.redraft) this.showRedraft(detail.redraft, detail.inReplyTo ?? null)
+    else this.show(detail?.inReplyTo ?? null)
   }
 
   private onKeydown = (e: KeyboardEvent) => {
@@ -243,21 +266,89 @@ export class CaribouComposeDialog extends LitElement {
     this.show(null)
   }
 
-  /** Opens the dialog for a new post, or a reply to `inReplyTo`. */
-  show(inReplyTo: mastodon.v1.Status | null): void {
+  // Everything every kind of opening shares. False when the dialog cannot
+  // open: no session, or it is open already.
+  private begin(): boolean {
     const client = activeClient.value
     const user = activeUser.value
-    if (!client || !user || this.open) return
-
+    if (!client || !user || this.open) return false
     const active = document.activeElement
     this.returnFocus = active instanceof HTMLElement ? deepActive(active) : null
-
     this.client = client
     this.session += 1
     this.posting = false
     this.syncedAlt = new Map()
     this.altSaves = new Map()
-    this.draftKey = draftSlot(inReplyTo?.id)
+    this.replyTo = null
+    this.editing = null
+    this.pending = []
+    return true
+  }
+
+  private finishOpen() {
+    this.open = true
+    this.showPending = true
+    this.ready = true
+    const client = this.client
+    const user = activeUser.value
+    if (client && user) void fetchLimits(client, user.server).then((l) => { this.limits = l })
+  }
+
+  /**
+   * Opens the dialog on the reader's own post, filled with its source text.
+   * Saving replaces the post's text and content warning; visibility and
+   * media stay as they are.
+   */
+  showEdit(status: mastodon.v1.Status, source: mastodon.v1.StatusSource): void {
+    if (!this.begin()) return
+    this.editing = status
+    this.draftKey = 'new'
+    this.draft = emptyDraft({
+      text: source.text,
+      spoilerText: source.spoilerText,
+      cw: source.spoilerText !== '',
+      visibility: status.visibility,
+      inReplyToId: status.inReplyToId ?? null,
+      media: (status.mediaAttachments ?? []).map(draftMediaOf),
+      sensitive: status.sensitive === true,
+      language: status.language ?? null,
+    })
+    this.finishOpen()
+  }
+
+  // The open draft is a redraft kept beside another draft (`redraft:<key>`).
+  private get keptRedraft(): boolean {
+    return this.draftKey.startsWith('redraft:')
+  }
+
+  /**
+   * Opens a new post filled from a deleted one, stored as a draft at once:
+   * the deleted post is nowhere else. It goes in its own slot, unless that
+   * slot holds an unsent draft. That one is never overwritten; the redraft
+   * is then kept in a `redraft:<key>` slot, which the next new post opens
+   * first.
+   */
+  showRedraft(draft: ComposeDraft, inReplyTo: mastodon.v1.Status | null = null): void {
+    if (!this.begin()) return
+    const client = this.client!
+    const slot = draftSlot(draft.inReplyToId)
+    const held = loadDraft(client.userKey, slot)
+    this.replyTo = inReplyTo && inReplyTo.id === draft.inReplyToId ? inReplyTo : null
+    this.draft = draft
+    this.draftKey = held && !isDraftEmpty(held) ? `redraft:${draft.idempotencyKey}` : slot
+    saveDraft(client.userKey, this.draftKey, draft)
+    this.finishOpen()
+  }
+
+  /** Opens the dialog for a new post, or a reply to `inReplyTo`. */
+  show(inReplyTo: mastodon.v1.Status | null): void {
+    if (!this.begin()) return
+    const user = activeUser.value!
+    const client = this.client!
+    // A kept redraft opens before a plain new post, so the deleted post's
+    // text is never left behind unseen.
+    const redraft = inReplyTo ? null : findRedraftSlot(client.userKey)
+    this.draftKey = redraft ?? draftSlot(inReplyTo?.id)
     this.replyTo = inReplyTo
     const visibility = defaultVisibility(user)
     this.draft = loadDraft(client.userKey, this.draftKey) ?? (inReplyTo
@@ -269,11 +360,7 @@ export class CaribouComposeDialog extends LitElement {
         spoilerText: inReplyTo.spoilerText,
       })
       : emptyDraft({ visibility }))
-    this.pending = []
-    this.open = true
-    this.showPending = true
-    this.ready = true
-    void fetchLimits(client, user.server).then((l) => { this.limits = l })
+    this.finishOpen()
   }
 
   private close() {
@@ -285,6 +372,7 @@ export class CaribouComposeDialog extends LitElement {
   private onClose = () => {
     this.open = false
     this.client = null
+    this.editing = null
     for (const p of this.pending) URL.revokeObjectURL(p.previewUrl)
     this.pending = []
     const target = this.returnFocus
@@ -297,7 +385,7 @@ export class CaribouComposeDialog extends LitElement {
     // the draft that is being sent, or be cleared with it.
     if (this.posting || !this.client) return
     this.draft = { ...this.draft, ...patch }
-    saveDraft(this.client.userKey, this.draftKey, this.draft)
+    if (!this.editing) saveDraft(this.client.userKey, this.draftKey, this.draft)
   }
 
   private get count(): number {
@@ -310,10 +398,48 @@ export class CaribouComposeDialog extends LitElement {
       && this.pending.length === 0 && !this.posting
   }
 
+  // Saves an edit. A failure leaves the post as it was and the dialog open
+  // with the reader's text, so nothing is lost.
+  //
+  // Media, language and the poll come from the newest copy of the post this
+  // page knows, which may be newer than the one the dialog opened with: an
+  // edit replaces the media list, so an older one would drop new media.
+  private async saveEdit(client: CaribouClient, opened: mastodon.v1.Status) {
+    const known = newestKnownStatus(opened.id)
+    const post = known && olderEdit(opened, known) ? known : opened
+    if (post.poll) {
+      toast('error', POLL_EDIT_REFUSED)
+      return
+    }
+    const session = this.session
+    const d = this.draft
+    const cw = d.cw && d.spoilerText.trim() !== ''
+    this.posting = true
+    try {
+      const saved = await editOwnStatus(client, post.id, {
+        status: d.text,
+        spoilerText: cw ? d.spoilerText : '',
+        // A content warning marks the media sensitive; without one the
+        // media keeps the mark it had.
+        sensitive: cw || (post.sensitive === true && (post.mediaAttachments?.length ?? 0) > 0),
+        language: post.language ?? d.language ?? null,
+        mediaIds: (post.mediaAttachments ?? []).map((m) => m.id),
+      })
+      if (!saved || client !== this.client || session !== this.session) return
+      this.close()
+      toast('info', 'Post updated')
+    } catch (err) {
+      toast('error', `Could not save the edit: ${errorText(err)}`)
+    } finally {
+      if (session === this.session) this.posting = false
+    }
+  }
+
   private async submit() {
     const client = this.client
     if (!client || !this.canPost) return
     if (activeUserKey.value !== client.userKey) return
+    if (this.editing) return this.saveEdit(client, this.editing)
     const done = this.replyTo ? 'Reply posted' : 'Post published'
     const session = this.session
     this.posting = true
@@ -449,8 +575,11 @@ export class CaribouComposeDialog extends LitElement {
     const over = count > this.limits.maxChars
     const mediaCount = d.media.length + this.pending.length
     const full = mediaCount >= this.limits.maxMedia
-    const title = this.replyTo ? 'Reply' : 'New post'
+    const editing = this.editing !== null
+    const title = editing ? 'Edit post' : this.replyTo || d.inReplyToId ? 'Reply' : 'New post'
     const busy = this.posting
+    const submitLabel = editing ? (busy ? 'Saving…' : 'Save')
+      : busy ? 'Posting…' : this.replyTo || d.inReplyToId ? 'Reply' : 'Post'
     return html`
       <dialog aria-labelledby="compose-title" @close=${this.onClose}>
         <form @submit=${this.onSubmit} @keydown=${this.onFormKeydown}>
@@ -464,6 +593,8 @@ export class CaribouComposeDialog extends LitElement {
               <span class="acct">@${this.replyTo.account.acct}</span>
               <div>${plainText(this.replyTo.content)}</div>
             </div>` : nothing}
+          ${this.keptRedraft ? html`
+            <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
           ${d.cw ? html`
             <label class="visually-hidden" for="compose-cw">Content warning</label>
             <input id="compose-cw" type="text" name="spoiler" placeholder="Content warning"
@@ -474,7 +605,17 @@ export class CaribouComposeDialog extends LitElement {
           <textarea id="compose-text" name="status" placeholder="What’s on your mind?"
             ?readonly=${busy} .value=${d.text}
             @input=${(e: Event) => this.patchDraft({ text: (e.target as HTMLTextAreaElement).value })}></textarea>
-          ${mediaCount > 0 ? html`
+          ${editing && d.media.length > 0 ? html`
+            <ul class="media" aria-label="Attachments" aria-describedby="compose-media-note">
+              ${d.media.map((m) => html`
+                <li data-media=${m.id}>
+                  ${m.type === 'image' || m.type === 'gifv'
+                    ? html`<img src=${m.previewUrl ?? m.url} alt=${m.description}>`
+                    : html`<div class="file">${m.type}</div>`}
+                </li>`)}
+            </ul>
+            <p class="note" id="compose-media-note">Media stays as it is. Caribou cannot edit attachments yet.</p>`
+          : !editing && mediaCount > 0 ? html`
             <ul class="media" aria-label="Attachments">
               ${d.media.map((m, i) => {
                 const label = mediaLabel(m.name, m.type, i + 1)
@@ -521,18 +662,21 @@ export class CaribouComposeDialog extends LitElement {
                  clicks it, and the click opens the hidden file input. -->
             <!-- Icon only, with no text beside it, so a mouse user needs the
                  tooltip even though a reader then hears the name twice. -->
+            ${editing ? nothing : html`
             <caribou-icon-button icon="image" label="Add images or video" hint="Add images or video" data-action="add-media"
               ?disabled=${full || busy} @click=${() => this.fileEl?.click()}></caribou-icon-button>
             <input type="file" hidden multiple accept=${this.limits.accept}
-              ?disabled=${full || busy} @change=${this.onFiles}>
+              ?disabled=${full || busy} @change=${this.onFiles}>`}
             <caribou-icon-button icon="triangleAlert" label="Content warning" hint="Content warning" data-action="toggle-cw"
               pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
               @click=${() => this.patchDraft({ cw: !d.cw })}></caribou-icon-button>
             <label class="visually-hidden" for="compose-visibility">Visibility</label>
-            <select id="compose-visibility" name="visibility" ?disabled=${busy}
+            <select id="compose-visibility" name="visibility" ?disabled=${busy || editing}
+              aria-describedby=${editing ? 'compose-visibility-note' : nothing}
               @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as mastodon.v1.StatusVisibility })}>
               ${VISIBILITIES.map((v) => html`<option value=${v.value}>${v.label}</option>`)}
             </select>
+            ${editing ? html`<span class="note" id="compose-visibility-note">Visibility cannot change.</span>` : nothing}
             <span class="spacer"></span>
             <span class="count" ?data-over=${over}
               aria-label=${`${this.limits.maxChars - count} characters left`}>${this.limits.maxChars - count}</span>
@@ -540,7 +684,7 @@ export class CaribouComposeDialog extends LitElement {
             <span class="visually-hidden" aria-live="polite" data-limit-status>${over ? 'Over the character limit' : ''}</span>
             <caribou-button variant="primary" type="submit" class="post" data-action="post"
               ?disabled=${!this.canPost && !busy} ?loading=${busy}>
-              ${busy ? 'Posting…' : this.replyTo ? 'Reply' : 'Post'}
+              ${submitLabel}
             </caribou-button>
           </div>
         </form>

@@ -8,6 +8,11 @@ import { isMutating } from './inflight.js'
 export const statusCache  = signal<Map<string, mastodon.v1.Status>>(new Map())
 export const accountCache = signal<Map<string, mastodon.v1.Account>>(new Map())
 
+// Posts the reader deleted in this page session, by id. A list that keeps
+// its own copies (a thread, notifications) hides a card whose post is here.
+// The ids are the active account's server's, so an account change empties it.
+export const deletedStatusIds = signal<ReadonlySet<string>>(new Set())
+
 export function cacheAccount(acct: mastodon.v1.Account): void {
   const next = new Map(accountCache.value)
   next.set(acct.id, acct)
@@ -44,11 +49,14 @@ function store(status: mastodon.v1.Status): void {
   if (status.account) cacheAccount(status.account)
 }
 
-/** Caches a copy just off the network, as it is. */
+/**
+ * Caches a copy just off the network, as it is, except that an older copy
+ * never undoes a newer edit of the post (`protectEdits`).
+ */
 export function cacheStatus(status: mastodon.v1.Status): void {
   batch(() => {
     noteFiltered(status)
-    store(status)
+    store(protectEdits(status))
   })
 }
 
@@ -68,6 +76,53 @@ export function updateStatus(id: string, patch: Partial<mastodon.v1.Status>): vo
 const READER_FIELDS = ['favourited', 'reblogged', 'bookmarked', 'muted', 'pinned', 'filtered'] as const
 
 const PAIRED_COUNTS = [['favourited', 'favouritesCount'], ['reblogged', 'reblogsCount']] as const
+
+/** The fields an edit of a post changes. */
+export const EDIT_FIELDS = [
+  'content', 'spoilerText', 'sensitive', 'mediaAttachments', 'card', 'poll', 'editedAt',
+  'mentions', 'tags', 'emojis', 'language',
+] as const
+
+/** True when `known` carries a newer edit of the post than `fresh`. */
+export function olderEdit(fresh: mastodon.v1.Status, known: mastodon.v1.Status | null | undefined): boolean {
+  if (!known?.editedAt) return false
+  return !fresh.editedAt || Date.parse(fresh.editedAt) < Date.parse(known.editedAt)
+}
+
+// The newest edit of a post the cache knows: its own copy, or the copy
+// inside a boost of it, whichever was edited last.
+function newestKnown(id: string, cache: Map<string, mastodon.v1.Status>): mastodon.v1.Status | undefined {
+  let best = cache.get(id)
+  for (const s of cache.values()) {
+    if (s.reblog?.id === id && (!best || olderEdit(best, s.reblog))) best = s.reblog
+  }
+  return best
+}
+
+/** The newest edit of a post the cache knows, alone or inside a boost. */
+export function newestKnownStatus(id: string): mastodon.v1.Status | undefined {
+  return newestKnown(id, statusCache.peek())
+}
+
+function keepEdit(fresh: mastodon.v1.Status, known: mastodon.v1.Status | undefined): mastodon.v1.Status {
+  if (!known || !olderEdit(fresh, known)) return fresh
+  const out = { ...fresh } as Record<string, unknown>
+  const had = known as unknown as Record<string, unknown>
+  for (const key of EDIT_FIELDS) out[key] = had[key]
+  return out as unknown as mastodon.v1.Status
+}
+
+// A copy can be older than one already cached: a fetch that left before
+// the reader's edit and answers after it, page data from the server's
+// upstream cache, or an earlier edit's late answer. The newest edit wins,
+// for the post and for the post inside a boost; every other field comes
+// from the copy at hand.
+function protectEdits(fresh: mastodon.v1.Status): mastodon.v1.Status {
+  const cache = statusCache.peek()
+  let out = keepEdit(fresh, newestKnown(fresh.id, cache))
+  if (fresh.reblog) out = { ...out, reblog: keepEdit(fresh.reblog, newestKnown(fresh.reblog.id, cache)) }
+  return out
+}
 
 function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status): mastodon.v1.Status {
   const out = { ...fresh } as Record<string, unknown>
@@ -105,6 +160,7 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   // The same object again (a store seeded twice from one page): nothing new.
   if (current === fresh) return current
   noteFiltered(fresh)
+  fresh = protectEdits(fresh)
   let next = current ? keepReaderFields(fresh, current) : fresh
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
@@ -132,9 +188,16 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
  */
 export function forgetReaderFields(): void {
   const next = new Map<string, mastodon.v1.Status>()
-  for (const [id, s] of statusCache.peek()) next.set(id, withoutReaderFields(s))
+  // The deleted marks go with the account; a copy of a deleted post that a
+  // fetch brought back must go with them, or it would show again.
+  const gone = deletedStatusIds.peek()
+  for (const [id, s] of statusCache.peek()) {
+    if (gone.has(id) || (s.reblog && gone.has(s.reblog.id))) continue
+    next.set(id, withoutReaderFields(s))
+  }
   batch(() => {
     statusCache.value = next
     filteredById.value = new Map()
+    deletedStatusIds.value = new Set()
   })
 }
