@@ -8,6 +8,11 @@ import { isMutating } from './inflight.js'
 export const statusCache  = signal<Map<string, mastodon.v1.Status>>(new Map())
 export const accountCache = signal<Map<string, mastodon.v1.Account>>(new Map())
 
+// Posts the reader deleted in this page session, by id. A list that keeps
+// its own copies (a thread, notifications) hides a card whose post is here.
+// The ids are the active account's server's, so an account change empties it.
+export const deletedStatusIds = signal<ReadonlySet<string>>(new Set())
+
 export function cacheAccount(acct: mastodon.v1.Account): void {
   const next = new Map(accountCache.value)
   next.set(acct.id, acct)
@@ -69,9 +74,23 @@ const READER_FIELDS = ['favourited', 'reblogged', 'bookmarked', 'muted', 'pinned
 
 const PAIRED_COUNTS = [['favourited', 'favouritesCount'], ['reblogged', 'reblogsCount']] as const
 
+// The fields an edit changes.
+const EDIT_FIELDS = [
+  'content', 'spoilerText', 'sensitive', 'mediaAttachments', 'card', 'poll', 'editedAt',
+  'mentions', 'tags', 'emojis', 'language',
+] as const
+
+// A copy can be older than the one cached: page data passes through the
+// server's upstream cache, so it may predate the reader's own edit.
+function olderEdit(fresh: mastodon.v1.Status, current: mastodon.v1.Status): boolean {
+  if (!current.editedAt) return false
+  return !fresh.editedAt || Date.parse(fresh.editedAt) < Date.parse(current.editedAt)
+}
+
 function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status): mastodon.v1.Status {
   const out = { ...fresh } as Record<string, unknown>
   const had = current as unknown as Record<string, unknown>
+  if (olderEdit(fresh, current)) for (const key of EDIT_FIELDS) out[key] = had[key]
   for (const key of READER_FIELDS) {
     // Only a reader with a token gets `filtered`, so a copy that has it is
     // the reader's own and newer: a filter added or removed since shows.
@@ -136,5 +155,6 @@ export function forgetReaderFields(): void {
   batch(() => {
     statusCache.value = next
     filteredById.value = new Map()
+    deletedStatusIds.value = new Set()
   })
 }

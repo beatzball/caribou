@@ -7,14 +7,16 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, activeUserKey, createKeepAlive, isOwnAccount, normalizeTagName, ownerGeneration,
-  loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
+  activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, isOwnAccount,
+  normalizeTagName, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
 import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
-import { confirmBlock } from './caribou-confirm-dialog.js'
+import { confirmBlock, confirmDialog } from './caribou-confirm-dialog.js'
+import { redraftOf } from './_redraft.js'
+import { showStatusHistory } from './caribou-status-history.js'
 import { spaClick } from './_spa-link.js'
 import { tagPath } from './_tag-path.js'
 import { mastodonLinkText } from './_shared-styles.js'
@@ -160,6 +162,31 @@ function stillOwner(o: Owner): boolean {
   return activeUserKey.peek() === o.userKey && ownerGeneration() === o.generation
 }
 
+// The fields an edit can change. A card whose list keeps its own copy of the
+// post (a thread, notifications) takes them from the cached copy once that
+// is newer, so an edit shows everywhere at once.
+const EDIT_FIELDS = [
+  'content', 'spoilerText', 'sensitive', 'mediaAttachments', 'card', 'poll', 'editedAt',
+  'mentions', 'tags', 'emojis', 'language',
+] as const
+
+function newerEdit(cached: Status | undefined, shown: Status): Status | null {
+  if (!cached?.editedAt) return null
+  if (shown.editedAt && Date.parse(cached.editedAt) <= Date.parse(shown.editedAt)) return null
+  return cached
+}
+
+function withEdit(post: Status, edit: Status | null): Status {
+  if (!edit || edit.id !== post.id) return post
+  const out = { ...post } as Record<string, unknown>
+  for (const key of EDIT_FIELDS) out[key] = (edit as unknown as Record<string, unknown>)[key]
+  return out as unknown as Status
+}
+
+function toast(kind: 'error' | 'info', message: string): void {
+  window.dispatchEvent(new CustomEvent('caribou:toast', { detail: { kind, message } }))
+}
+
 type Moderated = { verb: 'muted' | 'blocked'; account: Status['account']; owner: Owner }
 
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
@@ -251,6 +278,16 @@ export class CaribouStatusCard extends LitElement {
     .notice button { margin-top: 0; }
     .cw-toggle:hover, .notice button:hover { background: var(--bg-1); }
     .cw-toggle:focus-visible, .notice button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .edited {
+      color: var(--fg-muted); font: inherit; font-size: 0.875rem;
+      background: none; border: 0; padding: 0;
+    }
+    button.edited { cursor: pointer; text-decoration: underline dotted; }
+    button.edited:hover { color: var(--fg-1); }
+    button.edited:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+    @media (pointer: coarse) {
+      button.edited { min-block-size: 44px; padding-inline: var(--space-2); }
+    }
     .actions caribou-menu.more { margin-inline-start: auto; }
     .actions caribou-menu.more::part(trigger) { color: var(--fg-muted); }
     @media (pointer: fine) {
@@ -300,6 +337,13 @@ export class CaribouStatusCard extends LitElement {
   // signed-out bar. `bindActions` sets them after mount.
   @state() private canAct = false
   @state() private ownPost = false
+  // The post is the active account's own, by account id (never by handle):
+  // its menu offers Edit and Delete instead of Mute and Block.
+  @state() private mine = false
+  // A newer edit of the post than `status` carries, from the cache.
+  @state() private liveEdit: Status | null = null
+  // The reader deleted this post (or the post this boosts).
+  @state() private deleted = false
   @state() private liveFields: ActionFields | null = null
   // The filter verdict from the newest copy; undefined until mount, when
   // render() reads `status` itself, as the server did.
@@ -402,11 +446,18 @@ export class CaribouStatusCard extends LitElement {
       const post = s?.reblog ?? s
       this.canAct = client !== null && this.sameInstance(user?.server)
       this.ownPost = this.canAct && post !== null && post !== undefined && user !== null && isOwnAccount(user, post.account)
+      const mine = this.canAct && !!post && !!user?.account && user.account.id === post.account.id
+      if (mine !== this.mine) this.mine = mine
       const cache = statusCache.value
       const cached = post ? cache.get(post.id) ?? (s?.reblog ? cache.get(s.id)?.reblog : undefined) : undefined
       const next = cached ? actionFields(cached) : null
       const prev = this.liveFields
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
+      const edit = post && this.canAct ? newerEdit(cached ?? undefined, post) : null
+      if (edit !== this.liveEdit) this.liveEdit = edit
+      const gone = deletedStatusIds.value
+      const deleted = this.canAct && !!s && (gone.has(s.id) || (!!post && gone.has(post.id)))
+      if (deleted !== this.deleted) this.deleted = deleted
 
       // The reader's own posts are never filtered.
       // The boost and the post it boosts each by their newest `filtered`,
@@ -600,6 +651,60 @@ export class CaribouStatusCard extends LitElement {
     void this.focusIn('caribou-menu.more')
   }
 
+  // Edit opens the compose dialog with the post's source text: the text as
+  // the author typed it, not the server's HTML.
+  private onEdit = async () => {
+    const post = this.status?.reblog ?? this.status
+    const owner = currentOwner()
+    if (!this.mine || !post || !owner) return
+    let source: mastodon.v1.StatusSource
+    try {
+      source = await owner.client.fetchStatusSource(post.id)
+    } catch {
+      if (stillOwner(owner)) toast('error', 'Could not open this post for editing. Try again.')
+      return
+    }
+    if (!stillOwner(owner)) return
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status: post, source } } }))
+  }
+
+  private onDelete = async () => {
+    const post = this.status?.reblog ?? this.status
+    const owner = currentOwner()
+    if (!this.mine || !post || !owner) return
+    const ok = await confirmDialog({
+      title: 'Delete this post?',
+      message: 'The post goes from your server and from everyone who can still reach it. You cannot undo this.',
+      confirmLabel: 'Delete',
+    })
+    if (!ok || !stillOwner(owner)) return
+    if (await deleteOwnStatus(owner.client, post)) toast('info', 'Post deleted')
+  }
+
+  // Deletes the post, then opens a new one with what it had. Boosts,
+  // favourites and replies stay with the deleted post.
+  private onRedraft = async () => {
+    const post = this.status?.reblog ?? this.status
+    const owner = currentOwner()
+    if (!this.mine || !post || !owner) return
+    const ok = await confirmDialog({
+      title: 'Delete and redraft this post?',
+      message: 'The post is deleted and opens again as a new draft. Its boosts, favourites and replies are lost.',
+      confirmLabel: 'Delete & redraft',
+    })
+    if (!ok || !stillOwner(owner)) return
+    const gone = await deleteOwnStatus(owner.client, post)
+    if (!gone || !stillOwner(owner)) return
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { redraft: redraftOf(gone, post) } }))
+  }
+
+  private onHistory = () => {
+    const post = this.status?.reblog ?? this.status
+    const owner = currentOwner()
+    if (!this.canAct || !post || !owner) return
+    void showStatusHistory(owner.client, post.id)
+  }
+
   private onReply = () => {
     if (!this.canAct || !this.status) return
     window.dispatchEvent(new CustomEvent('caribou:compose', {
@@ -665,7 +770,7 @@ export class CaribouStatusCard extends LitElement {
           hint=${hint('bookmark')} description=${hint('bookmark')}
           ?soft-disabled=${off}
           @click=${this.onBookmark}></caribou-icon-button>
-        ${this.canAct && !this.ownPost ? this.renderMenu(post) : nothing}
+        ${this.mine ? this.renderOwnMenu() : this.canAct && !this.ownPost ? this.renderMenu(post) : nothing}
       </div>
     `
   }
@@ -678,6 +783,24 @@ export class CaribouStatusCard extends LitElement {
         @click=${this.onMute}>${muting ? 'Unmute' : 'Mute'} @${acct}</button>
       <button type="button" class=${blocking ? 'menu-item' : 'menu-item danger'} data-action="block"
         @click=${this.onBlock}>${blocking ? 'Unblock' : 'Block'} @${acct}</button>
+    </caribou-menu>`
+  }
+
+  // The server and the first client render show the plain mark; a reader
+  // who can ask the server for the history gets a button after mount.
+  private renderEdited(editedAt: string) {
+    const when = this.relativeTime ? formatRelativeTime(editedAt) : absoluteLabel(editedAt)
+    return this.canAct
+      ? html`<button type="button" class="edited" data-action="history" title=${`Edited ${when}`}
+          aria-label=${`Edited ${when}. Show edit history`} @click=${this.onHistory}>edited</button>`
+      : html`<span class="edited" title=${`Edited ${when}`}>edited</span>`
+  }
+
+  private renderOwnMenu() {
+    return html`<caribou-menu class="more" anchored icon="ellipsis" label="More actions for your post">
+      <button type="button" class="menu-item" data-action="edit" @click=${this.onEdit}>Edit</button>
+      <button type="button" class="menu-item danger" data-action="delete" @click=${this.onDelete}>Delete</button>
+      <button type="button" class="menu-item danger" data-action="redraft" @click=${this.onRedraft}>Delete &amp; redraft</button>
     </caribou-menu>`
   }
 
@@ -771,6 +894,16 @@ export class CaribouStatusCard extends LitElement {
     this.hiddenNow = false
     this.renderedPost = false
     if (!s) return nothing
+    if (this.deleted) {
+      // The post the reader opened stays, as a note; any other card goes.
+      if (this.variant !== 'focused') {
+        this.hiddenNow = true
+        return nothing
+      }
+      return html`<article data-variant=${this.variant} class="deleted"><div class="notice">
+        <p>You deleted this post.</p>
+      </div></article>`
+    }
     if (this.moderated) {
       const { verb, account } = this.moderated
       // The button's name carries what it undoes: a description in this
@@ -843,7 +976,7 @@ export class CaribouStatusCard extends LitElement {
     // booster's account + a createdAt for "when this was boosted to my
     // timeline". Render the inner content as the body, prepend a small
     // attribution row that names the booster.
-    const display = s.reblog ?? s
+    const display = withEdit(s.reblog ?? s, this.liveEdit)
     const dt = display.createdAt
     const timeLabel = this.relativeTime ? formatRelativeTime(dt) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
@@ -888,6 +1021,7 @@ export class CaribouStatusCard extends LitElement {
               <litro-link class="permalink" href=${statusPermalink(display)}>
                 <time datetime=${dt}>${timeLabel}</time>
               </litro-link>
+              ${display.editedAt ? this.renderEdited(display.editedAt) : nothing}
             </header>
             ${warning
               ? html`<div class="warning">

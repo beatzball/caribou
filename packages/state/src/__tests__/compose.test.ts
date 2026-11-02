@@ -105,6 +105,13 @@ describe('postDraft', () => {
     expect(create.mock.calls[0]![0]).toEqual({ status: 'hi', visibility: 'public' })
   })
 
+  it('sends sensitive and language when a redraft set them', async () => {
+    const create = vi.fn().mockResolvedValue(posted('p3'))
+    await postDraft(fakeClient(alice, create), 'new',
+      emptyDraft({ text: 'hi', sensitive: true, language: 'de' }))
+    expect(create.mock.calls[0]![0]).toEqual({ status: 'hi', visibility: 'public', sensitive: true, language: 'de' })
+  })
+
   it('keeps the draft when the post fails', async () => {
     const create = vi.fn().mockRejectedValue(new Error('boom'))
     const d = emptyDraft({ text: 'keep me' })

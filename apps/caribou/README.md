@@ -188,6 +188,32 @@ place. Block asks first (`confirmDialog` in
 filters (read only, with a link to the server's own page), the muted and
 the blocked accounts.
 
+**The reader edits and deletes their own posts.** On a post whose author
+has the active account's id (an id, never a handle, so a same-named
+account on another server is not the reader), the post menu has Edit,
+Delete and Delete & redraft instead of Mute and Block. Like every menu,
+it shows only after the first render. Edit asks for the post's source
+text, then opens `<caribou-compose-dialog>` in edit mode
+(`caribou:compose` with `edit`). An edit is not kept as a draft. Its
+visibility cannot change (Mastodon does not allow it). Its media stays as
+it is and is sent back with the edit, since Mastodon drops any attachment
+an edit leaves out. `editOwnStatus` (`@beatzball/caribou-state`) writes
+the new copy to the status cache, in place and inside every boost. A list
+that keeps its own copies (a thread, notifications) shows it because the
+card takes a newer edit from the cache (`editedAt`). A merge never lets
+an older copy undo an edit. A failed edit leaves the dialog open with
+the text. Delete asks first (`confirmDialog`). `deleteOwnStatus` takes
+the post and its boosts out of the cache at once and marks the id in
+`deletedStatusIds`. A card whose post is marked hides; the thread's main
+post says "You deleted this post." instead. A failed delete puts it all
+back with a toast. Delete & redraft opens a new post filled from the
+server's answer (`text`, content warning, visibility, sensitive,
+language, reply, media), kept as a draft. An edited post shows "edited"
+after its time: plain text in the server render, a button after mount
+for a reader on the same server. It opens `<caribou-status-history>`
+with every version, newest first, each sanitized like a post. A result
+that lands after an account change is dropped.
+
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
 header. The client returns it as the page's `nextMaxId`, and the timeline

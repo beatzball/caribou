@@ -73,11 +73,12 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('<caribou-status-card> post menu', () => {
-  it('has no menu signed out, or on the reader\'s own post', async () => {
+  it('has no menu signed out, and no Mute or Block on the reader\'s own post', async () => {
     expect($(await mount(post('1')), 'caribou-menu.more')).toBeNull()
     signIn()
-    const own = post('2', { account: { ...bob, id: 'me', acct: 'alice' } })
-    expect($(await mount(own), 'caribou-menu.more')).toBeNull()
+    const own = await mount(post('2', { account: { ...bob, id: 'me', acct: 'alice' } }))
+    expect($(own, 'caribou-menu.more button[data-action="mute"]')).toBeNull()
+    expect($(own, 'caribou-menu.more button[data-action="block"]')).toBeNull()
   })
 
   it('names the author in Mute and Block', async () => {

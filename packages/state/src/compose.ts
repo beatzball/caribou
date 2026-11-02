@@ -24,6 +24,10 @@ export interface ComposeDraft {
   // One key per draft, kept across reloads: a retry after a lost response
   // gets the first post back from the server instead of a second post.
   idempotencyKey: string
+  // Set only by a redraft, which keeps what the deleted post had. A new
+  // post leaves them out and the server decides.
+  sensitive?: boolean
+  language?: string | null
 }
 
 // A new post and each reply keep their own draft, so opening a reply does
@@ -110,7 +114,9 @@ export async function postDraft(
   const status = await client.createStatus({
     status: draft.text,
     visibility: draft.visibility,
+    ...(draft.sensitive ? { sensitive: true } : {}),
     ...(draft.cw && draft.spoilerText.trim() ? { spoilerText: draft.spoilerText, sensitive: true } : {}),
+    ...(draft.language ? { language: draft.language } : {}),
     ...(draft.inReplyToId ? { inReplyToId: draft.inReplyToId } : {}),
     ...(draft.media.length > 0 ? { mediaIds: draft.media.map((m) => m.id) } : {}),
   }, { idempotencyKey: draft.idempotencyKey })
