@@ -18,6 +18,7 @@ import {
 } from './components/_switch-account.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
 import { startTheme } from './components/_theme.js'
+import { startChangelogSeen } from './components/_changelog-seen.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
@@ -44,6 +45,8 @@ if (typeof window !== 'undefined') {
   // The nav rail's unread badge. One poll for the app, not one per rail:
   // every page has its own, and a page swap mounts two.
   startUnreadNotifications()
+  // The changelog's unread dot follows the active account.
+  startChangelogSeen()
   // One "Updating…" live region for the whole tab, outside every page.
   document.body.append(document.createElement('caribou-update-notice'))
 }

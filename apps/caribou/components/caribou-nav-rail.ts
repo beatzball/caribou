@@ -8,12 +8,14 @@ import { spaClick } from './_spa-link.js'
 import { switchToAccount } from './_switch-account.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
+import './caribou-changelog-dot.js'
 import './caribou-icon.js'
 import './caribou-menu.js'
 import './caribou-signout-form.js'
 
 // `more`: on a phone the item lives in the More menu instead of the bar.
-interface NavItem { label: string; icon: IconName; href: string; more?: boolean }
+// `dot`: the item carries the changelog's unread dot (`<caribou-changelog-dot>`).
+interface NavItem { label: string; icon: IconName; href: string; more?: boolean; dot?: boolean }
 
 // The items above New post. DOM order is the visual order at every width,
 // so Tab and the picture agree: the phone bar reads Home, Local, …, New
@@ -24,7 +26,7 @@ const ITEMS: NavItem[] = [
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
   { label: 'Public',  icon: 'globe', href: '/public', more: true },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
-  { label: 'Settings', icon: 'settings', href: '/settings', more: true },
+  { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
 ]
 
 const PROFILE: NavItem = { label: 'Profile', icon: 'user', href: '/@me' }
@@ -83,6 +85,7 @@ export class CaribouNavRail extends LitElement {
     /* The icon and the count share one box, so the badge can sit on the
        icon's corner when the label is hidden. */
     .icon-wrap { position: relative; display: inline-flex; }
+    .more-trigger { display: inline-flex; }
     .badge {
       position: absolute; top: -6px; right: -8px;
       min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
@@ -303,6 +306,7 @@ export class CaribouNavRail extends LitElement {
   // name stays its label: "Notifications, 3 unread".
   private renderIcon(it: NavItem) {
     const icon = html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`
+    if (it.dot) return this.withDot(icon)
     if (it.href !== '/notifications' || this.unread === 0) return icon
     return html`<span class="icon-wrap">${icon}<span class="badge" aria-hidden="true">${this.unreadLabel()}</span></span>`
   }
@@ -310,6 +314,20 @@ export class CaribouNavRail extends LitElement {
   private renderUnreadText(it: NavItem) {
     if (it.href !== '/notifications' || this.unread === 0) return nothing
     return html`<span class="sr-only">, ${this.unreadLabel()} unread</span>`
+  }
+
+  // The dot is always in the markup, server and client alike; it draws
+  // itself only after its first update, over the icon's corner.
+  private withDot(icon: unknown) {
+    return html`<span class="icon-wrap">${icon}<caribou-changelog-dot></caribou-changelog-dot></span>`
+  }
+
+  // A moved item's dot is out of sight in the closed menu, so the trigger
+  // carries it too, with its words read after "More".
+  private renderMoreTrigger() {
+    return html`<span slot="trigger" class="more-trigger">${this.withDot(
+      html`<caribou-icon class="icon" name="ellipsis"></caribou-icon>`)}<caribou-changelog-dot
+      text></caribou-changelog-dot></span>`
   }
 
   private unreadLabel(): string {
@@ -321,7 +339,8 @@ export class CaribouNavRail extends LitElement {
     const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
     return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
       class=${it.more ? 'in-more' : nothing} ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
-      >${this.renderIcon(it)}<span class="label">${it.label}</span>${this.renderUnreadText(it)}</a>`
+      >${this.renderIcon(it)}<span class="label">${it.label}</span>${this.renderUnreadText(it)}${it.dot
+        ? html`<caribou-changelog-dot text></caribou-changelog-dot>` : nothing}</a>`
   }
 
   // An account not loaded yet (only the active one is loaded, on each page
@@ -385,9 +404,12 @@ export class CaribouNavRail extends LitElement {
         <caribou-menu class="more" icon="ellipsis" label="More"
           ?data-current=${moved.some((it) => it.href === active)}
           ?data-pending=${moved.some((it) => it.href === this.pending)}>
+          ${moved.some((it) => it.dot) ? this.renderMoreTrigger() : nothing}
           ${moved.map((it) => html`<a href=${it.href} class="menu-item"
             aria-current=${it.href === active ? 'page' : nothing} @click=${spaClick}
-            ><caribou-icon class="icon" name=${it.icon}></caribou-icon>${it.label}</a>`)}
+            >${it.dot ? this.withDot(html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`)
+              : html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`}${it.label}${it.dot
+              ? html`<caribou-changelog-dot text></caribou-changelog-dot>` : nothing}</a>`)}
           <div class="sep signed-in-only" aria-hidden="true"></div>
           ${this.renderAccountItems()}
         </caribou-menu>
