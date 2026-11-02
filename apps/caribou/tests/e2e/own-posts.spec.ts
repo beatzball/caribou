@@ -143,3 +143,37 @@ test('delete & redraft opens compose filled from the deleted post', async ({ pag
   await expect(card(page, '1')).toHaveCount(0)
   expect(s.writes).toEqual(['DELETE 1'])
 })
+
+test('Edit on a post with a poll says why it cannot, and sends nothing', async ({ page }) => {
+  await signIn(page)
+  const poll = {
+    id: 'p1', expires_at: null, expired: false, multiple: false, votes_count: 3, voters_count: 3,
+    options: [{ title: 'yes', votes_count: 2 }, { title: 'no', votes_count: 1 }], emojis: [], voted: false, own_votes: [],
+  }
+  const s = await fakeServer(page, [own('1', 'a question', { poll })])
+  await gotoSettled(page, '/home')
+  await menu(page, '1').click()
+  await card(page, '1').getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(toaster(page)).toContainText('Caribou cannot edit a post with a poll yet')
+  await expect(compose(page)).toBeHidden()
+  expect(s.writes).toEqual([])
+})
+
+test('editing a post with media keeps the media', async ({ page }) => {
+  await signIn(page)
+  const image = {
+    id: 'm1', type: 'image', url: 'https://example.social/a.png', preview_url: 'https://example.social/a.png',
+    remote_url: null, description: 'a cat', blurhash: null, meta: null,
+  }
+  const s = await fakeServer(page, [own('1', 'teh cat', { media_attachments: [image] as never })])
+  await gotoSettled(page, '/home')
+  await menu(page, '1').click()
+  await card(page, '1').getByRole('button', { name: 'Edit', exact: true }).click()
+  const dialog = compose(page)
+  await expect(dialog.getByText('Media stays as it is.')).toBeVisible()
+  await dialog.getByRole('textbox', { name: 'Post text' }).fill('the cat')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(card(page, '1')).toContainText('the cat')
+  expect((s.posts.get('1')!.media_attachments as { id: string }[]).map((m) => m.id)).toEqual(['m1'])
+})

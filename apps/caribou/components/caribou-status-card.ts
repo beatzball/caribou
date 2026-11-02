@@ -7,15 +7,15 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, isOwnAccount,
-  normalizeTagName, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
+  activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
+  isOwnAccount, mergeStatus, normalizeTagName, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
 import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import { confirmBlock, confirmDialog } from './caribou-confirm-dialog.js'
-import { redraftOf } from './_redraft.js'
+import { POLL_EDIT_REFUSED, redraftOf } from './_redraft.js'
 import { showStatusHistory } from './caribou-status-history.js'
 import { spaClick } from './_spa-link.js'
 import { tagPath } from './_tag-path.js'
@@ -162,18 +162,11 @@ function stillOwner(o: Owner): boolean {
   return activeUserKey.peek() === o.userKey && ownerGeneration() === o.generation
 }
 
-// The fields an edit can change. A card whose list keeps its own copy of the
-// post (a thread, notifications) takes them from the cached copy once that
-// is newer, so an edit shows everywhere at once.
-const EDIT_FIELDS = [
-  'content', 'spoilerText', 'sensitive', 'mediaAttachments', 'card', 'poll', 'editedAt',
-  'mentions', 'tags', 'emojis', 'language',
-] as const
-
+// A card whose list keeps its own copy of the post (a thread,
+// notifications) takes the fields an edit changes (`EDIT_FIELDS`) from the
+// cached copy once that is newer, so an edit shows everywhere at once.
 function newerEdit(cached: Status | undefined, shown: Status): Status | null {
-  if (!cached?.editedAt) return null
-  if (shown.editedAt && Date.parse(cached.editedAt) <= Date.parse(shown.editedAt)) return null
-  return cached
+  return cached && olderEdit(shown, cached) ? cached : null
 }
 
 function withEdit(post: Status, edit: Status | null): Status {
@@ -651,25 +644,85 @@ export class CaribouStatusCard extends LitElement {
     void this.focusIn('caribou-menu.more')
   }
 
-  // Edit opens the compose dialog with the post's source text: the text as
-  // the author typed it, not the server's HTML.
-  private onEdit = async () => {
+  // The post as shown: with a newer edit from the cache over `status`.
+  private shownPost(): Status | null {
     const post = this.status?.reblog ?? this.status
+    return post ? withEdit(post, this.liveEdit) : null
+  }
+
+  // Edit opens the compose dialog with the post's source text (as the
+  // author typed it, not the server's HTML) and the post as the server has
+  // it now: the edit sends its media back, and the card's copy may be older.
+  // A post with a poll is refused: an edit without the poll removes it on
+  // Mastodon, and one with it starts the poll again.
+  private onEdit = async () => {
+    const post = this.shownPost()
     const owner = currentOwner()
     if (!this.mine || !post || !owner) return
+    if (post.poll) {
+      toast('error', POLL_EDIT_REFUSED)
+      return
+    }
+    let current: Status
     let source: mastodon.v1.StatusSource
     try {
+      current = await owner.client.fetchStatus(post.id)
+      if (!stillOwner(owner)) return
+      if (current.poll) {
+        toast('error', POLL_EDIT_REFUSED)
+        return
+      }
       source = await owner.client.fetchStatusSource(post.id)
     } catch {
       if (stillOwner(owner)) toast('error', 'Could not open this post for editing. Try again.')
       return
     }
     if (!stillOwner(owner)) return
-    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status: post, source } } }))
+    const status = mergeStatus(current)
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status, source } } }))
+  }
+
+  /** Focuses the post itself, for a keyboard reader whose place just went. */
+  async focusPost() {
+    await this.updateComplete
+    const article = this.renderRoot.querySelector('article')
+    article?.setAttribute('tabindex', '-1')
+    article?.focus()
+  }
+
+  // The card a keyboard reader goes to when this one leaves the list: the
+  // next shown post, else the one before.
+  private neighbour(): CaribouStatusCard | null {
+    const row = this.closest('li')
+    if (!row) return null
+    const shown = (li: Element | null) => {
+      const card = li?.querySelector(':scope > caribou-status-card, caribou-status-card')
+      return card instanceof CaribouStatusCard && !card.hidden && card !== this ? card : null
+    }
+    for (let li = row.nextElementSibling; li; li = li.nextElementSibling) {
+      const c = shown(li)
+      if (c) return c
+    }
+    for (let li = row.previousElementSibling; li; li = li.previousElementSibling) {
+      const c = shown(li)
+      if (c) return c
+    }
+    return null
+  }
+
+  // The post leaves at once; focus goes to its neighbour. A failure brings
+  // it back, and focus to its menu.
+  private async deleteAndMoveFocus(owner: Owner, post: Status): Promise<Status | null> {
+    const next = this.neighbour()
+    const deleting = deleteOwnStatus(owner.client, post)
+    if (next) void next.focusPost()
+    const gone = await deleting
+    if (!gone && stillOwner(owner)) void this.focusIn('caribou-menu.more')
+    return gone
   }
 
   private onDelete = async () => {
-    const post = this.status?.reblog ?? this.status
+    const post = this.shownPost()
     const owner = currentOwner()
     if (!this.mine || !post || !owner) return
     const ok = await confirmDialog({
@@ -678,24 +731,30 @@ export class CaribouStatusCard extends LitElement {
       confirmLabel: 'Delete',
     })
     if (!ok || !stillOwner(owner)) return
-    if (await deleteOwnStatus(owner.client, post)) toast('info', 'Post deleted')
+    if (await this.deleteAndMoveFocus(owner, post)) toast('info', 'Post deleted')
   }
 
   // Deletes the post, then opens a new one with what it had. Boosts,
   // favourites and replies stay with the deleted post.
   private onRedraft = async () => {
-    const post = this.status?.reblog ?? this.status
+    const post = this.shownPost()
     const owner = currentOwner()
     if (!this.mine || !post || !owner) return
     const ok = await confirmDialog({
       title: 'Delete and redraft this post?',
-      message: 'The post is deleted and opens again as a new draft. Its boosts, favourites and replies are lost.',
+      message: 'The post is deleted and opens again as a new draft. Its boosts, favourites and replies are lost.'
+        + (post.poll ? ' The poll is not kept.' : ''),
       confirmLabel: 'Delete & redraft',
     })
     if (!ok || !stillOwner(owner)) return
-    const gone = await deleteOwnStatus(owner.client, post)
+    const gone = await this.deleteAndMoveFocus(owner, post)
     if (!gone || !stillOwner(owner)) return
-    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { redraft: redraftOf(gone, post) } }))
+    const draft = redraftOf(gone, post)
+    // The post it replied to, when this page has it, so the dialog shows it.
+    const inReplyTo = draft.inReplyToId ? statusCache.peek().get(draft.inReplyToId) : undefined
+    window.dispatchEvent(new CustomEvent('caribou:compose', {
+      detail: { redraft: draft, ...(inReplyTo ? { inReplyTo } : {}) },
+    }))
   }
 
   private onHistory = () => {
@@ -845,7 +904,8 @@ export class CaribouStatusCard extends LitElement {
     const content = e.currentTarget as HTMLElement
     const a = (e.target as Element).closest?.('a')
     if (!a || !content.contains(a)) return
-    const display = this.status?.reblog ?? this.status
+    // The copy the body shows, so a hashtag or mention an edit added counts.
+    const display = this.shownPost()
     const tag = hashtagOf(a, display?.tags)
     if (tag) {
       e.preventDefault()

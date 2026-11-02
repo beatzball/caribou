@@ -6,7 +6,7 @@ import { ALICE, API, BOB, INSTANCE, gotoSettled, json, status } from './_moderat
 
 export { ALICE, API, BOB, INSTANCE, gotoSettled, json, status }
 
-type Post = ReturnType<typeof status> & { edited_at?: string | null; text?: string }
+type Post = ReturnType<typeof status> & { edited_at?: string | null; text?: string; poll?: unknown }
 
 export interface FakeServer {
   posts: Map<string, Post>
@@ -62,9 +62,14 @@ export async function fakeServer(page: Page, posts: Post[]): Promise<FakeServer>
     if (method === 'PUT' && !sub) {
       s.writes.push(`PUT ${id}`)
       if (s.fail.edit) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
-      const body = req.postDataJSON() as { status: string; spoiler_text: string }
+      const body = req.postDataJSON() as { status: string; spoiler_text: string; media_ids?: string[]; poll?: unknown }
+      // As Mastodon does: the edit's media list replaces the post's, and a
+      // poll left out of the edit is removed.
+      const media = post.media_attachments as { id: string }[]
       const edited: Post = {
         ...post, content: `<p>${body.status}</p>`, spoiler_text: body.spoiler_text,
+        media_attachments: (body.media_ids ?? []).map((m) => media.find((x) => x.id === m) ?? { id: m }) as never,
+        poll: body.poll ?? null,
         edited_at: '2026-11-01T10:00:00.000Z',
       }
       s.history.set(id!, [...(s.history.get(id!) ?? [post]), edited])

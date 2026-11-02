@@ -1,7 +1,7 @@
 import { batch } from '@preact/signals-core'
 import type { CaribouClient, EditStatusInput } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
-import { deletedStatusIds, mergeStatus, statusCache } from './caches.js'
+import { deletedStatusIds, mergeStatus, olderEdit, statusCache } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
 type Status = mastodon.v1.Status
@@ -23,8 +23,11 @@ export async function editOwnStatus(
   const generation = ownerGeneration()
   const fresh = await client.editStatus(statusId, input)
   if (generation !== ownerGeneration()) return null
+  // Always cached, even when only a boost held the post: a later stale
+  // copy then has this one to lose against. The merge keeps the newest
+  // edit, so a late answer to an earlier edit changes nothing.
   return batch(() => {
-    const cached = statusCache.peek().has(fresh.id) ? mergeStatus(fresh) : fresh
+    const cached = mergeStatus(fresh)
     replaceInBoosts(cached)
     return cached
   })
@@ -35,7 +38,7 @@ function replaceInBoosts(post: Status): void {
   const cache = statusCache.peek()
   let out: Map<string, Status> | null = null
   for (const [key, s] of cache) {
-    if (s.reblog?.id !== post.id) continue
+    if (s.reblog?.id !== post.id || olderEdit(post, s.reblog)) continue
     out ??= new Map(cache)
     out.set(key, { ...s, reblog: { ...s.reblog, ...post } })
   }

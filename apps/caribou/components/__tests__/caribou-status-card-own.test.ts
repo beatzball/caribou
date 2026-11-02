@@ -111,20 +111,64 @@ describe('<caribou-status-card> own post menu', () => {
     expect(item(el, 'edit')).toBeNull()
   })
 
-  it('Edit asks for the source and opens compose in edit mode', async () => {
+  it('Edit asks for the source and the current post, and opens compose in edit mode with them', async () => {
     signIn()
     const source = vi.spyOn(activeClient.value!, 'fetchStatusSource')
       .mockResolvedValue({ id: '1', text: 'teh typo', spoilerText: '' })
+    const fetchStatus = vi.spyOn(activeClient.value!, 'fetchStatus').mockResolvedValue(post('1'))
     const el = await mount(post('1'))
     item(el, 'edit')!.click()
     await settle(el)
     expect(source).toHaveBeenCalledWith('1')
+    expect(fetchStatus).toHaveBeenCalledWith('1')
     expect(events.at(-1)!.detail).toEqual({ edit: { status: post('1'), source: { id: '1', text: 'teh typo', spoilerText: '' } } })
+  })
+
+  it('Edit hands compose the current media and language, not the card\'s older copy', async () => {
+    signIn()
+    const newer = post('1', {
+      content: '<p>fresh</p>', editedAt: '2026-04-28T13:00:00Z', language: 'de',
+      mediaAttachments: [{ id: 'm2', type: 'image', url: 'u', previewUrl: 'p', description: '' }],
+    })
+    vi.spyOn(activeClient.value!, 'fetchStatusSource').mockResolvedValue({ id: '1', text: 'fresh', spoilerText: '' })
+    vi.spyOn(activeClient.value!, 'fetchStatus').mockResolvedValue(newer)
+    const el = await mount(post('1'))
+    item(el, 'edit')!.click()
+    await settle(el)
+    const sent = (events.at(-1)!.detail as { edit: { status: Status } }).edit.status
+    expect(sent.mediaAttachments.map((m) => m.id)).toEqual(['m2'])
+    expect(sent.language).toBe('de')
+  })
+
+  it('Edit refuses a post with a poll, since Mastodon would drop the poll and its votes', async () => {
+    signIn()
+    const source = vi.spyOn(activeClient.value!, 'fetchStatusSource')
+    const withPoll = post('1', { poll: { id: 'p', options: [{ title: 'a' }, { title: 'b' }] } })
+    vi.spyOn(activeClient.value!, 'fetchStatus').mockResolvedValue(withPoll)
+    const el = await mount(withPoll)
+    item(el, 'edit')!.click()
+    await settle(el)
+    expect(events).toEqual([])
+    expect(source).not.toHaveBeenCalled()
+    expect(toasts).toContainEqual({
+      kind: 'error', message: 'Caribou cannot edit a post with a poll yet: Mastodon would remove the poll and its votes.',
+    })
+  })
+
+  it('Edit refuses when the current post has a poll the card did not know of', async () => {
+    signIn()
+    vi.spyOn(activeClient.value!, 'fetchStatusSource').mockResolvedValue({ id: '1', text: 'x', spoilerText: '' })
+    vi.spyOn(activeClient.value!, 'fetchStatus').mockResolvedValue(post('1', { poll: { id: 'p', options: [] } }))
+    const el = await mount(post('1'))
+    item(el, 'edit')!.click()
+    await settle(el)
+    expect(events).toEqual([])
   })
 
   it('Edit toasts when the source cannot load', async () => {
     signIn()
     vi.spyOn(activeClient.value!, 'fetchStatusSource').mockRejectedValue(new Error('x'))
+    vi.spyOn(activeClient.value!, 'fetchStatus').mockResolvedValue(post('1'))
     const el = await mount(post('1'))
     item(el, 'edit')!.click()
     await settle(el)
@@ -168,13 +212,17 @@ describe('<caribou-status-card> own post menu', () => {
     expect(toasts).toContainEqual({ kind: 'info', message: 'Post deleted' })
   })
 
-  it('a failed delete brings the card back', async () => {
+  it('a failed delete hides the card at once, then brings it back', async () => {
     signIn()
-    vi.spyOn(activeClient.value!, 'deleteStatus').mockRejectedValue(new Error('x'))
+    let reject!: (e: unknown) => void
+    vi.spyOn(activeClient.value!, 'deleteStatus').mockReturnValue(new Promise((_, r) => { reject = r }))
     const el = await mount(post('1'))
     item(el, 'delete')!.click()
     await settle(el)
     confirmYes()
+    await settle(el)
+    expect(el.hasAttribute('hidden')).toBe(true)
+    reject(new Error('x'))
     await settle(el)
     expect(el.hasAttribute('hidden')).toBe(false)
     expect(toasts).toContainEqual({ kind: 'error', message: 'Could not delete this post. Try again.' })
@@ -198,6 +246,52 @@ describe('<caribou-status-card> own post menu', () => {
       language: 'de', inReplyToId: '5',
       media: [{ id: 'm1', type: 'image', url: 'u', previewUrl: 'p', description: 'd' }],
     })
+  })
+
+  it('after a delete, focus goes to the next post in the list', async () => {
+    signIn()
+    vi.spyOn(activeClient.value!, 'deleteStatus').mockResolvedValue(post('1'))
+    const ul = document.createElement('ul')
+    document.body.appendChild(ul)
+    const cards: CaribouStatusCard[] = []
+    for (const id of ['1', '2']) {
+      const li = document.createElement('li')
+      ul.appendChild(li)
+      const el = document.createElement('caribou-status-card') as CaribouStatusCard
+      el.instance = 'example.social'
+      el.status = post(id)
+      li.appendChild(el)
+      while (!(await el.updateComplete)) { /* settle */ }
+      cards.push(el)
+    }
+    item(cards[0]!, 'delete')!.click()
+    await settle(cards[0]!)
+    confirmYes()
+    await settle(cards[0]!)
+    await settle(cards[1]!)
+    expect(document.activeElement).toBe(cards[1])
+    expect(cards[1]!.shadowRoot!.activeElement?.localName).toBe('article')
+  })
+
+  it('a redraft of a reply hands compose the post it replies to, when known', async () => {
+    signIn()
+    const parent = post('5', { account: bob, content: '<p>question</p>' })
+    statusCache.value = new Map([['5', parent]])
+    vi.spyOn(activeClient.value!, 'deleteStatus').mockResolvedValue(post('1', { text: 'answer', inReplyToId: '5' }))
+    const el = await mount(post('1', { inReplyToId: '5' }))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    expect((events.at(-1)!.detail as { inReplyTo: Status }).inReplyTo).toEqual(parent)
+  })
+
+  it('the redraft question says the poll is not kept', async () => {
+    signIn()
+    const el = await mount(post('1', { poll: { id: 'p', options: [] } }))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(confirmEl()!.shadowRoot!.querySelector('p')!.textContent).toContain('The poll is not kept.')
   })
 
   it('a failed Delete & redraft opens no compose', async () => {
@@ -237,6 +331,20 @@ describe('<caribou-status-card> edits', () => {
     await settle(el)
     expect($(el, '.status-content')!.textContent).toBe('the fix')
     expect($(el, 'button.edited')).not.toBeNull()
+  })
+
+  it('a hashtag the edit added opens Caribou\'s tag page, from the edited copy\'s tags', async () => {
+    signIn()
+    const el = await mount(post('1'))
+    statusCache.value = new Map([['1', post('1', {
+      content: '<p><a href="https://example.social/tags/new" class="mention hashtag" rel="tag">#new</a></p>',
+      tags: [{ name: 'new', url: 'https://example.social/tags/new' }], editedAt: '2026-04-28T13:00:00Z',
+    })]])
+    await settle(el)
+    const a = $(el, '.status-content a')!
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+    a.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
   })
 
   it('takes the edit inside a boost too', async () => {
@@ -288,9 +396,30 @@ describe('<caribou-status-card> edits', () => {
     $(el, 'button.edited')!.click()
     await settle(el)
     expect(document.querySelector('caribou-status-history')).not.toBeNull()
+    const dlg = document.querySelector<CaribouStatusHistory>('caribou-status-history')!
     activeUserKey.value = null
     await settle(el)
     expect(document.querySelector('caribou-status-history')).toBeNull()
-    resolve([])
+    resolve([{ content: '<p>late</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z' } as unknown as mastodon.v1.StatusEdit])
+    await settle(el)
+    expect(dlg.versions).toBeNull()
+  })
+
+  it('the history list keeps list semantics, and focus goes back to the mark on close', async () => {
+    signIn()
+    vi.spyOn(activeClient.value!, 'fetchStatusHistory').mockResolvedValue([
+      { content: '<p>a</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z', mediaAttachments: [] },
+    ] as unknown as mastodon.v1.StatusEdit[])
+    const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
+    const mark = $(el, 'button.edited')!
+    mark.focus()
+    mark.click()
+    await settle(el)
+    const dlg = document.querySelector<CaribouStatusHistory>('caribou-status-history')!
+    await dlg.updateComplete
+    expect(dlg.shadowRoot!.querySelector('ol')!.getAttribute('role')).toBe('list')
+    dlg.shadowRoot!.querySelector<HTMLElement>('caribou-button.close')!.click()
+    await settle(el)
+    expect(el.shadowRoot!.activeElement).toBe(mark)
   })
 })

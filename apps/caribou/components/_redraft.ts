@@ -4,6 +4,13 @@ import { plainText } from './_compose-text.js'
 
 type Status = mastodon.v1.Status
 
+/**
+ * Why Edit is refused on a post with a poll. Mastodon removes the poll from
+ * an edit that leaves it out, and starts it again (votes gone) from one
+ * that sends it.
+ */
+export const POLL_EDIT_REFUSED = 'Caribou cannot edit a post with a poll yet: Mastodon would remove the poll and its votes.'
+
 /** An attachment of a post, as a draft holds it. */
 export function draftMediaOf(m: mastodon.v1.MediaAttachment): DraftMedia {
   return {

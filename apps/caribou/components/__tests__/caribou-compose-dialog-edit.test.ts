@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUserKey, addUserSession, emptyDraft, loadDraft, statusCache, users,
+  activeClient, activeUserKey, addUserSession, emptyDraft, loadDraft, saveDraft, statusCache, users,
   type UserSession,
 } from '@beatzball/caribou-state'
 import '../caribou-compose-dialog.js'
@@ -178,5 +178,59 @@ describe('caribou-compose-dialog edit mode', () => {
     expect(create.mock.calls[0]![0]).toEqual({
       status: 'again', visibility: 'private', spoilerText: 'cw', sensitive: true, inReplyToId: '5', language: 'de',
     })
+  })
+
+  it('refuses to save an edit of a post with a poll (Mastodon would remove the poll)', async () => {
+    const client = signIn()
+    const editStatus = vi.spyOn(client, 'editStatus')
+    const el = await mount()
+    await edit(el, own({ poll: { id: 'p', options: [] } } as unknown as Partial<mastodon.v1.Status>))
+    postButton(el).click()
+    await settle(el)
+    expect(editStatus).not.toHaveBeenCalled()
+    expect(toasts).toContainEqual({ kind: 'error', message: expect.stringContaining('poll') })
+  })
+
+  it('saves with the newest known media and language, when the post changed after the dialog opened', async () => {
+    const client = signIn()
+    const editStatus = vi.spyOn(client, 'editStatus').mockResolvedValue(own())
+    const el = await mount()
+    await edit(el, own())
+    // An edit from elsewhere lands while the dialog is open.
+    statusCache.value = new Map([['7', own({
+      editedAt: '2026-11-01T00:00:00.000Z', language: 'de',
+      mediaAttachments: [{ id: 'm1' }, { id: 'm9' }] as mastodon.v1.MediaAttachment[],
+    })]])
+    postButton(el).click()
+    await settle(el)
+    expect(editStatus.mock.calls[0]![1]).toMatchObject({ language: 'de', mediaIds: ['m1', 'm9'] })
+  })
+
+  it('a redraft never overwrites an unsent draft in its slot; posting it leaves that draft', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'createStatus').mockResolvedValue(own({ id: '8' }))
+    saveDraft(KEY, 'new', emptyDraft({ text: 'precious existing draft' }))
+    const el = await mount()
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { redraft: emptyDraft({ text: 'from the deleted post' }) } }))
+    await settle(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect($(el, '[data-redraft-note]')!.textContent).toContain('not kept as a draft')
+    await type(el, 'from the deleted post, again')
+    expect(loadDraft(KEY, 'new')?.text).toBe('precious existing draft')
+    postButton(el).click()
+    await settle(el)
+    expect(loadDraft(KEY, 'new')?.text).toBe('precious existing draft')
+  })
+
+  it('a redraft of a reply shows the post it replies to, when given', async () => {
+    signIn()
+    const el = await mount()
+    const parentPost = { ...own({ id: '5', content: '<p>the question</p>' }), account: { id: 'b1', acct: 'bob', username: 'bob', displayName: 'Bob' } }
+    window.dispatchEvent(new CustomEvent('caribou:compose', {
+      detail: { redraft: emptyDraft({ text: 'answer', inReplyToId: '5' }), inReplyTo: parentPost },
+    }))
+    await settle(el)
+    expect($(el, '[data-reply-to]')!.textContent).toContain('the question')
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('answer')
   })
 })

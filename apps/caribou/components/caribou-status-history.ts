@@ -28,7 +28,8 @@ function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
-// The versions of a post, newest first, in a modal dialog. Each version's
+// The versions of a post, newest first, in a modal dialog. The list keeps
+// `role="list"`: WebKit drops the role of a list with no markers. Each version's
 // HTML goes through DOMPurify with the post card's options.
 @customElement('caribou-status-history')
 export class CaribouStatusHistory extends LitElement {
@@ -112,7 +113,7 @@ export class CaribouStatusHistory extends LitElement {
           ? html`<p class="status" role="alert">Could not load the edit history.</p>`
           : vs === null
           ? html`<p class="status" role="status">Loading…</p>`
-          : html`<ol aria-label="Versions, newest first">${vs.map((v, i) => this.renderVersion(v, i, vs))}</ol>`}
+          : html`<ol role="list" aria-label="Versions, newest first">${vs.map((v, i) => this.renderVersion(v, i, vs))}</ol>`}
       </div>
     </dialog>`
   }
@@ -124,6 +125,10 @@ export class CaribouStatusHistory extends LitElement {
  * dialog closes on the change. Client only.
  */
 export async function showStatusHistory(client: CaribouClient, statusId: string): Promise<void> {
+  // The opener sits in a card's shadow root; give focus back to it by hand,
+  // as the compose dialog does, since the dialog element goes away.
+  let opener: Element | null = document.activeElement
+  while (opener?.shadowRoot?.activeElement) opener = opener.shadowRoot.activeElement
   const el = document.createElement('caribou-status-history') as CaribouStatusHistory
   document.body.appendChild(el)
   const owner = activeUserKey.peek()
@@ -142,6 +147,7 @@ export async function showStatusHistory(client: CaribouClient, statusId: string)
   } finally {
     stop()
     el.remove()
+    if (opener instanceof HTMLElement && opener.isConnected && activeUserKey.peek() === owner) opener.focus()
   }
 }
 

@@ -140,3 +140,84 @@ describe('mergeStatus and edits', () => {
     expect(get('1')?.content).toBe('<p>newer</p>')
   })
 })
+
+describe('review round 1: an older copy never undoes an edit', () => {
+  const EDITED = '2026-11-01T00:00:00.000Z'
+
+  it('a late timeline page fetched before the edit does not undo it (cacheStatus path)', async () => {
+    const { createTimelineStore } = await import('../timeline-store.js')
+    cacheStatus(makeStatus('1', { content: '<p>old</p>' }))
+    const page = deferred<Status[]>()
+    const store = createTimelineStore('home', {
+      clientSource: () => client({ fetchTimeline: () => page.promise as never }),
+    })
+    const loading = store.load()
+    await editOwnStatus(client({ editStatus: async () => makeStatus('1', { content: '<p>new</p>', editedAt: EDITED }) }),
+      '1', { status: 'new', spoilerText: '', mediaIds: [] })
+    page.resolve([makeStatus('1', { content: '<p>old</p>', favouritesCount: 9 })])
+    await loading
+    expect(get('1')?.content).toBe('<p>new</p>')
+    expect(get('1')?.editedAt).toBe(EDITED)
+    // Everything else still comes from the fresh copy.
+    expect(get('1')?.favouritesCount).toBe(9)
+  })
+
+  it('a late boost carrying the old post does not undo the edit inside it', () => {
+    cacheStatus(makeStatus('1', { content: '<p>new</p>', editedAt: EDITED }))
+    cacheStatus(wrapper('w1', makeStatus('1', { content: '<p>old</p>' })))
+    expect(get('w1')?.reblog?.content).toBe('<p>new</p>')
+  })
+
+  it('an edit of a post cached only inside a boost caches the post itself', async () => {
+    cacheStatus(wrapper('w1', makeStatus('1', { content: '<p>old</p>' })))
+    await editOwnStatus(client({ editStatus: async () => makeStatus('1', { content: '<p>new</p>', editedAt: EDITED }) }),
+      '1', { status: 'new', spoilerText: '', mediaIds: [] })
+    expect(get('1')?.content).toBe('<p>new</p>')
+    expect(get('w1')?.reblog?.content).toBe('<p>new</p>')
+    // Stale page data for the post now has a newer copy to lose against.
+    const { mergeStatus } = await import('../caches.js')
+    mergeStatus(makeStatus('1', { content: '<p>old</p>' }))
+    expect(get('1')?.content).toBe('<p>new</p>')
+  })
+
+  it('two overlapping edits answered newest first: the older answer does not win', async () => {
+    cacheStatus(wrapper('w1', makeStatus('1', { content: '<p>old</p>' })))
+    const first = deferred<Status>()
+    const second = deferred<Status>()
+    const p1 = editOwnStatus(client({ editStatus: () => first.promise }), '1', { status: 'first', spoilerText: '', mediaIds: [] })
+    const p2 = editOwnStatus(client({ editStatus: () => second.promise }), '1', { status: 'second', spoilerText: '', mediaIds: [] })
+    second.resolve(makeStatus('1', { content: '<p>second</p>', editedAt: '2026-11-01T00:00:02.000Z' }))
+    await p2
+    first.resolve(makeStatus('1', { content: '<p>first</p>', editedAt: '2026-11-01T00:00:01.000Z' }))
+    await p1
+    expect(get('w1')?.reblog?.content).toBe('<p>second</p>')
+    expect(get('1')?.content).toBe('<p>second</p>')
+  })
+
+  it('an edit answer is cached even when no copy of the post was', async () => {
+    await editOwnStatus(client({ editStatus: async () => makeStatus('1', { content: '<p>new</p>', editedAt: EDITED }) }),
+      '1', { status: 'new', spoilerText: '', mediaIds: [] })
+    expect(get('1')?.content).toBe('<p>new</p>')
+  })
+})
+
+describe('review round 1: a deleted post stays gone after A -> B -> A', () => {
+  it('a copy a poll brought back while the delete was out leaves the cache on the account change', async () => {
+    cacheStatus(makeStatus('1'))
+    cacheStatus(makeStatus('2'))
+    const d = deferred<Status>()
+    const p = deleteOwnStatus(client({ deleteStatus: () => d.promise }), makeStatus('1'))
+    // A poll lands meanwhile and brings the post and a boost of it back.
+    cacheStatus(makeStatus('1'))
+    cacheStatus(wrapper('w1', makeStatus('1')))
+    d.resolve(makeStatus('1'))
+    await p
+    activeUserKey.value = toUserKey('bob', 'example.social')
+    ownerGeneration()
+    activeUserKey.value = toUserKey('alice', 'example.social')
+    ownerGeneration()
+    expect(get('1')).toBeUndefined()
+    expect(get('w1')).toBeUndefined()
+    expect(get('2')).toBeDefined()
+  })
+})

@@ -32,7 +32,9 @@ export interface ComposeDraft {
 
 // A new post and each reply keep their own draft, so opening a reply does
 // not overwrite a half-written post, and the reverse.
-export type DraftSlot = 'new' | `reply:${string}`
+// `redraft` is a delete-and-redraft opened while its own slot held an
+// unsent draft: it lives only in the open dialog and is never stored.
+export type DraftSlot = 'new' | `reply:${string}` | 'redraft'
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'

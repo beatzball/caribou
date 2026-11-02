@@ -3,7 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser, activeUserKey, userName, editOwnStatus,
+  activeClient, activeUser, activeUserKey, userName, editOwnStatus, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
   type ComposeDraft, type DraftMedia, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
@@ -12,12 +12,13 @@ import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 import './caribou-icon-button.js'
 import { countChars, plainText, replyMentions, replyVisibility } from './_compose-text.js'
-import { draftMediaOf } from './_redraft.js'
+import { draftMediaOf, POLL_EDIT_REFUSED } from './_redraft.js'
 
 /**
  * What `caribou:compose` asks for: a new post, a reply to `inReplyTo`, an
  * edit of the reader's own post (`edit`, with its source text), or a new
- * post filled from a deleted one (`redraft`).
+ * post filled from a deleted one (`redraft`, with `inReplyTo` when the
+ * page has the post it replied to).
  */
 export interface ComposeDetail {
   inReplyTo?: mastodon.v1.Status
@@ -249,7 +250,7 @@ export class CaribouComposeDialog extends LitElement {
     if (!this.isActive()) return
     const detail = (e as CustomEvent<ComposeDetail | undefined>).detail
     if (detail?.edit) this.showEdit(detail.edit.status, detail.edit.source)
-    else if (detail?.redraft) this.showRedraft(detail.redraft)
+    else if (detail?.redraft) this.showRedraft(detail.redraft, detail.inReplyTo ?? null)
     else this.show(detail?.inReplyTo ?? null)
   }
 
@@ -312,12 +313,24 @@ export class CaribouComposeDialog extends LitElement {
     this.finishOpen()
   }
 
-  /** Opens a new post filled from a deleted one, and keeps it as a draft. */
-  showRedraft(draft: ComposeDraft): void {
+  /**
+   * Opens a new post filled from a deleted one. It is kept as a draft in
+   * its slot, unless that slot holds an unsent draft: that one is never
+   * overwritten, and the redraft then lives only in the open dialog.
+   */
+  showRedraft(draft: ComposeDraft, inReplyTo: mastodon.v1.Status | null = null): void {
     if (!this.begin()) return
-    this.draftKey = draftSlot(draft.inReplyToId)
+    const client = this.client!
+    const slot = draftSlot(draft.inReplyToId)
+    const held = loadDraft(client.userKey, slot)
+    this.replyTo = inReplyTo && inReplyTo.id === draft.inReplyToId ? inReplyTo : null
     this.draft = draft
-    saveDraft(this.client!.userKey, this.draftKey, draft)
+    if (held && !isDraftEmpty(held)) {
+      this.draftKey = 'redraft'
+    } else {
+      this.draftKey = slot
+      saveDraft(client.userKey, slot, draft)
+    }
     this.finishOpen()
   }
 
@@ -363,7 +376,7 @@ export class CaribouComposeDialog extends LitElement {
     // the draft that is being sent, or be cleared with it.
     if (this.posting || !this.client) return
     this.draft = { ...this.draft, ...patch }
-    if (!this.editing) saveDraft(this.client.userKey, this.draftKey, this.draft)
+    if (!this.editing && this.draftKey !== 'redraft') saveDraft(this.client.userKey, this.draftKey, this.draft)
   }
 
   private get count(): number {
@@ -378,7 +391,17 @@ export class CaribouComposeDialog extends LitElement {
 
   // Saves an edit. A failure leaves the post as it was and the dialog open
   // with the reader's text, so nothing is lost.
-  private async saveEdit(client: CaribouClient, post: mastodon.v1.Status) {
+  //
+  // Media, language and the poll come from the newest copy of the post this
+  // page knows, which may be newer than the one the dialog opened with: an
+  // edit replaces the media list, so an older one would drop new media.
+  private async saveEdit(client: CaribouClient, opened: mastodon.v1.Status) {
+    const known = newestKnownStatus(opened.id)
+    const post = known && olderEdit(opened, known) ? known : opened
+    if (post.poll) {
+      toast('error', POLL_EDIT_REFUSED)
+      return
+    }
     const session = this.session
     const d = this.draft
     const cw = d.cw && d.spoilerText.trim() !== ''
@@ -389,9 +412,9 @@ export class CaribouComposeDialog extends LitElement {
         spoilerText: cw ? d.spoilerText : '',
         // A content warning marks the media sensitive; without one the
         // media keeps the mark it had.
-        sensitive: cw || (post.sensitive === true && d.media.length > 0),
-        language: d.language ?? null,
-        mediaIds: d.media.map((m) => m.id),
+        sensitive: cw || (post.sensitive === true && (post.mediaAttachments?.length ?? 0) > 0),
+        language: post.language ?? d.language ?? null,
+        mediaIds: (post.mediaAttachments ?? []).map((m) => m.id),
       })
       if (!saved || client !== this.client || session !== this.session) return
       this.close()
@@ -561,6 +584,8 @@ export class CaribouComposeDialog extends LitElement {
               <span class="acct">@${this.replyTo.account.acct}</span>
               <div>${plainText(this.replyTo.content)}</div>
             </div>` : nothing}
+          ${this.draftKey === 'redraft' ? html`
+            <p class="note" data-redraft-note>This redraft is not kept as a draft: you already have an unsent draft here, and it stays as it is.</p>` : nothing}
           ${d.cw ? html`
             <label class="visually-hidden" for="compose-cw">Content warning</label>
             <input id="compose-cw" type="text" name="spoiler" placeholder="Content warning"

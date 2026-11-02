@@ -192,23 +192,34 @@ the blocked accounts.
 has the active account's id (an id, never a handle, so a same-named
 account on another server is not the reader), the post menu has Edit,
 Delete and Delete & redraft instead of Mute and Block. Like every menu,
-it shows only after the first render. Edit asks for the post's source
-text, then opens `<caribou-compose-dialog>` in edit mode
-(`caribou:compose` with `edit`). An edit is not kept as a draft. Its
-visibility cannot change (Mastodon does not allow it). Its media stays as
-it is and is sent back with the edit, since Mastodon drops any attachment
-an edit leaves out. `editOwnStatus` (`@beatzball/caribou-state`) writes
+it shows only after the first render. Edit asks for the post as the
+server has it now and for its source text, then opens
+`<caribou-compose-dialog>` in edit mode (`caribou:compose` with `edit`).
+An edit is not kept as a draft. Its visibility cannot change (Mastodon
+does not allow it). Its media stays as it is and is sent back with the
+edit, from the newest copy the page knows, since Mastodon drops any
+attachment an edit leaves out. A post with a poll cannot be edited:
+Mastodon removes a poll an edit leaves out, and starts one it sends again,
+with no votes. `editOwnStatus` (`@beatzball/caribou-state`) writes
 the new copy to the status cache, in place and inside every boost. A list
 that keeps its own copies (a thread, notifications) shows it because the
-card takes a newer edit from the cache (`editedAt`). A merge never lets
-an older copy undo an edit. A failed edit leaves the dialog open with
+card takes a newer edit from the cache (`editedAt`); its links follow
+that copy too. No write to the cache lets an older copy undo an edit
+(`cacheStatus` and `mergeStatus` both keep the newest edit, alone or
+inside a boost), so a fetch that answers after the edit, or a late answer
+to an earlier edit, changes nothing. A failed edit leaves the dialog open with
 the text. Delete asks first (`confirmDialog`). `deleteOwnStatus` takes
 the post and its boosts out of the cache at once and marks the id in
 `deletedStatusIds`. A card whose post is marked hides; the thread's main
-post says "You deleted this post." instead. A failed delete puts it all
-back with a toast. Delete & redraft opens a new post filled from the
+post says "You deleted this post." instead. Focus goes to the next post
+in the list (or the one before). A failed delete puts it all back with a
+toast. An account change drops the marks and every cached copy of a
+deleted post with them. Delete & redraft opens a new post filled from the
 server's answer (`text`, content warning, visibility, sensitive,
-language, reply, media), kept as a draft. An edited post shows "edited"
+language, reply, media), kept as a draft, and with the post it replied
+to when the page has it. An unsent draft already in that slot is never
+overwritten: the redraft then lives only in the open dialog, which says
+so. An edited post shows "edited"
 after its time: plain text in the server render, a button after mount
 for a reader on the same server. It opens `<caribou-status-history>`
 with every version, newest first, each sanitized like a post. A result
