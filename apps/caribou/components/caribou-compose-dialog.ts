@@ -59,14 +59,15 @@ interface PendingMedia {
   mediaId?: string
 }
 
-// What a Remove or Retry button says after its verb, so that each one has
-// its own name: the file name, or else the kind and place, "image 2".
+// What follows "Remove", "Retry" or "Alt text for" on each attachment, so
+// that every control has its own name: the kind and place, then the file
+// name when there is one, "image 2, image.jpeg". The place is always there:
+// a phone names every photo it hands over the same, "image.jpeg".
 function mediaLabel(name: string | undefined, kind: string, position: number): string {
-  if (name) return name
   const noun = kind.startsWith('image') || kind === 'gifv' ? 'image'
     : kind.startsWith('video') ? 'video'
     : kind.startsWith('audio') ? 'audio' : 'file'
-  return `${noun} ${position}`
+  return name ? `${noun} ${position}, ${name}` : `${noun} ${position}`
 }
 
 function errorText(err: unknown): string {
@@ -483,7 +484,7 @@ export class CaribouComposeDialog extends LitElement {
                     ? html`<img src=${m.previewUrl ?? m.url} alt="">`
                     : html`<div class="file">${m.type}</div>`}
                   <input type="text" placeholder="Describe for people who can’t see it"
-                    aria-label="Alt text" ?readonly=${busy} .value=${m.description}
+                    aria-label="Alt text for ${label}" ?readonly=${busy} .value=${m.description}
                     @input=${(e: Event) => this.patchDraft({
                       media: this.draft.media.map((x) => x.id === m.id
                         ? { ...x, description: (e.target as HTMLInputElement).value } : x),
@@ -503,7 +504,7 @@ export class CaribouComposeDialog extends LitElement {
                     ${p.state === 'uploading' ? 'Uploading…' : 'Upload failed'}
                   </span>
                   <input type="text" placeholder="Describe for people who can’t see it"
-                    aria-label="Alt text" .value=${p.description}
+                    aria-label="Alt text for ${label}" .value=${p.description}
                     @input=${(e: Event) => {
                       const description = (e.target as HTMLInputElement).value
                       this.pending = this.pending.map((x) => x.localId === p.localId ? { ...x, description } : x)

@@ -275,7 +275,7 @@ test('a failed upload offers Retry and Remove; Cancel closes from the keyboard',
   await expect(dialog).toHaveCount(0)
 })
 
-test('each Remove button names its own file', async ({ page }) => {
+test('each attachment control names its place and file, even when two files share a name', async ({ page }) => {
   await seedSession(page)
   await mockApi(page)
   let uploads = 0
@@ -292,30 +292,43 @@ test('each Remove button names its own file', async ({ page }) => {
   await page.keyboard.press('n')
   const dialog = page.getByRole('dialog', { name: 'New post' })
   const list = dialog.getByRole('list', { name: 'Attachments' })
-  for (const name of ['photo.png', 'other.png']) {
+  // A phone's photo picker gives every photo the same name.
+  for (const count of [1, 2]) {
     const chooser = page.waitForEvent('filechooser')
     await dialog.getByRole('button', { name: 'Add images or video' }).click()
-    await (await chooser).setFiles({ name, mimeType: 'image/png', buffer: PIXEL })
-    await expect(list.getByRole('listitem')).toHaveCount(name === 'photo.png' ? 1 : 2)
+    await (await chooser).setFiles({ name: 'image.png', mimeType: 'image/png', buffer: PIXEL })
+    await expect(list.getByRole('listitem')).toHaveCount(count)
   }
   await expect(list.getByRole('status')).toHaveText('Upload failed')
-  await expect(list.getByRole('button', { name: 'Remove photo.png', exact: true })).toHaveCount(1)
-  await expect(list.getByRole('button', { name: 'Remove other.png', exact: true })).toHaveCount(1)
-  await expect(list.getByRole('button', { name: 'Retry other.png', exact: true })).toHaveCount(1)
-  // The file name is for screen readers; the visible text stays short.
-  await expect(list.locator('[data-media="m1"] [data-action="remove-media"] .visually-hidden')).toHaveText('photo.png')
+  const exact = (name: string) => ({ name, exact: true })
+  await expect(list.getByRole('button', exact('Remove image 1, image.png'))).toHaveCount(1)
+  await expect(list.getByRole('button', exact('Remove image 2, image.png'))).toHaveCount(1)
+  await expect(list.getByRole('button', exact('Retry image 2, image.png'))).toHaveCount(1)
+  await expect(list.getByRole('textbox', exact('Alt text for image 1, image.png'))).toHaveCount(1)
+  await expect(list.getByRole('textbox', exact('Alt text for image 2, image.png'))).toHaveCount(1)
 
-  // The name is stored with the draft, so it is still there after a reload.
+  // The place and file name are for screen readers. The visible text stays
+  // "Remove": the extra text is clipped to a 1px box.
+  const remove = list.locator('[data-media="m1"] [data-action="remove-media"]')
+  const hidden = remove.locator('.visually-hidden')
+  await expect(hidden).toHaveText('image 1, image.png')
+  const box = await hidden.boundingBox()
+  expect(box!.width).toBeLessThanOrEqual(1)
+  expect(box!.height).toBeLessThanOrEqual(1)
+
+  // The file name is stored with the draft, so it is still there after a reload.
   await page.reload()
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   await page.keyboard.press('n')
-  await expect(list.getByRole('button', { name: 'Remove photo.png', exact: true })).toHaveCount(1)
+  await expect(list.getByRole('button', exact('Remove image 1, image.png'))).toHaveCount(1)
 })
 
-test('a stored draft with no file names names Remove by kind and place', async ({ page }) => {
+test('a stored draft with no file names names each item by kind and place, and renumbers', async ({ page }) => {
   await seedSession(page)
   await mockApi(page)
   await page.addInitScript((key) => {
+    if (sessionStorage.getItem('draft-seeded')) return
+    sessionStorage.setItem('draft-seeded', '1')
     const media = (id: string, type: string) =>
       ({ id, type, url: 'https://example.social/a.png', previewUrl: null, description: '' })
     localStorage.setItem(key, JSON.stringify({
@@ -329,10 +342,20 @@ test('a stored draft with no file names names Remove by kind and place', async (
   await page.keyboard.press('n')
   const list = page.getByRole('dialog', { name: 'New post' }).getByRole('list', { name: 'Attachments' })
   const remove = list.getByRole('button')
+  const alt = list.getByRole('textbox')
   await expect(remove).toHaveCount(3)
   await expect(remove.nth(0)).toHaveAccessibleName('Remove image 1')
   await expect(remove.nth(1)).toHaveAccessibleName('Remove video 2')
   await expect(remove.nth(2)).toHaveAccessibleName('Remove image 3')
+  await expect(alt.nth(1)).toHaveAccessibleName('Alt text for video 2')
+
+  // Removing the first item moves the others up a place.
+  await remove.nth(0).click()
+  await expect(remove).toHaveCount(2)
+  await expect(remove.nth(0)).toHaveAccessibleName('Remove video 1')
+  await expect(remove.nth(1)).toHaveAccessibleName('Remove image 2')
+  await expect(alt.nth(0)).toHaveAccessibleName('Alt text for video 1')
+  await expect(alt.nth(1)).toHaveAccessibleName('Alt text for image 2')
 })
 
 test('Tab stops once on each toolbar control; Space on Post publishes', async ({ page }) => {
