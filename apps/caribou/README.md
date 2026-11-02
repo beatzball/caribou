@@ -223,8 +223,12 @@ sign-in used to end with the session in the URL fragment, now only shows
 reader. On `/` only, an inline script in the head
 (`server/lib/root-forward-head.ts`) reads the stored accounts before the
 first paint and calls `location.replace('/home')`, so `/` leaves no history
-entry. A client-side navigation to `/` does the same in `pages/index.ts`,
-with the same rules (`components/_root-forward.ts`). `/` stays for `/?add`,
+entry. The browser then stops reading `/`, so the tab is empty until `/home`
+commits; after 3 s it shows links to `/home` and to sign in. When the script
+keeps the reader on `/`, it marks `<html>` with `data-caribou-root`, and the
+router does not check that load again (the error banner may have consumed a
+stashed error by then). A client-side navigation to `/` is checked in
+`pages/index.ts`, with the same rules (`components/_root-forward.ts`). `/` stays for `/?add`,
 for a sign-in error (`?error=`, or the stashed `caribou.error`), and with no
 active account. With storage blocked, or without JavaScript, `/` stays the
 sign-in page. The pages send no Content-Security-Policy, so the inline script

@@ -1,10 +1,9 @@
 import { html } from 'lit'
 import { customElement } from 'lit/decorators.js'
-import { LitroPage } from '@beatzball/litro/runtime'
-import type { LitroLocation } from '@beatzball/litro-router'
+import { LitroPage, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery } from 'h3'
-import { FORWARD_ATTR, forwardsToHome, replaceWithHome } from '../components/_root-forward.js'
+import { DECIDED_ATTR, forwardsToHome, replaceWithHome } from '../components/_root-forward.js'
 import '../components/caribou-landing.js'
 
 export interface IndexData {
@@ -20,12 +19,15 @@ export const pageData = definePageData<IndexData>(async (event) => ({
 
 @customElement('page-index')
 export class IndexPage extends LitroPage {
-  // With an active account, `/` is `/home` (issue 135). On a full load the
-  // head script has already started that navigation, before the first paint;
-  // then there is nothing more to do here. This covers a client-side
-  // navigation to `/`.
+  // With an active account, `/` is `/home` (issue 135). A full load of `/`
+  // is decided by the head script, before anything can consume a stashed
+  // sign-in error: it either left already or marked `<html>` to stay. So
+  // this checks only a client-side navigation to `/`.
   override onBeforeEnter(location: LitroLocation) {
-    if (!document.documentElement.hasAttribute(FORWARD_ATTR)) {
+    const root = document.documentElement
+    if (root.hasAttribute(DECIDED_ATTR)) {
+      root.removeAttribute(DECIDED_ATTR)
+    } else {
       let go = false
       try { go = forwardsToHome(location.search, localStorage, sessionStorage) } catch { /* blocked */ }
       if (go) {
