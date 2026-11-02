@@ -6,6 +6,7 @@ import { loadReaderView, readerCheckFor, readerChecks } from '../reader-view.js'
 import { createThreadStore } from '../thread-store.js'
 import { createProfileStore } from '../profile-store.js'
 import { createTimelineStore } from '../timeline-store.js'
+import { activeUserKey } from '../users.js'
 
 type Status = mastodon.v1.Status
 
@@ -108,6 +109,30 @@ describe('loadReaderView', () => {
     await loadReaderView(Array.from({ length: 30 }, (_, i) => post(String(i))), c)
     expect(check('0')).toBeUndefined()
     expect(check('25')).toBe('failed')
+  })
+
+  // A → B → A: the first A request comes back after a new A request went
+  // out for the same post. Its answer belongs to an old generation and is
+  // dropped, and it must leave the new request's pending check alone.
+  it('an old request does not clear a newer request\'s pending check', async () => {
+    activeUserKey.value = 'alice@example.social' as typeof activeUserKey.value
+    const first = deferred<Status[]>()
+    const second = deferred<Status[]>()
+    const c = client({ fetchStatuses: vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise) })
+    const old = loadReaderView([post('1')], c)
+    activeUserKey.value = 'bob@other.example' as typeof activeUserKey.value
+    activeUserKey.value = 'alice@example.social' as typeof activeUserKey.value
+    const now = loadReaderView([post('1')], c)
+    expect(check('1')).toBe('pending')
+    first.resolve([post('1', { filtered: [] })])
+    await old
+    expect(check('1')).toBe('pending')
+    expect(statusCache.value.get('1')?.filtered).toBeUndefined()
+    second.resolve([post('1', { filtered: HIDE })])
+    await now
+    expect(check('1')).toBeUndefined()
+    expect(statusCache.value.get('1')!.filtered).toEqual(HIDE)
+    activeUserKey.value = null
   })
 
   it('a post whose filters are known already is not covered while it is asked again', async () => {

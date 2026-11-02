@@ -33,13 +33,19 @@ describe('reader veil head', () => {
     expect(root.hasAttribute('data-caribou-reader-check')).toBe(false)
   })
 
-  it('takes the mark off after 15 s if the app never takes over', () => {
+  // A slow or failed app download must not show posts nobody has checked.
+  it('never takes the mark off by itself; after 15 s it says why posts are hidden, with Reload', () => {
     localStorage.setItem('caribou.activeUserKey', JSON.stringify('alice@example.social'))
     run()
     vi.advanceTimersByTime(14_999)
-    expect(root.hasAttribute('data-caribou-reader-check')).toBe(true)
+    expect(document.getElementById('caribou-reader-stalled')).toBeNull()
     vi.advanceTimersByTime(1)
-    expect(root.hasAttribute('data-caribou-reader-check')).toBe(false)
+    const note = document.getElementById('caribou-reader-stalled')!
+    expect(note.textContent).toContain('Posts are hidden until Caribou has checked them')
+    expect(note.querySelector('a')!.textContent).toBe('Reload')
+    vi.advanceTimersByTime(600_000)
+    expect(root.hasAttribute('data-caribou-reader-check')).toBe(true)
+    note.remove()
   })
 
   it('the app cancels that timer when it starts', () => {
@@ -47,6 +53,6 @@ describe('reader veil head', () => {
     run()
     clearTimeout((window as unknown as { __caribouReaderVeil?: number }).__caribouReaderVeil)
     vi.advanceTimersByTime(20_000)
-    expect(root.hasAttribute('data-caribou-reader-check')).toBe(true)
+    expect(document.getElementById('caribou-reader-stalled')).toBeNull()
   })
 })

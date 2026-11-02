@@ -23,17 +23,33 @@ type Status = mastodon.v1.Status
 // out). A post not in the map is settled. A card covers a post that is not
 // settled, so the reader never sees one their filters would hide.
 export type ReaderCheck = 'pending' | 'failed'
-export const readerChecks = signal<ReadonlyMap<string, ReaderCheck>>(new Map())
+
+// Each entry remembers the request that set it. A request settles or clears
+// only its own entries, so an older one (from before an account change and
+// back, say) can never clear a newer request's pending check.
+interface Entry { state: ReaderCheck; request: number }
+
+export const readerChecks = signal<ReadonlyMap<string, Entry>>(new Map())
+let requests = 0
 
 export function readerCheckFor(userKey: string, id: string): ReaderCheck | undefined {
-  return readerChecks.value.get(`${userKey} ${id}`)
+  return readerChecks.value.get(`${userKey} ${id}`)?.state
 }
 
-function mark(userKey: string, ids: readonly string[], to: ReaderCheck | null): void {
+function claim(userKey: string, ids: readonly string[], request: number): void {
+  const next = new Map(readerChecks.peek())
+  for (const id of ids) next.set(`${userKey} ${id}`, { state: 'pending', request })
+  readerChecks.value = next
+}
+
+// Moves this request's own entries to `to` (null: settled, removed).
+function release(userKey: string, ids: readonly string[], request: number, to: ReaderCheck | null): void {
   const next = new Map(readerChecks.peek())
   for (const id of ids) {
-    if (to) next.set(`${userKey} ${id}`, to)
-    else next.delete(`${userKey} ${id}`)
+    const key = `${userKey} ${id}`
+    if (next.get(key)?.request !== request) continue
+    if (to) next.set(key, { state: to, request })
+    else next.delete(key)
   }
   readerChecks.value = next
 }
@@ -54,7 +70,8 @@ export async function loadReaderView(statuses: readonly Status[], client: Caribo
   // A post whose reader filters are known already stays as it is while it
   // is asked again: covering it would make a shown post blink.
   const unknown = ids.filter((id) => !filteredById.peek().has(id))
-  mark(userKey, unknown, 'pending')
+  const request = ++requests
+  claim(userKey, unknown, request)
   let fresh: Status[] = []
   try {
     fresh = await batched(client, ids)
@@ -64,7 +81,7 @@ export async function loadReaderView(statuses: readonly Status[], client: Caribo
   // The account changed while the requests were out: these are its flags,
   // and its checks.
   if (generation !== ownerGeneration()) {
-    mark(userKey, unknown, null)
+    release(userKey, unknown, request, null)
     return
   }
   const settled: string[] = []
@@ -76,8 +93,8 @@ export async function loadReaderView(statuses: readonly Status[], client: Caribo
       settled.push(f.id)
     }
     const done = new Set(settled)
-    mark(userKey, settled, null)
-    mark(userKey, unknown.filter((id) => !done.has(id)), 'failed')
+    release(userKey, settled, request, null)
+    release(userKey, unknown.filter((id) => !done.has(id)), request, 'failed')
   })
 }
 

@@ -24,10 +24,11 @@ import { routes } from './routes.generated.js'
 // Hydrate session from localStorage before any component reads it.
 if (typeof window !== 'undefined') {
   // The head script hides server-rendered posts from a signed-in reader and
-  // set a timer to undo that if the app never ran. It runs: from now on each
+  // set a timer to say so if the app never ran. It runs: from now on each
   // status card shows its post once the reader's filters for it are known
   // (`server/lib/reader-veil-head.ts`).
   clearTimeout((window as unknown as { __caribouReaderVeil?: number }).__caribouReaderVeil)
+  document.getElementById('caribou-reader-stalled')?.remove()
   loadFromStorage()
   // The head script set the theme before the first paint; this keeps it in
   // step with /settings, an account switch and the system setting.

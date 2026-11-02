@@ -135,11 +135,15 @@ thread ask for the reader's copies of those posts (`loadReaderViewFrom` in
 older server). Until that answer is in, a signed-in reader does not see
 those posts: a head script marks `<html>` before the first paint and its
 style hides every card's post through the inherited
-`--caribou-reader-veil` (`server/lib/reader-veil-head.ts`); once the app
-runs, each card sets the property on itself and shows its post when its
-check has settled (`readerChecks` in `@beatzball/caribou-state`). A post the
-server leaves out, or a failed request, stays covered by "Could not check
-this post against your filters." with Show and Retry. The server HTML is
+`--caribou-reader-veil` (`server/lib/reader-veil-head.ts`); the mark never
+comes off by itself (after 15 s with no app it says why, with Reload). Once
+the app runs, one rule holds: such a post stays covered until the reader's
+check for it has settled (`readerChecks` in `@beatzball/caribou-state`), or
+the reader chooses Show. The note says "Checking this post…" while the
+check is out, and "Could not check this post…" with Retry after a failed
+request or for a post the server left out; a Retry keeps the note. Each
+check entry belongs to the request that made it, so a late answer from an
+earlier account cannot uncover a post a newer check still holds. The server HTML is
 the same for every reader, so hydration holds. Stores seed with
 `mergeStatus`, so a reader's copy already cached keeps its `filtered`. A
 post can be cached twice, alone and inside a boost; `readerFiltered(id)`

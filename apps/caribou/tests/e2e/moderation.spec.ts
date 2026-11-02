@@ -217,9 +217,8 @@ test('server-rendered posts get the reader\'s filters once the page runs', async
   // While the reader's copies are out, no post shows: not even the one a
   // hide filter is about to remove.
   await expect.poll(() => asked).toEqual([['1', '2', '3']])
-  await expect(card(page, '2').locator('article')).toBeHidden()
-  await expect(card(page, '1').locator('article')).toBeHidden()
-  await expect(card(page, '1')).toHaveCSS('--caribou-reader-veil', 'hidden')
+  await expect(card(page, '1').getByText('Checking this post against your filters…')).toBeVisible()
+  for (const id of ['1', '2', '3']) await expect(card(page, id)).not.toContainText(`post ${id}`)
   release()
   await expect(card(page, '1')).toContainText('post 1')
   await expect(card(page, '1').locator('article')).toBeVisible()
@@ -256,9 +255,42 @@ test('a failed check covers the post with Show and Retry', async ({ page }) => {
   })
   await expect(card(page, '1').getByText('Could not check this post against your filters.')).toBeVisible()
   await expect(card(page, '1')).not.toContainText('post 1')
+  // Held, then a hide: while Retry waits nothing of the post shows, and the
+  // focus stays on Retry.
   fail = false
-  await card(page, '1').getByRole('button', { name: 'Retry checking this post' }).click()
-  await expect(card(page, '1')).toContainText('post 1')
+  let answer!: () => void
+  const answered = new Promise<void>((r) => { answer = r })
+  await page.unroute(`${API}/v1/statuses?*`)
+  await page.route(`${API}/v1/statuses?*`, async (route) => {
+    await answered
+    return route.fulfill(json([status('1', BOB, [match('Politics', 'hide', ['public'])])]))
+  })
+  const retry = card(page, '1').getByRole('button', { name: 'Retry checking this post' })
+  await retry.focus()
+  await page.keyboard.press('Enter')
+  await expect(retry).toHaveAttribute('aria-busy', 'true')
+  await expect(card(page, '1')).not.toContainText('post 1')
+  await expect(retry).toBeFocused()
+  answer()
+  await expect(card(page, '1')).toBeHidden()
+})
+
+// A signed-in hard load whose app never starts: the head script keeps
+// every post hidden, and after 15 s says why, with Reload. Nothing uncovers
+// a post nobody has checked.
+test('a signed-in page whose app does not start keeps posts hidden and says so', async ({ page }) => {
+  await page.clock.install()
+  await signIn(page)
+  await page.route((url) => url.pathname.startsWith('/_litro/app.js'), (route) => route.abort())
+  await page.goto('/home')
+  const veil = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--caribou-reader-veil').trim())
+  expect(await veil()).toBe('hidden')
+  await page.clock.fastForward('00:16')
+  const note = page.locator('#caribou-reader-stalled')
+  await expect(note).toContainText('Posts are hidden until Caribou has checked them')
+  await expect(note.getByRole('link', { name: 'Reload' })).toBeVisible()
+  await page.clock.fastForward('10:00')
+  expect(await veil()).toBe('hidden')
 })
 
 test('/settings links to the moderation page', async ({ page }) => {

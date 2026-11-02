@@ -303,8 +303,15 @@ export class CaribouStatusCard extends LitElement {
   // Where the reader's-filters check for this post stands (`loadReaderView`):
   // pending, failed, or undefined when settled or not asked.
   @state() private readerCheck: ReaderCheck | undefined = undefined
+  // The reader chose Show on a post not checked yet. Kept apart from
+  // `filterShown`: a warning that arrives later must still warn.
+  @state() private uncheckedShown = false
   // A Retry of a failed check is out.
   @state() private retrying = false
+  // Set by render(): the cover shown is the unchecked one.
+  private coverIsUnchecked = false
+  // Set by render(), read by updated(): the post itself is on screen.
+  private renderedPost = false
   // Set by render(), read by updated(): the host is hidden.
   private hiddenNow = false
 
@@ -448,6 +455,7 @@ export class CaribouStatusCard extends LitElement {
       const key = typeof window === 'undefined' || hydrating ? null : this.warningKey()
       this.warningOpen = key !== null && openedWarnings.get(key) === true
       this.filterShown = key !== null && shownFiltered.get(key) === true
+      this.uncheckedShown = false
       this.moderated = null
     }
   }
@@ -455,9 +463,11 @@ export class CaribouStatusCard extends LitElement {
   protected override updated() {
     this.toggleAttribute('hidden', this.hiddenNow)
     // The head script hides every card's post from a signed-in reader until
-    // the card says (`server/lib/reader-veil-head.ts`). Only a post whose
-    // check is still out stays hidden; a Retry keeps its note in view.
-    const veiled = this.readerCheck === 'pending' && !this.retrying
+    // the card says (`server/lib/reader-veil-head.ts`). The card lifts that
+    // unless what it rendered is a post still waiting for its check: the
+    // render that hydrates the server's markup, before the card has drawn
+    // its cover.
+    const veiled = this.renderedPost && this.unchecked()
     this.style.setProperty('--caribou-reader-veil', veiled ? 'hidden' : 'visible')
   }
 
@@ -480,9 +490,21 @@ export class CaribouStatusCard extends LitElement {
   }
 
   private onToggleFiltered = () => {
+    if (this.coverIsUnchecked) {
+      this.uncheckedShown = !this.uncheckedShown
+      return
+    }
     const key = this.warningKey()
     this.filterShown = !this.filterShown
     if (key !== null) shownFiltered.set(key, this.filterShown)
+  }
+
+  // One rule for a post the server rendered without the reader's token: it
+  // stays covered until the reader's check for it has settled, or the
+  // reader asks to see it. That holds while the check is out, after it
+  // failed, for a post the server left out, and during a Retry.
+  private unchecked(): boolean {
+    return (this.readerCheck === 'pending' || this.readerCheck === 'failed') && !this.uncheckedShown
   }
 
   // Asks again for the reader's copy of a post whose check failed. The note
@@ -723,6 +745,7 @@ export class CaribouStatusCard extends LitElement {
   override render() {
     const s = this.status
     this.hiddenNow = false
+    this.renderedPost = false
     if (!s) return nothing
     if (this.moderated) {
       const { verb, account } = this.moderated
@@ -747,15 +770,20 @@ export class CaribouStatusCard extends LitElement {
       return nothing
     }
     const why = focused && this.relHidden ? this.relWhy : null
-    // The reader's filters for this post could not be learned: cover it.
-    const unchecked = !verdict && !why && this.readerCheck === 'failed'
+    // The reader's filters for this post are not known yet, or could not be
+    // learned: cover it.
+    const checking = this.readerCheck === 'pending' || this.readerCheck === 'failed'
+    const unchecked = !verdict && !why && checking
+    this.coverIsUnchecked = unchecked
     if (verdict || why || unchecked) {
-      const shown = this.filterShown
+      const shown = unchecked ? this.uncheckedShown : this.filterShown
       const titles = verdict?.titles.join(', ') ?? ''
       const note = verdict
         ? html`Hidden by filter: <strong>${titles}</strong>`
         : why
         ? html`<span>You ${why.verb} @${why.acct}.</span>`
+        : this.readerCheck === 'pending'
+        ? html`<span>Checking this post against your filters…</span>`
         : html`<span>Could not check this post against your filters.</span>`
       // The visible word starts the name, so a voice command still finds it.
       const name = verdict
@@ -769,15 +797,20 @@ export class CaribouStatusCard extends LitElement {
           <button type="button" class="filter-toggle" aria-controls="filtered-post"
             aria-expanded=${shown ? 'true' : 'false'} aria-label=${name}
             @click=${this.onToggleFiltered}>${shown ? 'Hide' : 'Show'}</button>
-          ${unchecked
+          ${unchecked && (this.readerCheck === 'failed' || this.retrying)
             ? html`<caribou-button class="retry" variant="secondary" ?loading=${this.retrying}
                 @click=${this.onRetryCheck}>Retry<span class="vh"> checking this post</span></caribou-button>`
             : nothing}
         </div>
-        <div class="filtered-post" id="filtered-post" ?hidden=${!shown}>${shown ? this.renderPost(s) : nothing}</div>
+        <div class="filtered-post" id="filtered-post" ?hidden=${!shown}>${shown ? this.renderPostShown(s) : nothing}</div>
       </article>`
     }
-    return html`<article data-variant=${this.variant}>${this.renderPost(s)}</article>`
+    return html`<article data-variant=${this.variant}>${this.renderPostShown(s)}</article>`
+  }
+
+  private renderPostShown(s: Status) {
+    this.renderedPost = true
+    return this.renderPost(s)
   }
 
   private renderPost(s: Status) {

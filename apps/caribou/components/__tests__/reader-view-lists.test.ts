@@ -126,6 +126,10 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
   // the card keeps the post hidden (the head script hid it before the app
   // ran); a post whose copy never comes stays covered by a note.
   const veil = (c: CaribouStatusCard) => c.style.getPropertyValue('--caribou-reader-veil')
+  // The post's own text, when it is on screen: not hidden by the veil and
+  // not in a closed region.
+  const content = (c: CaribouStatusCard) =>
+    veil(c) === 'hidden' ? null : c.shadowRoot!.querySelector('.status-content')
 
   function held() {
     let resolve!: (v: Status[]) => void
@@ -147,7 +151,11 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
     vi.mocked(activeClient.value!.fetchStatuses).mockReturnValue(d.promise)
     const tl = await timelineWith([post('1'), post('2')])
     const [one, two] = cards(tl)
-    expect([veil(one!), veil(two!)]).toEqual(['hidden', 'hidden'])
+    // In the window: no post content anywhere, only the note.
+    for (const c of [one!, two!]) {
+      expect(content(c)).toBeNull()
+      expect(c.shadowRoot!.querySelector('.notice p')!.textContent).toBe('Checking this post against your filters…')
+    }
     d.resolve([post('1', { filtered: HIDE }), post('2', { filtered: [] })])
     for (let i = 0; i < 3; i++) { await flush(); await tl.updateComplete }
     expect(one!.hasAttribute('hidden')).toBe(true)
@@ -187,5 +195,63 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
   it('signed out, the card shows its post at once', async () => {
     const tl = await timelineWith([post('1')])
     expect(veil(cards(tl)[0]!)).toBe('visible')
+  })
+
+  it('Retry keeps the note and its busy button, focused, with no post content, until the answer is in', async () => {
+    signIn()
+    vi.mocked(activeClient.value!.fetchStatuses).mockRejectedValueOnce(new Error('boom'))
+    const tl = await timelineWith([post('1')])
+    const [c] = cards(tl)
+    await c!.updateComplete
+    const retry = c!.shadowRoot!.querySelector<HTMLElement>('caribou-button.retry')!
+    const d = held()
+    vi.mocked(activeClient.value!.fetchStatuses).mockReturnValueOnce(d.promise)
+    retry.focus()
+    retry.click()
+    for (let i = 0; i < 3; i++) { await flush(); await c!.updateComplete }
+    expect(content(c!)).toBeNull()
+    expect(c!.shadowRoot!.querySelector('caribou-button.retry')).toBe(retry)
+    expect(retry.hasAttribute('loading')).toBe(true)
+    expect(c!.shadowRoot!.activeElement).toBe(retry)
+    d.resolve([post('1', { filtered: HIDE })])
+    for (let i = 0; i < 3; i++) { await flush(); await c!.updateComplete }
+    expect(c!.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('Show reveals a post still being checked; a hide that arrives then still removes it', async () => {
+    signIn()
+    const d = held()
+    vi.mocked(activeClient.value!.fetchStatuses).mockReturnValue(d.promise)
+    const tl = await timelineWith([post('1')])
+    const [c] = cards(tl)
+    c!.shadowRoot!.querySelector<HTMLElement>('button.filter-toggle')!.click()
+    await c!.updateComplete
+    expect(content(c!)!.textContent).toBe('1')
+    d.resolve([post('1', { filtered: HIDE })])
+    for (let i = 0; i < 3; i++) { await flush(); await c!.updateComplete }
+    expect(c!.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('A → B → A: the first A answer, coming back late, does not uncover a post the new check still holds', async () => {
+    signIn()
+    const first = held()
+    vi.mocked(activeClient.value!.fetchStatuses).mockReturnValueOnce(first.promise)
+    const tl = await timelineWith([post('1')])
+    const [c] = cards(tl)
+    const aClient = activeClient.value!
+    signIn('other.example')
+    activeUserKey.value = toUserKey('alice', 'example.social')
+    expect(activeClient.value!).not.toBe(aClient)
+    const second = held()
+    vi.spyOn(activeClient.value!, 'fetchStatuses').mockReturnValueOnce(second.promise)
+    const { loadReaderView } = await import('@beatzball/caribou-state')
+    const again = loadReaderView([post('1')], activeClient.value!)
+    first.resolve([post('1', { filtered: [] })])
+    for (let i = 0; i < 3; i++) { await flush(); await c!.updateComplete }
+    expect(content(c!)).toBeNull()
+    second.resolve([post('1', { filtered: HIDE })])
+    await again
+    for (let i = 0; i < 3; i++) { await flush(); await c!.updateComplete }
+    expect(c!.hasAttribute('hidden')).toBe(true)
   })
 })
