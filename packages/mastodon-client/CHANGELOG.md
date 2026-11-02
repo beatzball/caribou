@@ -1,5 +1,13 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.1
+
+### Patch Changes
+
+- [#146](https://github.com/beatzball/caribou/pull/146) [`d334e96`](https://github.com/beatzball/caribou/commit/d334e96531bac7d5a864372046fa791ffa3dfdd1) Thanks [@beatzball](https://github.com/beatzball)! - Add `mute`, `unmute`, `block`, `unblock`, `fetchMutes`, `fetchBlocks` (paged by the Link header cursor), `fetchFilters` (filters v2) and `fetchStatuses` (several posts in one request).
+
+- [#145](https://github.com/beatzball/caribou/pull/145) [`113e18e`](https://github.com/beatzball/caribou/commit/113e18e83b3d227b8dda7af0ef2c6cd05eeba1d4) Thanks [@beatzball](https://github.com/beatzball)! - Add `fetchTag`, `followTag` and `unfollowTag`. Tag names are encoded in the path, for hashtag timelines too.
+
 ## 0.4.0
 
 ### Minor Changes

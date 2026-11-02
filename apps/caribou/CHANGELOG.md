@@ -1,5 +1,30 @@
 # caribou-app
 
+## 0.10.3
+
+### Patch Changes
+
+- [#143](https://github.com/beatzball/caribou/pull/143) [`dc9a885`](https://github.com/beatzball/caribou/commit/dc9a8853aae9184e610f10b88c87367d90611b84) Thanks [@beatzball](https://github.com/beatzball)! - Add a `/changelog` page (#68). It shows this app's release notes, newest version first. The newest version is open; the others open with a click. Each version has its own link, such as `/changelog#v0-10-2`, and a link to a closed version opens it. Each change links to its pull request. The page renders the notes as text, never as HTML, and shows only http(s) links. "Updated dependencies" lines are left out.
+
+  Settings has a new About section with the version and a Changelog link, and the right rail links to it too. When a newer version ships than the one you last saw on `/changelog`, the Settings nav item shows a dot (on a phone, the More button shows it too), and a screen reader hears "Settings, new version". The Changelog link on Settings shows the dot as well. Opening `/changelog` clears it. The last version you saw is `lastSeenChangelogVersion` in `caribou.prefs.<userKey>`, so it is per account. A new account starts with the running version as seen, so it gets no dot. Signed out, there is no dot. The dot shows after the page loads and takes no room, so nothing moves.
+
+- [#151](https://github.com/beatzball/caribou/pull/151) [`f8fbc6e`](https://github.com/beatzball/caribou/commit/f8fbc6ed2459145795e587460c06f287ab638123) Thanks [@beatzball](https://github.com/beatzball)! - Fix the changelog parser test. It now checks that no item is an "Updated dependencies" line, instead of searching for those words anywhere. The changelog page's own release note mentions them, which made the test fail on the release branch.
+
+- [#146](https://github.com/beatzball/caribou/pull/146) [`d334e96`](https://github.com/beatzball/caribou/commit/d334e96531bac7d5a864372046fa791ffa3dfdd1) Thanks [@beatzball](https://github.com/beatzball)! - Honor the reader's server filters: a hide filter removes the post, a warn filter shows the filter name with a Show button. Mute and block from a post's menu and from a profile; block asks first. New page `/settings/moderation` lists filters, muted and blocked accounts, with Unmute and Unblock.
+
+- [#150](https://github.com/beatzball/caribou/pull/150) [`1a70cb7`](https://github.com/beatzball/caribou/commit/1a70cb73c72f18a8149749f3d61c5c4cb6a7de11) Thanks [@beatzball](https://github.com/beatzball)! - Fix a flaky e2e test. The theme first-paint check now waits for the first frame before it reads the page color. Before, under load, it could read before that frame and see an empty color.
+
+- [#145](https://github.com/beatzball/caribou/pull/145) [`113e18e`](https://github.com/beatzball/caribou/commit/113e18e83b3d227b8dda7af0ef2c6cd05eeba1d4) Thanks [@beatzball](https://github.com/beatzball)! - New hashtag page at `/tags/<tag>`. It shows the tag's posts with the same timeline as Local and Public. The server paints the first page, so it works without JavaScript. A hashtag in a post now opens this page inside Caribou. The link keeps its real address, so a new-tab click still goes to the instance. A signed-in reader can follow and unfollow the tag. The button changes at once and goes back if the server fails. The tab title is "#tag · Caribou". Case and non-ASCII names work, and a name that cannot be a hashtag says so.
+
+- [#147](https://github.com/beatzball/caribou/pull/147) [`3f7a878`](https://github.com/beatzball/caribou/commit/3f7a87810bb4ad33de399f261a281f2ab4dadfc7) Thanks [@beatzball](https://github.com/beatzball)! - Show a loading screen when `/` opens your timeline: the Caribou logo, a ring that fills while the timeline loads, and "Loading…". It goes to your default timeline (Home, Local or Public) and uses your theme. It stays until the first posts, an error or the empty notice show. While it is up, the keyboard stays on the screen. Leaving the page removes it at once. After 3 s it shows links to your timeline and to sign in, and after 10 s it goes. With reduced motion the ring does not move and there is no fade. Chrome now paints `/` while it opens your timeline; before, the tab stayed blank.
+
+- [#144](https://github.com/beatzball/caribou/pull/144) [`d0bcc11`](https://github.com/beatzball/caribou/commit/d0bcc1141c48f3e600ad5986b251f8bd75e3d947) Thanks [@beatzball](https://github.com/beatzball)! - Add a Settings page at `/settings`. Choose the theme (dark, light or system) and the timeline that opens after sign-in (Home, Local or Public), and see the signed-in account with its actions and sign-out. The theme is set before the first paint, so a page never flashes the other theme. Settings is in the nav rail and in the phone's More menu.
+
+- Updated dependencies [[`d334e96`](https://github.com/beatzball/caribou/commit/d334e96531bac7d5a864372046fa791ffa3dfdd1), [`d334e96`](https://github.com/beatzball/caribou/commit/d334e96531bac7d5a864372046fa791ffa3dfdd1), [`113e18e`](https://github.com/beatzball/caribou/commit/113e18e83b3d227b8dda7af0ef2c6cd05eeba1d4), [`113e18e`](https://github.com/beatzball/caribou/commit/113e18e83b3d227b8dda7af0ef2c6cd05eeba1d4), [`d0bcc11`](https://github.com/beatzball/caribou/commit/d0bcc1141c48f3e600ad5986b251f8bd75e3d947), [`d0bcc11`](https://github.com/beatzball/caribou/commit/d0bcc1141c48f3e600ad5986b251f8bd75e3d947)]:
+  - @beatzball/caribou-mastodon-client@0.4.1
+  - @beatzball/caribou-state@0.4.2
+  - @beatzball/caribou-design-tokens@0.1.2
+
 ## 0.10.2
 
 ### Patch Changes
