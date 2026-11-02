@@ -1,4 +1,4 @@
-import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
+import { LitElement, html, css, nothing, type TemplateResult } from 'lit'
 import { customElement, property, query, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { batch, effect } from '@preact/signals-core'
@@ -38,10 +38,15 @@ type Results =
 const DEBOUNCE_MS = 300
 const LIMIT = 20
 
-// One template each, whichever state shows it, so the element the server
-// sent stays in place when the state changes after mount.
-const hint = () => html`<p class="notice">Search for people, hashtags and posts.</p>`
-const searching = () => html`<p class="notice" role="status">Searching…</p>`
+const HINT = 'Search for people, hashtags and posts.'
+
+// What the results area shows: the notice line (null hides it), its role,
+// and what follows it.
+interface View {
+  note: string | TemplateResult | null
+  role?: 'status' | 'alert'
+  body?: TemplateResult
+}
 
 function fullAcct(acct: string, host: string): string {
   return acct.includes('@') || !host ? acct : `${acct}@${host}`
@@ -89,6 +94,7 @@ export class CaribouSearch extends LitElement {
     }
     .tabs a:hover { color: var(--fg-0); background: var(--bg-1); }
     .tabs a[aria-current="page"] { color: var(--fg-0); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+    .view { display: contents; }
     .notice { padding: var(--space-4) var(--space-3); color: var(--fg-muted); margin: 0; }
     .notice button {
       font: inherit; color: var(--accent); background: none; border: 0; padding: 0;
@@ -137,7 +143,6 @@ export class CaribouSearch extends LitElement {
   // its own, so Back returns to this one.
   private settled = false
   private disposers: (() => void)[] = []
-  private lastProps: string | null = null
 
   private get currentTab(): SearchType { return this.tab ?? this.type }
   private get currentQ(): string { return this.shownQ ?? this.q }
@@ -173,18 +178,6 @@ export class CaribouSearch extends LitElement {
     void this.run(this.q, true)
   }
 
-  protected override updated(changed: PropertyValues<this>) {
-    // The page hands a new query when the router reuses the element.
-    const props = `${this.type} ${this.q}`
-    if (this.lastProps !== null && props !== this.lastProps && (changed.has('q') || changed.has('type'))) {
-      this.tab = null
-      this.shownQ = null
-      if (this.input) this.input.value = this.q
-      void this.run(this.q, true)
-    }
-    this.lastProps = props
-  }
-
   private async run(raw: string, resolve: boolean): Promise<void> {
     const q = raw.trim()
     const seq = ++this.seq
@@ -212,7 +205,9 @@ export class CaribouSearch extends LitElement {
       return
     }
     if (!current()) return
-    if (resolve && this.goToResolved(q, data, host)) return
+    // Only a signed-in search asked the server to resolve the address; a
+    // signed-out answer is a text search and names nothing.
+    if (client && resolve && this.goToResolved(q, data, host)) return
     if (client) {
       const statuses = batch(() => data.statuses.map((s) => mergeStatus(s)))
       data = { ...data, statuses }
@@ -238,6 +233,9 @@ export class CaribouSearch extends LitElement {
   // entry it started from, unless that entry holds a settled search.
   private commit(opts: { push: boolean; resolve: boolean }) {
     clearTimeout(this.timer)
+    // The reader has left: a link click already changed the address, and
+    // the page is only waiting for the router to swap it out.
+    if (location.pathname !== '/search') return
     const q = this.input.value
     const path = searchPath(q.trim(), this.currentTab)
     const here = location.pathname + location.search
@@ -269,6 +267,8 @@ export class CaribouSearch extends LitElement {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
     if (type === this.currentTab) return
+    // The tab takes the typed query now; the waiting search would repeat it.
+    clearTimeout(this.timer)
     const q = (this.input?.value ?? this.currentQ).trim()
     history.pushState(null, '', searchPath(q, type))
     this.settled = true
@@ -283,8 +283,8 @@ export class CaribouSearch extends LitElement {
   // Back and Forward between searches. The router may also build a new
   // page for the entry; this one keeps up in case it does not.
   private onPopState = () => {
-    if (location.pathname !== '/search') return
     clearTimeout(this.timer)
+    if (location.pathname !== '/search') return
     const { q, type } = parseSearch(location.search)
     this.tab = type
     this.settled = true
@@ -317,55 +317,70 @@ export class CaribouSearch extends LitElement {
   }
 
   private renderResults(tab: SearchType) {
+    const v = this.view(tab)
+    // One notice line for every state. The server sends it, and it stays the
+    // same element whatever the state turns into after mount, so hydration
+    // keeps the server's node and nothing it sent is removed.
+    return html`<div class="view"><p class="notice" role=${v.role ?? nothing} ?hidden=${v.note === null}>${v.note ?? ''}</p>${v.body ?? nothing}</div>`
+  }
+
+  private view(tab: SearchType): View {
     const r = this.results
     switch (r.kind) {
       case 'empty':
-        return hint()
+        return { note: HINT }
       case 'pending':
-        return this.q.trim() ? searching() : hint()
+        return this.q.trim() ? { note: 'Searching…', role: 'status' } : { note: HINT }
       case 'loading':
-        return searching()
+        return { note: 'Searching…', role: 'status' }
       case 'no-instance':
-        return html`<caribou-auth-required
-          label="Search needs to know which server to ask. Sign in once and Caribou will remember."></caribou-auth-required>`
+        return { note: null, body: html`<caribou-auth-required
+          label="Search needs to know which server to ask. Sign in once and Caribou will remember."></caribou-auth-required>` }
       case 'refused':
-        return html`<caribou-auth-required
-          label="This server searches only for signed-in readers."></caribou-auth-required>`
+        return { note: null, body: html`<caribou-auth-required
+          label="This server searches only for signed-in readers."></caribou-auth-required>` }
       case 'error':
-        return html`<p class="notice" role="alert">Search failed. <button type="button" @click=${this.retry}>Retry</button></p>`
+        return { note: html`Search failed. <button type="button" @click=${this.retry}>Retry</button>`, role: 'alert' }
       case 'ok':
-        return this.renderOk(r, tab)
+        return this.viewOk(r, tab)
     }
   }
 
-  private renderOk(r: Extract<Results, { kind: 'ok' }>, tab: SearchType) {
+  private viewOk(r: Extract<Results, { kind: 'ok' }>, tab: SearchType): View {
     // An address the server did not open. Signed out, it cannot look one up.
-    const urlNote = isUrlQuery(r.q)
-      ? html`<p class="notice" role="status">${!r.signedIn
-          ? 'Sign in to open a post or profile from another server.'
-          : r.resolved ? 'Nothing found at that address.' : 'Press Enter to look up this address.'}</p>`
-      : nothing
+    const url = isUrlQuery(r.q)
+    const urlNote = !url ? null
+      : !r.signedIn ? 'Sign in to open a post or profile from another server.'
+      : r.resolved ? 'Nothing found at that address.' : 'Press Enter to look up this address.'
+    const empty = (what: string): View => ({
+      note: urlNote, role: 'status',
+      body: html`<p class="notice" role="status">No ${what} found for “${r.q}”.</p>`,
+    })
+    // Signed out, the note stays over the results: none of them is the
+    // address itself.
+    const listNote = url && !r.signedIn ? urlNote : null
     if (tab === 'accounts') {
-      if (r.data.accounts.length === 0) return html`${urlNote}<p class="notice" role="status">No people found for “${r.q}”.</p>`
-      return html`<ul class="accounts">${repeat(r.data.accounts, (a) => a.id, (a) => this.renderAccount(a, r))}</ul>`
+      if (r.data.accounts.length === 0) return empty('people')
+      return { note: listNote, role: 'status',
+        body: html`<ul class="accounts">${repeat(r.data.accounts, (a) => a.id, (a) => this.renderAccount(a, r))}</ul>` }
     }
     if (tab === 'hashtags') {
-      if (r.data.hashtags.length === 0) return html`${urlNote}<p class="notice" role="status">No hashtags found for “${r.q}”.</p>`
-      return html`<ul class="hashtags">${repeat(r.data.hashtags, (t) => t.name, (t) => {
+      if (r.data.hashtags.length === 0) return empty('hashtags')
+      return { note: listNote, role: 'status', body: html`<ul class="hashtags">${repeat(r.data.hashtags, (t) => t.name, (t) => {
         const uses = weeklyUses(t)
         return html`<li><a class="tag" href=${tagPath(t.name)} @click=${spaClick}>
           <span class="tag-name">#${t.name}</span>
           ${uses === null ? nothing : html`<span class="tag-uses">${uses} ${uses === 1 ? 'post' : 'posts'} this week</span>`}
         </a></li>`
-      })}</ul>`
+      })}</ul>` }
     }
     if (!r.signedIn) {
-      return html`<p class="notice" role="status">Sign in to search posts. Mastodon finds posts only for a signed-in reader.</p>`
+      return { note: 'Sign in to search posts. Mastodon finds posts only for a signed-in reader.', role: 'status' }
     }
-    if (r.data.statuses.length === 0) return html`${urlNote}<p class="notice" role="status">No posts found for “${r.q}”.</p>`
-    return html`<ul class="statuses">${repeat(r.data.statuses, (s) => s.id, (s) => html`<li>
+    if (r.data.statuses.length === 0) return empty('posts')
+    return { note: null, body: html`<ul class="statuses">${repeat(r.data.statuses, (s) => s.id, (s) => html`<li>
       <caribou-status-card .status=${s} instance=${r.host}></caribou-status-card>
-    </li>`)}</ul>`
+    </li>`)}</ul>` }
   }
 
   private renderAccount(a: Account, r: Extract<Results, { kind: 'ok' }>) {

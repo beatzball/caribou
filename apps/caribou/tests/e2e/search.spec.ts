@@ -213,3 +213,29 @@ test('the right rail search box opens /search', async ({ page }) => {
   await expect(page).toHaveURL(/\/search\?q=bob$/)
   await expect(results(page).locator('.account .acct')).toHaveText('@bob@other.social')
 })
+
+// Review round 1 (Codex 1): a link click while a typed query waits. The
+// router keeps the search page while it loads the next page's data; the
+// waiting query must not write the address in that time.
+test('leaving /search while a typed query waits keeps the new address', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await signIn(page)
+  const seen = await answerSearch(page, everything)
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  await page.route((url) => url.pathname === '/about', async (route) => {
+    if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
+    await held
+    return route.continue()
+  })
+  await page.goto('/search')
+  await settled(page)
+  await search(page).locator('input[name="q"]').fill('new')
+  await page.locator('litro-outlet > :not([hidden]) caribou-right-rail litro-link[href="/about"]').click()
+  await page.waitForTimeout(600)
+  expect(new URL(page.url()).pathname).toBe('/about')
+  release()
+  await expect(page.locator('litro-outlet > page-about')).toHaveCount(1)
+  expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe('/about')
+  expect(seen.map((u) => u.searchParams.get('q'))).not.toContain('new')
+})

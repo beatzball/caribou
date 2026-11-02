@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import type * as MastodonClient from '@beatzball/caribou-mastodon-client'
+import type * as CaribouState from '@beatzball/caribou-state'
 import { CaribouError } from '@beatzball/caribou-mastodon-client'
 import type { CaribouSearch as El } from '../caribou-search.js'
 import {
@@ -12,6 +13,14 @@ vi.mock('@beatzball/caribou-mastodon-client', async (orig) => ({
   ...(await orig<typeof MastodonClient>()),
   searchPublic,
 }))
+
+// A test can move the account generation on its own, with no account
+// change and so no new search (review round 1, Codex 5 / Fable F4).
+const generation = vi.hoisted(() => ({ offset: 0 }))
+vi.mock('@beatzball/caribou-state', async (orig) => {
+  const real = await orig<typeof CaribouState>()
+  return { ...real, ownerGeneration: () => real.ownerGeneration() + generation.offset }
+})
 
 await import('../caribou-search.js')
 
@@ -72,6 +81,7 @@ afterEach(() => {
   relationshipCache.value = new Map()
   localStorage.clear()
   searchPublic.mockReset()
+  generation.offset = 0
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
@@ -254,5 +264,90 @@ describe('<caribou-search>', () => {
     await el.updateComplete
     expect(input.value).toBe('one')
     expect(accts(el)).toEqual(['@one@pub.social'])
+  })
+
+  // Review round 1 (Codex 5 / Fable F4): the generation alone drops an answer.
+  it('drops an answer when the account generation moved, with no newer search', async () => {
+    const slow = deferred<mastodon.v2.Search>()
+    searchPublic.mockImplementationOnce(() => slow.promise)
+    const el = await mount({ q: 'bob', instance: 'pub.social' })
+    generation.offset = 1
+    slow.resolve(result({ accounts: [account('2', 'bob')] }))
+    await flush()
+    await el.updateComplete
+    expect(accts(el)).toEqual([])
+  })
+
+  // Review round 1 (Codex 1): leaving /search cancels the typed query.
+  it('a navigation away from /search cancels the waiting typed query', async () => {
+    searchPublic.mockResolvedValue(result())
+    const el = await mount({ instance: 'pub.social' })
+    vi.useFakeTimers()
+    const input = el.shadowRoot!.querySelector('input')!
+    input.value = 'new'
+    input.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+    history.pushState(null, '', '/about')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    vi.advanceTimersByTime(400)
+    expect(location.pathname + location.search).toBe('/about')
+    expect(searchPublic).not.toHaveBeenCalled()
+  })
+
+  it('a typed query that fires after the address left /search changes nothing', async () => {
+    searchPublic.mockResolvedValue(result())
+    const el = await mount({ instance: 'pub.social' })
+    vi.useFakeTimers()
+    const input = el.shadowRoot!.querySelector('input')!
+    input.value = 'new'
+    input.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+    // A link click: the router pushes, and its popstate may come later.
+    history.pushState(null, '', '/about')
+    vi.advanceTimersByTime(400)
+    expect(location.pathname + location.search).toBe('/about')
+    expect(searchPublic).not.toHaveBeenCalled()
+  })
+
+  // Review round 1 (Codex 3 / Fable F2): signed out, nothing is resolved.
+  it('signed out, an address that finds one account stays on search', async () => {
+    const q = 'https://other.social/@bob'
+    history.replaceState(null, '', `/search?q=${encodeURIComponent(q)}`)
+    searchPublic.mockResolvedValue(result({ accounts: [account('2', 'bob@other.social')] }))
+    const el = await mount({ q, instance: 'pub.social' })
+    expect(location.pathname).toBe('/search')
+    expect(accts(el)).toEqual(['@bob@other.social'])
+    expect(text(el)).toContain('Sign in to open a post or profile from another server.')
+  })
+
+  // Review round 1 (Codex 2): a malformed answer leaves the search usable.
+  it('a malformed resolved answer shows the results and does not navigate', async () => {
+    const q = 'https://other.social/@bob/5'
+    history.replaceState(null, '', `/search?q=${encodeURIComponent(q)}`)
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])
+    const broken = { ...status('5'), account: undefined } as unknown as mastodon.v1.Status
+    vi.spyOn(client, 'search').mockResolvedValue(result({ statuses: [broken] }))
+    const el = await mount({ q })
+    expect(location.pathname).toBe('/search')
+    expect(text(el)).not.toContain('Searching…')
+  })
+
+  // Review round 1 (Codex 4 / Fable F1): a tab takes the typed query.
+  it('a tab click during the debounce searches once and keeps its own entry', async () => {
+    searchPublic.mockResolvedValue(result())
+    const el = await mount({ instance: 'pub.social' })
+    vi.useFakeTimers()
+    const input = el.shadowRoot!.querySelector('input')!
+    input.value = 'bob'
+    input.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+    el.shadowRoot!.querySelectorAll<HTMLAnchorElement>('.tabs a')[1]!.click()
+    vi.advanceTimersByTime(400)
+    expect(searchPublic).toHaveBeenCalledOnce()
+    expect(location.search).toBe('?q=bob&type=hashtags')
+    // The tab's entry is settled: the next typed query gets its own entry.
+    const before = history.length
+    input.value = 'bobcat'
+    input.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+    vi.advanceTimersByTime(400)
+    expect(history.length).toBe(before + 1)
   })
 })

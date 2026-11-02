@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
@@ -70,5 +71,32 @@ describe('loadRelationships', () => {
   it('swallows a failed read', async () => {
     const client = fakeClient({ fetchRelationships: vi.fn(async () => { throw new Error('down') }) })
     await expect(loadRelationships(['1'], { clientSource: () => client })).resolves.toBeUndefined()
+  })
+
+  // Review round 1 (Codex 5): a follow already on its way when the read starts.
+  it('keeps a follow that was still waiting when the read started', async () => {
+    let answerFollow!: (r: mastodon.v1.Relationship) => void
+    const client = fakeClient({
+      follow: vi.fn(() => new Promise<mastodon.v1.Relationship>((r) => { answerFollow = r })),
+    })
+    const opts = { clientSource: () => client }
+    const following = toggleFollow({ id: '7', acct: 'bob', locked: false }, opts)
+    expect(cached('7')?.following).toBe(true)
+    await loadRelationships(['7'], opts)
+    expect(cached('7')?.following).toBe(true)
+    answerFollow(rel('7', { following: true }))
+    await following
+    expect(cached('7')?.following).toBe(true)
+  })
+
+  // Review round 1 (Fable F8): one batch is one cache change.
+  it('writes the cache once for a whole batch', async () => {
+    const client = fakeClient()
+    let writes = -1
+    const stop = effect(() => { void relationshipCache.value; writes++ })
+    await loadRelationships(['1', '2', '3'], { clientSource: () => client })
+    stop()
+    expect(writes).toBe(1)
+    expect(cached('3')).toBeDefined()
   })
 })

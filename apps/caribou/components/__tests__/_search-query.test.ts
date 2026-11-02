@@ -67,7 +67,7 @@ describe('resolvedPath', () => {
       .toBe('/@bob@other.social')
   })
   it('adds the host to a local account', () => {
-    expect(resolvedPath('https://home.social/@me', { accounts: [account({ acct: 'me' })], statuses: [] }, 'home.social'))
+    expect(resolvedPath('https://home.social/@me', { accounts: [account({ acct: 'me', url: 'https://home.social/@me' })], statuses: [] }, 'home.social'))
       .toBe('/@me@home.social')
   })
   it('prefers a post whose url or uri is the query', () => {
@@ -80,6 +80,35 @@ describe('resolvedPath', () => {
     const other = account({ id: '2', acct: 'carol', url: 'https://x/@carol', uri: 'https://x/u/carol' })
     expect(resolvedPath('https://other.social/@bob', { accounts: [other, account()], statuses: [] }, 'h'))
       .toBe('/@bob@other.social')
+  })
+  // Review round 1 (Codex 2, Fable F3): the answer is checked before it
+  // becomes a path.
+  it('refuses an acct with a path separator or a dot segment', () => {
+    const bad = ['bob@other.social/../../settings', 'bob/x', '..', 'bob@..', 'bob@other.social?x', 'bob#x', '', '@', 'bob@']
+    for (const acct of bad) {
+      const a = account({ acct })
+      expect(resolvedPath('https://other.social/@bob', { accounts: [a], statuses: [] }, 'home.social'), acct).toBeNull()
+      expect(resolvedPath(url, { accounts: [], statuses: [status({ account: a })] }, 'home.social'), acct).toBeNull()
+    }
+  })
+  it('refuses a malformed status instead of throwing', () => {
+    const noAccount = { ...status(), account: undefined } as unknown as ReturnType<typeof status>
+    expect(resolvedPath(url, { accounts: [], statuses: [noAccount] }, 'h')).toBeNull()
+    expect(resolvedPath(url, { accounts: [], statuses: [status({ id: '' })] }, 'h')).toBeNull()
+    expect(resolvedPath(url, { accounts: [], statuses: [status({ id: 5 })] }, 'h')).toBeNull()
+    expect(resolvedPath(url, { accounts: [], statuses: [null as unknown as ReturnType<typeof status>] }, 'h')).toBeNull()
+  })
+  it('encodes a status id with a slash so it stays one segment', () => {
+    expect(resolvedPath(url, { accounts: [], statuses: [status({ id: 'a/../b' })] }, 'h')).toBe('/@bob@other.social/a%2F..%2Fb')
+  })
+  it('opens a lone answer only when it lives on the host of the address', () => {
+    const carol = account({ acct: 'carol@another.social', url: 'https://another.social/@carol', uri: 'https://another.social/users/carol' })
+    expect(resolvedPath('https://other.social/@bob', { accounts: [carol], statuses: [] }, 'h')).toBeNull()
+    const elsewhere = status({ url: 'https://another.social/@carol/1', uri: 'https://another.social/users/carol/statuses/1' })
+    expect(resolvedPath(url, { accounts: [], statuses: [elsewhere] }, 'h')).toBeNull()
+    // The same server under another address form is the same post.
+    const alias = status({ url: 'https://other.social/@bob/5', uri: 'https://other.social/users/bob/statuses/5' })
+    expect(resolvedPath('https://other.social/web/statuses/5', { accounts: [], statuses: [alias] }, 'h')).toBe('/@bob@other.social/99')
   })
   it('opens nothing when the match is unclear or empty', () => {
     expect(resolvedPath(url, { accounts: [], statuses: [] }, 'h')).toBeNull()

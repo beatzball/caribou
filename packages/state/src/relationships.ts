@@ -159,11 +159,18 @@ export async function loadRelationships(
     } catch {
       return
     }
+    // One new map for the whole batch, so the cache changes once.
+    const next = new Map(relationshipCache.value)
+    let changed = false
     for (const rel of rels) {
       const key = relationshipKey(client.userKey, rel.id)
       if (!before.has(rel.id)) continue
-      if ((revisions.get(key) ?? 0) === before.get(rel.id) && !queues.has(key)) put(key, rel)
+      if ((revisions.get(key) ?? 0) === before.get(rel.id) && !queues.has(key)) {
+        next.set(key, rel)
+        changed = true
+      }
     }
+    if (changed) relationshipCache.value = next
   }))
 }
 
