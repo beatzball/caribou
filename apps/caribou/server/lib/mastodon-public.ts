@@ -24,6 +24,17 @@ export async function fetchPublicTimeline(
   return fetchCamel<Status[]>(url, TTL.PUBLIC_TIMELINE)
 }
 
+// A hashtag's public timeline. The server answers an empty page for a tag
+// nobody has used.
+export async function fetchTagTimeline(
+  opts: PublicFetchOpts & { tag: string; maxId?: string },
+): Promise<Status[]> {
+  const params = new URLSearchParams()
+  if (opts.maxId) params.set('max_id', opts.maxId)
+  const url = `https://${opts.instance}/api/v1/timelines/tag/${encodeURIComponent(opts.tag)}?${params}`
+  return fetchCamel<Status[]>(url, TTL.PUBLIC_TIMELINE)
+}
+
 export async function fetchAccountByHandle(
   handle: string, opts: PublicFetchOpts,
 ): Promise<Account> {
