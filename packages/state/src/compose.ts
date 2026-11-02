@@ -24,11 +24,18 @@ export interface ComposeDraft {
   // One key per draft, kept across reloads: a retry after a lost response
   // gets the first post back from the server instead of a second post.
   idempotencyKey: string
+  // Set only by a redraft, which keeps what the deleted post had. A new
+  // post leaves them out and the server decides.
+  sensitive?: boolean
+  language?: string | null
 }
 
 // A new post and each reply keep their own draft, so opening a reply does
 // not overwrite a half-written post, and the reverse.
-export type DraftSlot = 'new' | `reply:${string}`
+// `redraft:<key>` holds a delete-and-redraft opened while its own slot held
+// an unsent draft. The deleted post exists nowhere else, so it is stored
+// like any draft, beside the one it must not overwrite.
+export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}`
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'
@@ -94,6 +101,19 @@ export function saveDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft
   writeAll(userKey, all)
 }
 
+/**
+ * The slot of the oldest kept redraft (`redraft:<key>`), or null. A new
+ * post opens it before the plain `new` draft, so it cannot be forgotten.
+ */
+export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
+  for (const [slot, d] of Object.entries(readAll(userKey))) {
+    if (slot.startsWith('redraft:') && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
+      return slot as DraftSlot
+    }
+  }
+  return null
+}
+
 export function clearDraft(userKey: UserKey, slot: DraftSlot): void {
   const all = readAll(userKey)
   delete all[slot]
@@ -110,7 +130,9 @@ export async function postDraft(
   const status = await client.createStatus({
     status: draft.text,
     visibility: draft.visibility,
+    ...(draft.sensitive ? { sensitive: true } : {}),
     ...(draft.cw && draft.spoilerText.trim() ? { spoilerText: draft.spoilerText, sensitive: true } : {}),
+    ...(draft.language ? { language: draft.language } : {}),
     ...(draft.inReplyToId ? { inReplyToId: draft.inReplyToId } : {}),
     ...(draft.media.length > 0 ? { mediaIds: draft.media.map((m) => m.id) } : {}),
   }, { idempotencyKey: draft.idempotencyKey })
