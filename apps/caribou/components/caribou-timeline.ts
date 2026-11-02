@@ -17,7 +17,7 @@ import { timelineFilterContext } from './_status-filter.js'
 import { findShell, loadReaderViewFrom } from './_shell.js'
 import { settleSplash } from './_splash.js'
 
-export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag'
+export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag' | 'list'
 
 export interface TimelineInitial {
   statuses: mastodon.v1.Status[]
@@ -49,7 +49,7 @@ const isFirstPage = () => !new URLSearchParams(location.search).has('max_id')
 
 // The timelines that are kept. Bookmarks are not, yet: their pages run by a
 // bookmark cursor, and a `since_id` check by status id does not fit them.
-const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public', 'hashtag'])
+const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public', 'hashtag', 'list'])
 
 @customElement('caribou-timeline')
 export class CaribouTimeline extends LitElement {
@@ -72,6 +72,8 @@ export class CaribouTimeline extends LitElement {
   // The hashtag, for `kind="hashtag"`. Set once: the router makes a new
   // page, and so a new timeline, for every tag.
   @property({ reflect: true }) tag = ''
+  // The list's id, for `kind="list"`. Set once, like `tag`.
+  @property({ reflect: true }) list = ''
   // The first page, fetched by the page's `pageData` on the server. The
   // server renders straight from it; the client seeds its store with it, so
   // the first client render equals the server render and no fetch runs.
@@ -138,7 +140,8 @@ export class CaribouTimeline extends LitElement {
     }
     const keep = KEPT.has(this.kind) && isFirstPage()
     // One kept store per tag; `#AI` and `#ai` are one tag.
-    const keepKey = this.kind === 'hashtag' ? `hashtag:${normalizeTagName(this.tag)}` : this.kind
+    const keepKey = this.kind === 'hashtag' ? `hashtag:${normalizeTagName(this.tag)}`
+      : this.kind === 'list' ? `list:${this.list}` : this.kind
     const kept = keep ? stores.get(keepKey) : undefined
     if (kept) {
       this.store = kept
@@ -156,7 +159,8 @@ export class CaribouTimeline extends LitElement {
       }
       return
     }
-    const storeKind = this.kind === 'hashtag' ? { type: 'hashtag' as const, tag: this.tag } : this.kind
+    const storeKind = this.kind === 'hashtag' ? { type: 'hashtag' as const, tag: this.tag }
+      : this.kind === 'list' ? { type: 'list' as const, id: this.list } : this.kind
     this.store = createTimelineStore(storeKind, {
       clientSource: () => activeClient.value,
       ...(this.initial ? { initial: this.initial } : {}),
@@ -303,7 +307,8 @@ export class CaribouTimeline extends LitElement {
     const context = timelineFilterContext(this.kind) ?? ''
     if (!last) {
       const empty = this.kind === 'bookmarks' ? 'No bookmarks yet.'
-        : this.kind === 'hashtag' ? `No posts with #${this.tag} yet.` : 'No posts yet.'
+        : this.kind === 'hashtag' ? `No posts with #${this.tag} yet.`
+        : this.kind === 'list' ? 'No posts in this list yet.' : 'No posts yet.'
       return html`<div class="notice">${empty}</div>`
     }
     // Keyed by status id, and each card gets the status object itself. A

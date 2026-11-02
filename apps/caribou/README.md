@@ -188,6 +188,31 @@ place. Block asks first (`confirmDialog` in
 filters (read only, with a link to the server's own page), the muted and
 the blocked accounts.
 
+**Lists are private, so the server sends only the shell.** `/lists`
+(`pages/lists/index.ts`) and `/lists/<id>` (`pages/lists/[id].ts`) render
+the sign-in placeholder on the server, like `/home`, and the lists after
+mount. A list's posts and even its title need the reader's token, so there
+is no server-painted first page and no reading without JavaScript.
+`parseListId` (`components/_list-path.ts`) refuses an id that is not
+letters, digits, `-` or `_` before any request. The store is in
+`@beatzball/caribou-state` (`lists.ts`): every entry is keyed by account,
+writes change it at once and roll back with a toast, and an answer for an
+earlier account is dropped (`ownerGeneration()`). A list timeline is
+`<caribou-timeline kind="list" list=<id>>`, kept per list, and filtered in
+the home context, as Mastodon does. New members come from a profile's menu
+("Add to lists", `<caribou-list-picker>`); the server takes only accounts
+the reader follows. The Members panel on the list and an unchecked box in
+the picker remove them, with Undo in the toast (`toastRemoved` in
+`components/_list-flows.ts`; `action: { label, run }` on a
+`caribou:toast` event). Such a toast stays until it is used or dismissed,
+and later toasts never push it out; a new toast always shows too, so with
+several Undos up the stack can pass its limit of four. A read that crosses a write five
+times in a row fails with Retry. Writes to one list or
+one membership run in order; a read that crosses a write waits for it and
+asks again, so it never undoes a change still on its way.
+`/lists` is kept on an account switch; `/lists/<id>` is not (ids are per
+account).
+
 **The reader edits and deletes their own posts.** On a post whose author
 has the active account's id (an id, never a handle, so a same-named
 account on another server is not the reader), the post menu has Edit,

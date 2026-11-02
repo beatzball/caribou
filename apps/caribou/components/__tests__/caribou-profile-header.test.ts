@@ -325,6 +325,23 @@ describe('<caribou-profile-header> mute and block', () => {
     expect(badges(el)).toEqual([])
   })
 
+  it('Add to lists opens the reader\'s lists for the account, as the reader\'s server knows it', async () => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ following: true })])
+    vi.spyOn(client, 'fetchLists').mockResolvedValue([])
+    const read = vi.spyOn(client, 'fetchAccountLists').mockResolvedValue([])
+    const el = await mountWith(ACCOUNT)
+    expect(item(el, 'lists')!.textContent).toBe('Add to lists')
+    item(el, 'lists')!.click()
+    await flush()
+    const picker = document.querySelector('caribou-list-picker')!
+    await picker.updateComplete
+    expect(picker.shadowRoot!.querySelector('h2')!.textContent).toBe('Lists for @alice@example.social')
+    expect(picker.shadowRoot!.querySelector('#hint')).toBeNull()
+    expect(read).toHaveBeenCalledWith('42')
+  })
+
   it('Mute shows Muted at once and Unmute takes it back', async () => {
     const client = signIn()
     vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel()])
