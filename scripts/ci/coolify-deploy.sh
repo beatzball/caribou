@@ -10,11 +10,12 @@
 # prints its own error instead.
 #
 # The tag is put back on the previous image only when this deploy surely did
-# not change production: Coolify refused it, or reported it failed or
+# not change production: no deploy was requested yet, Coolify clearly refused
+# it (a 4xx with its own error body), or Coolify reported it failed or
 # cancelled (Docker Image apps use a rolling update, so the old container
-# keeps serving). When the outcome is unknown (a timeout, or a deploy request
-# Coolify did not queue), the script leaves the tag alone, and fails with the
-# steps to check by hand.
+# keeps serving). When the outcome is unknown (no answer, a 5xx or gateway
+# error, a timeout, or a deploy Coolify did not queue), the script leaves the
+# tag alone, and fails with the steps to check by hand.
 set -euo pipefail
 
 # Test hooks. CI uses the defaults.
@@ -102,8 +103,17 @@ tag=$(jq -r '.docker_registry_image_tag // empty' "$body" 2>/dev/null || true)
 [[ "$code" == 2?? && "$tag" == "$GITHUB_SHA" ]] || fail_and_restore "The Coolify app tag did not change to ${GITHUB_SHA} (got '$tag')."
 
 # 4. Start the deploy. The answer must be for this app and carry an id.
+# Only a 4xx with Coolify's own JSON error body is a clear refusal. No answer
+# (000), a 5xx, or a gateway or proxy page may come after Coolify already
+# queued the deployment, so the outcome is unknown.
 code=$(call POST "/deploy?uuid=$COOLIFY_APP_UUID&force=false")
-[[ "$code" == 2?? ]] || fail_and_restore "Coolify refused the deploy (HTTP $code)."
+if [[ "$code" != 2?? ]]; then
+  refusal=$(jq -r 'select(type == "object") | .message | strings' "$body" 2>/dev/null || true)
+  if [[ "$code" == 4?? && -n "$refusal" ]]; then
+    fail_and_restore "Coolify refused the deploy (HTTP $code): $refusal"
+  fi
+  fail_unknown "The deploy request got no clear answer (HTTP $code). Coolify may have queued it."
+fi
 resource=$(jq -r '.deployments[0].resource_uuid // empty' "$body")
 deployment=$(jq -r '.deployments[0].deployment_uuid // empty' "$body")
 message=$(jq -r '.deployments[0].message // empty' "$body")

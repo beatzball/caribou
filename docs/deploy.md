@@ -45,7 +45,8 @@ it in the `checks` job.
 
 | what happened | production | the app's tag | the job |
 |---|---|---|---|
-| Coolify refused the deploy, or reported `failed` or `cancelled` | not changed (Docker Image apps use a rolling update; the old container keeps serving) | set back to the previous SHA | fails |
+| Coolify clearly refused the deploy (a 4xx with Coolify's own error message), or reported `failed` or `cancelled` | not changed (Docker Image apps use a rolling update; the old container keeps serving) | set back to the previous SHA | fails |
+| The deploy request got no answer, a 5xx, or a gateway or proxy error page | **unknown** (Coolify may have queued it before the answer was lost) | left on the new SHA | fails and prints the steps below |
 | Coolify did not queue the deploy, or it did not finish in 8 minutes | **unknown** | left on the new SHA | asks Coolify to cancel (on a timeout), then fails and prints the steps below |
 
 When the state is unknown:
@@ -89,7 +90,10 @@ Some steps run on the Coolify server, over SSH.
 
 1. **Merge the PR.** CI still uses the webhook, with a warning. Each push to
    main now also pushes an image to GHCR. Wait for one push to main to
-   finish, so an image exists.
+   finish, so an image exists. If `publish-image` fails with "Could not get
+   a GHCR token" on this first push, GHCR refused a pull token for a package
+   that does not exist yet. Nothing unsafe happened; report it, because the
+   check then needs a first-push exception.
 2. **GHCR pull access.** Make the package `beatzball/caribou` public
    (GitHub, the package page, *Package settings*, *Change visibility*).
    Or log the Coolify server in to `ghcr.io` with a token that has
@@ -131,8 +135,14 @@ Some steps run on the Coolify server, over SSH.
       source looks like `/var/lib/docker/volumes/<name>/_data`.
    2. In the new app, *Persistent Storage*, *Add*, **Directory Mount**.
       Source path: that source. Destination path: `/data`.
-      Coolify does not create, change or delete a directory outside the
-      app's own folder, so this mounts the live data as it is.
+      On deploy, Coolify runs `mkdir -p` on the source path; the folder
+      exists, so nothing changes.
+   3. **Never press Delete on this mount.** Check the Coolify version
+      (*Settings*). Coolify 4.4.0 and later never delete a directory outside
+      the app's own folder. Older versions (4.3.x and below) run `rm -rf` on
+      the source path, and the delete dialog ticks "permanently deleted from
+      the server" by default: that deletes the production data. Deleting the
+      whole app does not remove the folder on any version.
 8. **Start it.** Deploy the new app once from Coolify.
 9. **Prove the data is there, before any traffic moves.** On the server:
    ```
@@ -161,7 +171,9 @@ Some steps run on the Coolify server, over SSH.
 ### Switch
 
 11. **Pause deploys.** Do not merge to main until step 14 is done. In the
-    repo's *Actions* tab, wait until no CI run on main is in progress.
+    repo's *Actions* tab, wait until no CI run on main is in progress. The
+    webhook path does not wait for Coolify, so also check, in Coolify, that
+    neither app has a deployment queued or in progress.
 12. **Flip CI to the pinned path.** Add the repo secrets `COOLIFY_API_URL`
     (for example `https://<coolify host>/api/v1`) and `COOLIFY_APP_UUID`
     (the new app's UUID). Add both. **From the next push to main, CI deploys
@@ -196,15 +208,18 @@ Some steps run on the Coolify server, over SSH.
   unticked).
 - **After step 12, before step 13:** delete `COOLIFY_API_URL` and
   `COOLIFY_APP_UUID`. CI uses the webhook again.
-- **After step 13:** do these in order.
+- **After step 13:** do these in order. The new app keeps serving until
+  the old one is back.
   1. Pause deploys as in step 11.
-  2. If the old app is stopped, start it (Coolify *Start*/*Deploy*; it
-     builds main).
-  3. On the **new** app, remove `caribou.quest`, save, and stop the new
-     app.
-  4. On the **old** app, add `caribou.quest`, save, and **Redeploy** it, so
-     its container carries the domain again.
-  5. Check `curl -sS https://caribou.quest/api/health`.
+  2. On the **new** app, remove `caribou.quest` and save. Do not restart or
+     redeploy it. Its running container keeps its labels and keeps
+     serving.
+  3. On the **old** app, add `caribou.quest`, save, and **Redeploy** it (it
+     builds main). Its new container carries the domain.
+  4. Check `curl -sS https://caribou.quest/api/health`. If the old app's
+     deploy failed, stop here: the new app still serves. Fix the old app
+     first.
+  5. Stop the new app.
   6. Delete `COOLIFY_API_URL` and `COOLIFY_APP_UUID`. Deploys may resume;
      CI uses the webhook again.
 

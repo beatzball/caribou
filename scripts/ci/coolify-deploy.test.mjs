@@ -22,8 +22,12 @@ const DEP = 'dep-uuid'
 //   skipped:    GET /deployments/<id> answers 404
 //   cancelCode: HTTP status of the cancel call
 //   appReadFailsAfterFinish: GET app answers 500 once the deploy finished
+//   deployAnswer: how POST /deploy answers, after queueing the deployment:
+//                 { code, body } (body is sent as is), or 'drop' to cut the
+//                 connection with no answer
+//   tagChangedDuringDeploy: someone sets another tag while it deploys
 function fakeCoolify(opts = {}) {
-  const state = { tag: OLD, calls: [], polls: 0, finished: false }
+  const state = { tag: OLD, calls: [], polls: 0, finished: false, queued: false }
   const active = [...(opts.active ?? [])]
   const statuses = opts.statuses ?? ['in_progress', 'finished']
   const server = createServer((req, res) => {
@@ -50,6 +54,13 @@ function fakeCoolify(opts = {}) {
         return send(200, { uuid: APP })
       }
       if (req.method === 'POST' && path === `/deploy?uuid=${APP}&force=false`) {
+        state.queued = true
+        if (opts.deployAnswer === 'drop') return req.socket.destroy()
+        if (opts.deployAnswer) {
+          res.writeHead(opts.deployAnswer.code, { 'content-type': 'text/plain' })
+          return res.end(opts.deployAnswer.body)
+        }
+        if (opts.tagChangedDuringDeploy) state.tag = 'c'.repeat(40)
         return send(200, { deployments: [{ message: 'Deployment request queued.', resource_uuid: APP, deployment_uuid: DEP }] })
       }
       if (req.method === 'GET' && path === `/deployments/${DEP}`) {
@@ -174,4 +185,49 @@ test('no answer from Coolify fails without printing the host', async () => {
   assert.equal(r.code, 1)
   assert.match(r.out, /HTTP 000/)
   assert.ok(!r.out.includes('coolify-host'))
+})
+
+test('a clear 4xx refusal from Coolify puts the tag back', async () => {
+  const r = await scenario({ deployAnswer: { code: 422, body: '{"message":"Validation failed."}' } })
+  assert.equal(r.code, 1)
+  assert.equal(r.state.tag, OLD)
+  assert.match(r.out, /Coolify refused the deploy \(HTTP 422\): Validation failed\./)
+})
+
+test('a lost answer to the deploy request leaves the tag and says the state is unknown', async () => {
+  const r = await scenario({ deployAnswer: 'drop' })
+  assert.equal(r.code, 1)
+  assert.ok(r.state.queued)
+  assert.equal(r.state.tag, NEW)
+  assert.match(r.out, /HTTP 000/)
+  assert.match(r.out, /state in Coolify is unknown/)
+})
+
+test('a gateway error on the deploy request leaves the tag', async () => {
+  const r = await scenario({ deployAnswer: { code: 502, body: '<html>Bad Gateway</html>' } })
+  assert.equal(r.code, 1)
+  assert.equal(r.state.tag, NEW)
+  assert.match(r.out, /HTTP 502/)
+  assert.match(r.out, /state in Coolify is unknown/)
+})
+
+test('a 4xx that is not a Coolify answer leaves the tag', async () => {
+  const r = await scenario({ deployAnswer: { code: 404, body: '<html>Not Found</html>' } })
+  assert.equal(r.code, 1)
+  assert.equal(r.state.tag, NEW)
+  assert.match(r.out, /state in Coolify is unknown/)
+})
+
+test('a cancelled deployment puts the tag back', async () => {
+  const r = await scenario({ statuses: ['in_progress', 'cancelled-by-user'] })
+  assert.equal(r.code, 1)
+  assert.equal(r.state.tag, OLD)
+  assert.match(r.out, /ended as cancelled-by-user/)
+})
+
+test('a tag changed during the deploy fails without touching it', async () => {
+  const r = await scenario({ tagChangedDuringDeploy: true })
+  assert.equal(r.code, 1)
+  assert.equal(r.state.tag, 'c'.repeat(40))
+  assert.match(r.out, /Someone changed it during the deploy/)
 })
