@@ -161,3 +161,18 @@ it('an Undo toast is never pushed out by later toasts (codex P3, fable 5)', asyn
   expect(shown).toContain('Removed @bob.')
   expect(shown.length).toBeLessThanOrEqual(4)
 })
+
+it('an error still shows when four Undo toasts are up, and the Undo toasts stay (codex round 3)', async () => {
+  const el = await mount()
+  for (let i = 1; i <= 4; i++) toast({ kind: 'info', message: `Removal ${i}`, action: { label: 'Undo', run: () => {} } })
+  toast({ kind: 'error', message: "Couldn't save the list." })
+  await el.updateComplete
+  expect(messages(el, 'alert')).toEqual(["Couldn't save the list."])
+  expect(messages(el, 'status')).toEqual(['Removal 1', 'Removal 2', 'Removal 3', 'Removal 4'])
+  expect(el.shadowRoot!.querySelectorAll('caribou-button.action')).toHaveLength(4)
+  // A newer error takes the older error's place, not an Undo's.
+  toast({ kind: 'error', message: "Couldn't delete the list." })
+  await el.updateComplete
+  expect(messages(el, 'alert')).toEqual(["Couldn't delete the list."])
+  expect(messages(el, 'status')).toHaveLength(4)
+})

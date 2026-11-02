@@ -205,7 +205,8 @@ the reader follows. The Members panel on the list and an unchecked box in
 the picker remove them, with Undo in the toast (`toastRemoved` in
 `components/_list-flows.ts`; `action: { label, run }` on a
 `caribou:toast` event). Such a toast stays until it is used or dismissed,
-and later toasts never push it out. A read that crosses a write five
+and later toasts never push it out; a new toast always shows too, so with
+several Undos up the stack can pass its limit of four. A read that crosses a write five
 times in a row fails with Retry. Writes to one list or
 one membership run in order; a read that crosses a write waits for it and
 asks again, so it never undoes a change still on its way.

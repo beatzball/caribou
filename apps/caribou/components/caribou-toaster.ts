@@ -95,11 +95,14 @@ export class CaribouToaster extends LitElement {
     }
     const next = [...this.toasts, toast]
     // Past the limit the oldest plain info toast goes first, then the
-    // oldest error. A toast with an action (Undo) is never pushed out: it
-    // goes when it is used or dismissed.
+    // oldest error. Two toasts are never pushed out: the one that just
+    // came (a new failure always shows) and one with an action (Undo goes
+    // only when it is used or dismissed). With several Undos up the stack
+    // can grow past the limit rather than break either promise.
+    const kept = (t: Toast) => t === toast || !!t.action
     while (next.length > MAX_TOASTS) {
-      const info = next.findIndex((t) => t.kind === 'info' && !t.action)
-      const at = info !== -1 ? info : next.findIndex((t) => !t.action)
+      const info = next.findIndex((t) => t.kind === 'info' && !kept(t))
+      const at = info !== -1 ? info : next.findIndex((t) => !kept(t))
       if (at === -1) break
       const [old] = next.splice(at, 1)
       this.clearTimer(old!.id)
