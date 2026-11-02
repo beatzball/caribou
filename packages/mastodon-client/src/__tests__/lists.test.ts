@@ -146,3 +146,23 @@ describe('CaribouClient lists', () => {
       .rejects.toMatchObject({ code: 'not_found' })
   })
 })
+
+describe('CaribouClient lists: ids in the path', () => {
+  it('encodes a list id and an account id, so neither can leave its path segment', async () => {
+    const paths: string[] = []
+    server.use(
+      http.get(`${API}/v1/lists/:id`, ({ request }) => {
+        paths.push(new URL(request.url).pathname)
+        return HttpResponse.json(list('x', 'X'))
+      }),
+      http.get(`${API}/v1/accounts/:id/lists`, ({ request }) => {
+        paths.push(new URL(request.url).pathname)
+        return HttpResponse.json([])
+      }),
+    )
+    const c = createCaribouClient(userKey, sessionSource())
+    await c.fetchList('a/b')
+    await c.fetchAccountLists('7?x')
+    expect(paths).toEqual(['/api/v1/lists/a%2Fb', '/api/v1/accounts/7%3Fx/lists'])
+  })
+})

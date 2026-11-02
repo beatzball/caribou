@@ -242,7 +242,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         if (kind === 'public') return c.v1.timelines.public.list(listParams)
         if (kind === 'bookmarks') return fetchBookmarkTimeline(c, params)
         if (kind.type === 'hashtag') return c.v1.timelines.tag.$select(encodeURIComponent(kind.tag)).list(listParams)
-        if (kind.type === 'list')    return c.v1.timelines.list.$select(kind.id).list(listParams)
+        if (kind.type === 'list')    return c.v1.timelines.list.$select(encodeURIComponent(kind.id)).list(listParams)
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
       })
     },
@@ -351,27 +351,29 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
 
     // --- lists ---
+    // masto puts an id into the path as it is; each one is encoded, so an
+    // id can never leave its path segment.
     async fetchLists() {
       return run('lists', async (c) => c.v1.lists.list())
     },
     async fetchList(id) {
-      return run(`list:${id}`, (c) => c.v1.lists.$select(id).fetch())
+      return run(`list:${id}`, (c) => c.v1.lists.$select(encodeURIComponent(id)).fetch())
     },
     async createList(input) {
       return write((c) => c.v1.lists.create(listBody(input)))
     },
     async updateList(id, input) {
-      return write((c) => c.v1.lists.$select(id).update(listBody(input)))
+      return write((c) => c.v1.lists.$select(encodeURIComponent(id)).update(listBody(input)))
     },
     async deleteList(id) {
-      await write((c) => c.v1.lists.$select(id).remove())
+      await write((c) => c.v1.lists.$select(encodeURIComponent(id)).remove())
     },
     async fetchListAccounts(id) {
       return run(`list-accounts:${id}`, async (c) => {
         const all: mastodon.v1.Account[] = []
         let maxId: string | null = null
         for (let i = 0; i < MAX_LIST_ACCOUNT_PAGES; i++) {
-          const res = await c.v1.lists.$select(id).accounts.list.$raw({
+          const res = await c.v1.lists.$select(encodeURIComponent(id)).accounts.list.$raw({
             limit: 80, ...(maxId ? { maxId } : {}),
           })
           all.push(...res.data)
@@ -382,13 +384,13 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       })
     },
     async addListAccounts(id, accountIds) {
-      await write((c) => c.v1.lists.$select(id).accounts.create({ accountIds: [...accountIds] }))
+      await write((c) => c.v1.lists.$select(encodeURIComponent(id)).accounts.create({ accountIds: [...accountIds] }))
     },
     async removeListAccounts(id, accountIds) {
-      await write((c) => c.v1.lists.$select(id).accounts.remove({ accountIds: [...accountIds] }))
+      await write((c) => c.v1.lists.$select(encodeURIComponent(id)).accounts.remove({ accountIds: [...accountIds] }))
     },
     async fetchAccountLists(accountId) {
-      return run(`account-lists:${accountId}`, async (c) => c.v1.accounts.$select(accountId).lists.list())
+      return run(`account-lists:${accountId}`, async (c) => c.v1.accounts.$select(encodeURIComponent(accountId)).lists.list())
     },
 
     async createStatus(params, opts = {}) {
