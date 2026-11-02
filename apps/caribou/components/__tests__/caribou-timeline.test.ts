@@ -873,3 +873,35 @@ describe('<caribou-timeline> — revisit', () => {
     expect(offer).toHaveBeenCalledWith(expect.anything(), 'n')
   })
 })
+
+describe('<caribou-timeline> — a list', () => {
+  async function mountList(id: string, initial: TimelineInitial | null) {
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'list'
+    tl.list = id
+    tl.initial = initial
+    document.body.appendChild(tl)
+    await settle(tl)
+    return tl
+  }
+
+  it('keeps one store per list', async () => {
+    const first = await mountList('3', asInitial([mkStatus('a')]))
+    const store = storeOf(first)
+    first.remove()
+    const again = await mountList('3', null)
+    expect(storeOf(again)).toBe(store)
+    const other = await mountList('4', asInitial([mkStatus('b')]))
+    expect(storeOf(other)).not.toBe(store)
+  })
+
+  it('says the list has no posts yet', async () => {
+    const tl = await mountList('5', asInitial([]))
+    expect(tl.shadowRoot!.textContent).toContain('No posts in this list yet.')
+  })
+
+  it('filters its cards in the home context, as Mastodon does', async () => {
+    const tl = await mountList('6', asInitial([mkStatus('a')]))
+    expect(tl.shadowRoot!.querySelector('caribou-status-card')!.getAttribute('filter-context')).toBe('home')
+  })
+})

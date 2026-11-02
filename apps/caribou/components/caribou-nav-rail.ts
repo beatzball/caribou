@@ -15,7 +15,8 @@ import './caribou-signout-form.js'
 
 // `more`: on a phone the item lives in the More menu instead of the bar.
 // `dot`: the item carries the changelog's unread dot (`<caribou-changelog-dot>`).
-interface NavItem { label: string; icon: IconName; href: string; more?: boolean; dot?: boolean }
+// `signedIn`: the item shows only while an account is signed in.
+interface NavItem { label: string; icon: IconName; href: string; more?: boolean; dot?: boolean; signedIn?: boolean }
 
 // The items above New post. DOM order is the visual order at every width,
 // so Tab and the picture agree: the phone bar reads Home, Local, …, New
@@ -26,6 +27,7 @@ const ITEMS: NavItem[] = [
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
   { label: 'Public',  icon: 'globe', href: '/public', more: true },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
+  { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true },
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
 ]
 
@@ -338,7 +340,7 @@ export class CaribouNavRail extends LitElement {
     const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
     const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
     return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
-      class=${it.more ? 'in-more' : nothing} ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
+      class=${[it.more ? 'in-more' : '', it.signedIn ? 'signed-in-only' : ''].join(' ').trim() || nothing} ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
       >${this.renderIcon(it)}<span class="label">${it.label}</span>${this.renderUnreadText(it)}${it.dot
         ? html`<caribou-changelog-dot text></caribou-changelog-dot>` : nothing}</a>`
   }
@@ -405,7 +407,7 @@ export class CaribouNavRail extends LitElement {
           ?data-current=${moved.some((it) => it.href === active)}
           ?data-pending=${moved.some((it) => it.href === this.pending)}>
           ${moved.some((it) => it.dot) ? this.renderMoreTrigger() : nothing}
-          ${moved.map((it) => html`<a href=${it.href} class="menu-item"
+          ${moved.map((it) => html`<a href=${it.href} class=${it.signedIn ? 'menu-item signed-in-only' : 'menu-item'}
             aria-current=${it.href === active ? 'page' : nothing} @click=${spaClick}
             >${it.dot ? this.withDot(html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`)
               : html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`}${it.label}${it.dot

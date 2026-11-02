@@ -65,6 +65,20 @@ export interface CaribouClient {
   followTag(name: string): Promise<mastodon.v1.Tag>
   unfollowTag(name: string): Promise<mastodon.v1.Tag>
 
+  // Lists. Only the reader's own lists; an account must be one the reader
+  // follows before the server lets it join a list.
+  fetchLists(): Promise<mastodon.v1.List[]>
+  fetchList(id: string): Promise<mastodon.v1.List>
+  createList(input: ListInput): Promise<mastodon.v1.List>
+  updateList(id: string, input: ListInput): Promise<mastodon.v1.List>
+  deleteList(id: string): Promise<void>
+  /** Every member of the list: the pages the Link header names, in order. */
+  fetchListAccounts(id: string): Promise<mastodon.v1.Account[]>
+  addListAccounts(id: string, accountIds: readonly string[]): Promise<void>
+  removeListAccounts(id: string, accountIds: readonly string[]): Promise<void>
+  /** The reader's lists that hold the account. */
+  fetchAccountLists(accountId: string): Promise<mastodon.v1.List[]>
+
   // Compose. Writes bypass dedup: two posts with the same text are two posts.
   createStatus(params: CreateStatusInput, opts?: { idempotencyKey?: string }): Promise<mastodon.v1.Status>
   /** Resolves once the server has processed the file and it has a `url`. */
@@ -99,6 +113,17 @@ export type TimelinePage = mastodon.v1.Status[] & { nextMaxId?: string | null }
 // id, not the account id, and names the next page only in the Link header:
 // `nextMaxId` is that cursor, or null on the last page.
 export type AccountPage = mastodon.v1.Account[] & { nextMaxId: string | null }
+
+// A list's fields. `exclusive` (Mastodon 4.2+) keeps the members' posts out
+// of the home timeline; an older server ignores it. Unset fields are not sent.
+export interface ListInput {
+  title: string
+  repliesPolicy?: mastodon.v1.ListRepliesPolicy
+  exclusive?: boolean
+}
+
+// A safety stop for a list with very many members: 80 per page.
+const MAX_LIST_ACCOUNT_PAGES = 50
 
 export interface WaitForMediaOpts {
   pollIntervalMs?: number
@@ -324,6 +349,48 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     async unfollowTag(name) {
       return write((c) => c.v1.tags.$select(encodeURIComponent(name)).unfollow())
     },
+
+    // --- lists ---
+    async fetchLists() {
+      return run('lists', async (c) => c.v1.lists.list())
+    },
+    async fetchList(id) {
+      return run(`list:${id}`, (c) => c.v1.lists.$select(id).fetch())
+    },
+    async createList(input) {
+      return write((c) => c.v1.lists.create(listBody(input)))
+    },
+    async updateList(id, input) {
+      return write((c) => c.v1.lists.$select(id).update(listBody(input)))
+    },
+    async deleteList(id) {
+      await write((c) => c.v1.lists.$select(id).remove())
+    },
+    async fetchListAccounts(id) {
+      return run(`list-accounts:${id}`, async (c) => {
+        const all: mastodon.v1.Account[] = []
+        let maxId: string | null = null
+        for (let i = 0; i < MAX_LIST_ACCOUNT_PAGES; i++) {
+          const res = await c.v1.lists.$select(id).accounts.list.$raw({
+            limit: 80, ...(maxId ? { maxId } : {}),
+          })
+          all.push(...res.data)
+          maxId = nextMaxIdFromLink(res.headers.get('link'))
+          if (!maxId || res.data.length === 0) break
+        }
+        return all
+      })
+    },
+    async addListAccounts(id, accountIds) {
+      await write((c) => c.v1.lists.$select(id).accounts.create({ accountIds: [...accountIds] }))
+    },
+    async removeListAccounts(id, accountIds) {
+      await write((c) => c.v1.lists.$select(id).accounts.remove({ accountIds: [...accountIds] }))
+    },
+    async fetchAccountLists(accountId) {
+      return run(`account-lists:${accountId}`, async (c) => c.v1.accounts.$select(accountId).lists.list())
+    },
+
     async createStatus(params, opts = {}) {
       const { status, mediaIds, ...rest } = params
       const body = mediaIds && mediaIds.length > 0
@@ -370,6 +437,16 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         ...(params.limit ? { limit: params.limit } : {}),
       }))
     },
+  }
+}
+
+// masto's own params type has no `repliesPolicy`; it snake-cases every key,
+// so the server gets `replies_policy`.
+function listBody(input: ListInput): { title: string; exclusive?: boolean } {
+  return {
+    title: input.title,
+    ...(input.repliesPolicy ? { repliesPolicy: input.repliesPolicy } : {}),
+    ...(input.exclusive !== undefined ? { exclusive: input.exclusive } : {}),
   }
 }
 

@@ -146,6 +146,8 @@ describe('pathAfterSwitch across servers', () => {
     ['/@carol@example.social?tab=media&max_id=9', '/@carol@example.social?tab=media'],
     ['/@carol@example.social?tab=media', '/@carol@example.social?tab=media'],
     ['/@carol/109999?max_id=9', '/home'],
+    ['/lists', '/lists'],
+    ['/lists/3', '/home'],
   ])('%s -> %s', (from, to) => {
     expect(pathAfterSwitch(from, true)).toBe(to)
   })

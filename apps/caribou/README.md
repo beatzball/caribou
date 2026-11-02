@@ -188,6 +188,23 @@ place. Block asks first (`confirmDialog` in
 filters (read only, with a link to the server's own page), the muted and
 the blocked accounts.
 
+**Lists are private, so the server sends only the shell.** `/lists`
+(`pages/lists/index.ts`) and `/lists/<id>` (`pages/lists/[id].ts`) render
+the sign-in placeholder on the server, like `/home`, and the lists after
+mount. A list's posts and even its title need the reader's token, so there
+is no server-painted first page and no reading without JavaScript.
+`parseListId` (`components/_list-path.ts`) refuses an id that is not
+letters, digits, `-` or `_` before any request. The store is in
+`@beatzball/caribou-state` (`lists.ts`): every entry is keyed by account,
+writes change it at once and roll back with a toast, and an answer for an
+earlier account is dropped (`ownerGeneration()`). A list timeline is
+`<caribou-timeline kind="list" list=<id>>`, kept per list, and filtered in
+the home context, as Mastodon does. New members come from a profile's menu
+("Add to lists", `<caribou-list-picker>`); the server takes only accounts
+the reader follows. The Members panel on the list removes them.
+`/lists` is kept on an account switch; `/lists/<id>` is not (ids are per
+account).
+
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
 header. The client returns it as the page's `nextMaxId`, and the timeline
