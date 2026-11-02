@@ -4,8 +4,9 @@ import { repeat } from 'lit/directives/repeat.js'
 import { computed, effect, untracked } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser, createNotificationsStore, markNotificationsSeen, relationshipCache, startPolling,
-  unreadNotificationCount, NOTIFICATIONS_POLL_MS, type NotificationFilter, type NotificationsStore,
+  activeClient, activeUser, compareNotificationIds, createNotificationsStore, markNotificationsSeen, relationshipCache,
+  startPolling, unreadNotificationCount, withoutSilencedAccounts, NOTIFICATIONS_POLL_MS,
+  type NotificationFilter, type NotificationGroup, type NotificationsStore,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
@@ -13,8 +14,6 @@ import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
 import './caribou-icon.js'
 import './caribou-status-card.js'
-
-type Notification = mastodon.v1.Notification
 
 const FILTERS: { value: NotificationFilter; label: string; empty: string }[] = [
   { value: 'all',      label: 'All',      empty: 'No notifications yet.' },
@@ -56,16 +55,37 @@ export class CaribouNotifications extends LitElement {
     .filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     ul { list-style: none; margin: 0; padding: 0; }
     /* A post hidden by a filter, a mute or a block takes its notification with it. */
-    li:has(caribou-status-card[hidden]) { display: none; }
-    li { border-bottom: 1px solid var(--border); }
+    .rows > li:has(caribou-status-card[hidden]) { display: none; }
+    .rows > li { border-bottom: 1px solid var(--border); }
     .line {
       display: flex; align-items: center; gap: var(--space-2);
       padding: var(--space-3) var(--space-4) 0; color: var(--fg-1);
     }
-    li.no-status .line { padding-bottom: var(--space-3); }
+    li.no-status:not(.grouped) .line { padding-bottom: var(--space-3); }
     .line caribou-icon { font-size: 18px; color: var(--accent); flex-shrink: 0; }
     .line a { color: var(--fg-0); font-weight: 600; text-decoration: none; }
     .line a:hover { text-decoration: underline; }
+    .line > span { min-width: 0; overflow-wrap: anywhere; }
+    /* The faces in a group, overlapping, newest first. */
+    .avatars { display: flex; padding: var(--space-2) var(--space-4) 0 calc(var(--space-4) + 18px + var(--space-2)); }
+    .avatars img {
+      width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+      background: var(--bg-2); border: 2px solid var(--bg-0);
+    }
+    .avatars img + img { margin-left: -8px; }
+    .expand {
+      margin-left: auto; flex-shrink: 0; padding: var(--space-1) var(--space-2);
+      color: var(--fg-1); background: none; border: 1px solid var(--border); border-radius: 999px;
+      font: inherit; font-size: 0.875rem; cursor: pointer;
+    }
+    .expand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .who { list-style: none; margin: 0; padding: var(--space-2) var(--space-4) 0 calc(var(--space-4) + 18px + var(--space-2)); }
+    .who li { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) 0; }
+    .who img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+    .who a { color: var(--fg-0); text-decoration: none; overflow-wrap: anywhere; }
+    .who a:hover { text-decoration: underline; }
+    .who .rest { color: var(--fg-muted); }
+    .rows > li.no-status.grouped .group-body { padding-bottom: var(--space-3); }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
     .inline-error { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); }
@@ -73,7 +93,9 @@ export class CaribouNotifications extends LitElement {
   `
 
   @state() private filter: NotificationFilter = 'all'
-  @state() private items: Notification[] = []
+  @state() private items: NotificationGroup[] = []
+  // The groups whose list of accounts is open, by group key.
+  @state() private expanded: ReadonlySet<string> = new Set()
   // The accounts the reader mutes or blocks, by id on the reader's server.
   // Their notifications leave the list at once, as Mastodon's own do, and
   // come back if the mute fails.
@@ -136,7 +158,7 @@ export class CaribouNotifications extends LitElement {
     const store = createNotificationsStore({ clientSource, filter })
     this.store = store
     this.disposeBindings = effect(() => {
-      this.items = store.notifications.value
+      this.items = store.groups.value
       this.loading = store.loading.value
       this.errorMsg = store.error.value?.message ?? null
       this.hasMore = store.hasMore.value
@@ -180,8 +202,9 @@ export class CaribouNotifications extends LitElement {
       return
     }
     const session = this.session.peek()
-    const newest = this.items[0]
-    if (session && newest) markNotificationsSeen(newest.id, session.userKey)
+    let newest: string | undefined
+    for (const g of this.items) if (!newest || compareNotificationIds(g.newestId, newest) > 0) newest = g.newestId
+    if (session && newest) markNotificationsSeen(newest, session.userKey)
   }
 
   // The router adds the next page with `hidden`, lets it render, then shows
@@ -214,6 +237,7 @@ export class CaribouNotifications extends LitElement {
     if (filter === this.filter) return
     this.filter = filter
     this.items = []
+    this.expanded = new Set()
     this.open(filter)
   }
 
@@ -228,22 +252,76 @@ export class CaribouNotifications extends LitElement {
     return profilePath(a.acct, activeUser.value?.server ?? '')
   }
 
-  private renderLine(icon: IconName, account: mastodon.v1.Account | undefined, text: string) {
-    const name = account ? (account.displayName || account.username || account.acct) : ''
-    const who = account
-      ? html`<a href=${this.profileHref(account)} @click=${spaClick}>${name}</a>`
-      : nothing
+  private name(a: mastodon.v1.Account): string {
+    return a.displayName || a.username || a.acct
+  }
+
+  private nameLink(a: mastodon.v1.Account) {
+    return html`<a href=${this.profileHref(a)} @click=${spaClick}>${this.name(a)}</a>`
+  }
+
+  // "Alice", "Alice and Bob", "Alice, Bob and 12 others": two names at most.
+  private renderWho(g: NotificationGroup) {
+    const shown = g.accounts.slice(0, 2)
+    const others = Math.max(0, g.count - shown.length)
+    if (shown.length === 0) return nothing
+    const links = shown.map((a) => this.nameLink(a))
+    if (others === 0) return links.length === 1 ? links : [links[0], ' and ', links[1]]
+    const rest = `${others} ${others === 1 ? 'other' : 'others'}`
+    return links.length === 1 ? [links[0], ` and ${rest}`] : [links[0], ', ', links[1], ` and ${rest}`]
+  }
+
+  private toggle(key: string) {
+    const next = new Set(this.expanded)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    this.expanded = next
+  }
+
+  private renderLine(icon: IconName, g: NotificationGroup, text: string) {
+    const many = g.count > 1
+    const open = this.expanded.has(g.key)
+    const id = this.whoId(g)
     return html`<div class="line">
       <caribou-icon name=${icon}></caribou-icon>
-      <span>${who} <span class="what">${text}</span></span>
+      <span>${this.renderWho(g)} <span class="what">${text}</span></span>
+      ${many
+        ? html`<button type="button" class="expand" aria-expanded=${open ? 'true' : 'false'} aria-controls=${id}
+            @click=${() => this.toggle(g.key)}>${open ? 'Hide' : 'Show all'}</button>`
+        : nothing}
     </div>`
   }
 
-  private renderItem(n: Notification) {
-    // Read loosely: a server can send a type this build does not know, or
-    // leave out a field its type says is there.
-    const loose = n as { type: string; account?: mastodon.v1.Account; status?: mastodon.v1.Status | null }
-    const status = loose.status ?? null
+  // The faces in a group and, once opened, the list of who.
+  private renderGroupBody(g: NotificationGroup) {
+    if (g.count <= 1) return nothing
+    const open = this.expanded.has(g.key)
+    return html`<div class="group-body">
+      <div class="avatars" aria-hidden="true">
+        ${g.accounts.slice(0, 8).map((a) => html`<img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">`)}
+      </div>
+      ${open ? this.renderAccounts(g, this.whoId(g)) : nothing}
+    </div>`
+  }
+
+  private whoId(g: NotificationGroup): string {
+    return `who-${g.key.replace(/[^a-z0-9_-]/gi, '_')}`
+  }
+
+  // The accounts the list knows. A server group sends a sample of them.
+  private renderAccounts(g: NotificationGroup, id: string) {
+    const more = g.count - g.accounts.length
+    return html`<ul class="who" id=${id} aria-label="Who">
+      ${g.accounts.map((a) => html`<li>
+        <img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">
+        ${this.nameLink(a)}
+      </li>`)}
+      ${more > 0 ? html`<li class="rest">and ${more} more</li>` : nothing}
+    </ul>`
+  }
+
+  private renderItem(g: NotificationGroup) {
+    const status = g.status
     // Notifications come from the user's own server, which is the instance
     // the card acts on.
     const card = status
@@ -251,20 +329,15 @@ export class CaribouNotifications extends LitElement {
           instance=${activeUser.value?.server ?? ''} filter-context="notifications"></caribou-status-card>`
       : nothing
     // A mention is its post. Without one it gets the generic line.
-    if (loose.type === 'mention' && status) {
+    if (g.type === 'mention' && status) {
       return html`<li class="n-mention">${card}</li>`
     }
-    const known = LINES[loose.type]
+    const known = LINES[g.type]
     const line = known
-      ? this.renderLine(known.icon, loose.account, known.text)
-      : this.renderLine('bell', loose.account, loose.account ? 'sent you a notification' : 'New notification')
-    return html`<li class=${`n-${loose.type.replace(/[^a-z_]/gi, '')}${status ? '' : ' no-status'}`}>${line}${card}</li>`
-  }
-
-  // Read loosely, like renderItem: a row may come without an account.
-  private isSilenced(n: Notification): boolean {
-    const id = (n as { account?: { id?: string } }).account?.id
-    return id !== undefined && this.silenced.has(id)
+      ? this.renderLine(known.icon, g, known.text)
+      : this.renderLine('bell', g, g.accounts.length > 0 ? 'sent you a notification' : 'New notification')
+    const cls = `n-${g.type.replace(/[^a-z_]/gi, '')}${status ? '' : ' no-status'}${g.count > 1 ? ' grouped' : ''}`
+    return html`<li class=${cls}>${line}${this.renderGroupBody(g)}${card}</li>`
   }
 
   private renderList() {
@@ -283,7 +356,7 @@ export class CaribouNotifications extends LitElement {
     }
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      <ul>${repeat(this.items.filter((n) => !this.isSilenced(n)), (n) => n.id, (n) => this.renderItem(n))}</ul>
+      <ul class="rows">${repeat(withoutSilencedAccounts(this.items, this.silenced), (g) => g.key, (g) => this.renderItem(g))}</ul>
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
         : nothing}

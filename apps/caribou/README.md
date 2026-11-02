@@ -231,6 +231,17 @@ The seen marker is `lastSeenNotificationId` in `caribou.prefs.<userKey>`; only
 the unfiltered list on `/notifications` moves it, and only to a row that is on
 screen in a visible tab and a page the router has shown, for the session the list was loaded for.
 
+**Notifications are grouped.** The list asks `GET /api/v2/notifications`
+(Mastodon 4.3+) with `grouped_types[]` favourite, reblog and follow. A 404
+means an older server: the list asks `/api/v1/notifications` and groups
+the rows itself (`groupNotifications` in `@beatzball/caribou-state`: the
+same type on the same post, or a follow, on the same UTC day), and
+remembers that for the account until the page reloads. Older and newer
+pages join the group they continue. A muted or blocked account leaves its
+group; a group with nobody left goes. The e2e fixture answers the grouped
+endpoint with 404, so a spec that mocks `/api/v1/notifications` keeps
+working; `tests/e2e/notifications-grouped.spec.ts` serves the grouped one.
+
 **The changelog is part of the build.** `scripts/write-changelog.mjs`
 (in `pnpm build-meta`) copies `CHANGELOG.md` into
 `server/changelog.generated.ts`. `pages/changelog.ts` reads it in `pageData`

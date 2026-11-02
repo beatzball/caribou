@@ -79,3 +79,44 @@ describe('CaribouClient.fetchNotifications', () => {
     expect(source.onUnauthorized).toHaveBeenCalledOnce()
   })
 })
+
+const v2url = 'https://fosstodon.org/api/v2/notifications'
+
+describe('CaribouClient.fetchGroupedNotifications', () => {
+  it('GETs /api/v2/notifications, asks to group favourites, boosts and follows, and returns the page camel-cased', async () => {
+    let params: URLSearchParams | null = null
+    server.use(http.get(v2url, ({ request }) => {
+      params = new URL(request.url).searchParams
+      return HttpResponse.json({
+        accounts: [sampleAccount],
+        statuses: [makeStatus('s1')],
+        notification_groups: [{
+          group_key: 'favourite-s1-1', notifications_count: 14, type: 'favourite',
+          most_recent_notification_id: '20', page_min_id: '7', page_max_id: '20',
+          sample_account_ids: [sampleAccount.id], status_id: 's1',
+        }],
+      })
+    }))
+    const c = createCaribouClient(userKey, sessionSource())
+    const page = await c.fetchGroupedNotifications({ types: ['mention'], minId: '1', maxId: '9', limit: 40 })
+    const p = params as unknown as URLSearchParams
+    expect(p.getAll('grouped_types[]')).toEqual(['favourite', 'reblog', 'follow'])
+    expect(p.getAll('types[]')).toEqual(['mention'])
+    expect(p.get('min_id')).toBe('1')
+    expect(p.get('max_id')).toBe('9')
+    expect(p.get('limit')).toBe('40')
+    expect(page.notificationGroups).toEqual([{
+      groupKey: 'favourite-s1-1', notificationsCount: 14, type: 'favourite',
+      mostRecentNotificationId: '20', pageMinId: '7', pageMaxId: '20',
+      sampleAccountIds: [sampleAccount.id], statusId: 's1',
+    }])
+    expect(page.accounts[0]!.id).toBe(sampleAccount.id)
+    expect(page.statuses[0]!.id).toBe('s1')
+  })
+
+  it('reports an older server, which has no such endpoint, as not_found', async () => {
+    server.use(http.get(v2url, () => HttpResponse.json({ error: 'Not found' }, { status: 404 })))
+    const c = createCaribouClient(userKey, sessionSource())
+    await expect(c.fetchGroupedNotifications()).rejects.toMatchObject({ code: 'not_found' })
+  })
+})
