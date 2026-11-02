@@ -4,6 +4,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { UserKey } from '@beatzball/caribou-auth'
 import {
   activeClient, activeUser, activeUserKey, listKey, listMembersCache, listsCache, loadList, loadListMembers,
   setListMember,
@@ -11,7 +12,7 @@ import {
 import { boxReset } from './_shared-styles.js'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
-import { editListFlow } from './caribou-lists.js'
+import { editListFlow } from './_list-flows.js'
 import './caribou-button.js'
 
 type Members = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; items: mastodon.v1.Account[] }
@@ -54,6 +55,7 @@ export class CaribouListHeader extends LitElement {
     .who span { color: var(--fg-muted); }
     .notice { color: var(--fg-muted); margin: var(--space-2) 0; }
     [role="alert"] { color: var(--danger); margin: var(--space-2) 0; }
+    .title-error { display: flex; align-items: center; gap: var(--space-2); flex-basis: 100%; }
     .vh {
       position: absolute; width: 1px; height: 1px; overflow: hidden;
       clip-path: inset(50%); white-space: nowrap;
@@ -66,6 +68,7 @@ export class CaribouListHeader extends LitElement {
   @state() private known: mastodon.v1.List | undefined = undefined
   @state() private lists: mastodon.v1.List[] | undefined = undefined
   @state() private missing = false
+  @state() private titleError: string | null = null
   @state() private open = false
   @state() private members: Members = { status: 'loading' }
   @state() private server = ''
@@ -73,6 +76,9 @@ export class CaribouListHeader extends LitElement {
   private dispose: (() => void) | null = null
   private loadedFor: CaribouClient | null = null
   private membersFor: CaribouClient | null = null
+  // The account the shown member rows belong to. Ids are per account, so a
+  // row is never acted on through another account's client.
+  private membersOwner: UserKey | null = null
 
   override connectedCallback() {
     super.connectedCallback()
@@ -82,6 +88,11 @@ export class CaribouListHeader extends LitElement {
       this.known = this.lists?.find((l) => l.id === this.list)
       this.server = activeUser.value?.server ?? ''
       const items = key ? listMembersCache.value.get(listKey(key, this.list)) : undefined
+      if (key !== this.membersOwner) {
+        // Another account: the rows shown so far are not its rows.
+        this.membersOwner = key
+        this.members = { status: 'loading' }
+      }
       if (items) this.members = { status: 'ready', items }
       const client = activeClient.value
       if (client && client !== this.loadedFor) {
@@ -105,11 +116,19 @@ export class CaribouListHeader extends LitElement {
   // shows here.
   private async loadTitle(client: CaribouClient) {
     this.missing = false
+    this.titleError = null
     try {
       await loadList(this.list, { clientSource: () => client })
     } catch (err) {
-      if ((err as { code?: string }).code === 'not_found' && this.loadedFor === client) this.missing = true
+      if (this.loadedFor !== client) return
+      if ((err as { code?: string }).code === 'not_found') this.missing = true
+      else this.titleError = (err as Error).message || 'Could not load the list.'
     }
+  }
+
+  private onRetryTitle = () => {
+    const client = activeClient.peek()
+    if (client) void this.loadTitle(client)
   }
 
   private async loadMembers(client: CaribouClient) {
@@ -142,7 +161,7 @@ export class CaribouListHeader extends LitElement {
 
   private onRemove = async (account: mastodon.v1.Account, e: Event) => {
     const client = activeClient.peek()
-    if (!client) return
+    if (!client || client.userKey !== this.membersOwner || this.members.status !== 'ready') return
     const button = e.currentTarget as HTMLElement
     const rows = [...this.renderRoot.querySelectorAll<HTMLElement>('#members li')]
     const at = rows.findIndex((r) => r.contains(button))
@@ -152,7 +171,18 @@ export class CaribouListHeader extends LitElement {
     // or back to Members.
     const buttons = this.renderRoot.querySelectorAll<HTMLElement>('#members caribou-button.remove')
     ;(buttons[at] ?? buttons[at - 1] ?? this.renderRoot.querySelector<HTMLElement>('button.members'))?.focus()
-    await done
+    // A failure puts the row back and the store's toast says so. A removal
+    // that worked says so too, with Undo, since it is quick to do by mistake.
+    if (!(await done) || activeUserKey.peek() !== client.userKey) return
+    const listId = this.list
+    const title = this.known ? `the list "${this.known.title}"` : 'the list'
+    window.dispatchEvent(new CustomEvent('caribou:toast', { detail: {
+      kind: 'info', message: `Removed @${account.acct} from ${title}.`,
+      action: { label: 'Undo', run: () => {
+        if (activeUserKey.peek() !== client.userKey) return
+        void setListMember(listId, account, true, { clientSource: () => client, at })
+      } },
+    } }))
   }
 
   private renderMembers() {
@@ -184,6 +214,9 @@ export class CaribouListHeader extends LitElement {
     return html`<div>
       <header>
         <h1>${title}</h1>
+        ${this.titleError ? html`<div class="title-error"><span role="alert">${this.titleError}</span>
+          <caribou-button class="retry-title" variant="secondary" @click=${this.onRetryTitle}>Retry</caribou-button></div>`
+          : nothing}
         ${this.missing ? nothing : html`<div class="actions">
           <caribou-button class="edit" variant="secondary" ?disabled=${!this.known} @click=${this.onEdit}
             >Edit list</caribou-button>

@@ -5,38 +5,15 @@ import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUserKey, createList, deleteList, listsCache, loadLists, updateList,
+  activeClient, activeUserKey, deleteList, listsCache, loadLists,
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import { spaClick } from './_spa-link.js'
 import { listPath } from './_list-path.js'
 import { confirmDialog } from './caribou-confirm-dialog.js'
-import { listDialog } from './caribou-list-dialog.js'
+import { newListFlow, editListFlow } from './_list-flows.js'
 import './caribou-button.js'
 
-
-/** Whether the server has `exclusive` (4.2+): it sends it on every list. */
-export const supportsExclusive = (lists: readonly mastodon.v1.List[] | undefined) =>
-  !!lists?.some((l) => typeof l.exclusive === 'boolean')
-
-/** Asks for a new list's fields and makes it. Resolves to the list, or null. */
-export async function newListFlow(lists: readonly mastodon.v1.List[] | undefined): Promise<mastodon.v1.List | null> {
-  const client = activeClient.peek()
-  const input = await listDialog({ title: 'New list', submitLabel: 'Create', exclusive: supportsExclusive(lists) })
-  if (!input || !client || activeClient.peek()?.userKey !== client.userKey) return null
-  return createList(input, { clientSource: () => client })
-}
-
-/** Asks for a list's new fields and saves them. */
-export async function editListFlow(list: mastodon.v1.List, lists: readonly mastodon.v1.List[] | undefined): Promise<void> {
-  const client = activeClient.peek()
-  const input = await listDialog({
-    title: 'Edit list', submitLabel: 'Save', exclusive: supportsExclusive(lists),
-    initial: { title: list.title, repliesPolicy: list.repliesPolicy, exclusive: list.exclusive },
-  })
-  if (!input || !client || activeClient.peek()?.userKey !== client.userKey) return
-  await updateList(list.id, input, { clientSource: () => client })
-}
 
 // The reader's lists, with New list, Edit and Delete. Client only: lists
 // need the access token, so the page renders this after mount.
@@ -73,6 +50,9 @@ export class CaribouLists extends LitElement {
 
   private dispose: (() => void) | null = null
   private loadedFor: CaribouClient | null = null
+  // The read in flight, if any. A list made meanwhile makes it ask again
+  // (the store's read guard), so New list waits for it before focusing.
+  private reading: Promise<void> | null = null
 
   override connectedCallback() {
     super.connectedCallback()
@@ -94,13 +74,18 @@ export class CaribouLists extends LitElement {
     super.disconnectedCallback()
   }
 
-  private async load(client: CaribouClient) {
+  private load(client: CaribouClient): Promise<void> {
     this.error = null
-    try {
-      await loadLists({ clientSource: () => client })
-    } catch (err) {
-      if (this.loadedFor === client) this.error = (err as Error).message || 'Could not load your lists.'
-    }
+    const reading = (async () => {
+      try {
+        await loadLists({ clientSource: () => client })
+      } catch (err) {
+        if (this.loadedFor === client) this.error = (err as Error).message || 'Could not load your lists.'
+      }
+    })()
+    this.reading = reading
+    void reading.finally(() => { if (this.reading === reading) this.reading = null })
+    return reading
   }
 
   private onRetry = async () => {
@@ -117,6 +102,7 @@ export class CaribouLists extends LitElement {
   private onNew = async () => {
     const made = await newListFlow(this.lists)
     if (!made) return
+    await this.reading
     await this.updateComplete
     const row = [...this.renderRoot.querySelectorAll<HTMLElement>('li')].find((li) => li.dataset.listId === made.id)
     row?.querySelector<HTMLElement>('a.title')?.focus()

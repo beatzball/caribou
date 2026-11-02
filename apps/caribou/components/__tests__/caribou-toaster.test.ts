@@ -119,3 +119,35 @@ describe('<caribou-toaster>', () => {
     expect(messages(el, 'status')).toEqual([])
   })
 })
+
+describe('<caribou-toaster> action', () => {
+  it('shows the action as a button, runs it once and closes the toast', async () => {
+    const el = await mount()
+    const run = vi.fn()
+    toast({ kind: 'info', message: 'Removed @bob.', action: { label: 'Undo', run } })
+    await el.updateComplete
+    const button = el.shadowRoot!.querySelector<HTMLElement>('.toast caribou-button.action')!
+    expect(button.textContent).toBe('Undo')
+    button.click()
+    await el.updateComplete
+    expect(run).toHaveBeenCalledOnce()
+    expect(el.shadowRoot!.querySelectorAll('.toast')).toHaveLength(0)
+  })
+
+  it('a toast with an action waits for the reader: it does not time out', async () => {
+    const el = await mount()
+    toast({ kind: 'info', message: 'Removed @bob.', action: { label: 'Undo', run: () => {} } })
+    await el.updateComplete
+    vi.advanceTimersByTime(TOAST_TIMEOUT_MS * 3)
+    await el.updateComplete
+    expect(messages(el, 'status')).toEqual(['Removed @bob.'])
+  })
+
+  it('ignores an action without a label or a function', async () => {
+    const el = await mount()
+    toast({ kind: 'info', message: 'Hi', action: { label: '', run: () => {} } })
+    toast({ kind: 'info', message: 'Ho', action: { label: 'Undo' } as never })
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('caribou-button.action')).toBeNull()
+  })
+})

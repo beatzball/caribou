@@ -372,3 +372,11 @@ describe('review round 1: races', () => {
     await p
   })
 })
+
+it('an added member goes where `at` says', async () => {
+  activeUserKey.value = ME
+  listMembersCache.value = new Map()
+  await loadListMembers('1', { clientSource: () => fakeClient() })
+  await setListMember('1', account('9'), true, { clientSource: () => fakeClient(), at: 1 })
+  expect(listMembers('1')?.map((a) => a.id)).toEqual(['7', '9', '8'])
+})

@@ -308,3 +308,90 @@ describe('openListPicker', () => {
     expect(document.querySelector('caribou-list-picker')).toBeNull()
   })
 })
+
+describe('review round 1', () => {
+  it('a switch with Members open drops the old account\'s rows; Remove cannot reach the new account (codex 1)', async () => {
+    const alice = signIn('alice')
+    vi.spyOn(alice, 'fetchList').mockResolvedValue(list('3', 'Friends'))
+    vi.spyOn(alice, 'fetchListAccounts').mockResolvedValue([account('7', 'bob')])
+    const el = await mount<CaribouListHeader>('caribou-list-header', (e) => { e.list = '3' })
+    $(el, 'button.members')!.click()
+    await settle(el)
+    expect($$(el, '#members li').map((li) => li.dataset.accountId)).toEqual(['7'])
+    const oldRemove = $(el, '#members li caribou-button.remove')!
+
+    // Bob's reads are held, so nothing of his list is known yet.
+    const carol = signIn('carol')
+    vi.spyOn(carol, 'fetchList').mockReturnValue(new Promise(() => {}))
+    vi.spyOn(carol, 'fetchListAccounts').mockReturnValue(new Promise(() => {}))
+    const remove = vi.spyOn(carol, 'removeListAccounts').mockResolvedValue()
+    oldRemove.click()
+    await settle(el)
+    expect(remove).not.toHaveBeenCalled()
+    expect($$(el, '#members li')).toEqual([])
+    expect($(el, '#members .notice')!.textContent).toBe('Loading the members…')
+  })
+
+  it('a removed member gets a toast with Undo, which adds them back (codex 6)', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchList').mockResolvedValue(list('3', 'Friends'))
+    vi.spyOn(client, 'fetchListAccounts').mockResolvedValue([account('7', 'bob'), account('8', 'carol')])
+    vi.spyOn(client, 'removeListAccounts').mockResolvedValue()
+    const add = vi.spyOn(client, 'addListAccounts').mockResolvedValue()
+    const details: { kind: string; message: string; action?: { label: string; run: () => void } }[] = []
+    const grab = (e: Event) => details.push((e as CustomEvent).detail)
+    window.addEventListener('caribou:toast', grab)
+    try {
+      const el = await mount<CaribouListHeader>('caribou-list-header', (e) => { e.list = '3' })
+      $(el, 'button.members')!.click()
+      await settle(el)
+      $(el, '#members li caribou-button.remove')!.click()
+      await settle(el)
+      const info = details.find((d) => d.kind === 'info')!
+      expect(info.message).toBe('Removed @bob from the list "Friends".')
+      expect(info.action!.label).toBe('Undo')
+      info.action!.run()
+      await settle(el)
+      expect(add).toHaveBeenCalledWith('3', ['7'])
+      expect($$(el, '#members li').map((li) => li.dataset.accountId)).toEqual(['7', '8'])
+    } finally {
+      window.removeEventListener('caribou:toast', grab)
+    }
+  })
+
+  it('a failed title read shows an error with Retry (fable 6)', async () => {
+    const client = signIn()
+    const fetch = vi.spyOn(client, 'fetchList').mockRejectedValueOnce(new CaribouError('server_error', 'Server down'))
+      .mockResolvedValueOnce(list('3', 'Friends'))
+    const el = await mount<CaribouListHeader>('caribou-list-header', (e) => { e.list = '3' })
+    expect($(el, '[role="alert"]')!.textContent).toBe('Server down')
+    $(el, 'caribou-button.retry-title')!.click()
+    await settle(el)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect($(el, 'h1')!.textContent).toBe('Friends')
+    expect($(el, '[role="alert"]')).toBeNull()
+  })
+
+  it('New list on a first visit, before the lists arrive, shows and focuses it (codex 5)', async () => {
+    const client = signIn()
+    let release!: (v: mastodon.v1.List[]) => void
+    let reads = 0
+    vi.spyOn(client, 'fetchLists').mockImplementation(() => (++reads === 1
+      ? new Promise((r) => { release = r })
+      : Promise.resolve([list('1', 'Friends'), list('9', 'Cats')])))
+    vi.spyOn(client, 'createList').mockResolvedValue(list('9', 'Cats'))
+    const el = await mount<CaribouLists>('caribou-lists')
+    expect($(el, '.notice')!.textContent).toBe('Loading your lists…')
+    $(el, 'caribou-button.new')!.click()
+    const d = await dialogOf<CaribouListDialog>('caribou-list-dialog')
+    const title = $(d, '#title') as HTMLInputElement
+    title.value = 'Cats'
+    title.dispatchEvent(new Event('input'))
+    $(d, 'form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle(el)
+    release([list('1', 'Friends')])
+    await settle(el)
+    expect($$(el, 'li a.title').map((a) => a.textContent)).toEqual(['Friends', 'Cats'])
+    expect(el.shadowRoot!.activeElement).toBe($(el, 'li[data-list-id="9"] a.title'))
+  })
+})

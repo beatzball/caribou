@@ -9,7 +9,7 @@ import {
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import { spaClick } from './_spa-link.js'
-import { newListFlow } from './caribou-lists.js'
+import { newListFlow } from './_list-flows.js'
 import './caribou-button.js'
 
 type Loaded = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready' }

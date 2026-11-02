@@ -328,10 +328,11 @@ const memberWrites = new Map<string, MemberWrites>()
  * Adds the account to the list, or removes it. The change shows at once.
  * Changes to one membership go to the server in order; when the last one
  * has answered, the cache shows what the server has, and a failure says so.
- * The server adds only an account the reader follows.
+ * The server adds only an account the reader follows. `at` is where an
+ * added member goes in the known members (an Undo puts it back in place).
  */
 export async function setListMember(
-  listId: string, account: mastodon.v1.Account, member: boolean, opts: ListsOpts = {},
+  listId: string, account: mastodon.v1.Account, member: boolean, opts: ListsOpts & { at?: number } = {},
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return false
@@ -346,7 +347,7 @@ export async function setListMember(
   }
   const writes = w
   writes.count += 1
-  applyMember(userKey, listId, account, member)
+  applyMember(userKey, listId, account, member, member ? opts.at ?? -1 : -1)
   const keys = [membersKey(userKey, listId), accountKey(userKey, account.id)]
   begin(keys)
   return enqueue(key, async () => {

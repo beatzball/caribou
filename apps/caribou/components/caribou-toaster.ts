@@ -2,12 +2,20 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import './caribou-icon-button.js'
+import './caribou-button.js'
 
 export type ToastKind = 'error' | 'info'
+
+export interface ToastAction {
+  label: string
+  run: () => void
+}
 
 export interface ToastDetail {
   kind: ToastKind
   message: string
+  /** One button after the message, such as Undo. Running it closes the toast. */
+  action?: ToastAction
 }
 
 interface Toast extends ToastDetail {
@@ -81,6 +89,10 @@ export class CaribouToaster extends LitElement {
       kind: detail.kind === 'error' ? 'error' : 'info',
       message: detail.message,
     }
+    const action = detail.action
+    if (action && typeof action.label === 'string' && action.label && typeof action.run === 'function') {
+      toast.action = { label: action.label, run: action.run }
+    }
     const next = [...this.toasts, toast]
     while (next.length > MAX_TOASTS) {
       const info = next.findIndex((t) => t.kind === 'info')
@@ -88,7 +100,9 @@ export class CaribouToaster extends LitElement {
       this.clearTimer(old!.id)
     }
     this.toasts = next
-    if (toast.kind === 'info') {
+    // A toast with an action waits for the reader, like an error: a
+    // timeout could take the action away before it is read (WCAG 2.2.1).
+    if (toast.kind === 'info' && !toast.action) {
       this.timers.set(toast.id, setTimeout(() => this.dismiss(toast.id), TOAST_TIMEOUT_MS))
     }
   }
@@ -107,6 +121,8 @@ export class CaribouToaster extends LitElement {
     return repeat(this.toasts.filter((t) => t.kind === kind), (t) => t.id, (t) => html`
       <div class="toast" data-kind=${t.kind} role=${kind === 'error' ? 'alert' : nothing}>
         <span class="message">${t.message}</span>
+        ${t.action ? html`<caribou-button class="action" variant="secondary"
+          @click=${() => { this.dismiss(t.id); t.action!.run() }}>${t.action.label}</caribou-button>` : nothing}
         <caribou-icon-button icon="x" label="Dismiss" @click=${() => this.dismiss(t.id)}></caribou-icon-button>
       </div>
     `)

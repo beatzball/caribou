@@ -40,8 +40,10 @@ test('the server sends the shell of a list page; the browser fills it and hydrat
   await expect(page.getByRole('heading', { level: 1, name: 'Friends' })).toBeVisible()
   await expect(card(page, '1')).toContainText('post 1')
   await expect(card(page, '2')).toContainText('post 2')
-  // The rail marks Lists in the account's nav.
-  await expect(page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Lists' })).toBeVisible()
+  // The rail marks Lists as the current page on one of the lists.
+  const lists = page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Lists' })
+  await expect(lists).toBeVisible()
+  await expect(lists).toHaveAttribute('aria-current', 'page')
   expect(errors).toEqual([])
 })
 
@@ -150,6 +152,13 @@ test('add an account to a list from its profile, then remove it on the list', as
   await panel.getByRole('button', { name: 'Remove @bob' }).click()
   await expect(panel.getByText('No one is in this list yet.')).toBeVisible()
   await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 1'])
+  // The toast offers Undo, which puts Bob back.
+  const toast = page.locator('caribou-toaster')
+  await expect(toast).toContainText('Removed @bob from the list "Friends".')
+  await toast.getByRole('button', { name: 'Undo' }).click()
+  await expect(panel.getByRole('button', { name: 'Remove @bob' })).toBeVisible()
+  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 1', 'add b1 1'])
+  await expect(toast).not.toContainText('Removed @bob')
   expect(errors).toEqual([])
 })
 
