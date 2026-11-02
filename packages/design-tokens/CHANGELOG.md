@@ -1,5 +1,11 @@
 # @beatzball/caribou-design-tokens
 
+## 0.1.2
+
+### Patch Changes
+
+- [#144](https://github.com/beatzball/caribou/pull/144) [`d0bcc11`](https://github.com/beatzball/caribou/commit/d0bcc1141c48f3e600ad5986b251f8bd75e3d947) Thanks [@beatzball](https://github.com/beatzball)! - Fix the light theme's `color-scheme` rule. It now matches `html[data-theme="light"]`, so native controls and scroll bars are light too.
+
 ## 0.1.1
 
 ### Patch Changes

@@ -1,5 +1,18 @@
 # @beatzball/caribou-state
 
+## 0.4.2
+
+### Patch Changes
+
+- [#146](https://github.com/beatzball/caribou/pull/146) [`d334e96`](https://github.com/beatzball/caribou/commit/d334e96531bac7d5a864372046fa791ffa3dfdd1) Thanks [@beatzball](https://github.com/beatzball)! - Add `setMute` and `setBlock`. Writes to one account's relationship, follow included, go through one queue in order: the cache changes at once, an answer cannot overwrite a newer write, and a failed write rolls back only itself. Add `loadReaderView`, which merges the reader's own copies of server-rendered posts and tracks each post's check in `readerChecks`. Add `readerFiltered`, the newest `filtered` for a post from any copy. `mergeStatus` takes `filtered` from a fresh copy that has it, and the timeline, profile and thread stores seed with it.
+
+- [#145](https://github.com/beatzball/caribou/pull/145) [`113e18e`](https://github.com/beatzball/caribou/commit/113e18e83b3d227b8dda7af0ef2c6cd05eeba1d4) Thanks [@beatzball](https://github.com/beatzball)! - Add `tagCache`, `loadTag`, `toggleTagFollow`, `tagFollowing`, `tagKey` and `normalizeTagName` for hashtag follow state. `normalizeTagName` copies Mastodon's normalizer, so `#Café` and `#cafe` are one tag. A follow shows at once and rolls back with a toast when it fails. A read that fails with anything but 404 keeps the known state. A read that overlaps a write is dropped, and so is any result after the account changes.
+
+- [#144](https://github.com/beatzball/caribou/pull/144) [`d0bcc11`](https://github.com/beatzball/caribou/commit/d0bcc1141c48f3e600ad5986b251f8bd75e3d947) Thanks [@beatzball](https://github.com/beatzball)! - Add per-account preference helpers over `caribou.prefs.<userKey>`: `readPrefs`, `updatePrefs`, `themeOf` and `defaultTimelineOf`. Add `storageWorks`, which says whether the browser lets the app save anything. The notifications seen marker now uses them.
+
+- Updated dependencies [[`d334e96`](https://github.com/beatzball/caribou/commit/d334e96531bac7d5a864372046fa791ffa3dfdd1), [`113e18e`](https://github.com/beatzball/caribou/commit/113e18e83b3d227b8dda7af0ef2c6cd05eeba1d4)]:
+  - @beatzball/caribou-mastodon-client@0.4.1
+
 ## 0.4.1
 
 ### Patch Changes
