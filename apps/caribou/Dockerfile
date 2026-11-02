@@ -9,11 +9,11 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 # The commit SHA feeding /api/health.commit comes (in order of preference)
 # from: an explicit --build-arg GIT_SHA, Coolify's own SOURCE_COMMIT build
-# arg (set automatically per deploy), or `git rev-parse HEAD` against the
-# repo in the build context. The build script (`write-build-meta.mjs`) walks
-# that chain. Coolify strips .git from the build context in some
-# configurations, so the SOURCE_COMMIT fallback is what keeps the canary
-# honest in prod.
+# arg, or `git rev-parse HEAD` against the repo in the build context. The
+# build script (`write-build-meta.mjs`) walks that chain. CI builds the
+# production image and passes GIT_SHA. SOURCE_COMMIT matters only while
+# Coolify still builds the app itself (the webhook deploy in
+# docs/deploy.md); drop it once that path is gone.
 ARG GIT_SHA
 ARG SOURCE_COMMIT
 ENV GIT_SHA=${GIT_SHA}

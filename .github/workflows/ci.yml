@@ -114,12 +114,9 @@ jobs:
   # locally but throws MODULE_NOT_FOUND in the runtime image, which ships only
   # `dist/`.
   #
-  # On a push to main, the image that passed the probe is pushed to GHCR as
-  # ghcr.io/<repo>:<sha>. Deploy tells Coolify to run that exact tag, so
-  # production runs the bytes tested here, not a fresh build of whatever main
-  # points at later. There is no moving tag such as :main or :latest: Coolify
-  # keeps the last deployed SHA as its tag, so a manual redeploy in Coolify
-  # runs the same tested image again.
+  # On a push to main, the image that passed the probe is saved as a run
+  # artifact. publish-image pushes those same bytes to GHCR. This job keeps
+  # read-only permissions, so a PR run can never write to the registry.
   #
   # Skipped on the release PR for the same reason as e2e: main runs it again
   # before deploy, and deploy needs it.
@@ -128,14 +125,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: checks
-    permissions:
-      contents: read
-      # Only the push to main writes to GHCR; PR runs never log in.
-      packages: write
-    env:
-      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    outputs:
-      image: ${{ steps.publish.outputs.image }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -167,62 +156,76 @@ jobs:
       - name: Stop container
         if: always()
         run: docker stop caribou-smoke || true
+      - name: Save tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save caribou-app:ci | gzip > "$RUNNER_TEMP/caribou-image.tar.gz"
+      - name: Upload tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: caribou-image
+          path: ${{ runner.temp }}/caribou-image.tar.gz
+          retention-days: 1
+          compression-level: 0
+
+  # Push the image smoke-image tested to GHCR as ghcr.io/<repo>:<sha>. This is
+  # the only job with packages: write, and it runs only on a push to main.
+  #
+  # A SHA tag is never overwritten. If it already exists (a re-run of an old
+  # main run), the job keeps the image that is there: it passed CI the first
+  # time, and it may be what production runs now. A rebuild can differ,
+  # because the base image moves.
+  #
+  # There is no moving tag such as :main or :latest. Coolify deploys by SHA.
+  publish-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: smoke-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: caribou-image
+          path: ${{ runner.temp }}
+      - name: Load tested image
+        run: gunzip -c "$RUNNER_TEMP/caribou-image.tar.gz" | docker load
       - name: Log in to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # Push the image the probe just passed, not a rebuild of it.
       - name: Push tested image
-        id: publish
-        if: env.PUBLISH == 'true'
+        id: push
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
-          docker tag caribou-app:ci "$image"
-          docker push "$image"
+          if docker manifest inspect "$image" > /dev/null 2>&1; then
+            echo "::notice::$image already exists. Keeping it; a tested SHA tag is never overwritten."
+          else
+            docker tag caribou-app:ci "$image"
+            docker push "$image"
+          fi
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
-  # Deploy the image smoke-image pushed for this run's commit. Coolify runs a
-  # "Docker Image" resource: this job sets its tag to github.sha, then starts
-  # a deploy of that resource and waits for it to finish. Coolify never
-  # builds from main, so a push that lands mid-deploy cannot slip in.
-  #
-  # Deploy only when this run's commit is still main's head. A newer push has
-  # its own run, which deploys once that commit is tested; this stops an older
-  # run from rolling production back. The group keeps two deploys from
-  # overlapping.
-  deploy:
+  # Is this run's commit still main's head? Checked here, before the deploy
+  # job joins the deploy-prod group. GitHub keeps only one pending job per
+  # group and drops the older pending one. Without this gate, a stale run (an
+  # old run that finished late, or a re-run) could join the group, push out
+  # the pending deploy of the real head, and then skip itself. deploy checks
+  # the head again once it holds the lock.
+  deploy-gate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [checks, e2e, smoke-image]
+    needs: [checks, e2e, publish-image]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency: { group: deploy-prod, cancel-in-progress: false }
-    permissions:
-      contents: read
+    timeout-minutes: 5
     outputs:
-      deployed: ${{ steps.head.outputs.current }}
-    env:
-      COOLIFY_API_URL: ${{ secrets.COOLIFY_API_URL }}
-      COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
-      COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
-      IMAGE: ${{ needs.smoke-image.outputs.image }}
+      current: ${{ steps.head.outputs.current }}
     steps:
-      - name: Check deploy settings
-        run: |
-          missing=()
-          [[ -n "$COOLIFY_API_URL" ]] || missing+=(COOLIFY_API_URL)
-          [[ -n "$COOLIFY_API_TOKEN" ]] || missing+=(COOLIFY_API_TOKEN)
-          [[ -n "$COOLIFY_APP_UUID" ]] || missing+=(COOLIFY_APP_UUID)
-          if (( ${#missing[@]} )); then
-            echo "::error::Missing repository secret(s): ${missing[*]}. Not deploying. See docs/deploy.md."
-            exit 1
-          fi
-          if [[ "$IMAGE" != *":${GITHUB_SHA}" ]]; then
-            echo "::error::smoke-image did not push an image for ${GITHUB_SHA} (got '${IMAGE}'). Not deploying."
-            exit 1
-          fi
       - name: Check main has not moved on
         id: head
         run: |
@@ -237,51 +240,208 @@ jobs:
             echo "::notice::main is at $head, not ${GITHUB_SHA}. Skipping the deploy; the run for the newer commit deploys it."
             echo "current=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Point Coolify at the tested image
-        if: steps.head.outputs.current == 'true'
+
+  # Two paths. docs/deploy.md has the setup and the migration.
+  #
+  # Pinned (COOLIFY_API_URL and COOLIFY_APP_UUID set): Coolify runs a Docker
+  # Image app. This job sets its tag to github.sha, starts a deploy and waits
+  # until it finishes. Coolify never builds, so it runs the image tested above.
+  #
+  # Webhook (only COOLIFY_WEBHOOK_URL set): the old path, kept until the
+  # Coolify migration is done. Coolify builds whatever main points at, so the
+  # deploy is not pinned to this SHA. The job warns about that.
+  #
+  # Neither path set, or only half of the pinned one: the job fails.
+  #
+  # Deploy only when this run's commit is still main's head, so an older run
+  # cannot roll production back. The group keeps two deploys from overlapping.
+  deploy:
+    if: needs.deploy-gate.outputs.current == 'true'
+    needs: [deploy-gate, publish-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency: { group: deploy-prod, cancel-in-progress: false }
+    outputs:
+      deployed: ${{ steps.head.outputs.current }}
+    env:
+      COOLIFY_API_URL: ${{ secrets.COOLIFY_API_URL }}
+      COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+      COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+      COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+      IMAGE: ${{ needs.publish-image.outputs.image }}
+    steps:
+      - name: Choose deploy path
+        id: mode
         run: |
-          api="${COOLIFY_API_URL%/}"
-          body=$(jq -nc --arg name "${IMAGE%:*}" --arg tag "$GITHUB_SHA" \
-            '{docker_registry_image_name: $name, docker_registry_image_tag: $tag}')
-          # Write the token to a header file so it never appears in argv.
-          printf 'Authorization: Bearer %s\n' "$COOLIFY_API_TOKEN" > "$RUNNER_TEMP/auth"
-          curl -fSsL -X PATCH -H @"$RUNNER_TEMP/auth" -H 'Content-Type: application/json' \
-            --data "$body" "$api/applications/$COOLIFY_APP_UUID" > /dev/null
-          # Read it back: a resource that is not a Docker Image app ignores the tag.
-          tag=$(curl -fSsL -H @"$RUNNER_TEMP/auth" "$api/applications/$COOLIFY_APP_UUID" \
-            | jq -r '"\(.build_pack) \(.docker_registry_image_tag)"')
-          if [[ "$tag" != "dockerimage $GITHUB_SHA" ]]; then
-            echo "::error::Coolify app is not a Docker Image resource on tag ${GITHUB_SHA} (got: $tag). Not deploying."
+          if [[ -n "$COOLIFY_API_URL" && -n "$COOLIFY_APP_UUID" ]]; then
+            if [[ -z "$COOLIFY_API_TOKEN" ]]; then
+              echo "::error::Missing repository secret COOLIFY_API_TOKEN. Not deploying. See docs/deploy.md."
+              exit 1
+            fi
+            if [[ "$IMAGE" != *":${GITHUB_SHA}" ]]; then
+              echo "::error::publish-image did not push an image for ${GITHUB_SHA} (got '${IMAGE}'). Not deploying."
+              exit 1
+            fi
+            echo "mode=pinned" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$COOLIFY_API_URL" || -n "$COOLIFY_APP_UUID" ]]; then
+            echo "::error::Only one of COOLIFY_API_URL and COOLIFY_APP_UUID is set. Set both for the pinned deploy, or neither for the webhook. Not deploying. See docs/deploy.md."
+            exit 1
+          elif [[ -n "$COOLIFY_WEBHOOK_URL" ]]; then
+            echo "::warning::Deploying through the Coolify webhook. Coolify builds main as it is now, so this deploy is NOT pinned to ${GITHUB_SHA}. Finish the migration in docs/deploy.md to pin it."
+            echo "mode=webhook" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No deploy target. Set COOLIFY_API_URL and COOLIFY_APP_UUID (pinned) or COOLIFY_WEBHOOK_URL (webhook). Not deploying. See docs/deploy.md."
             exit 1
           fi
-      - name: Deploy and wait
-        if: steps.head.outputs.current == 'true'
+      - name: Check main has not moved on
+        id: head
         run: |
-          api="${COOLIFY_API_URL%/}"
-          deployment=$(curl -fSsL -X POST -H @"$RUNNER_TEMP/auth" \
-            "$api/deploy?uuid=$COOLIFY_APP_UUID&force=false" | jq -r '.deployments[0].deployment_uuid // empty')
-          if [[ -z "$deployment" ]]; then
-            echo "::error::Coolify did not return a deployment id."
+          if ! head=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/heads/main | cut -f1) || [[ -z "$head" ]]; then
+            echo "::error::Could not read the head of main from GitHub; not deploying."
             exit 1
           fi
-          echo "Coolify deployment $deployment for $IMAGE"
-          # 60 x 10s = 10 minutes, inside the job's 15-minute limit.
-          for _ in $(seq 60); do
-            status=$(curl -fSsL -H @"$RUNNER_TEMP/auth" "$api/deployments/$deployment" | jq -r '.status') || status=unknown
-            case "$status" in
-              finished) echo "Deployed $IMAGE"; exit 0 ;;
-              failed|cancelled*) echo "::error::Coolify deployment $deployment ended as $status."; exit 1 ;;
-            esac
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is at $head, not ${GITHUB_SHA}. Skipping the deploy; the run for the newer commit deploys it."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      # The token goes to curl through a header file, never argv. curl's
+      # stderr is dropped, so a connection error cannot print the Coolify host;
+      # the job prints its own error instead.
+      - name: Deploy through the webhook (not pinned)
+        if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'webhook'
+        run: |
+          auth="$RUNNER_TEMP/coolify-auth"
+          printf 'Authorization: Bearer %s\n' "$COOLIFY_API_TOKEN" > "$auth"
+          code=$(curl -sS -L --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' \
+            -X POST -H @"$auth" "$COOLIFY_WEBHOOK_URL" 2>/dev/null || true)
+          if [[ "$code" != 2?? ]]; then
+            echo "::error::The Coolify webhook answered HTTP $code."
+            exit 1
+          fi
+      - name: Deploy the tested image (pinned)
+        if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'pinned'
+        run: |
+          api="${COOLIFY_API_URL%/}"
+          auth="$RUNNER_TEMP/coolify-auth"
+          body="$RUNNER_TEMP/coolify-body"
+          printf 'Authorization: Bearer %s\n' "$COOLIFY_API_TOKEN" > "$auth"
+          # One deadline for the whole step, inside the job's 15 minutes.
+          deadline=$(( SECONDS + 720 ))
+
+          # call METHOD PATH [curl args]: the body goes to $body, the HTTP
+          # status to stdout ("000" when there is no answer).
+          call() {
+            local method=$1 path=$2
+            shift 2
+            curl -sS --connect-timeout 10 --max-time 30 -o "$body" -w '%{http_code}' \
+              -X "$method" -H @"$auth" "$@" "$api$path" 2>/dev/null || true
+          }
+          fail() { echo "::error::$*"; exit 1; }
+          set_tag() {
+            local data code
+            data=$(jq -nc --arg name "${IMAGE%:*}" --arg tag "$1" \
+              '{docker_registry_image_name: $name, docker_registry_image_tag: $tag}')
+            code=$(call PATCH "/applications/$COOLIFY_APP_UUID" -H 'Content-Type: application/json' --data "$data")
+            [[ "$code" == 2?? ]]
+          }
+          deployment=""
+          previous=""
+          # Called when the deploy does not finish. Cancel a deployment that
+          # may still run, and put the app's tag back on the image production
+          # runs, so a manual Redeploy in Coolify does not retry this one.
+          give_up() {
+            if [[ -n "$deployment" ]]; then
+              call POST "/deployments/$deployment/cancel" > /dev/null
+            fi
+            if [[ -n "$previous" && "$previous" != "$GITHUB_SHA" ]]; then
+              if set_tag "$previous"; then
+                echo "::warning::The Coolify app tag is back on $previous."
+              else
+                echo "::warning::Could not set the Coolify app tag back to $previous. Set it by hand."
+              fi
+            fi
+            fail "$@"
+          }
+
+          # 1. Wait until no deployment of this app is queued or running.
+          # Coolify skips a deploy request while one for the same app is
+          # active, and still answers with a deployment id that does not exist.
+          while :; do
+            code=$(call GET "/deployments/applications/$COOLIFY_APP_UUID?take=20")
+            [[ "$code" == 2?? ]] || fail "Could not list the app's Coolify deployments (HTTP $code)."
+            active=$(jq -r '[.deployments[]? | select(.status == "queued" or .status == "in_progress")] | length' "$body")
+            [[ "$active" =~ ^[0-9]+$ ]] || fail "Could not read the app's Coolify deployments."
+            (( active == 0 )) && break
+            (( SECONDS < deadline )) || fail "Another Coolify deployment of the app is still active. Not deploying."
+            echo "Waiting for $active active Coolify deployment(s) to end"
             sleep 10
           done
-          echo "::error::Coolify deployment $deployment did not finish in 10 minutes (last status: $status)."
-          exit 1
+
+          # 2. The app must be a Docker Image app. Remember its current tag.
+          code=$(call GET "/applications/$COOLIFY_APP_UUID")
+          [[ "$code" == 2?? ]] || fail "Could not read the Coolify app (HTTP $code)."
+          pack=$(jq -r '.build_pack' "$body")
+          [[ "$pack" == dockerimage ]] || fail "The Coolify app is not a Docker Image app (build_pack: $pack). Not deploying. See docs/deploy.md."
+          previous=$(jq -r '.docker_registry_image_tag // empty' "$body")
+
+          # 3. Point the app at the tested image, and read it back.
+          set_tag "$GITHUB_SHA" || fail "Could not set the Coolify app tag."
+          code=$(call GET "/applications/$COOLIFY_APP_UUID")
+          tag=$(jq -r '.docker_registry_image_tag // empty' "$body" 2>/dev/null || true)
+          [[ "$code" == 2?? && "$tag" == "$GITHUB_SHA" ]] || give_up "The Coolify app tag did not change to ${GITHUB_SHA} (got '$tag')."
+
+          # 4. Start the deploy. It must be for this app and have a real id.
+          code=$(call POST "/deploy?uuid=$COOLIFY_APP_UUID&force=false")
+          [[ "$code" == 2?? ]] || give_up "Coolify refused the deploy (HTTP $code)."
+          resource=$(jq -r '.deployments[0].resource_uuid // empty' "$body")
+          deployment=$(jq -r '.deployments[0].deployment_uuid // empty' "$body")
+          message=$(jq -r '.deployments[0].message // empty' "$body")
+          [[ "$resource" == "$COOLIFY_APP_UUID" ]] || give_up "Coolify answered for a different resource. Message: $message"
+          [[ -n "$deployment" ]] || give_up "Coolify did not return a deployment id. Message: $message"
+          echo "Coolify deployment $deployment for $IMAGE: $message"
+
+          # 5. Wait for it. A 404 means Coolify did not queue it.
+          misses=0
+          status=unknown
+          while (( SECONDS < deadline )); do
+            code=$(call GET "/deployments/$deployment")
+            if [[ "$code" == 404 ]]; then
+              misses=$(( misses + 1 ))
+              (( misses < 3 )) || give_up "Coolify has no deployment $deployment; it did not queue the deploy. Message: $message"
+            elif [[ "$code" == 2?? ]]; then
+              misses=0
+              status=$(jq -r '.status // "unknown"' "$body")
+              case "$status" in
+                finished)
+                  code=$(call GET "/applications/$COOLIFY_APP_UUID")
+                  tag=$(jq -r '.docker_registry_image_tag // empty' "$body" 2>/dev/null || true)
+                  [[ "$tag" == "$GITHUB_SHA" ]] || fail "Deployment finished, but the Coolify app tag is now '$tag', not ${GITHUB_SHA}."
+                  echo "Deployed $IMAGE"
+                  exit 0
+                  ;;
+                failed | cancelled*)
+                  deployment=""
+                  give_up "Coolify deployment ended as $status."
+                  ;;
+              esac
+            else
+              echo "Coolify status check answered HTTP $code; trying again"
+            fi
+            sleep 10
+          done
+          give_up "Coolify deployment $deployment did not finish in time (last status: $status)."
       - name: Remove credentials
         if: always()
-        run: rm -f "$RUNNER_TEMP/auth"
+        run: rm -f "$RUNNER_TEMP/coolify-auth" "$RUNNER_TEMP/coolify-body"
 
+  # Probes production for this run's SHA. It runs outside the deploy-prod
+  # lock: if a newer deploy replaces this one before the probe, this run goes
+  # red although production is right. Re-running it then fails the same way;
+  # check the newer run instead.
   verify-prod:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deploy.outputs.deployed == 'true'
+    if: needs.deploy.outputs.deployed == 'true'
     needs: [deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 10
