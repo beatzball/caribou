@@ -158,8 +158,11 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   // nothing about the older page, and clearing the error would start
   // infinite scroll again on its own: an automatic retry the reader did not
   // ask for. The error stays until the reader presses Retry (or a reload
-  // starts the list again).
-  const olderPagePending = () => failedOp.value === 'loadMore'
+  // starts the list again). While that Retry runs the error is cleared, but
+  // the older page is still pending, so a check in that window keeps out
+  // of the way too.
+  let retryingOlder = false
+  const olderPagePending = () => failedOp.value === 'loadMore' || retryingOlder
 
   // Posts go to the buffer only when the list does not show them yet; a
   // post can come back from the page data and from a check at once. A page
@@ -265,7 +268,13 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     const op = failedOp.value
     if (!op) return
     succeed()
-    await ops[op]()
+    if (op !== 'loadMore') return ops[op]()
+    retryingOlder = true
+    try {
+      await ops[op]()
+    } finally {
+      retryingOlder = false
+    }
   }
 
   function offer(page: mastodon.v1.Status[], nextMaxId?: string | null) {

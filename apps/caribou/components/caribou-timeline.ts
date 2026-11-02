@@ -82,8 +82,9 @@ export class CaribouTimeline extends LitElement {
   @state() private canFetch = false
   // Set while a Retry runs. The store clears its error as the retry starts;
   // the failed block stays in place with a busy button until it is done, so
-  // the button the reader pressed keeps focus (#108).
-  @state() private retrying: { older: boolean; message: string } | null = null
+  // the button the reader pressed keeps focus (#108). `older` says where the
+  // block was, since the store no longer does.
+  @state() private retrying: { older: boolean } | null = null
 
   private store: TimelineStore | null = null
   private disposeBindings: (() => void) | null = null
@@ -225,12 +226,12 @@ export class CaribouTimeline extends LitElement {
 
   private onRetry = async (e: Event) => {
     const store = this.store
-    if (!store || this.retrying || !this.errorMsg) return
+    if (!store || this.retrying || this.errorMsg === null) return
     const button = e.currentTarget as HTMLElement
     const hadFocus = this.shadowRoot?.activeElement === button
     const older = this.failedOlder
     const before = this.statuses.length
-    this.retrying = { older, message: this.errorMsg }
+    this.retrying = { older }
     try {
       await store.retry()
     } finally {
@@ -239,9 +240,19 @@ export class CaribouTimeline extends LitElement {
     await this.updateComplete
     // Failed again: the same button is still there, and still focused.
     if (!hadFocus || button.isConnected) return
-    // It worked and the button is gone. Focus must not fall to the page:
-    // after an older page it goes to the first post that came in (or the
-    // last one, when the page was empty), else to the top of the list.
+    // It worked and the button is gone. Focus must not fall to the page.
+    // A check at the top that found posts: the button that shows them.
+    if (!older && this.newPostsCount > 0) {
+      const banner = this.renderRoot.querySelector<LitElement>('caribou-new-posts-banner')
+      await banner?.updateComplete
+      const show = banner?.shadowRoot?.querySelector('button')
+      if (show) {
+        show.focus()
+        return
+      }
+    }
+    // Else, after an older page, the first post that came in (or the last
+    // one, when the page was empty); else the top of the list.
     const list = this.renderRoot.querySelector('ul')
     const items = list?.children
     const target = (older ? items?.[before] ?? items?.[before - 1] : null)
@@ -297,7 +308,10 @@ export class CaribouTimeline extends LitElement {
   }
 
   private renderFailed() {
-    return html`<div class="failed"><div role="alert">${this.retrying?.message ?? this.errorMsg}</div>
+    // The alert is empty while a Retry runs. A retry that fails again then
+    // puts the message back as new text, and a screen reader announces it
+    // again; the same text left in place would be silent.
+    return html`<div class="failed"><div role="alert">${this.retrying ? '' : this.errorMsg}</div>
       <caribou-button variant="secondary" data-action="retry" ?loading=${this.retrying !== null}
         @click=${this.onRetry}>Retry</caribou-button></div>`
   }

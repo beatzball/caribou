@@ -249,6 +249,35 @@ describe('retry', () => {
     expect(store.statusIds.value).toEqual(['1', '0'])
   })
 
+  // Review of #139: the older page is still pending while its Retry runs.
+  it('a poll that fails while a loadMore Retry runs does not take failedOp', async () => {
+    const older = deferred<Page>()
+    let olderCalls = 0
+    const store = createTimelineStore('home', {
+      clientSource: () => clientWith(async (_k, params) => {
+        if (params?.maxId) {
+          olderCalls++
+          if (olderCalls === 1) throw new Error('offline')
+          return older.promise
+        }
+        throw new Error('poll offline')
+      }),
+      initial: { statuses: [st('1')], nextMaxId: '1' },
+    })
+    await store.loadMore()
+    const retrying = store.retry()
+    await store.poll()
+    expect(store.failedOp.value).toBeNull()
+    expect(store.error.value).toBeNull()
+    older.reject(new Error('still offline'))
+    await retrying
+    expect(store.failedOp.value).toBe('loadMore')
+    expect(store.error.value?.message).toBe('still offline')
+    // Pending again: a failed poll after it still does not take the place.
+    await store.poll()
+    expect(store.failedOp.value).toBe('loadMore')
+  })
+
   // #108 item 3: `failedOp` goes with `error`.
   it('retry() and load() clear failedOp together with error', async () => {
     const gate = deferred<Page>()
