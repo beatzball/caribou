@@ -6,11 +6,13 @@ import { effect, signal } from '@preact/signals-core'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import type { Account, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUser, isOwnAccount, loadRelationship, relationshipCache, relationshipKey, toggleFollow,
-  type UserSession,
+  activeClient, activeUser, activeUserKey, isOwnAccount, loadRelationship, relationshipCache, relationshipKey,
+  setBlock, setMute, toggleFollow, type UserSession,
 } from '@beatzball/caribou-state'
 import { mastodonLinkText } from './_shared-styles.js'
+import { confirmBlock } from './caribou-confirm-dialog.js'
 import './caribou-button.js'
+import './caribou-menu.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -28,11 +30,21 @@ export class CaribouProfileHeader extends LitElement {
     .handle { color: var(--fg-muted); }
     .bio    { color: var(--fg-1); padding: 0 var(--space-3) var(--space-3); }
     .counts { display: flex; gap: var(--space-4); padding: 0 var(--space-3) var(--space-3); color: var(--fg-1); }
-    .follows-you {
-      display: inline-block; margin-top: var(--space-1); padding: 0 var(--space-2);
+    .badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
+    .badge {
+      display: inline-block; padding: 0 var(--space-2);
       border-radius: var(--radius-sm); background: var(--bg-2); color: var(--fg-muted); font-size: 0.85rem;
     }
-    .actions { margin-left: auto; align-self: flex-start; }
+    .badge.warn { color: var(--danger); }
+    .actions { margin-left: auto; align-self: flex-start; display: flex; gap: var(--space-1); align-items: center; }
+    .menu-item {
+      display: block; inline-size: 100%; padding: var(--space-2) var(--space-3);
+      font: inherit; text-align: start; color: var(--fg-1); background: none;
+      border: 0; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .menu-item:hover { background: var(--bg-1); }
+    .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .menu-item.danger { color: var(--danger); }
     caribou-button.follow { min-width: 7.5rem; font-weight: 600; }
     /* "Following" reads as "Unfollow" under the pointer or keyboard focus,
        so the reader knows what a click will do before making it. The
@@ -165,6 +177,35 @@ export class CaribouProfileHeader extends LitElement {
     if (this.target) void toggleFollow(this.target)
   }
 
+  private onMute = () => {
+    if (this.target) void setMute(this.target, this.relationship?.muting !== true)
+  }
+
+  private onBlock = async () => {
+    const target = this.target
+    const client = activeClient.peek()
+    const userKey = activeUserKey.peek()
+    if (!target || !client) return
+    const opts = { clientSource: () => client }
+    if (this.relationship?.blocking) {
+      void setBlock(target, false, opts)
+      return
+    }
+    const ok = await confirmBlock(target.acct)
+    // The target's id belongs to the server of the account that asked.
+    if (ok && activeUserKey.peek() === userKey && this.target === target) void setBlock(target, true, opts)
+  }
+
+  private renderMenu(rel: Relationship) {
+    const acct = this.target!.acct
+    return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for @${acct}`}>
+      <button type="button" class="menu-item" data-action="mute"
+        @click=${this.onMute}>${rel.muting ? 'Unmute' : 'Mute'} @${acct}</button>
+      <button type="button" class=${rel.blocking ? 'menu-item' : 'menu-item danger'} data-action="block"
+        @click=${this.onBlock}>${rel.blocking ? 'Unblock' : 'Block'} @${acct}</button>
+    </caribou-menu>`
+  }
+
   // The host matches `:focus` but not `:focus-visible` when its inner button
   // has focus, so ask the inner button and mark the host for the CSS. A
   // mouse click focuses the button too, and must not keep "Unfollow" up.
@@ -176,20 +217,37 @@ export class CaribouProfileHeader extends LitElement {
     host.toggleAttribute('data-focus-visible', e.type !== 'focusout' && inner.matches(':focus-visible'))
   }
 
+  // One template for every state, so the button the reader pressed (Follow,
+  // Unfollow or Unblock) stays the same element and keeps focus. A blocked
+  // account cannot be followed: the button then unblocks.
   private renderFollow() {
     const rel = this.relationship
     if (!this.target || !rel) return nothing
-    const state = rel.following ? 'following' : rel.requested ? 'requested' : 'follow'
+    const state = rel.blocking ? 'blocked' : rel.following ? 'following' : rel.requested ? 'requested' : 'follow'
     const label = state === 'following'
       ? html`<span class="idle">Following</span><span class="hover">Unfollow</span>`
-      : state === 'requested' ? 'Requested' : 'Follow'
+      : state === 'blocked' ? 'Unblock' : state === 'requested' ? 'Requested' : 'Follow'
     // A live region, so a screen reader hears the new label after a click.
     return html`<div class="actions" aria-live="polite">
       <caribou-button class="follow" data-state=${state} variant=${state === 'follow' ? 'primary' : 'secondary'}
-        @click=${this.onFollowClick} @focusin=${this.onFollowFocus} @focusout=${this.onFollowFocus}
+        @click=${state === 'blocked' ? this.onBlock : this.onFollowClick}
+        @focusin=${this.onFollowFocus} @focusout=${this.onFollowFocus}
         @keydown=${this.onFollowFocus} @keyup=${this.onFollowFocus}
         >${label}</caribou-button>
+      ${this.renderMenu(rel)}
     </div>`
+  }
+
+  private renderBadges() {
+    const rel = this.relationship
+    if (!rel || !this.target) return nothing
+    const badges = [
+      rel.followedBy ? html`<span class="badge follows-you">Follows you</span>` : nothing,
+      rel.muting ? html`<span class="badge muted">Muted</span>` : nothing,
+      rel.blocking ? html`<span class="badge warn blocked">Blocked</span>` : nothing,
+    ]
+    if (!rel.followedBy && !rel.muting && !rel.blocking) return nothing
+    return html`<div class="badges">${badges}</div>`
   }
 
   override render() {
@@ -208,9 +266,7 @@ export class CaribouProfileHeader extends LitElement {
         <div>
           <div class="name">${a.displayName || a.username}</div>
           <div class="handle">@${a.acct}</div>
-          ${this.relationship?.followedBy && this.target
-            ? html`<span class="follows-you">Follows you</span>`
-            : nothing}
+          ${this.renderBadges()}
         </div>
         ${this.renderFollow()}
       </div>

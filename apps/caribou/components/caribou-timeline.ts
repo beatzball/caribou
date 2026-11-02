@@ -13,6 +13,8 @@ import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 import './caribou-button.js'
 import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
+import { timelineFilterContext } from './_status-filter.js'
+import { findShell, loadReaderViewFrom } from './_shell.js'
 import { settleSplash } from './_splash.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag'
@@ -54,6 +56,8 @@ export class CaribouTimeline extends LitElement {
   static override styles = css`
     :host { display: block; }
     ul { list-style: none; margin: 0; padding: 0; }
+    /* A card hidden by a filter, a mute or a block takes its row with it. */
+    li:has(> caribou-status-card[hidden]) { display: none; }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
     .failed { display: flex; align-items: center; gap: var(--space-2); padding-inline-end: var(--space-4); }
@@ -128,6 +132,7 @@ export class CaribouTimeline extends LitElement {
       // The page got fresh data in the background (`enterWithCache`).
       if (changed.has('initial') && this.initial && !isCachedSnapshot(this.initial)) {
         this.store.offer(this.initial.statuses, this.initial.nextMaxId)
+        this.loadReaderView(this.initial.statuses)
       }
       return
     }
@@ -141,7 +146,10 @@ export class CaribouTimeline extends LitElement {
       const old = Date.now() - kept.syncedAt.peek() > STALE_MS
       // The list is already there; what is new goes to the banner. A cached
       // snapshot is what the store was filled from, so it adds nothing.
-      if (this.initial && !isCachedSnapshot(this.initial)) kept.offer(this.initial.statuses, this.initial.nextMaxId)
+      if (this.initial && !isCachedSnapshot(this.initial)) {
+        kept.offer(this.initial.statuses, this.initial.nextMaxId)
+        this.loadReaderView(this.initial.statuses)
+      }
       if (activeClient.peek() && !firstLoadSettling()) {
         const refresh = kept.refresh()
         if (old) trackUpdate(refresh)
@@ -157,6 +165,13 @@ export class CaribouTimeline extends LitElement {
     this.bind(this.store)
     // The server already paid for the first page when `initial` is set.
     if (!this.initial) void this.store.load()
+    else this.loadReaderView(this.initial.statuses)
+  }
+
+  // The server fetched `initial` without the reader's token, so it has none
+  // of the reader's filters; ask again for the reader's copy.
+  private loadReaderView(statuses: readonly mastodon.v1.Status[]) {
+    loadReaderViewFrom(findShell(this)?.getAttribute('instance') ?? '', statuses)
   }
 
   private bind(store: TimelineStore) {
@@ -285,6 +300,7 @@ export class CaribouTimeline extends LitElement {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
     const last = statuses[statuses.length - 1]
+    const context = timelineFilterContext(this.kind) ?? ''
     if (!last) {
       const empty = this.kind === 'bookmarks' ? 'No bookmarks yet.'
         : this.kind === 'hashtag' ? `No posts with #${this.tag} yet.` : 'No posts yet.'
@@ -306,7 +322,8 @@ export class CaribouTimeline extends LitElement {
         ></caribou-new-posts-banner>
         <ul>
           ${repeat(statuses, (s) => s.id, (s) => html`
-            <li><caribou-status-card data-status-id=${s.id} .status=${s}></caribou-status-card></li>
+            <li><caribou-status-card data-status-id=${s.id} .status=${s}
+              filter-context=${context}></caribou-status-card></li>
           `)}
         </ul>
         ${failed && failedOlder

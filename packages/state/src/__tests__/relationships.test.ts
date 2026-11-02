@@ -3,7 +3,7 @@ import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import {
-  loadRelationship, relationshipCache, relationshipFor, relationshipKey, toggleFollow,
+  _testOnlyResetRelationships, loadRelationship, relationshipCache, relationshipFor, relationshipKey, toggleFollow,
 } from '../relationships.js'
 import { activeUserKey } from '../users.js'
 
@@ -38,6 +38,7 @@ let toasts: { kind: string; message: string }[]
 const onToast = (e: Event) => toasts.push((e as CustomEvent).detail)
 
 beforeEach(() => {
+  _testOnlyResetRelationships()
   relationshipCache.value = new Map()
   toasts = []
   window.addEventListener('caribou:toast', onToast)

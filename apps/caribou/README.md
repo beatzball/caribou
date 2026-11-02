@@ -142,6 +142,52 @@ memory empties on an account change. Without JavaScript a post with a
 content warning cannot be opened: the server sends the collapsed card and
 no fallback. Read such a post on its home instance.
 
+**The reader's server filters hide or warn.** A status fetched with a
+token carries `filtered`: every filter that matches it, whatever the
+context. The card picks the ones for its `filter-context` attribute (home,
+notifications, public, thread, account; empty, as on bookmarks, never
+filters) in `components/_status-filter.ts`. Hide removes the card and its
+row (`li:has(> caribou-status-card[hidden])`); warn shows "Hidden by filter:
+<name>" and a Show button. A hide filter on the post a thread is about
+warns instead. A server without filters v2 sends no `filtered`, and nothing
+changes. Server-rendered data is fetched without a token, so it has none
+either: the server render never filters and hydration holds. Once the page
+runs with a session on the same server, the timeline, the profile and the
+thread ask for the reader's copies of those posts (`loadReaderViewFrom` in
+`components/_shell.ts`, `GET /api/v1/statuses?id[]=`, or one by one on an
+older server). Until that answer is in, a signed-in reader does not see
+those posts: a head script marks `<html>` before the first paint and its
+style hides every card's post through the inherited
+`--caribou-reader-veil` (`server/lib/reader-veil-head.ts`); the mark never
+comes off by itself (after 15 s with no app it says why, with Reload). Once
+the app runs, one rule holds: such a post stays covered until the reader's
+check for it has settled (`readerChecks` in `@beatzball/caribou-state`), or
+the reader chooses Show. The note says "Checking this post…" while the
+check is out, and "Could not check this post…" with Retry after a failed
+request or for a post the server left out; a Retry keeps the note. Each
+check entry belongs to the request that made it, so a late answer from an
+earlier account cannot uncover a post a newer check still holds. The server HTML is
+the same for every reader, so hydration holds. Stores seed with
+`mergeStatus`, so a reader's copy already cached keeps its `filtered`. A
+post can be cached twice, alone and inside a boost; `readerFiltered(id)`
+holds the newest `filtered` from either, and the card reads that.
+
+**Mute and block change the relationship at once.** `setMute`,
+`setBlock` and `toggleFollow` in `@beatzball/caribou-state` write the
+relationship cache first, then ask the server. Writes to one account go
+through one queue, in order, so an answer cannot overwrite a newer one, and
+an Undo pressed before the mute has answered runs after it. A failed write
+leaves the queue and the cache shows the rest. A muted or blocked
+account's notifications leave the list too. A block, and anything else that
+runs after a dialog, checks that the same account is still signed in. In every context but a profile, a card hides a post by an account
+the reader mutes or blocks, or a boost by one; only a card on the reader's
+own server reads the cache, since account ids are per server. The card
+whose menu did it shows "You muted @x." with Undo instead, so focus has a
+place. Block asks first (`confirmDialog` in
+`components/caribou-confirm-dialog.ts`). `/settings/moderation` lists the
+filters (read only, with a link to the server's own page), the muted and
+the blocked accounts.
+
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
 header. The client returns it as the page's `nextMaxId`, and the timeline
@@ -364,6 +410,10 @@ registers the element on the server and the client alike.
   `--caribou-icon-fill: none` on boost. The status card's actions are the
   first server-rendered use; `tests/e2e/status-card-hydration.spec.ts`
   hydrates them in CI.
+- A native `<button>` is right in two places: an item in a
+  `<caribou-menu>` (the caller's light DOM, see below), and a toggle whose
+  `aria-controls` names a region in the same root (the status card's Show
+  more and Show), since an id cannot reach into a shared control's root.
 - `<caribou-button>`: the label is the slotted text. `type="submit"` submits
   its form (through `ElementInternals`) the way a native submit button
   does: after every click listener has run, and not if one of them called
@@ -404,7 +454,9 @@ The phone nav bar uses it for More (Public, Bookmarks, Settings, Sign out).
   so on a phone its items are out of reach there.
 - The panel is fixed above the viewport's bottom-right corner;
   `--caribou-menu-bottom` and `--caribou-menu-right` move it. It never grows
-  past the viewport. Parts: `trigger`, `icon`, `panel`.
+  past the viewport. With `anchored` it opens next to its trigger instead
+  (below it, or above it low in the viewport), as in a post's menu.
+  `focus()` focuses the trigger. Parts: `trigger`, `icon`, `panel`.
 - The items are the caller's light DOM, so the caller styles them. An item
   that is also shown elsewhere at another width must be `display: none`
   there, so its name is in the accessibility tree once. In e2e, check that

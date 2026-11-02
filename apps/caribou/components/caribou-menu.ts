@@ -30,6 +30,10 @@ import './caribou-icon.js'
 // `--caribou-menu-right` move it; set `--caribou-menu-right: auto` and
 // `--caribou-menu-left` to put it on the left. It never grows past the viewport.
 //
+// With `anchored` the panel opens next to its trigger instead: below it,
+// or above it when the trigger is in the lower part of the viewport, with
+// its right edge at the trigger's right edge. A menu in a post uses it.
+//
 // The `trigger` slot replaces the icon inside the trigger, for a trigger that
 // shows more than an icon (the account button). The label is still the
 // trigger's name, read before the slotted content.
@@ -85,6 +89,7 @@ export class CaribouMenu extends LitElement {
 
   @property() label = ''
   @property() icon = ''
+  @property({ type: Boolean }) anchored = false
 
   private _open = false
   // Whether focus was inside when the menu began to close. Read before the
@@ -96,6 +101,9 @@ export class CaribouMenu extends LitElement {
 
   show() { this.setOpen(true) }
   hide() { this.setOpen(false) }
+
+  /** Focuses the trigger, so a caller can give focus back to the menu. */
+  override focus(opts?: FocusOptions) { this.trigger?.focus(opts) }
 
   constructor() {
     super()
@@ -168,6 +176,24 @@ export class CaribouMenu extends LitElement {
 
   private beforeChange(open: boolean) {
     if (!open) this._hadFocus = this.matches(':focus-within')
+    else if (this.anchored) this.placeNearTrigger()
+  }
+
+  // Inline insets win over the stylesheet's corner position. The panel is
+  // fixed (and in the top layer as a popover), so viewport numbers fit.
+  private placeNearTrigger() {
+    const trigger = this.trigger
+    const panel = this.panel
+    if (!trigger || !panel) return
+    const r = trigger.getBoundingClientRect()
+    const vw = document.documentElement.clientWidth || window.innerWidth
+    const vh = window.innerHeight
+    const right = Math.max(8, vw - r.right)
+    const below = r.bottom < vh * 0.6
+    panel.style.inset = below
+      ? `${r.bottom + 4}px ${right}px auto auto`
+      : `auto ${right}px ${vh - r.top + 4}px auto`
+    panel.style.maxBlockSize = below ? `${vh - r.bottom - 12}px` : `${r.top - 12}px`
   }
 
   private afterChange(open: boolean) {

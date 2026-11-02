@@ -113,4 +113,32 @@ describe('caribou-menu', () => {
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
     expect(el.open).toBe(true)
   })
+
+  it('anchored: opens under its trigger, right edges aligned', async () => {
+    const el = await mount()
+    el.anchored = true
+    await el.updateComplete
+    const vw = document.documentElement.clientWidth || window.innerWidth
+    trigger(el).getBoundingClientRect = () => ({ top: 100, bottom: 136, left: 200, right: 236, width: 36, height: 36 }) as DOMRect
+    trigger(el).click()
+    expect(panel(el).style.inset).toBe(`140px ${vw - 236}px auto auto`)
+    el.hide()
+  })
+
+  it('anchored: opens above a trigger low in the viewport', async () => {
+    const el = await mount()
+    el.anchored = true
+    await el.updateComplete
+    const vh = window.innerHeight
+    trigger(el).getBoundingClientRect = () => ({ top: vh - 50, bottom: vh - 14, left: 10, right: 46, width: 36, height: 36 }) as DOMRect
+    trigger(el).click()
+    expect(panel(el).style.inset).toMatch(new RegExp(`^auto \\d+px 54px auto$`))
+    el.hide()
+  })
+
+  it('focus() focuses the trigger', async () => {
+    const el = await mount()
+    el.focus()
+    expect(el.shadowRoot!.activeElement).toBe(trigger(el))
+  })
 })

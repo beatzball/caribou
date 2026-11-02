@@ -4,7 +4,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import { computed, effect, untracked } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, activeUser, createNotificationsStore, markNotificationsSeen, startPolling,
+  activeClient, activeUser, createNotificationsStore, markNotificationsSeen, relationshipCache, startPolling,
   unreadNotificationCount, NOTIFICATIONS_POLL_MS, type NotificationFilter, type NotificationsStore,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
@@ -55,6 +55,8 @@ export class CaribouNotifications extends LitElement {
     .filters button[aria-pressed="true"] { color: var(--fg-0); border-bottom-color: var(--accent); }
     .filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     ul { list-style: none; margin: 0; padding: 0; }
+    /* A post hidden by a filter, a mute or a block takes its notification with it. */
+    li:has(caribou-status-card[hidden]) { display: none; }
     li { border-bottom: 1px solid var(--border); }
     .line {
       display: flex; align-items: center; gap: var(--space-2);
@@ -72,6 +74,11 @@ export class CaribouNotifications extends LitElement {
 
   @state() private filter: NotificationFilter = 'all'
   @state() private items: Notification[] = []
+  // The accounts the reader mutes or blocks, by id on the reader's server.
+  // Their notifications leave the list at once, as Mastodon's own do, and
+  // come back if the mute fails.
+  @state() private silenced: ReadonlySet<string> = new Set()
+  private disposeSilenced: (() => void) | null = null
   @state() private loading = true
   @state() private errorMsg: string | null = null
   @state() private hasMore = false
@@ -98,12 +105,23 @@ export class CaribouNotifications extends LitElement {
       this.items = []
       untracked(() => this.open(this.filter))
     })
+    this.disposeSilenced = effect(() => {
+      const prefix = `${this.session.value?.userKey ?? ''} `
+      const ids = new Set<string>()
+      for (const [key, rel] of relationshipCache.value) {
+        if (key.startsWith(prefix) && (rel.muting || rel.blocking)) ids.add(key.slice(prefix.length))
+      }
+      const same = ids.size === this.silenced.size && [...ids].every((id) => this.silenced.has(id))
+      if (!same) this.silenced = ids
+    })
     document.addEventListener('visibilitychange', this.onVisibility)
   }
 
   override disconnectedCallback() {
     this.disposeSession?.()
     this.disposeSession = null
+    this.disposeSilenced?.()
+    this.disposeSilenced = null
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.close()
     super.disconnectedCallback()
@@ -230,7 +248,7 @@ export class CaribouNotifications extends LitElement {
     // the card acts on.
     const card = status
       ? html`<caribou-status-card data-status-id=${status.id} .status=${status}
-          instance=${activeUser.value?.server ?? ''}></caribou-status-card>`
+          instance=${activeUser.value?.server ?? ''} filter-context="notifications"></caribou-status-card>`
       : nothing
     // A mention is its post. Without one it gets the generic line.
     if (loose.type === 'mention' && status) {
@@ -241,6 +259,12 @@ export class CaribouNotifications extends LitElement {
       ? this.renderLine(known.icon, loose.account, known.text)
       : this.renderLine('bell', loose.account, loose.account ? 'sent you a notification' : 'New notification')
     return html`<li class=${`n-${loose.type.replace(/[^a-z_]/gi, '')}${status ? '' : ' no-status'}`}>${line}${card}</li>`
+  }
+
+  // Read loosely, like renderItem: a row may come without an account.
+  private isSilenced(n: Notification): boolean {
+    const id = (n as { account?: { id?: string } }).account?.id
+    return id !== undefined && this.silenced.has(id)
   }
 
   private renderList() {
@@ -259,7 +283,7 @@ export class CaribouNotifications extends LitElement {
     }
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      <ul>${repeat(this.items, (n) => n.id, (n) => this.renderItem(n))}</ul>
+      <ul>${repeat(this.items.filter((n) => !this.isSilenced(n)), (n) => n.id, (n) => this.renderItem(n))}</ul>
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
         : nothing}

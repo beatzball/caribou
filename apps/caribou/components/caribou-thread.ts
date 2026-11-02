@@ -8,6 +8,7 @@ import {
 } from '@beatzball/caribou-state'
 import './caribou-status-card.js'
 import { isCachedSnapshot } from './_page-cache.js'
+import { findShell, loadReaderViewFrom } from './_shell.js'
 
 const MAX_DEPTH = 3
 
@@ -68,6 +69,8 @@ export class CaribouThread extends LitElement {
   static override styles = css`
     :host { display: block; }
     ul { list-style: none; padding: 0; margin: 0; }
+    /* A card hidden by a filter, a mute or a block takes its row with it. */
+    li:has(> caribou-status-card[hidden]) { display: none; }
     .loading { padding: var(--space-4); color: var(--fg-muted); }
   `
 
@@ -102,6 +105,7 @@ export class CaribouThread extends LitElement {
     // nothing (the same guard as in `caribou-timeline`).
     if (this.store && changed.has('initial') && this.initial && !isCachedSnapshot(this.initial)) {
       this.store.offer(this.initial)
+      this.loadReaderView(this.initial)
     }
   }
 
@@ -115,11 +119,15 @@ export class CaribouThread extends LitElement {
       this.store = kept
       // A snapshot is what the store was filled from; data off the network
       // may hold new replies.
-      if (this.initial && !isCachedSnapshot(this.initial)) kept.offer(this.initial)
+      if (this.initial && !isCachedSnapshot(this.initial)) {
+        kept.offer(this.initial)
+        this.loadReaderView(this.initial)
+      }
     } else if (this.initial) {
       // A store seeded with the thread never touches the client, so a
       // signed-out reader gets a working thread too.
       this.store = createThreadStore(client!, this.statusId, { initial: this.initial })
+      this.loadReaderView(this.initial)
     } else if (client) {
       this.store = createThreadStore(client, this.statusId, {})
       void this.store.load()
@@ -128,6 +136,12 @@ export class CaribouThread extends LitElement {
     }
     stores.set(this.statusId, this.store)
     if (this.isConnected) this.bind()
+  }
+
+  // The server fetched the thread without the reader's token, so it has none
+  // of the reader's filters; ask again for the reader's copy.
+  private loadReaderView({ focused, ancestors, descendants }: ThreadInitial) {
+    loadReaderViewFrom(findShell(this)?.getAttribute('instance') ?? '', [...ancestors, focused, ...descendants])
   }
 
   private bind() {
@@ -154,7 +168,7 @@ export class CaribouThread extends LitElement {
           data-depth=${depth ?? nothing}
           style=${depth === null ? nothing : `margin-inline-start:calc(var(--space-4) * ${depth})`}
           ><caribou-status-card variant=${variant} data-id=${status.id} data-depth=${depth ?? nothing}
-            .status=${status}></caribou-status-card
+            filter-context="thread" .status=${status}></caribou-status-card
         ></li>`)}
       </ul>
     `

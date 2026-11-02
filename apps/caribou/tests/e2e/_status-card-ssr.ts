@@ -22,8 +22,7 @@ export const SSR_STATUS = {
   },
 }
 
-export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part evrveaXQmMc=-->
-      <!--lit-node 0--><article data-variant="timeline">
+export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part jqfdYnbj4a8=--><!--lit-node 0--><article data-variant="timeline"><!--lit-part GZx7xlpcd9A=--><div class="post">
         <!--lit-part jsefPjIxCJQ=--><div class="boost-attribution">
                    <!--lit-node 1--><caribou-icon   class="boost-icon" name="repeat2" defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part 5qecDuV0+bI=--><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
     width="1em" height="1em" aria-hidden="true"
@@ -69,7 +68,7 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
       </a>
     <!--/lit-part--></template></caribou-status-link-card><!--/lit-part-->
             </div>
-            <!--lit-part x0gb5fvNV/0=-->
+            <!--lit-part saWHpufMJIM=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button
 
@@ -133,12 +132,12 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
     width="1em" height="1em" aria-hidden="true"
     style="display:inline-block;vertical-align:-0.125em"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 21l-7-4l-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg><!--/lit-part--></template></caribou-icon><!--lit-part--><!--/lit-part--></button><span
       class="sr-only" id="description"><!--lit-part-->Sign in to bookmark<!--/lit-part--></span><!--/lit-part--></template></caribou-icon-button>
+        <!--lit-part--><!--/lit-part-->
       </div>
     <!--/lit-part-->
           </div>
         </div>
-      </article>
-    <!--/lit-part--></template></caribou-status-card>`
+      </div><!--/lit-part--></article><!--/lit-part--></template></caribou-status-card>`
 
 // A post behind a content warning, with sensitive media. The server prints
 // it collapsed: the warning and the Show more button, an empty body region,
@@ -156,8 +155,7 @@ export const SSR_CW_STATUS = {
   bookmarked: false, repliesCount: 0,
 }
 
-export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part evrveaXQmMc=-->
-      <!--lit-node 0--><article data-variant="timeline">
+export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part jqfdYnbj4a8=--><!--lit-node 0--><article data-variant="timeline"><!--lit-part GZx7xlpcd9A=--><div class="post">
         <!--lit-part--><!--/lit-part-->
         <div class="row">
           <div class="body">
@@ -187,7 +185,7 @@ export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="time
               <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
             </div>
-            <!--lit-part x0gb5fvNV/0=-->
+            <!--lit-part saWHpufMJIM=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button
 
@@ -251,12 +249,12 @@ export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="time
     width="1em" height="1em" aria-hidden="true"
     style="display:inline-block;vertical-align:-0.125em"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 21l-7-4l-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg><!--/lit-part--></template></caribou-icon><!--lit-part--><!--/lit-part--></button><span
       class="sr-only" id="description"><!--lit-part-->Sign in to bookmark<!--/lit-part--></span><!--/lit-part--></template></caribou-icon-button>
+        <!--lit-part--><!--/lit-part-->
       </div>
     <!--/lit-part-->
           </div>
         </div>
-      </article>
-    <!--/lit-part--></template></caribou-status-card>`
+      </div><!--/lit-part--></article><!--/lit-part--></template></caribou-status-card>`
 
 export function withoutTime(markup: string): string {
   return markup.replace(/(<time [^>]*><!--lit-part-->)[^<]*/, '$1')

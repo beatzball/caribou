@@ -49,9 +49,11 @@ export function createThreadStore(
   const context = signal<AsyncState<ThreadContext>>({ status: 'idle' })
 
   if (opts.initial) {
-    cacheStatus(opts.initial.focused)
-    for (const s of opts.initial.ancestors) cacheStatus(s)
-    for (const s of opts.initial.descendants) cacheStatus(s)
+    // A merge, not a plain write: the server's copy has no reader state,
+    // and a copy cached earlier with the reader's token keeps its own.
+    mergeStatus(opts.initial.focused)
+    for (const s of opts.initial.ancestors) mergeStatus(s)
+    for (const s of opts.initial.descendants) mergeStatus(s)
     focused.value = { status: 'ready', data: opts.initial.focused }
     context.value = {
       status: 'ready',
