@@ -7,6 +7,7 @@ import { matchRoute } from '../lib/match-route.js';
 import { APP_SCRIPT_URL } from '../lib/app-entry.js';
 import { ICONS_HEAD, PAGE_TITLE, brandHead } from '../lib/brand-head.js';
 import { resolveOrigin } from '../lib/public-origin.js';
+import { ROOT_FORWARD_HEAD } from '../lib/root-forward-head.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
 // not every client encodes, so escape it rather than trust that.
@@ -44,7 +45,12 @@ export default defineEventHandler(async (event) => {
     //     component's `static styles` can use them.
     //   • BASE_HEAD   — document-level rules that no shadow root owns.
     // brandHead adds the icons, the manifest and the link-preview tags.
-    routeMeta: { title: PAGE_TITLE, head: TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)) },
+    // ROOT_FORWARD_HEAD (only on `/`) sends a signed-in reader to /home
+    // before the sign-in form paints.
+    routeMeta: {
+      title: PAGE_TITLE,
+      head: (matched.path === '/' ? ROOT_FORWARD_HEAD : '') + TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)),
+    },
     appScriptUrl: APP_SCRIPT_URL,
   });
   return handler(event);

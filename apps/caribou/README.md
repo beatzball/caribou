@@ -218,6 +218,22 @@ link cannot sign a reader in to someone else's account. `/signin/done`, where
 sign-in used to end with the session in the URL fragment, now only shows
 "Something went wrong… Return to start" and stores nothing.
 
+**`/` goes to `/home` when an account is active.** The server cannot know
+(the accounts are in the browser), so it renders the sign-in page for every
+reader. On `/` only, an inline script in the head
+(`server/lib/root-forward-head.ts`) reads the stored accounts before the
+first paint and calls `location.replace('/home')`, so `/` leaves no history
+entry. The browser then stops reading `/`, so the tab is empty until `/home`
+commits; after 3 s it shows links to `/home` and to sign in. When the script
+keeps the reader on `/`, it marks `<html>` with `data-caribou-root`, and the
+router does not check that load again (the error banner may have consumed a
+stashed error by then). A client-side navigation to `/` is checked in
+`pages/index.ts`, with the same rules (`components/_root-forward.ts`). `/` stays for `/?add`,
+for a sign-in error (`?error=`, or the stashed `caribou.error`), and with no
+active account. With storage blocked, or without JavaScript, `/` stays the
+sign-in page. The pages send no Content-Security-Policy, so the inline script
+runs; a CSP added later must allow it (a hash or a nonce).
+
 **Adding an account** is `/?add`: the sign-in form, which keeps the stored
 accounts. The new account becomes active; signing in to one already stored
 replaces its token in place. Opened with no account (a stale link), it is the
