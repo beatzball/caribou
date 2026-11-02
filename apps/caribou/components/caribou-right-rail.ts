@@ -59,6 +59,7 @@ export class CaribouRightRail extends LitElement {
         <ul class="links">
           <li><litro-link href="/privacy">Privacy</litro-link></li>
           <li><litro-link href="/about">About</litro-link></li>
+          <li><litro-link href="/changelog">Changelog</litro-link></li>
         </ul>
         ${inst
           ? html`<div class="session signed-in">Signed in to <strong>${inst}</strong> ·

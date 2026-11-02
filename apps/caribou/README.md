@@ -185,6 +185,22 @@ The seen marker is `lastSeenNotificationId` in `caribou.prefs.<userKey>`; only
 the unfiltered list on `/notifications` moves it, and only to a row that is on
 screen in a visible tab and a page the router has shown, for the session the list was loaded for.
 
+**The changelog is part of the build.** `scripts/write-changelog.mjs`
+(in `pnpm build-meta`) copies `CHANGELOG.md` into
+`server/changelog.generated.ts`. `pages/changelog.ts` reads it in `pageData`
+through a dynamic import, so the browser never downloads the text (Vite
+still writes it as an unreferenced chunk under `dist/client/assets`, as with
+the sanitizer); `server/lib/changelog.ts` parses it into plain data that Lit
+renders as text. Nothing from the file is used as HTML. The unread dot is
+`<caribou-changelog-dot>`: put one inside the item's `.icon-wrap` (the dot)
+and one with `text` after the label (", new version" for a screen reader).
+In the nav rail, `dot: true` on an item does both, and on a `more` item the
+phone's More trigger gets them too. It is on Settings; the About section
+of `/settings` (`caribou-settings-about.ts`) and the right rail link to
+`/changelog`. The marker is
+`lastSeenChangelogVersion` in `caribou.prefs.<userKey>`
+(`components/_changelog-seen.ts`); `app-main.ts` starts it once.
+
 ## Accounts
 
 A reader can be signed in to several accounts, on several servers, with one

@@ -17,10 +17,10 @@ describe('caribou-right-rail', () => {
     activeUserKey.value = null
   })
 
-  it('links to privacy and about', async () => {
+  it('links to privacy, about and the changelog', async () => {
     const el = await mount()
     const hrefs = [...el.shadowRoot!.querySelectorAll('litro-link')].map((l) => l.getAttribute('href'))
-    expect(hrefs).toEqual(['/privacy', '/about'])
+    expect(hrefs).toEqual(['/privacy', '/about', '/changelog'])
   })
 
   it('renders no session block without an instance', async () => {

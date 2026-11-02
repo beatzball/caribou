@@ -58,6 +58,30 @@ describe('caribou-nav-rail', () => {
     expect(icons).toEqual(['home', 'users', 'bell', 'globe', 'bookmark', 'settings', 'user'])
   })
 
+  // The changelog's unread dot sits on the Settings item, in the rail and
+  // in the More menu. The dot element is always there; it draws itself.
+  it('puts the changelog dot on the Changelog links only', async () => {
+    const el = await mount()
+    const dots = [...el.shadowRoot!.querySelectorAll('a caribou-changelog-dot:not([text])')]
+    expect(dots.map((d) => d.closest('a')?.getAttribute('href'))).toEqual(['/settings', '/settings'])
+    expect(dots.map((d) => d.parentElement?.className)).toEqual(['icon-wrap', 'icon-wrap'])
+    // The words come after the label, so the name reads "Settings, new version".
+    const words = [...el.shadowRoot!.querySelectorAll('a caribou-changelog-dot[text]')]
+    expect(words.map((d) => d.closest('a')?.getAttribute('href'))).toEqual(['/settings', '/settings'])
+    const rail = words[0]!.closest('a')!
+    expect(rail.querySelector('.label')!.compareDocumentPosition(words[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // On a phone the Settings item is in the More menu, so More carries the
+  // dot too: a reader sees it without opening the menu.
+  it('puts the changelog dot and its words on the More trigger', async () => {
+    const el = await mount()
+    const trigger = el.shadowRoot!.querySelector('caribou-menu.more > [slot="trigger"]')!
+    expect(trigger.querySelector('caribou-icon')!.getAttribute('name')).toBe('ellipsis')
+    expect(trigger.querySelector('caribou-changelog-dot:not([text])')).not.toBeNull()
+    expect(trigger.querySelector('caribou-changelog-dot[text]')).not.toBeNull()
+  })
+
   it('marks the route in `current` with aria-current="page"', async () => {
     const el = await mount('/local')
     const active = el.shadowRoot!.querySelectorAll('a[aria-current="page"]')

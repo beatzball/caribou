@@ -2,6 +2,7 @@ import { html, type TemplateResult } from 'lit'
 import './caribou-settings-appearance.js'
 import './caribou-settings-timeline.js'
 import './caribou-settings-account.js'
+import './caribou-settings-about.js'
 
 // The sections of /settings, in page order. `<caribou-settings>` renders each
 // one as `<section id=${id}>` with an `<h2>` of `heading`, then `render()`.
@@ -41,5 +42,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     id: 'account',
     heading: 'Account',
     render: () => html`<caribou-settings-account></caribou-settings-account>`,
+  },
+  {
+    id: 'about',
+    heading: 'About',
+    render: () => html`<caribou-settings-about></caribou-settings-about>`,
   },
 ]
