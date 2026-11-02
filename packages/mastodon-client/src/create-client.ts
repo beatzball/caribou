@@ -75,6 +75,19 @@ export interface CaribouClient {
   updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
   fetchInstance(): Promise<mastodon.v2.Instance>
 
+  // Edit and delete the reader's own posts.
+  /** The post's plain text and content warning, as the author wrote them. */
+  fetchStatusSource(statusId: string): Promise<mastodon.v1.StatusSource>
+  /**
+   * Replaces the post's text. Mastodon drops every attachment an edit does
+   * not list, so pass the ids of the media to keep. Visibility cannot change.
+   */
+  editStatus(statusId: string, params: EditStatusInput): Promise<mastodon.v1.Status>
+  /** Deletes the post. The answer carries `text`, the source to redraft from. */
+  deleteStatus(statusId: string): Promise<mastodon.v1.Status>
+  /** Every version of the post, oldest first, the current one last. */
+  fetchStatusHistory(statusId: string): Promise<mastodon.v1.StatusEdit[]>
+
   // Notifications.
   fetchNotifications(params?: FetchNotificationsParams): Promise<mastodon.v1.Notification[]>
 
@@ -171,6 +184,14 @@ export interface CreateStatusInput {
   mediaIds?: string[]
   sensitive?: boolean
   language?: string
+}
+
+export interface EditStatusInput {
+  status: string
+  spoilerText: string
+  sensitive?: boolean
+  language?: string | null
+  mediaIds: readonly string[]
 }
 
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
@@ -401,6 +422,27 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchInstance() {
       return run('instance', (c) => c.v2.instance.fetch())
+    },
+
+    // --- edit and delete ---
+    async fetchStatusSource(statusId) {
+      return run(`status-source:${statusId}`, (c) => c.v1.statuses.$select(statusId).source.fetch())
+    },
+    async editStatus(statusId, params) {
+      const { mediaIds, language, sensitive, ...rest } = params
+      const body = {
+        ...rest,
+        ...(sensitive !== undefined ? { sensitive } : {}),
+        ...(language ? { language } : {}),
+        ...(mediaIds.length > 0 ? { mediaIds: [...mediaIds] } : {}),
+      }
+      return write((c) => c.v1.statuses.$select(statusId).update(body as mastodon.rest.v1.UpdateStatusParams))
+    },
+    async deleteStatus(statusId) {
+      return write((c) => c.v1.statuses.$select(statusId).remove())
+    },
+    async fetchStatusHistory(statusId) {
+      return run(`status-history:${statusId}`, async (c) => await c.v1.statuses.$select(statusId).history.list())
     },
 
     // --- notifications ---
