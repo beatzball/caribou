@@ -10,6 +10,8 @@ import { resolveOrigin } from '../lib/public-origin.js';
 import { ROOT_FORWARD_HEAD } from '../lib/root-forward-head.js';
 import { READER_VEIL_HEAD } from '../lib/reader-veil-head.js';
 import { THEME_HEAD } from '../lib/theme-head.js';
+import { TIMELINE_SPLASH_HEAD } from '../lib/timeline-splash-head.js';
+import { SPLASH_TARGETS } from '../../components/_splash.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
 // not every client encodes, so escape it rather than trust that.
@@ -47,15 +49,21 @@ export default defineEventHandler(async (event) => {
     //     component's `static styles` can use them.
     //   • BASE_HEAD   — document-level rules that no shadow root owns.
     // brandHead adds the icons, the manifest and the link-preview tags.
-    // ROOT_FORWARD_HEAD (only on `/`) sends a signed-in reader to /home
-    // before the sign-in form paints. READER_VEIL_HEAD hides server-rendered
-    // posts from a signed-in reader until their filters are known
+    // ROOT_FORWARD_HEAD (only on `/`) sends a signed-in reader to their
+    // timeline before the sign-in form paints, behind a loading screen.
+    // TIMELINE_SPLASH_HEAD (only on the timelines a forward can reach) goes
+    // on with that screen. READER_VEIL_HEAD hides server-rendered posts from
+    // a signed-in reader until their filters are known
     // (`server/lib/reader-veil-head.ts`). THEME_HEAD comes last, after the
     // theme-color meta it updates: it puts the reader's theme on <html>
-    // before the first paint.
+    // before the first paint. On `/` it runs first as well: the forward ends `/` as hidden
+    // text, and its screen must have the reader's colors. Running twice is
+    // on purpose: the first run is before the theme-color meta exists, and
+    // the last one (when `/` stays) sets that meta.
     routeMeta: {
       title: PAGE_TITLE,
-      head: (matched.path === '/' ? ROOT_FORWARD_HEAD : '') + TOKENS_HEAD + BASE_HEAD + READER_VEIL_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD,
+      head: (matched.path === '/' ? THEME_HEAD + ROOT_FORWARD_HEAD
+        : (SPLASH_TARGETS as readonly string[]).includes(matched.path) ? TIMELINE_SPLASH_HEAD : '') + TOKENS_HEAD + BASE_HEAD + READER_VEIL_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD,
     },
     appScriptUrl: APP_SCRIPT_URL,
   });
