@@ -61,8 +61,15 @@ async function watchFirstPaint(page: Page) {
   })
 }
 
-const firstPaint = (page: Page) =>
-  page.evaluate(() => (window as unknown as { __firstPaint: { theme: string | null; bg: string } }).__firstPaint)
+// `goto` returns at the load event, and under load that can come before the
+// first frame; then `bg` is still empty. So wait for the frame to record it.
+const firstPaint = async (page: Page) => {
+  const handle = await page.waitForFunction(() => {
+    const seen = (window as unknown as { __firstPaint?: { theme: string | null; bg: string } }).__firstPaint
+    return seen && seen.bg !== '' ? seen : null
+  })
+  return handle.jsonValue()
+}
 
 async function gotoSettled(page: Page, path: string) {
   await page.goto(path)
