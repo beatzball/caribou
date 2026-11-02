@@ -4,6 +4,7 @@ import type { CaribouClient, CaribouError } from '@beatzball/caribou-mastodon-cl
 import type { mastodon } from 'masto'
 import { cacheAccount, cacheStatus, statusCache } from './caches.js'
 import { startPolling, type PollHost } from './polling.js'
+import { readPrefs, updatePrefs } from './prefs.js'
 import { activeClient, activeUser } from './users.js'
 
 export type NotificationFilter = 'all' | 'mentions'
@@ -177,21 +178,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 // --- seen marker and unread count ------------------------------------------
 
 // The marker shares `caribou.prefs.<userKey>` with the other per-account
-// preferences, so signing out (which removes that key) clears it too.
-function prefsKey(userKey: UserKey): string {
-  return `caribou.prefs.${userKey}`
-}
-
-function readPrefs(userKey: UserKey): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(prefsKey(userKey)) ?? 'null') as unknown
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
-  }
-}
+// preferences (`prefs.ts`), so signing out (which removes that key) clears it too.
 
 export function lastSeenNotificationId(userKey: UserKey): string | null {
   const id = readPrefs(userKey).lastSeenNotificationId
@@ -217,7 +204,7 @@ export function markNotificationsSeen(id: string, userKey?: UserKey): void {
   const prefs = readPrefs(user.userKey)
   const current = typeof prefs.lastSeenNotificationId === 'string' ? prefs.lastSeenNotificationId : null
   if (current && compareNotificationIds(id, current) <= 0) return
-  localStorage.setItem(prefsKey(user.userKey), JSON.stringify({ ...prefs, lastSeenNotificationId: id }))
+  updatePrefs(user.userKey, { lastSeenNotificationId: id })
   unreadNotificationCount.value = 0
 }
 

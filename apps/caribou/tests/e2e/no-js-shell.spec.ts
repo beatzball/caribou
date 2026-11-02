@@ -19,7 +19,7 @@ test('privacy page shows its text inside the shell, with real links', async ({ p
   await expect(page.getByText(/does not collect analytics or\s+telemetry/i)).toBeVisible()
 
   const nav = page.getByRole('navigation', { name: 'Primary' })
-  for (const [name, href] of [['Home', '/home'], ['Local', '/local'], ['Notifications', '/notifications'], ['Public', '/public'], ['Bookmarks', '/bookmarks'], ['Profile', '/@me']] as const) {
+  for (const [name, href] of [['Home', '/home'], ['Local', '/local'], ['Notifications', '/notifications'], ['Public', '/public'], ['Bookmarks', '/bookmarks'], ['Settings', '/settings'], ['Profile', '/@me']] as const) {
     await expect(nav.getByRole('link', { name })).toHaveAttribute('href', href)
   }
   // The account menu opens without JavaScript (a native popover) and holds

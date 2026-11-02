@@ -26,7 +26,7 @@ for (const { width, layout } of [
     const tree = await rail.ariaSnapshot()
     const inBar = layout === 'mobile'
       ? ['Home', 'Local', 'Notifications', 'Profile']
-      : ['Home', 'Local', 'Notifications', 'Public', 'Bookmarks', 'Profile']
+      : ['Home', 'Local', 'Notifications', 'Public', 'Bookmarks', 'Settings', 'Profile']
     for (const name of inBar) expect(tree).toContain(`link "${name}"`)
     expect(tree).toContain('button "New post"')
     if (layout !== 'mobile') {
@@ -39,11 +39,11 @@ for (const { width, layout } of [
     // Before More opens, its items are nowhere in the tree.
     expect(tree).toContain('button "More"')
     expect(tree).not.toContain('Accounts')
-    for (const name of ['link "Public"', 'link "Bookmarks"', 'link "Add account"', 'button "Sign out"']) {
+    for (const name of ['link "Public"', 'link "Bookmarks"', 'link "Settings"', 'link "Add account"', 'button "Sign out"']) {
       expect(tree).not.toContain(name)
     }
     await rail.getByRole('button', { name: 'More', exact: true }).click()
-    for (const name of ['Public', 'Bookmarks']) {
+    for (const name of ['Public', 'Bookmarks', 'Settings']) {
       await expect(rail.getByRole('link', { name, exact: true })).toBeVisible()
     }
     await expect(rail.locator('caribou-menu.more').getByRole('link', { name: 'Add account', exact: true })).toBeVisible()
