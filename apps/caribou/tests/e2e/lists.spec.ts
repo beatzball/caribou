@@ -131,9 +131,17 @@ test('add an account to a list from its profile, then remove it on the list', as
   await expect(friends).not.toBeChecked()
   await friends.check()
   await expect.poll(() => server.writes).toEqual(['add b1 1'])
+  // Unchecking removes at once; the toast's Undo (reachable once the
+  // modal picker closes) puts Bob back.
+  await picker.getByRole('checkbox', { name: 'News' }).uncheck()
+  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 2'])
   await picker.getByRole('button', { name: 'Done' }).click()
   await expect(picker).toBeHidden()
   await expect(header.getByRole('button', { name: 'More actions for @bob' })).toBeFocused()
+  const undoToast = page.locator('caribou-toaster')
+  await expect(undoToast).toContainText('Removed @bob from the list "News".')
+  await undoToast.getByRole('button', { name: 'Undo' }).click()
+  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 2', 'add b1 2'])
 
   // On the list, Members shows Bob with Remove.
   members[1] = [BOB]
@@ -151,13 +159,13 @@ test('add an account to a list from its profile, then remove it on the list', as
   await expect(panel.getByRole('link', { name: /BOB/ })).toHaveAttribute('href', '/@bob@example.social')
   await panel.getByRole('button', { name: 'Remove @bob' }).click()
   await expect(panel.getByText('No one is in this list yet.')).toBeVisible()
-  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 1'])
+  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 2', 'add b1 2', 'remove b1 1'])
   // The toast offers Undo, which puts Bob back.
   const toast = page.locator('caribou-toaster')
   await expect(toast).toContainText('Removed @bob from the list "Friends".')
   await toast.getByRole('button', { name: 'Undo' }).click()
   await expect(panel.getByRole('button', { name: 'Remove @bob' })).toBeVisible()
-  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 1', 'add b1 1'])
+  await expect.poll(() => server.writes).toEqual(['add b1 1', 'remove b1 2', 'add b1 2', 'remove b1 1', 'add b1 1'])
   await expect(toast).not.toContainText('Removed @bob')
   expect(errors).toEqual([])
 })
