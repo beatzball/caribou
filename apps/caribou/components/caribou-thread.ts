@@ -98,7 +98,11 @@ export class CaribouThread extends LitElement {
 
   protected override willUpdate(changed: PropertyValues<this>) {
     // The page got the thread again in the background (`enterWithCache`).
-    if (this.store && changed.has('initial') && this.initial) this.store.offer(this.initial)
+    // A cached snapshot is what the store was filled from, so it adds
+    // nothing (the same guard as in `caribou-timeline`).
+    if (this.store && changed.has('initial') && this.initial && !isCachedSnapshot(this.initial)) {
+      this.store.offer(this.initial)
+    }
   }
 
   // The store is made here, not in connectedCallback: a server-rendered

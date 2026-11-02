@@ -450,9 +450,11 @@ describe('<caribou-timeline> — older posts', () => {
       vi.spyOn(store, 'loadMore').mockImplementation(async () => {
         attempts++
         ;(store.error as Writable<unknown>).value = { message: 'offline' }
+        ;(store.failedOp as Writable<unknown>).value = 'loadMore'
       })
       const retry = vi.spyOn(store, 'retry').mockImplementation(async () => {
         ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
       })
       for (let i = 0; i < 3; i++) {
         io.fire(true)
@@ -498,6 +500,82 @@ describe('<caribou-timeline> — older posts', () => {
       expect(retry).toHaveBeenCalledOnce()
       expect(tl.shadowRoot!.querySelector('.failed')).toBeNull()
       expect([...io.targets]).toEqual([sentinel(tl)])
+    })
+
+    // #108 item 1: a failed check at the top must not stop paging, or the
+    // "Older posts" link does nothing until a check works.
+    it('keeps the link working while a failed check shows at the top', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      ;(store.error as Writable<unknown>).value = { message: 'offline' }
+      ;(store.failedOp as Writable<unknown>).value = 'poll'
+      await settle(tl)
+      expect(tl.shadowRoot!.querySelector('.failed')!.nextElementSibling!.tagName).toBe('CARIBOU-NEW-POSTS-BANNER')
+      expect([...io.targets]).toEqual([sentinel(tl)])
+      const loadMore = vi.spyOn(store, 'loadMore').mockResolvedValue()
+      io.fire(true)
+      expect(loadMore).toHaveBeenCalledOnce()
+    })
+
+    // #108 item 2: the reader pressed Retry from the keyboard. Focus must
+    // not fall to the page while it runs, or after it works.
+    it('keeps Retry focused and busy while it runs, then focuses the first new post', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = { message: 'offline' }
+        ;(store.failedOp as Writable<unknown>).value = 'loadMore'
+      })
+      let finish!: () => void
+      vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+        await new Promise<void>((r) => { finish = r })
+        // What a working older page does: one more post at the end.
+        statusCache.value = new Map([...statusCache.value, ['older', mkStatus('older') as never]])
+        ;(store.statusIds as Writable<string[]>).value = ['s0', 'older']
+      })
+      io.fire(true)
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement & { loading: boolean }
+      button.focus()
+      expect(tl.shadowRoot!.activeElement).toBe(button)
+      button.click()
+      await settle(tl)
+      expect(tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]')).toBe(button)
+      expect(button.loading).toBe(true)
+      expect(tl.shadowRoot!.activeElement).toBe(button)
+
+      finish()
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(button.isConnected).toBe(false)
+      const focused = tl.shadowRoot!.activeElement!
+      expect(focused).toBe(listItems(tl)[1])
+      expect(focused.querySelector('caribou-status-card')!.getAttribute('data-status-id')).toBe('older')
+      expect(document.activeElement).toBe(tl)
+    })
+
+    it('focuses the top of the list after a Retry at the top works', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const store = storeOf(tl)
+      ;(store.error as Writable<unknown>).value = { message: 'offline' }
+      ;(store.failedOp as Writable<unknown>).value = 'poll'
+      vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+      })
+      await settle(tl)
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement
+      button.focus()
+      button.click()
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(tl.shadowRoot!.activeElement).toBe(tl.shadowRoot!.querySelector('ul'))
     })
 
     it('observes the link again after a page loads, so a short page keeps loading', async () => {

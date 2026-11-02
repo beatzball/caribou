@@ -80,6 +80,10 @@ export class CaribouTimeline extends LitElement {
   // /public with the instance cookie only). The store then has no client
   // and cannot fetch a page in place.
   @state() private canFetch = false
+  // Set while a Retry runs. The store clears its error as the retry starts;
+  // the failed block stays in place with a busy button until it is done, so
+  // the button the reader pressed keeps focus (#108).
+  @state() private retrying: { older: boolean; message: string } | null = null
 
   private store: TimelineStore | null = null
   private disposeBindings: (() => void) | null = null
@@ -180,8 +184,11 @@ export class CaribouTimeline extends LitElement {
     // the only way to older posts.
     //
     // After a failed page it waits: a fresh report for an anchor still in
-    // view would fail again at once, and again. Retry starts it again.
-    const sentinel = this.canFetch && !this.errorMsg ? this.renderRoot.querySelector('a[data-sentinel]') : null
+    // view would fail again at once, and again. Retry starts it again. (A
+    // failed page shows in place of the anchor, so there is none to find.)
+    // A failed background check at the top does not stop paging: the
+    // anchor stays a working way to older posts.
+    const sentinel = this.canFetch ? this.renderRoot.querySelector('a[data-sentinel]') : null
     if (sentinel === this.observedSentinel) return
     this.observedSentinel = sentinel
     this.io?.disconnect()
@@ -203,7 +210,7 @@ export class CaribouTimeline extends LitElement {
     // target only when its state changes. Observe again to get a fresh
     // report and keep loading until the anchor leaves the viewport or the
     // timeline ends (the anchor is then no longer rendered).
-    if (this.io && this.observedSentinel?.isConnected && !this.store?.error.peek()) {
+    if (this.io && this.observedSentinel?.isConnected && this.store?.failedOp.peek() !== 'loadMore') {
       this.io.disconnect()
       this.io.observe(this.observedSentinel)
     }
@@ -216,7 +223,33 @@ export class CaribouTimeline extends LitElement {
 
   private onApplyNewPosts = () => { this.store?.applyNewPosts() }
 
-  private onRetry = () => { void this.store?.retry() }
+  private onRetry = async (e: Event) => {
+    const store = this.store
+    if (!store || this.retrying || !this.errorMsg) return
+    const button = e.currentTarget as HTMLElement
+    const hadFocus = this.shadowRoot?.activeElement === button
+    const older = this.failedOlder
+    const before = this.statuses.length
+    this.retrying = { older, message: this.errorMsg }
+    try {
+      await store.retry()
+    } finally {
+      this.retrying = null
+    }
+    await this.updateComplete
+    // Failed again: the same button is still there, and still focused.
+    if (!hadFocus || button.isConnected) return
+    // It worked and the button is gone. Focus must not fall to the page:
+    // after an older page it goes to the first post that came in (or the
+    // last one, when the page was empty), else to the top of the list.
+    const list = this.renderRoot.querySelector('ul')
+    const items = list?.children
+    const target = (older ? items?.[before] ?? items?.[before - 1] : null)
+      ?? list ?? this.renderRoot.querySelector<HTMLElement>('.notice')
+    if (!(target instanceof HTMLElement)) return
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1')
+    target.focus()
+  }
 
   override render() {
     // No store: this is the server. It renders from `initial` alone.
@@ -224,7 +257,9 @@ export class CaribouTimeline extends LitElement {
     const hasMore = this.store ? this.hasMore : this.initial?.nextMaxId != null
     // A failed background check must not hide the list the reader has; it
     // shows above it until a later check works.
-    if (this.errorMsg && statuses.length === 0) return this.renderFailed()
+    const failed = this.errorMsg !== null || this.retrying !== null
+    const failedOlder = this.retrying ? this.retrying.older : this.failedOlder
+    if (failed && statuses.length === 0) return this.renderFailed()
     if (this.loading && statuses.length === 0) {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
@@ -241,7 +276,7 @@ export class CaribouTimeline extends LitElement {
     // against the current path.
     return html`
       <div>
-        ${this.errorMsg && !this.failedOlder ? this.renderFailed() : nothing}
+        ${failed && !failedOlder ? this.renderFailed() : nothing}
         <caribou-new-posts-banner
           .count=${this.newPostsCount}
           @apply-new-posts=${this.onApplyNewPosts}
@@ -251,7 +286,7 @@ export class CaribouTimeline extends LitElement {
             <li><caribou-status-card data-status-id=${s.id} .status=${s}></caribou-status-card></li>
           `)}
         </ul>
-        ${this.errorMsg && this.failedOlder
+        ${failed && failedOlder
           ? this.renderFailed()
           : hasMore
           ? html`<a href="?max_id=${encodeURIComponent(last.id)}" rel="next" data-sentinel
@@ -262,7 +297,8 @@ export class CaribouTimeline extends LitElement {
   }
 
   private renderFailed() {
-    return html`<div class="failed"><div role="alert">${this.errorMsg}</div>
-      <caribou-button variant="secondary" data-action="retry" @click=${this.onRetry}>Retry</caribou-button></div>`
+    return html`<div class="failed"><div role="alert">${this.retrying?.message ?? this.errorMsg}</div>
+      <caribou-button variant="secondary" data-action="retry" ?loading=${this.retrying !== null}
+        @click=${this.onRetry}>Retry</caribou-button></div>`
   }
 }

@@ -204,13 +204,85 @@ describe('retry', () => {
       initial: { statuses: [st('1')], nextMaxId: '1' },
     })
     expect(store.failedOp.value).toBeNull()
-    await store.loadMore()
-    expect(store.failedOp.value).toBe('loadMore')
     await store.poll()
     expect(store.failedOp.value).toBe('poll')
+    await store.loadMore()
+    expect(store.failedOp.value).toBe('loadMore')
     fail = false
     await store.retry()
     expect(store.failedOp.value).toBeNull()
+  })
+
+  // #108 item 1: the reader is at the bottom, looking at the failed page's
+  // Retry. A failed background check must not take that place.
+  it('a failed poll keeps a pending loadMore failure', async () => {
+    const store = createTimelineStore('home', {
+      clientSource: () => clientWith(async () => { throw new Error('offline') }),
+      initial: { statuses: [st('1')], nextMaxId: '1' },
+    })
+    await store.loadMore()
+    await store.poll()
+    expect(store.failedOp.value).toBe('loadMore')
+    expect(store.error.value?.message).toBe('offline')
+  })
+
+  // #108 item 4: a check that works says nothing about the older page. The
+  // error stays until the reader retries, so paging does not start again on
+  // its own.
+  it('a poll that works keeps a pending loadMore failure', async () => {
+    let fail = true
+    const store = createTimelineStore('home', {
+      clientSource: () => clientWith(async (_k, params) => {
+        if (params?.maxId && fail) throw new Error('offline')
+        return params?.sinceId ? [st('2')] : [st('0')]
+      }),
+      initial: { statuses: [st('1')], nextMaxId: '1' },
+    })
+    await store.loadMore()
+    await store.poll()
+    expect(store.newPostsCount.value).toBe(1)
+    expect(store.failedOp.value).toBe('loadMore')
+    expect(store.error.value?.message).toBe('offline')
+    fail = false
+    await store.retry()
+    expect(store.error.value).toBeNull()
+    expect(store.statusIds.value).toEqual(['1', '0'])
+  })
+
+  // #108 item 3: `failedOp` goes with `error`.
+  it('retry() and load() clear failedOp together with error', async () => {
+    const gate = deferred<Page>()
+    let calls = 0
+    const store = createTimelineStore('home', {
+      clientSource: () => clientWith(async () => {
+        calls++
+        if (calls === 1) throw new Error('offline')
+        return gate.promise
+      }),
+    })
+    await store.load()
+    expect(store.failedOp.value).toBe('load')
+    const retrying = store.retry()
+    expect(store.error.value).toBeNull()
+    expect(store.failedOp.value).toBeNull()
+    gate.resolve([st('1')])
+    await retrying
+
+    // load() also starts clean, while its request is out.
+    let fail = true
+    const again = createTimelineStore('home', {
+      clientSource: () => clientWith(async () => {
+        if (fail) throw new Error('offline')
+        return [st('1')]
+      }),
+    })
+    await again.load()
+    expect(again.failedOp.value).toBe('load')
+    fail = false
+    const loading = again.load()
+    expect(again.error.value).toBeNull()
+    expect(again.failedOp.value).toBeNull()
+    await loading
   })
 })
 
