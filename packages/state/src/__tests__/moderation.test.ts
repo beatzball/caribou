@@ -147,6 +147,18 @@ describe('setMute', () => {
     expect(client.unmute).toHaveBeenCalledWith('7')
   })
 
+  it('a failure after the reader moved to another account rolls back without a toast', async () => {
+    activeUserKey.value = ME
+    const m = deferred<mastodon.v1.Relationship>()
+    const client = fakeClient({ mute: vi.fn(() => m.promise) })
+    const muting = setMute(BOB, true, { clientSource: () => client })
+    activeUserKey.value = 'carol@other.example' as UserKey
+    m.reject(new Error('boom'))
+    expect(await muting).toBe(false)
+    expect(cached('7')).toBeUndefined()
+    expect(toasts).toEqual([])
+  })
+
   it('does nothing without a client', async () => {
     expect(await setMute(BOB, true, { clientSource: () => null })).toBe(false)
     expect(cached('7')).toBeUndefined()

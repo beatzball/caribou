@@ -8,7 +8,8 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, createKeepAlive, isOwnAccount, ownerGeneration,
-  relationshipCache, relationshipKey, setBlock, setMute, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
+  loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
+  type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
 import { findShell } from './_shell.js'
@@ -116,11 +117,11 @@ function sameVerdict(a: FilterVerdict | null | undefined, b: FilterVerdict | nul
   return a.action === b.action && a.titles.join('\n') === b.titles.join('\n')
 }
 
-// A copy with `filtered` is the reader's own (Mastodon sends it only with a
-// token). The cached copy wins when it has one: it is the newest.
-function filterSource(own: Status, cached: Status | undefined): Status {
-  const has = (x: Status | undefined) => Array.isArray(x?.filtered) || Array.isArray(x?.reblog?.filtered)
-  return cached && has(cached) ? cached : own
+// A copy with the newest `filtered` the reader's server sent for it,
+// whichever copy that came in (`readerFiltered`). Without one, the copy's own.
+function withNewestFilters(post: Status): Status {
+  const f = readerFiltered(post.id)
+  return f ? { ...post, filtered: f as Status['filtered'] } : post
 }
 
 // The session an action started under. A step that runs after an await (a
@@ -154,6 +155,11 @@ export class CaribouStatusCard extends LitElement {
   static override styles = [mastodonLinkText, css`
     :host { display: block; }
     :host([hidden]) { display: none; }
+    /* Hidden from a signed-in reader until their filters for the post are
+       known; see server/lib/reader-veil-head.ts. */
+    article { visibility: var(--caribou-reader-veil, visible); }
+    article:focus { outline: none; }
+    article:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     article { padding: var(--space-4); border-bottom: 1px solid var(--border); }
     /* The avatar sits in the gutter beside the body, but it is part of the
        author link in the header, so one link holds avatar, name and acct.
@@ -294,6 +300,11 @@ export class CaribouStatusCard extends LitElement {
   // The reader muted or blocked the author from this card's menu. The card
   // then shows that, with Undo, where the post was, so focus has a place.
   @state() private moderated: Moderated | null = null
+  // Where the reader's-filters check for this post stands (`loadReaderView`):
+  // pending, failed, or undefined when settled or not asked.
+  @state() private readerCheck: ReaderCheck | undefined = undefined
+  // A Retry of a failed check is out.
+  @state() private retrying = false
   // Set by render(), read by updated(): the host is hidden.
   private hiddenNow = false
 
@@ -375,15 +386,11 @@ export class CaribouStatusCard extends LitElement {
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
 
       // The reader's own posts are never filtered.
-      // For a boost, the inner post's own cache entry too: it can be newer
-      // than the copy inside the wrapper (opened in a thread, say).
-      let source: Status | null = null
-      if (s) {
-        const wrapper = filterSource(s, cache.get(s.id))
-        source = s.reblog
-          ? { ...wrapper, reblog: filterSource(wrapper.reblog ?? s.reblog, cache.get(s.reblog.id)) }
-          : wrapper
-      }
+      // The boost and the post it boosts each by their newest `filtered`,
+      // whichever copy brought it: the post alone or inside a boost.
+      const source = s
+        ? s.reblog ? { ...withNewestFilters(s), reblog: withNewestFilters(s.reblog) } : withNewestFilters(s)
+        : null
       const verdict = source && !this.ownPost ? filterVerdict(source, this.filterContext || null) : null
       if (!sameVerdict(verdict, this.liveVerdict)) this.liveVerdict = verdict
 
@@ -407,6 +414,10 @@ export class CaribouStatusCard extends LitElement {
       const hides = this.filterContext !== '' && this.filterContext !== 'account'
       const relHidden = hides && [author, booster].some((r) => r?.muting === true || r?.blocking === true)
       if (relHidden !== this.relHidden) this.relHidden = relHidden
+      const check = s && this.canAct && user ? readerCheckFor(user.userKey, s.id) : undefined
+      if (check !== this.readerCheck) this.readerCheck = check
+      // "You muted …" belongs to the account that did it.
+      if (this.moderated && !stillOwner(this.moderated.owner)) this.moderated = null
     })
   }
 
@@ -443,6 +454,11 @@ export class CaribouStatusCard extends LitElement {
 
   protected override updated() {
     this.toggleAttribute('hidden', this.hiddenNow)
+    // The head script hides every card's post from a signed-in reader until
+    // the card says (`server/lib/reader-veil-head.ts`). Only a post whose
+    // check is still out stays hidden; a Retry keeps its note in view.
+    const veiled = this.readerCheck === 'pending' && !this.retrying
+    this.style.setProperty('--caribou-reader-veil', veiled ? 'hidden' : 'visible')
   }
 
   // The instance the shown post came from, the same order `profileHref`
@@ -469,6 +485,26 @@ export class CaribouStatusCard extends LitElement {
     if (key !== null) shownFiltered.set(key, this.filterShown)
   }
 
+  // Asks again for the reader's copy of a post whose check failed. The note
+  // stays, with a busy Retry, so focus stays on it; when the check settles
+  // the post shows and focus goes to it.
+  private onRetryCheck = async () => {
+    const s = this.status
+    const owner = currentOwner()
+    if (!s || !owner || this.retrying) return
+    this.retrying = true
+    try {
+      await loadReaderView([s], owner.client)
+    } finally {
+      this.retrying = false
+    }
+    if (this.readerCheck !== undefined) return
+    await this.updateComplete
+    const article = this.renderRoot.querySelector('article')
+    article?.setAttribute('tabindex', '-1')
+    article?.focus()
+  }
+
   private async focusIn(selector: string) {
     await this.updateComplete
     this.renderRoot.querySelector<HTMLElement>(selector)?.focus()
@@ -482,7 +518,9 @@ export class CaribouStatusCard extends LitElement {
     const mine: Moderated = { verb, account: post.account, owner }
     this.moderated = mine
     void this.focusIn('caribou-button.undo')
-    if (await write() || this.moderated !== mine) return
+    // Another account is signed in now: the notice is gone, and focus is
+    // the new page's.
+    if (await write() || this.moderated !== mine || !stillOwner(owner)) return
     this.moderated = null
     void this.focusIn('caribou-menu.more')
   }
@@ -709,22 +747,32 @@ export class CaribouStatusCard extends LitElement {
       return nothing
     }
     const why = focused && this.relHidden ? this.relWhy : null
-    if (verdict || why) {
+    // The reader's filters for this post could not be learned: cover it.
+    const unchecked = !verdict && !why && this.readerCheck === 'failed'
+    if (verdict || why || unchecked) {
       const shown = this.filterShown
       const titles = verdict?.titles.join(', ') ?? ''
       const note = verdict
         ? html`Hidden by filter: <strong>${titles}</strong>`
-        : html`<span>You ${why!.verb} @${why!.acct}.</span>`
+        : why
+        ? html`<span>You ${why.verb} @${why.acct}.</span>`
+        : html`<span>Could not check this post against your filters.</span>`
       // The visible word starts the name, so a voice command still finds it.
       const name = verdict
         ? `${shown ? 'Hide' : 'Show'} post hidden by filter: ${titles}`
-        : `${shown ? 'Hide' : 'Show'} post by @${why!.acct}`
+        : why
+        ? `${shown ? 'Hide' : 'Show'} post by @${why.acct}`
+        : `${shown ? 'Hide' : 'Show'} post not checked against your filters`
       return html`<article data-variant=${this.variant} class="filtered">
         <div class="notice">
           <p>${note}</p>
           <button type="button" class="filter-toggle" aria-controls="filtered-post"
             aria-expanded=${shown ? 'true' : 'false'} aria-label=${name}
             @click=${this.onToggleFiltered}>${shown ? 'Hide' : 'Show'}</button>
+          ${unchecked
+            ? html`<caribou-button class="retry" variant="secondary" ?loading=${this.retrying}
+                @click=${this.onRetryCheck}>Retry<span class="vh"> checking this post</span></caribou-button>`
+            : nothing}
         </div>
         <div class="filtered-post" id="filtered-post" ?hidden=${!shown}>${shown ? this.renderPost(s) : nothing}</div>
       </article>`

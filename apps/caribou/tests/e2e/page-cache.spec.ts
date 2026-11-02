@@ -59,6 +59,13 @@ function hold(): Hold {
  * `since_id` check whatever `newer` holds once `gate` opens.
  */
 async function serveHome(page: Page, opts: { gate?: Hold; newer?: unknown[] } = {}) {
+  // A signed-in page asks for the reader's own copies of the posts the
+  // server rendered for /local and threads (their filters); answer with no
+  // filter matches.
+  await page.route(`https://${INSTANCE}/api/v1/statuses?*`, (route) => {
+    const ids = new URL(route.request().url()).searchParams.getAll('id[]')
+    return route.fulfill({ json: ids.map((id) => ({ ...makeStatus(id), filtered: [] })) })
+  })
   await page.route('**/api/v1/timelines/home*', async (route) => {
     const u = new URL(route.request().url())
     if (u.searchParams.get('max_id')) return route.fulfill({ json: [] })

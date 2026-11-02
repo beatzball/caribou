@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { mastodon } from 'masto'
 import {
-  statusCache, accountCache, cacheStatus, cacheAccount, mergeStatus, updateStatus,
+  statusCache, accountCache, cacheStatus, cacheAccount, filteredById, forgetReaderFields, mergeStatus,
+  readerFiltered, updateStatus,
 } from '../caches.js'
 
 function makeStatus(id: string, fav = false): mastodon.v1.Status {
@@ -13,6 +14,7 @@ function makeStatus(id: string, fav = false): mastodon.v1.Status {
 
 beforeEach(() => {
   statusCache.value = new Map()
+  filteredById.value = new Map()
   accountCache.value = new Map()
 })
 
@@ -76,5 +78,34 @@ describe('mergeStatus', () => {
     const again = [{ filter: { id: 'g', title: 'Sports', context: ['home'], filterAction: 'warn' } }]
     expect(mergeStatus({ ...makeStatus('3'), filtered: again } as unknown as mastodon.v1.Status).filtered)
       .toEqual(again)
+  })
+})
+
+describe('readerFiltered', () => {
+  const hide = [{ filter: { id: 'f', title: 'Spoilers', context: ['home'], filterAction: 'hide' } }]
+  const boost = (inner: unknown) => ({ ...makeStatus('w'), reblog: inner }) as unknown as mastodon.v1.Status
+
+  it('the last copy to arrive wins, alone or inside a boost, in either order', () => {
+    cacheStatus({ ...makeStatus('p'), filtered: [] } as mastodon.v1.Status)
+    cacheStatus(boost({ ...makeStatus('p'), filtered: hide }))
+    expect(readerFiltered('p')).toEqual(hide)
+    mergeStatus({ ...makeStatus('p'), filtered: [] } as mastodon.v1.Status)
+    expect(readerFiltered('p')).toEqual([])
+    mergeStatus(boost({ ...makeStatus('p'), filtered: hide }))
+    expect(readerFiltered('p')).toEqual(hide)
+  })
+
+  it('a copy without `filtered` does not count, and a merge does not renew a kept value', () => {
+    cacheStatus(boost({ ...makeStatus('p'), filtered: hide }))
+    cacheStatus({ ...makeStatus('p'), filtered: [] } as mastodon.v1.Status)
+    // A token-less copy of the boost keeps the cached inner `filtered: hide`.
+    mergeStatus(boost(makeStatus('p')))
+    expect(readerFiltered('p')).toEqual([])
+  })
+
+  it('forgets everything on an account change', () => {
+    cacheStatus({ ...makeStatus('p'), filtered: hide } as unknown as mastodon.v1.Status)
+    forgetReaderFields()
+    expect(readerFiltered('p')).toBeUndefined()
   })
 })

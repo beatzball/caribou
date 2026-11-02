@@ -199,9 +199,12 @@ test('server-rendered posts get the reader\'s filters once the page runs', async
     }))
   })
   const asked: string[][] = []
-  await page.route(`${API}/v1/statuses?*`, (route) => {
+  let release!: () => void
+  const released = new Promise<void>((r) => { release = r })
+  await page.route(`${API}/v1/statuses?*`, async (route) => {
     const ids = new URL(route.request().url()).searchParams.getAll('id[]')
     asked.push(ids)
+    await released
     return route.fulfill(json(ids.map((id) => status(id, BOB,
       id === '2' ? [match('Politics', 'hide', ['public'])]
         : id === '3' ? [match('Spoilers', 'warn', ['public'])] : []))))
@@ -211,12 +214,51 @@ test('server-rendered posts get the reader\'s filters once the page runs', async
     history.pushState(null, '', '/local')
     window.dispatchEvent(new PopStateEvent('popstate'))
   })
-  await expect(card(page, '1')).toContainText('post 1')
+  // While the reader's copies are out, no post shows: not even the one a
+  // hide filter is about to remove.
   await expect.poll(() => asked).toEqual([['1', '2', '3']])
+  await expect(card(page, '2').locator('article')).toBeHidden()
+  await expect(card(page, '1').locator('article')).toBeHidden()
+  await expect(card(page, '1')).toHaveCSS('--caribou-reader-veil', 'hidden')
+  release()
+  await expect(card(page, '1')).toContainText('post 1')
+  await expect(card(page, '1').locator('article')).toBeVisible()
   await expect(card(page, '2')).toBeHidden()
   await expect(card(page, '3').getByText('Hidden by filter: Spoilers')).toBeVisible()
   await expect(card(page, '3')).not.toContainText('post 3')
   expect(errors).toEqual([])
+})
+
+test('a failed check covers the post with Show and Retry', async ({ page }) => {
+  await signIn(page)
+  await page.route(`${API}/v1/timelines/home*`, (route) => route.fulfill(json([])))
+  await page.route((url) => url.pathname === '/local', (route) => {
+    if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
+    return route.fulfill(json({
+      kind: 'ok', nextMaxId: null, shell: { instance: INSTANCE, source: 'cookie' },
+      statuses: [{
+        id: '1', uri: `https://${INSTANCE}/@bob/1`, url: `https://${INSTANCE}/@bob/1`,
+        createdAt: '2024-01-01T00:00:00.000Z', content: '<p>post 1</p>', visibility: 'public',
+        sensitive: false, spoilerText: '', mediaAttachments: [], mentions: [], tags: [], emojis: [],
+        reblogsCount: 0, favouritesCount: 0, repliesCount: 0,
+        account: { id: 'b1', username: 'bob', acct: 'bob', displayName: 'BOB', avatar: '', avatarStatic: '' },
+      }],
+    }))
+  })
+  let fail = true
+  await page.route(`${API}/v1/statuses?*`, (route) => fail
+    ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+    : route.fulfill(json([status('1', BOB, [])])))
+  await gotoSettled(page, '/home')
+  await page.evaluate(() => {
+    history.pushState(null, '', '/local')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await expect(card(page, '1').getByText('Could not check this post against your filters.')).toBeVisible()
+  await expect(card(page, '1')).not.toContainText('post 1')
+  fail = false
+  await card(page, '1').getByRole('button', { name: 'Retry checking this post' }).click()
+  await expect(card(page, '1')).toContainText('post 1')
 })
 
 test('/settings links to the moderation page', async ({ page }) => {

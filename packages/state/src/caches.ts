@@ -14,11 +14,42 @@ export function cacheAccount(acct: mastodon.v1.Account): void {
   accountCache.value = next
 }
 
-export function cacheStatus(status: mastodon.v1.Status): void {
+// The newest `filtered` the reader's server sent for each post, by id,
+// whichever copy it came in: the post alone, or inside a boost. A boost and
+// the post it boosts are cached in two places, and either can be the newer
+// one, so neither copy's own `filtered` decides; the last to arrive does.
+// Only copies off the network write here: a merge that keeps an older
+// cached value does not make it new again. Read it with `readerFiltered`.
+export const filteredById = signal<ReadonlyMap<string, readonly mastodon.v1.FilterResult[]>>(new Map())
+
+function noteFiltered(status: mastodon.v1.Status): void {
+  const own = Array.isArray(status.filtered) ? status.filtered : null
+  const inner = status.reblog && Array.isArray(status.reblog.filtered) ? status.reblog : null
+  if (!own && !inner) return
+  const next = new Map(filteredById.peek())
+  if (own) next.set(status.id, own)
+  if (inner) next.set(inner.id, inner.filtered!)
+  filteredById.value = next
+}
+
+/** The newest `filtered` known for a post, or undefined when none is known. */
+export function readerFiltered(id: string): readonly mastodon.v1.FilterResult[] | undefined {
+  return filteredById.value.get(id)
+}
+
+function store(status: mastodon.v1.Status): void {
   const next = new Map(statusCache.value)
   next.set(status.id, status)
   statusCache.value = next
   if (status.account) cacheAccount(status.account)
+}
+
+/** Caches a copy just off the network, as it is. */
+export function cacheStatus(status: mastodon.v1.Status): void {
+  batch(() => {
+    noteFiltered(status)
+    store(status)
+  })
 }
 
 export function updateStatus(id: string, patch: Partial<mastodon.v1.Status>): void {
@@ -73,14 +104,15 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   const current = cache.get(fresh.id)
   // The same object again (a store seeded twice from one page): nothing new.
   if (current === fresh) return current
+  noteFiltered(fresh)
   let next = current ? keepReaderFields(fresh, current) : fresh
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
     const reblog = inner ? keepReaderFields(fresh.reblog, inner) : fresh.reblog
     next = { ...next, reblog }
-    if (cache.has(fresh.reblog.id)) cacheStatus(reblog)
+    if (cache.has(fresh.reblog.id)) store(reblog)
   }
-  cacheStatus(next)
+  store(next)
   return next
 }
 
@@ -101,5 +133,8 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
 export function forgetReaderFields(): void {
   const next = new Map<string, mastodon.v1.Status>()
   for (const [id, s] of statusCache.peek()) next.set(id, withoutReaderFields(s))
-  statusCache.value = next
+  batch(() => {
+    statusCache.value = next
+    filteredById.value = new Map()
+  })
 }

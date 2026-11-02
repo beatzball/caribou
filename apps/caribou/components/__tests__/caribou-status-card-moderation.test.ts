@@ -282,4 +282,49 @@ describe('<caribou-status-card> post menu', () => {
     await el.updateComplete
     expect($(el, '.status-content')).not.toBeNull()
   })
+
+  it('a pending mute\'s notice and its failure stay with the account that made it', async () => {
+    signIn()
+    const toasts: string[] = []
+    const onToast = (e: Event) => toasts.push((e as CustomEvent).detail.message)
+    window.addEventListener('caribou:toast', onToast)
+    const d = deferred<Relationship>()
+    vi.spyOn(activeClient.value!, 'mute').mockReturnValue(d.promise)
+    const el = await mount(post('30'))
+    item(el, 'mute').click()
+    await settle(el)
+    expect($(el, '#moderated-msg')).not.toBeNull()
+    addUserSession({
+      userKey: toUserKey('carol', 'other.example'), server: 'other.example', token: 't2', vapidKey: '', createdAt: 0,
+      account: { id: 'c', acct: 'carol', username: 'carol' } as mastodon.v1.Account,
+    })
+    await settle(el)
+    expect($(el, '#moderated-msg')).toBeNull()
+    d.reject(new Error('boom'))
+    await settle(el)
+    expect(toasts).toEqual([])
+    expect($(el, '#moderated-msg')).toBeNull()
+    window.removeEventListener('caribou:toast', onToast)
+  })
+
+  it('Block confirmed, then the account changes before the answer is read: nothing is sent', async () => {
+    signIn()
+    const oldBlock = vi.spyOn(activeClient.value!, 'block')
+    const el = await mount(post('31'))
+    item(el, 'block').click()
+    await settle(el)
+    const d = dialog()!
+    await d.updateComplete
+    // Confirm first; the switch lands before the card reads the answer.
+    d.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
+    addUserSession({
+      userKey: toUserKey('carol', 'other.example'), server: 'other.example', token: 't2', vapidKey: '', createdAt: 0,
+      account: { id: 'c', acct: 'carol', username: 'carol' } as mastodon.v1.Account,
+    })
+    const newBlock = vi.spyOn(activeClient.value!, 'block')
+    await settle(el)
+    expect(oldBlock).not.toHaveBeenCalled()
+    expect(newBlock).not.toHaveBeenCalled()
+    expect($(el, '#moderated-msg')).toBeNull()
+  })
 })

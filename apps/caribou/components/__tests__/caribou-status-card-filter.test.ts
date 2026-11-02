@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { mastodon } from 'masto'
-import { activeUserKey, cacheStatus, mergeStatus, statusCache, users } from '@beatzball/caribou-state'
+import { activeUserKey, cacheStatus, filteredById, mergeStatus, statusCache, users } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
@@ -35,6 +35,7 @@ describe('<caribou-status-card> server filters', () => {
   beforeEach(() => {
     document.body.replaceChildren()
     statusCache.value = new Map()
+    filteredById.value = new Map()
     users.value = new Map()
   })
   afterEach(() => { activeUserKey.value = null })
@@ -136,6 +137,44 @@ describe('<caribou-status-card> server filters', () => {
     // The boosted post is fetched again elsewhere (its thread), and a new
     // hide filter matches it there.
     mergeStatus(post('bb2', { filtered: [match('Spoilers', 'hide')] }))
+    await el.updateComplete
+    expect(el.hasAttribute('hidden')).toBe(true)
+  })
+
+  // The boosted post is cached twice: alone, and inside the boost. Whichever
+  // copy came last holds the reader's current filters.
+  it('a newer boost\'s hide filter wins over an older copy of the post alone', async () => {
+    cacheStatus(post('or1', { filtered: [] }))
+    const boost = post('or2', { filtered: [], reblog: post('or1', { filtered: [match('Spoilers', 'hide')] }) })
+    cacheStatus(boost)
+    const el = await mount(boost, 'home')
+    expect(el.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('a filter removed on the server: a newer copy without the match shows the boost again, either way it comes', async () => {
+    const hidden = post('rm2', { filtered: [], reblog: post('rm1', { filtered: [match('Spoilers', 'hide')] }) })
+    cacheStatus(hidden)
+    const el = await mount(hidden, 'home')
+    expect(el.hasAttribute('hidden')).toBe(true)
+    // The post alone, fetched again after the reader removed the filter.
+    mergeStatus(post('rm1', { filtered: [] }))
+    await el.updateComplete
+    expect(el.hasAttribute('hidden')).toBe(false)
+    // And back: the boost comes again with the filter added once more.
+    cacheStatus(post('rm2', { filtered: [], reblog: post('rm1', { filtered: [match('Spoilers', 'hide')] }) }))
+    await el.updateComplete
+    expect(el.hasAttribute('hidden')).toBe(true)
+    // Then the boost alone, again without it.
+    mergeStatus(post('rm2', { filtered: [], reblog: post('rm1', { filtered: [] }) }))
+    await el.updateComplete
+    expect(el.hasAttribute('hidden')).toBe(false)
+  })
+
+  it('a copy without `filtered` (fetched with no token) changes nothing', async () => {
+    const boost = post('nt2', { filtered: [], reblog: post('nt1', { filtered: [match('Spoilers', 'hide')] }) })
+    cacheStatus(boost)
+    const el = await mount(boost, 'home')
+    mergeStatus(post('nt1'))
     await el.updateComplete
     expect(el.hasAttribute('hidden')).toBe(true)
   })

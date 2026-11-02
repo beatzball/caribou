@@ -3,6 +3,7 @@ import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { activeClient, activeUserKey } from './users.js'
+import { ownerGeneration } from './keep-alive.js'
 
 // Keyed by the signed-in user as well as the account: account ids are minted
 // per instance, and what one user follows says nothing about another.
@@ -82,13 +83,16 @@ function enqueue(
   queue.pending.push(patch)
   revisions.set(key, (revisions.get(key) ?? 0) + 1)
   put(key, shown(queue, accountId))
+  const generation = ownerGeneration()
   const start = async () => {
     let ok = true
     try {
       queue.confirmed = await call(client)
     } catch {
       ok = false
-      toast(failure)
+      // The reader moved to another account meanwhile: this account's
+      // failure is not theirs to read. The cache still rolls back.
+      if (ownerGeneration() === generation) toast(failure)
     }
     queue.pending.splice(queue.pending.indexOf(patch), 1)
     put(key, shown(queue, accountId))

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  activeClient, activeUserKey, addUserSession, clearKeptAlive, statusCache, users,
+  activeClient, activeUserKey, addUserSession, clearKeptAlive, filteredById, readerChecks, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-app-shell.js'
 import '../caribou-timeline.js'
@@ -54,6 +54,8 @@ function cards(root: HTMLElement): CaribouStatusCard[] {
 beforeEach(() => {
   document.body.replaceChildren()
   statusCache.value = new Map()
+  filteredById.value = new Map()
+  readerChecks.value = new Map()
   users.value = new Map()
   activeUserKey.value = null
   localStorage.clear()
@@ -118,5 +120,72 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
     }
     await inShell(pr, 'example.social')
     expect(fetch).toHaveBeenCalledWith(['1'])
+  })
+
+  // The server's copy has no reader filters. Until the reader's copy is in,
+  // the card keeps the post hidden (the head script hid it before the app
+  // ran); a post whose copy never comes stays covered by a note.
+  const veil = (c: CaribouStatusCard) => c.style.getPropertyValue('--caribou-reader-veil')
+
+  function held() {
+    let resolve!: (v: Status[]) => void
+    let reject!: (e: unknown) => void
+    const promise = new Promise<Status[]>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  async function timelineWith(statuses: Status[]) {
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'local'
+    tl.initial = { statuses, nextMaxId: null }
+    return inShell(tl, 'example.social')
+  }
+
+  it('while the reader\'s copy is out the post stays hidden; a hide filter then removes it, a clean copy shows it', async () => {
+    signIn()
+    const d = held()
+    vi.mocked(activeClient.value!.fetchStatuses).mockReturnValue(d.promise)
+    const tl = await timelineWith([post('1'), post('2')])
+    const [one, two] = cards(tl)
+    expect([veil(one!), veil(two!)]).toEqual(['hidden', 'hidden'])
+    d.resolve([post('1', { filtered: HIDE }), post('2', { filtered: [] })])
+    for (let i = 0; i < 3; i++) { await flush(); await tl.updateComplete }
+    expect(one!.hasAttribute('hidden')).toBe(true)
+    expect(veil(two!)).toBe('visible')
+    expect(two!.shadowRoot!.querySelector('.status-content')!.textContent).toBe('2')
+  })
+
+  it('a failed request covers each post with a note, Show and Retry; Retry that works shows it', async () => {
+    signIn()
+    vi.mocked(activeClient.value!.fetchStatuses).mockRejectedValueOnce(new Error('boom'))
+    const tl = await timelineWith([post('1')])
+    const [c] = cards(tl)
+    await c!.updateComplete
+    expect(veil(c!)).toBe('visible')
+    expect(c!.shadowRoot!.querySelector('.notice p')!.textContent).toBe('Could not check this post against your filters.')
+    expect(c!.shadowRoot!.querySelector('.status-content')).toBeNull()
+    expect(c!.shadowRoot!.querySelector('button.filter-toggle')!.getAttribute('aria-label'))
+      .toBe('Show post not checked against your filters')
+    vi.mocked(activeClient.value!.fetchStatuses).mockResolvedValueOnce([post('1', { filtered: [] })])
+    c!.shadowRoot!.querySelector<HTMLElement>('caribou-button.retry')!.click()
+    for (let i = 0; i < 3; i++) { await flush(); await c!.updateComplete }
+    expect(c!.shadowRoot!.querySelector('.status-content')!.textContent).toBe('1')
+    expect(c!.shadowRoot!.activeElement).toBe(c!.shadowRoot!.querySelector('article'))
+  })
+
+  it('a post the server leaves out of its answer stays covered', async () => {
+    signIn()
+    vi.mocked(activeClient.value!.fetchStatuses).mockResolvedValueOnce([post('1', { filtered: [] })])
+    const tl = await timelineWith([post('1'), post('2')])
+    const [one, two] = cards(tl)
+    await two!.updateComplete
+    expect(one!.shadowRoot!.querySelector('.status-content')).not.toBeNull()
+    expect(two!.shadowRoot!.querySelector('.status-content')).toBeNull()
+    expect(two!.shadowRoot!.querySelector('.notice p')!.textContent).toBe('Could not check this post against your filters.')
+  })
+
+  it('signed out, the card shows its post at once', async () => {
+    const tl = await timelineWith([post('1')])
+    expect(veil(cards(tl)[0]!)).toBe('visible')
   })
 })

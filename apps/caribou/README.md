@@ -132,9 +132,18 @@ either: the server render never filters and hydration holds. Once the page
 runs with a session on the same server, the timeline, the profile and the
 thread ask for the reader's copies of those posts (`loadReaderViewFrom` in
 `components/_shell.ts`, `GET /api/v1/statuses?id[]=`, or one by one on an
-older server), and the filters apply a moment later. Stores seed with
-`mergeStatus`, so a reader's copy already cached keeps its `filtered`, and a
-fresh copy's `filtered` replaces the cached one.
+older server). Until that answer is in, a signed-in reader does not see
+those posts: a head script marks `<html>` before the first paint and its
+style hides every card's post through the inherited
+`--caribou-reader-veil` (`server/lib/reader-veil-head.ts`); once the app
+runs, each card sets the property on itself and shows its post when its
+check has settled (`readerChecks` in `@beatzball/caribou-state`). A post the
+server leaves out, or a failed request, stays covered by "Could not check
+this post against your filters." with Show and Retry. The server HTML is
+the same for every reader, so hydration holds. Stores seed with
+`mergeStatus`, so a reader's copy already cached keeps its `filtered`. A
+post can be cached twice, alone and inside a boost; `readerFiltered(id)`
+holds the newest `filtered` from either, and the card reads that.
 
 **Mute and block change the relationship at once.** `setMute`,
 `setBlock` and `toggleFollow` in `@beatzball/caribou-state` write the
