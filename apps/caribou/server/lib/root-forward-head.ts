@@ -31,8 +31,11 @@
 //   not run this script again, so it checks again then, but only when the
 //   page is still on `/` (the reader may have moved on with client-side
 //   navigation). That page is already parsed and painted: no
-//   `document.write` (it would wipe the page), and at the time limit the
-//   screen only goes away.
+//   `document.write` (it would wipe the page). Its screen is a child of
+//   `<html>` with the same guard as on the timeline (`caribouGuard`): the
+//   landing under it is inert, and at the time limit the screen goes and
+//   the landing is live again. A `/` that was already ended as hidden text
+//   (a forward stopped, then restored) shows the plain page at the limit.
 // - Everything is in try/catch: blocked storage leaves `/` as it is.
 // - Without JavaScript nothing runs, and `/` stays the sign-in page.
 //
@@ -56,13 +59,15 @@ for(var i=0;i<u.length;i++){if(Array.isArray(u[i])&&u[i][0]===k)return timeline(
 return null;}
 ${SPLASH_ES5}
 function show(to){
-var t=Date.now(),cut=document.readyState==='loading';
+var t=Date.now();
 try{sessionStorage.setItem(${JSON.stringify(SPLASH_KEY)},JSON.stringify({t:t,to:to}));}catch(e){}
-if(cut)document.write('<plaintext hidden>');
-var d=caribouSplash(t,to);
-setTimeout(function(){if(!d.parentNode)return;
+if(document.readyState==='loading')document.write('<plaintext hidden>');
+var b=document.body,cut=!!(b&&b.firstElementChild&&b.firstElementChild.tagName==='PLAINTEXT');
+var d=caribouSplash(t,to,!cut);
+if(!cut)caribouGuard(d,'/',${LIMIT_MS});
+setTimeout(function(){
 try{sessionStorage.removeItem(${JSON.stringify(SPLASH_KEY)});}catch(e){}
-if(cut){d.parentNode.innerHTML=${JSON.stringify(stuckMarkup('@TO@')).replace(/</g, '\\u003c').replace('@TO@', '"+to+"')};}else{d.parentNode.removeChild(d);}},${LIMIT_MS});}
+if(cut&&document.body)document.body.innerHTML=${JSON.stringify(stuckMarkup('@TO@')).replace(/</g, '\\u003c').replace('@TO@', '"+to+"')};},${LIMIT_MS});}
 function leave(to){
 var n=false;function go(){if(n)return;n=true;location.replace(to);}
 try{show(to);}catch(e){}

@@ -82,7 +82,10 @@ function runHeadScript(search: string, local: Store | null, session: Store | nul
   const timers: Array<{ fn: () => void; ms: number }> = []
   const frames: Array<() => void> = []
   const listeners: Record<string, (e: { persisted: boolean }) => void> = {}
-  const win = { addEventListener: (type: string, fn: (e: { persisted: boolean }) => void) => { listeners[type] = fn } }
+  const win = {
+    addEventListener: (type: string, fn: (e: { persisted: boolean }) => void) => { listeners[type] = fn },
+    removeEventListener: () => {},
+  }
   new Function('location', 'localStorage', 'sessionStorage', 'document', 'window', 'setTimeout', 'requestAnimationFrame', body)(
     location, storage(local), storage(session), doc, win,
     (fn: () => void, ms: number) => { timers.push({ fn, ms }) },
@@ -166,14 +169,14 @@ describe('ROOT_FORWARD_HEAD (inline script before first paint)', () => {
     expect(r.frames).toHaveLength(0)
   })
 
-  it('a / page back from the back-forward cache checks again, without ending the page', () => {
+  it('a / page back from the back-forward cache checks again, and keeps the landing under the screen out of reach', () => {
     const local: Store = {}
     const r = runHeadScript('', local, {})
     expect(r.location.replace).not.toHaveBeenCalled()
     // The page was parsed and shown as the sign-in page.
     r.complete()
     const landing = r.doc.createElement('body')
-    landing.textContent = 'landing'
+    landing.innerHTML = '<a href="/about">About</a>'
     r.doc.documentElement.append(landing)
     Object.assign(local, signedIn) // signed in, in another tab
     r.listeners.pageshow!({ persisted: false })
@@ -183,11 +186,25 @@ describe('ROOT_FORWARD_HEAD (inline script before first paint)', () => {
     runFrameThenTimers(r)
     expect(r.location.replace).toHaveBeenCalledWith('/home')
     expect(r.written).toEqual([])
-    expect(r.doc.getElementById(SPLASH_ID)?.parentElement).toBe(landing)
-    // At the time limit the screen goes, and the page under it stays.
-    r.timers.find((t) => t.ms === LIMIT_MS)!.fn()
+    // The screen is outside the landing, and the landing is inert.
+    expect(r.doc.getElementById(SPLASH_ID)?.parentElement).toBe(r.doc.documentElement)
+    expect(landing.inert).toBe(true)
+    // At the time limit the screen goes, and the landing is live again.
+    r.timers.filter((t) => t.ms === LIMIT_MS).forEach((t) => t.fn())
     expect(r.doc.getElementById(SPLASH_ID)).toBeNull()
-    expect(r.doc.body?.textContent).toBe('landing')
+    expect(landing.inert).toBe(false)
+    expect(links(r.doc.body!)).toEqual([['About', '/about']])
+  })
+
+  it('a / that was ended as hidden text, restored and forwarded again, shows the plain page at the limit', () => {
+    const r = runHeadScript('', signedIn, {})
+    runFrameThenTimers(r)
+    r.complete() // the forward was stopped; the page is back from the cache
+    r.listeners.pageshow!({ persisted: true })
+    expect(r.written).toEqual(['<plaintext hidden>'])
+    r.timers.filter((t) => t.ms === LIMIT_MS).forEach((t) => t.fn())
+    expect(r.doc.body?.textContent).toContain('Opening your timeline…')
+    expect(links(r.doc.body!)).toEqual([['Open your timeline', '/home'], ['Sign in', '/?add']])
   })
 
   it('a restored page that moved off / by client-side navigation stays', () => {

@@ -202,6 +202,74 @@ test('keeps keyboard focus off the page under it, and its links are reachable', 
   expect(seen).toContain('splash:A:Sign in')
 })
 
+// The body is parsed before the app's module runs, and DOMContentLoaded
+// waits for that module. The page must be out of reach from the moment the
+// body exists, not only once the app has loaded.
+test('keeps focus off the page while the app itself is still loading', async ({ page, context, browserName }) => {
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+  await signIn(page, context)
+  let releaseApp!: () => void
+  const appHeld = new Promise<void>((r) => { releaseApp = r })
+  await page.route((u) => u.pathname === '/_litro/app.js', async (route) => {
+    if (new URL(page.url()).pathname === '/home') await appHeld
+    await route.continue()
+  })
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => { (window as { __dcl?: boolean }).__dcl = true })
+  })
+  await page.goto('/', { waitUntil: 'commit' })
+  await page.waitForURL('**/home', { waitUntil: 'commit' })
+  await page.locator('litro-outlet').waitFor({ state: 'attached' })
+  // The body is there; DOMContentLoaded is still waiting for the app.
+  expect(await page.evaluate(() => (window as { __dcl?: boolean }).__dcl ?? false)).toBe(false)
+  await expect.poll(() => page.evaluate(() => document.body.inert)).toBe(true)
+  await expect(splash(page).getByRole('link', { name: 'Sign in' })).toBeVisible({ timeout: 5000 })
+  const seen: string[] = []
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press(tab)
+    seen.push(await page.evaluate(() => {
+      const a = document.activeElement
+      if (!a || a === document.body) return 'none'
+      return a.closest('#caribou-splash') ? `splash:${a.textContent}` : `page:${a.tagName}`
+    }))
+  }
+  expect(seen.filter((w) => w.startsWith('page:'))).toEqual([])
+  expect(seen).toContain('splash:Sign in')
+  expect(await page.evaluate(() => (window as { __dcl?: boolean }).__dcl ?? false)).toBe(false)
+  releaseApp()
+})
+
+// A `/` back from the back-forward cache is already the sign-in page; the
+// forward then puts the screen over it. Here the restore is played by hand:
+// the reader signs in in another tab, and `pageshow` comes with `persisted`.
+test('a restored / keeps its landing out of reach under the screen', async ({ page, browserName }) => {
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+  await page.goto('/')
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  await page.route((u) => u.pathname === '/home', () => { /* the timeline never comes */ })
+  const probes: string[] = []
+  page.on('console', (m) => { if (m.text().startsWith('PROBE ')) probes.push(m.text().slice(6)) })
+  await page.evaluate(({ userKey, instance }) => {
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(userKey))
+    localStorage.setItem('caribou.users',
+      JSON.stringify([[userKey, { userKey, token: 'TOK', server: instance, vapidKey: 'VK' }]]))
+    setInterval(() => {
+      const a = document.activeElement
+      console.warn('PROBE ' + JSON.stringify({
+        splash: document.getElementById('caribou-splash')?.parentElement?.tagName ?? null,
+        inert: document.body.inert,
+        focus: !a || a === document.body ? 'none' : a.closest('#caribou-splash') ? 'splash' : 'page',
+      }))
+    }, 100)
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+  }, { userKey: USER_KEY, instance: INSTANCE })
+  for (let i = 0; i < 4; i++) await page.keyboard.press(tab)
+  await expect.poll(() => probes.length).toBeGreaterThan(3)
+  const last = probes.slice(-3).map((p) => JSON.parse(p))
+  for (const p of last) expect(p).toMatchObject({ splash: 'HTML', inert: true })
+  expect(last.filter((p) => p.focus === 'page')).toEqual([])
+})
+
 test('focus goes to the page once the posts show', async ({ page, context }) => {
   await signIn(page, context)
   const timeline = await forwardToHome(page)

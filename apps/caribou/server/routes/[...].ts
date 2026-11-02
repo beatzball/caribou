@@ -54,7 +54,9 @@ export default defineEventHandler(async (event) => {
     // on with that screen. THEME_HEAD comes last, after the theme-color meta
     // it updates: it puts the reader's theme on <html> before the first
     // paint. On `/` it runs first as well: the forward ends `/` as hidden
-    // text, and its screen must have the reader's colors.
+    // text, and its screen must have the reader's colors. Running twice is
+    // on purpose: the first run is before the theme-color meta exists, and
+    // the last one (when `/` stays) sets that meta.
     routeMeta: {
       title: PAGE_TITLE,
       head: (matched.path === '/' ? THEME_HEAD + ROOT_FORWARD_HEAD

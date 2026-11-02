@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  LIMIT_MS, LIVE_MS, QUICK_MS, SETTLE_MS, SPLASH_ID, SPLASH_KEY, SPLASH_MARKUP, settleSplash, showSplash,
+  LIMIT_MS, LIVE_MS, QUICK_MS, SETTLE_MS, SPLASH_ES5, SPLASH_ID, SPLASH_KEY, SPLASH_MARKUP, settleSplash, showSplash,
 } from '../_splash.js'
 import { TIMELINE_SPLASH_HEAD } from '../../server/lib/timeline-splash-head.js'
 
@@ -106,6 +106,74 @@ describe('showSplash (client-side forward)', () => {
   })
 })
 
+// The head scripts' screen, run in this document, as a predecessor of a
+// client-side one.
+function headSplash(to: string, start = Date.now()): HTMLElement {
+  const [splash, guard] = new Function(`${SPLASH_ES5} return [caribouSplash, caribouGuard]`)() as [
+    (t: number, to: string, top: boolean) => HTMLElement, (d: HTMLElement, to: string, ms: number) => void,
+  ]
+  const el = splash(start, to, true)
+  guard(el, to, LIMIT_MS - (Date.now() - start))
+  return el
+}
+
+describe('one screen at a time', () => {
+  it.each([['client-side', showSplash], ['head script', headSplash]] as const)(
+    'a settled %s screen does not unlock the body under the next one, at its fade or its old deadline',
+    (_name, first) => {
+      pageUnder()
+      const a = first('/home')
+      vi.advanceTimersByTime(200)
+      settleSplash('/home') // A fades: its removal is SETTLE_MS away
+      vi.advanceTimersByTime(800)
+      expect(a.isConnected).toBe(false)
+      // t = 1 s. A's deadline is at 10 s; B (a later forward, still
+      // loading) has until 11 s.
+      const b = showSplash('/home')
+      vi.advanceTimersByTime(SETTLE_MS) // past A's fade
+      expect(document.body.inert).toBe(true)
+      vi.advanceTimersByTime(LIMIT_MS - SETTLE_MS - 1) // t = 11 s - 1 ms: A's deadline has passed
+      expect(b.isConnected).toBe(true)
+      expect(document.body.inert).toBe(true)
+      vi.advanceTimersByTime(1) // B's own deadline
+      expect(b.isConnected).toBe(false)
+      expect(document.body.inert).toBe(false)
+    },
+  )
+
+  it.each([['client-side', showSplash], ['head script', headSplash]] as const)(
+    'a %s screen that is replaced is ended, with its timers and listeners',
+    (_name, first) => {
+      pageUnder()
+      const a = first('/home')
+      const b = showSplash('/local')
+      expect(a.isConnected).toBe(false)
+      expect(document.body.inert).toBe(true)
+      // A's popstate check would end it on /local; it must not touch B.
+      history.replaceState(null, '', '/local')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      vi.advanceTimersByTime(LIMIT_MS - 1)
+      expect(b.isConnected).toBe(true)
+      expect(document.body.inert).toBe(true)
+    },
+  )
+
+  it('the time limit does nothing once the screen has settled', () => {
+    const { outlet } = pageUnder()
+    showSplash('/home')
+    vi.advanceTimersByTime(QUICK_MS)
+    settleSplash('/home')
+    vi.advanceTimersByTime(SETTLE_MS)
+    // Later, something else locks the page and focus is on the body (a
+    // modal, say). The old screen's limit must leave both alone.
+    outlet.blur()
+    document.body.inert = true
+    vi.advanceTimersByTime(LIMIT_MS)
+    expect(document.body.inert).toBe(true)
+    expect(document.activeElement).toBe(document.body)
+  })
+})
+
 describe('settleSplash', () => {
   it('does nothing when no screen is shown', () => {
     expect(() => settleSplash('/home')).not.toThrow()
@@ -168,15 +236,19 @@ function runTimelineHead(path: string, session: Store | null) {
   const location = { pathname: path }
   const timers: Array<{ fn: () => void; ms: number }> = []
   const listeners: Record<string, () => void> = {}
-  const win = { addEventListener: (t: string, fn: () => void) => { listeners[t] = fn }, removeEventListener: () => {} }
+  const win = {
+    addEventListener: (t: string, fn: () => void) => { listeners[t] = fn },
+    removeEventListener: (t: string) => { delete listeners[t] },
+  }
   new Function('document', 'sessionStorage', 'setTimeout', 'location', 'window', body)(
     doc, storage, (fn: () => void, ms: number) => { timers.push({ fn, ms }) }, location, win,
   )
+  // The parser adds the body; DOMContentLoaded comes later, after the app's
+  // module (which may be slow) has run.
   const parseBody = () => {
     const b = doc.createElement('body')
-    b.innerHTML = '<litro-outlet tabindex="-1"></litro-outlet>'
+    b.innerHTML = '<litro-outlet tabindex="-1"></litro-outlet><a href="/local">Local</a>'
     doc.documentElement.append(b)
-    doc.dispatchEvent(new Event('DOMContentLoaded'))
     return b
   }
   return { doc, timers, store, listeners, location, parseBody }
@@ -203,18 +275,24 @@ describe('TIMELINE_SPLASH_HEAD (head of /home, /local, /public)', () => {
     expect(r.doc.getElementById(SPLASH_ID)).toBeNull()
   })
 
-  it('makes the body inert once it is parsed, and gives it back at the end', () => {
+  it('makes the body inert as soon as it is parsed, before DOMContentLoaded, and gives it back at the end', async () => {
     const r = runTimelineHead('/home', forward('/home', 0))
+    // happy-dom delivers mutation records on a real timer.
+    vi.useRealTimers()
     const body = r.parseBody()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    // (Focus on the screen is checked in the browser, `loading-screen.spec.ts`.)
     expect(body.inert).toBe(true)
     r.timers.find((t) => t.ms === LIMIT_MS)!.fn()
     expect(body.inert).toBe(false)
     expect(r.doc.activeElement).toBe(body.querySelector('litro-outlet'))
   })
 
-  it('goes at once when the reader leaves the page', () => {
+  it('goes at once when the reader leaves the page', async () => {
     const r = runTimelineHead('/home', forward('/home', 0))
+    vi.useRealTimers()
     r.parseBody()
+    await new Promise((resolve) => setTimeout(resolve, 10))
     r.listeners.popstate!()
     expect(r.doc.getElementById(SPLASH_ID)).not.toBeNull()
     r.location.pathname = '/about'

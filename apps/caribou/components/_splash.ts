@@ -106,16 +106,18 @@ const js = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c')
  * The screen for the head scripts, in plain ES5 (function expressions, so it
  * can sit inside a `try` block):
  *
- * - `caribouSplash(start, to)` adds the screen to `<body>`, or to `<html>`
- *   while there is no body yet, and returns it. Following one of its links
- *   drops the stored forward.
- * - `caribouGuard(el, to, ms)` does what the target page needs: the body
- *   inert, focus on the screen, removal when the path leaves `to` and after
- *   `ms`. It puts `caribouRelease` and `caribouEnd` on the element, which
- *   `settleSplash` calls.
+ * - `caribouSplash(start, to, top)` ends any screen already up, adds a new
+ *   one and returns it: to `<html>` when `top` is true or there is no body
+ *   yet, else to `<body>`. Following one of its links drops the stored
+ *   forward.
+ * - `caribouGuard(el, to, ms)` keeps the page under the screen out of reach
+ *   and puts `caribouRelease` and `caribouEnd` on the element, which
+ *   `settleSplash` calls. See `showSplash` for what it does; the two must
+ *   agree, and the tests run both.
  */
-export const SPLASH_ES5 = `var caribouSplash=function(t,to){
-var o=document.getElementById(${js(SPLASH_ID)});if(o&&o.parentNode)o.parentNode.removeChild(o);
+export const SPLASH_ES5 = `var caribouSplash=function(t,to,top){
+var o=document.getElementById(${js(SPLASH_ID)});
+if(o){if(o.caribouEnd)o.caribouEnd();else if(o.parentNode)o.parentNode.removeChild(o);}
 var d=document.createElement('div');d.id=${js(SPLASH_ID)};d.tabIndex=-1;
 d.setAttribute('data-target',to);d.setAttribute('data-shown',String(Date.now()));
 d.innerHTML=${js(SPLASH_MARKUP)};
@@ -123,21 +125,26 @@ d.querySelector('.cs-to').setAttribute('href',to);
 d.style.setProperty('--cs-t',(t-Date.now())+'ms');
 d.addEventListener('click',function(e){var a=e.target;while(a&&a!==d&&a.tagName!=='A')a=a.parentNode;
 if(a&&a!==d)try{sessionStorage.removeItem(${js(SPLASH_KEY)});}catch(x){}});
-(document.body||document.documentElement).appendChild(d);
+(top||!document.body?document.documentElement:document.body).appendChild(d);
 setTimeout(function(){var s=d.querySelector('[role=status]');if(s)s.textContent=${js(LIVE_TEXT)};},${LIVE_MS});
 return d;};
 var caribouGuard=function(d,to,ms){
+var done=false,timer=0,mo=null;
 var path=function(){return location.pathname.replace(/\\/+$/,'')||'/';};
-var lock=function(){if(d.parentNode&&d.parentNode!==document.body&&document.body)document.body.inert=true;};
+var lock=function(){if(done||!document.body||!d.parentNode||d.parentNode===document.body)return;
+document.body.inert=true;var a=document.activeElement;if(a!==d&&!d.contains(a))try{d.focus({preventScroll:true});}catch(x){}};
 var pop=function(){if(path()!==to)end();};
-var release=function(){window.removeEventListener('popstate',pop);document.removeEventListener('DOMContentLoaded',lock);
+var release=function(){if(done)return;done=true;clearTimeout(timer);if(mo)mo.disconnect();
+window.removeEventListener('popstate',pop);document.removeEventListener('DOMContentLoaded',lock);
+var c=document.getElementById(${js(SPLASH_ID)});if(c&&c!==d)return;
 if(document.body)document.body.inert=false;
 var a=document.activeElement;if(!a||a===document.body||a===d||d.contains(a)){
 var w=document.querySelector('litro-outlet');if(w&&w.focus)w.focus({preventScroll:true});}};
 var end=function(){if(d.parentNode)d.parentNode.removeChild(d);release();};
 d.caribouRelease=release;d.caribouEnd=end;
-lock();document.addEventListener('DOMContentLoaded',lock);window.addEventListener('popstate',pop);
-setTimeout(end,ms);try{d.focus({preventScroll:true});}catch(x){}};`
+if(typeof MutationObserver==='function'){mo=new MutationObserver(lock);mo.observe(document.documentElement,{childList:true});}
+document.addEventListener('DOMContentLoaded',lock);window.addEventListener('popstate',pop);
+timer=setTimeout(end,ms);try{d.focus({preventScroll:true});}catch(x){}lock();};`
 
 interface SplashElement extends HTMLElement {
   caribouRelease?: () => void
@@ -148,11 +155,26 @@ const currentPath = () => location.pathname.replace(/\/+$/, '') || '/'
 
 /**
  * Shows the screen for a client-side forward to `to`. `start` is when the
- * forward began; the ring and the way out count from it. One screen at a
- * time. The same behavior as `caribouSplash` + `caribouGuard`.
+ * forward began; the ring and the way out count from it. The same behavior
+ * as `caribouSplash` + `caribouGuard`:
+ *
+ * - One screen at a time: a screen already up is ended first, with all its
+ *   timers and listeners.
+ * - The screen is a child of `<html>`; the body is `inert` and focus is on
+ *   the screen. (The head script also watches for the body to be parsed,
+ *   and locks it then.)
+ * - Leaving `to` (any `popstate` to another path) ends it at once; so does
+ *   the time limit.
+ * - Its release runs once: it stops the timer and the listeners, and gives
+ *   the body back only when no newer screen is up. Focus left on the screen
+ *   goes to the router's outlet.
  */
 export function showSplash(to: string, start: number = Date.now()): HTMLElement {
-  document.getElementById(SPLASH_ID)?.remove()
+  const old = document.getElementById(SPLASH_ID) as SplashElement | null
+  if (old) {
+    if (old.caribouEnd) old.caribouEnd()
+    else old.remove()
+  }
   const el = document.createElement('div') as SplashElement
   el.id = SPLASH_ID
   el.tabIndex = -1
@@ -172,9 +194,15 @@ export function showSplash(to: string, start: number = Date.now()): HTMLElement 
     if (status) status.textContent = LIVE_TEXT
   }, LIVE_MS)
 
+  let done = false
   const onPop = () => { if (currentPath() !== to) end() }
   const release = () => {
+    if (done) return
+    done = true
+    clearTimeout(timer)
     window.removeEventListener('popstate', onPop)
+    const current = document.getElementById(SPLASH_ID)
+    if (current && current !== el) return // a newer screen owns the body
     document.body.inert = false
     const active = document.activeElement
     if (!active || active === document.body || el.contains(active)) {
@@ -189,7 +217,7 @@ export function showSplash(to: string, start: number = Date.now()): HTMLElement 
   el.caribouEnd = end
   document.body.inert = true
   window.addEventListener('popstate', onPop)
-  setTimeout(end, Math.max(0, LIMIT_MS - (Date.now() - start)))
+  const timer = setTimeout(end, Math.max(0, LIMIT_MS - (Date.now() - start)))
   el.focus({ preventScroll: true })
   return el
 }
