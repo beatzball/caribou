@@ -10,6 +10,7 @@ import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
 import '../components/caribou-timeline.js'
 import { enterWithCache } from '../components/_page-cache.js'
+import { settleSplash } from '../components/_splash.js'
 
 export interface HomeData {
   kind: 'auth-required'
@@ -32,6 +33,9 @@ export class HomePage extends LitroPage {
   protected override firstUpdated() {
     const meRaw = localStorage.getItem('caribou.activeUserKey')
     this.signedIn = !!meRaw && meRaw !== 'null' && meRaw !== '""'
+    // Signed out, the placeholder is all there is: the loading screen goes.
+    // Signed in, the timeline removes it.
+    if (!this.signedIn) settleSplash()
   }
 
   // A revisit paints from the last copy at once. The page data is only the

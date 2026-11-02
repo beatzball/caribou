@@ -13,6 +13,7 @@ import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 import './caribou-button.js'
 import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
+import { settleSplash } from './_splash.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
 
@@ -177,6 +178,9 @@ export class CaribouTimeline extends LitElement {
   }
 
   protected override updated() {
+    // Home has something to show: posts, an error, or the empty notice. The
+    // loading screen of `/` → `/home` goes (issue 142).
+    if (this.kind === 'home' && this.store && !(this.loading && this.statuses.length === 0)) settleSplash()
     // The "Older posts" anchor is the no-JS pagination link. With JS and a
     // signed-in client it is also the infinite-scroll sentinel: when it
     // scrolls into view the next page loads in place. Without a client it

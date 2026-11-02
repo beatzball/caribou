@@ -8,6 +8,7 @@ import { APP_SCRIPT_URL } from '../lib/app-entry.js';
 import { ICONS_HEAD, PAGE_TITLE, brandHead } from '../lib/brand-head.js';
 import { resolveOrigin } from '../lib/public-origin.js';
 import { ROOT_FORWARD_HEAD } from '../lib/root-forward-head.js';
+import { HOME_SPLASH_HEAD } from '../lib/home-splash-head.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
 // not every client encodes, so escape it rather than trust that.
@@ -46,10 +47,11 @@ export default defineEventHandler(async (event) => {
     //   • BASE_HEAD   — document-level rules that no shadow root owns.
     // brandHead adds the icons, the manifest and the link-preview tags.
     // ROOT_FORWARD_HEAD (only on `/`) sends a signed-in reader to /home
-    // before the sign-in form paints.
+    // before the sign-in form paints. HOME_SPLASH_HEAD (only on `/home`)
+    // goes on with the loading screen that `/` showed.
     routeMeta: {
       title: PAGE_TITLE,
-      head: (matched.path === '/' ? ROOT_FORWARD_HEAD : '') + TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)),
+      head: (matched.path === '/' ? ROOT_FORWARD_HEAD : matched.path === '/home' ? HOME_SPLASH_HEAD : '') + TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)),
     },
     appScriptUrl: APP_SCRIPT_URL,
   });

@@ -1,3 +1,5 @@
+import { showSplash } from './_splash.js'
+
 // `/` goes to `/home` when an account is active (issue 135).
 //
 // Two checks share these rules. The inline script in the head of `/`
@@ -15,6 +17,7 @@
  * full load is then decided; the router must not check again.
  */
 export const DECIDED_ATTR = 'data-caribou-root'
+
 
 export function forwardsToHome(
   search: string,
@@ -46,8 +49,12 @@ export function forwardsToHome(
  * one Back press seems to do nothing; no signed-in page links to `/` today.
  * The router has no replace navigation, so it treats this as Back/Forward
  * and restores the saved scroll offset of `/home` instead of the top.
+ *
+ * It shows the loading screen, as the head script of `/` does, until Home
+ * has something to show (`settleSplash` in `_splash.ts`).
  */
 export function replaceWithHome(): void {
+  showSplash()
   // The SSR data of the first page is read once, by the first page the
   // router enters. If any is left, it is not `/home`'s: Home must not read it.
   document.getElementById('__litro_data__')?.remove()

@@ -5,6 +5,7 @@ import {
 import '../caribou-timeline.js'
 import type { CaribouTimeline, TimelineInitial, TimelineKind } from '../caribou-timeline.js'
 import { CaribouStatusCard } from '../caribou-status-card.js'
+import { SPLASH_ID, showSplash } from '../_splash.js'
 
 const ACCT = { id: '1', acct: 'a', username: 'a', displayName: 'A', avatar: '', avatarStatic: '' }
 const mkStatus = (id: string) => ({
@@ -387,6 +388,49 @@ describe('<caribou-timeline> — states', () => {
   it('reflects kind to an attribute', async () => {
     const tl = await mount('public', asInitial([]))
     expect(tl.getAttribute('kind')).toBe('public')
+  })
+})
+
+// The screen of `/` → `/home` (issue 142) stays until Home shows something.
+describe('<caribou-timeline> — loading screen', () => {
+  const splashDone = () => document.getElementById(SPLASH_ID)?.hasAttribute('data-done')
+
+  it('stays while Home loads its first page, and goes when the load ends', async () => {
+    showSplash()
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'home'
+    document.body.appendChild(tl)
+    await tl.updateComplete
+    expect(tl.shadowRoot!.textContent).toContain('Loading your timeline…')
+    expect(splashDone()).toBe(false)
+    // No client → the load resolves empty: the empty notice shows.
+    await new Promise((r) => setTimeout(r, 0))
+    await settle(tl)
+    expect(splashDone()).toBe(true)
+  })
+
+  it('goes when Home shows posts', async () => {
+    showSplash()
+    await mount('home', asInitial([mkStatus('s0')]))
+    expect(splashDone()).toBe(true)
+  })
+
+  it('goes when the first page of Home fails', async () => {
+    showSplash()
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'home'
+    document.body.appendChild(tl)
+    await tl.updateComplete
+    expect(splashDone()).toBe(false)
+    ;(storeOf(tl).error as Writable<unknown>).value = { message: 'upstream 503' }
+    await settle(tl)
+    expect(splashDone()).toBe(true)
+  })
+
+  it('is left alone by the other timelines', async () => {
+    showSplash()
+    await mount('local', asInitial([mkStatus('s0')]))
+    expect(splashDone()).toBe(false)
   })
 })
 
