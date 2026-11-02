@@ -142,6 +142,18 @@ describe('<caribou-status-card> body links', () => {
     expect(goSpy).toHaveBeenCalledWith(`/tags/${encodeURIComponent('Café')}`)
   })
 
+  // The server lists `#ΟΣ` as `οσ` (Ruby's downcase has no final-sigma rule).
+  it('matches a Greek hashtag ending in Σ to the name the server lists', async () => {
+    const href = `https://example.social/tags/${encodeURIComponent('ΟΣ')}`
+    const el = await mount(post({
+      content: `<p><a href="${href}" class="mention hashtag" rel="tag">#<span>ΟΣ</span></a></p>`,
+      tags: [{ name: 'οσ', url: `https://example.social/tags/${encodeURIComponent('οσ')}` }],
+    }))
+    click(el, href)
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith(`/tags/${encodeURIComponent('ΟΣ')}`)
+  })
+
   it('leaves modified, non-primary and handled clicks on a hashtag to the browser', async () => {
     const el = await mount()
     const href = 'https://example.social/tags/AI'

@@ -72,6 +72,16 @@ describe('normalizeTagName', () => {
     expect(normalizeTagName('a_b')).toBe('a_b')
   })
 
+  // Ruby's `downcase` maps each character on its own; JavaScript's
+  // `toLowerCase` turns a final Σ into ς. The server stores `ΟΣ` as `οσ`.
+  it('lowercases Greek sigma as Ruby does, with no final-sigma rule', () => {
+    expect(normalizeTagName('ΟΣ')).toBe('οσ')
+    expect(normalizeTagName('ΣΟΣ')).toBe('σοσ')
+    expect(normalizeTagName('ος')).toBe('ος')
+    expect(tagKey(ME, 'ΟΣ')).toBe(tagKey(ME, 'οσ'))
+    expect(tagKey(ME, 'ΟΣ')).not.toBe(tagKey(ME, 'ος'))
+  })
+
   it('drops characters the server drops', () => {
     expect(normalizeTagName('हिन्दी')).toBe('हिनदी')
     expect(normalizeTagName('a-b')).toBe('ab')

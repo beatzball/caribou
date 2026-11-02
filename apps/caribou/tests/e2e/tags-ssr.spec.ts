@@ -132,10 +132,26 @@ test('two tags keep their own lists across a revisit', async ({ page, context })
   await expect(livePage(page).locator('caribou-tag-header h1')).toHaveText('#Rust')
   await expect.poll(() => ids(page)).toEqual(['rust-2', 'rust-1'])
   await expect(page).toHaveTitle('#Rust · Caribou')
+  // Hold the revisit's page data. The list must be there without it: the
+  // page comes back from what was kept, not from a new fetch.
+  let release!: () => void
+  const held = new Promise<void>((r) => { release = r })
+  let asked = false
+  await page.route((url) => url.pathname === '/tags/AI', async (route) => {
+    if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
+    asked = true
+    await held
+    return route.continue()
+  })
   await page.goBack()
   await expect(livePage(page).locator('caribou-tag-header h1')).toHaveText('#AI')
   await expect.poll(() => ids(page)).toEqual(['ai-2', 'ai-1'])
   await expect(page).toHaveTitle('#AI · Caribou')
+  await expect.poll(() => asked).toBe(true)
+  release()
+  // The fresh copy brings nothing new, so the list stays as it is.
+  await page.waitForLoadState('networkidle')
+  expect(await ids(page)).toEqual(['ai-2', 'ai-1'])
   expect(errors).toEqual([])
 })
 

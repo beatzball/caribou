@@ -26,9 +26,12 @@ const INVALID = /[^\p{Alphabetic}\p{Nd}็-๎_·・‌]/gu
  * `#cafe` are one tag, and so are `#AI` and `#ai`.
  */
 export function normalizeTagName(name: string): string {
-  const lower = name.normalize('NFKC').toLowerCase()
+  // Lowercase one character at a time, as Ruby's `downcase` does. A whole
+  // string's `toLowerCase` turns a final Σ into ς; the server keeps σ.
   let folded = ''
-  for (const c of lower) folded += FOLD.get(c) ?? c
+  for (const c of name.normalize('NFKC')) {
+    for (const l of c.toLowerCase()) folded += FOLD.get(l) ?? l
+  }
   return folded.replace(INVALID, '')
 }
 
