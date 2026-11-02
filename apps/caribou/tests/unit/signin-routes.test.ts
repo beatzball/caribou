@@ -71,8 +71,31 @@ describe('GET /api/signin/callback', () => {
     expect(sessionJson(html)).toEqual(SESSION)
     // The token's `</script>` cannot end the block early.
     expect(html).not.toContain('TOK</script>')
-    expect(html).toContain("location.replace('/feed')")
     expect(html).toContain("history.replaceState(null, '', '/')")
+  })
+
+  it.each([
+    ['no prefs', null, '/feed'],
+    ['default timeline local', '{"defaultTimeline":"local"}', '/local'],
+    ['default timeline public', '{"defaultTimeline":"public"}', '/public'],
+    ['unknown value', '{"defaultTimeline":"//evil.example"}', '/feed'],
+    ['broken prefs', '{', '/feed'],
+  ])('the page goes on to the default timeline: %s', async (_name, prefs, expected) => {
+    complete.mockResolvedValue({ kind: 'ok', server: 'two.example', session: SESSION })
+    const html = await (await callback()).text()
+    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!
+    const store = new Map<string, string>(prefs ? [[`caribou.prefs.${SESSION.userKey}`, prefs]] : [])
+    const localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v) },
+    }
+    const json = html.match(/<script type="application\/json" id="session">([^<]*)<\/script>/)![1]!
+    const document = { getElementById: () => ({ textContent: json, hidden: false }) }
+    const location = { replace: vi.fn() }
+    new Function('localStorage', 'document', 'location', 'history', script)(
+      localStorage, document, location, { replaceState: () => {} })
+    expect(location.replace).toHaveBeenCalledWith(expected)
+    expect(store.get('caribou.activeUserKey')).toBe(JSON.stringify(SESSION.userKey))
   })
 
   it('on success sets the instance cookie and clears the sign-in cookie', async () => {

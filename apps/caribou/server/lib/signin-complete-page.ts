@@ -21,13 +21,24 @@ const STYLE = `
   `
 
 // Reads the session from the JSON block, stores it next to the accounts
-// already there, makes it active, and goes on to the app. `replaceState`
+// already there, makes it active, and goes on to the account's default
+// timeline. `replaceState`
 // takes the callback URL (with its `code`) out of history first.
 const SCRIPT = `
     (function () {
       function showFallback() {
         document.getElementById('status').hidden = true;
         document.getElementById('fallback').hidden = false;
+      }
+      // The account's default timeline (issue 49), when it was signed in
+      // here before and chose one on /settings; else /feed, which is /home.
+      function timeline(key) {
+        try {
+          var p = JSON.parse(localStorage.getItem('caribou.prefs.' + key) || 'null');
+          var t = p && typeof p === 'object' ? p.defaultTimeline : null;
+          if (t === 'local' || t === 'public') return '/' + t;
+        } catch (e) { /* bad prefs: the default */ }
+        return '/feed';
       }
       try {
         var s = JSON.parse(document.getElementById('session').textContent);
@@ -45,7 +56,7 @@ const SCRIPT = `
         localStorage.setItem('caribou.users', JSON.stringify(Array.from(users.entries())));
         localStorage.setItem('caribou.activeUserKey', JSON.stringify(s.userKey));
         history.replaceState(null, '', '/');
-        location.replace('/feed');
+        location.replace(timeline(s.userKey));
       } catch (e) {
         showFallback();
       }

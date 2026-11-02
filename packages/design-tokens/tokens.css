@@ -39,7 +39,7 @@
 }
 
 html { color-scheme: dark; background: var(--bg-0); color: var(--fg-0); }
-[data-theme="light"] html { color-scheme: light; }
+html[data-theme="light"] { color-scheme: light; }
 
 body { margin: 0; font-family: var(--font-body); background: var(--bg-0); color: var(--fg-0); }
 * { box-sizing: border-box; }

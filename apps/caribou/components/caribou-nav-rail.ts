@@ -24,6 +24,7 @@ const ITEMS: NavItem[] = [
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
   { label: 'Public',  icon: 'globe', href: '/public', more: true },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
+  { label: 'Settings', icon: 'settings', href: '/settings', more: true },
 ]
 
 const PROFILE: NavItem = { label: 'Profile', icon: 'user', href: '/@me' }

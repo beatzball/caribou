@@ -3,7 +3,7 @@ import { customElement } from 'lit/decorators.js'
 import { LitroPage, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery } from 'h3'
-import { DECIDED_ATTR, forwardsToHome, replaceWithHome } from '../components/_root-forward.js'
+import { DECIDED_ATTR, rootForwardTarget, replaceWithTimeline } from '../components/_root-forward.js'
 import '../components/caribou-landing.js'
 
 export interface IndexData {
@@ -19,7 +19,7 @@ export const pageData = definePageData<IndexData>(async (event) => ({
 
 @customElement('page-index')
 export class IndexPage extends LitroPage {
-  // With an active account, `/` is `/home` (issue 135). A full load of `/`
+  // With an active account, `/` is its default timeline (issue 135). A full load of `/`
   // is decided by the head script, before anything can consume a stashed
   // sign-in error: it either left already or marked `<html>` to stay. So
   // this checks only a client-side navigation to `/`.
@@ -28,10 +28,10 @@ export class IndexPage extends LitroPage {
     if (root.hasAttribute(DECIDED_ATTR)) {
       root.removeAttribute(DECIDED_ATTR)
     } else {
-      let go = false
-      try { go = forwardsToHome(location.search, localStorage, sessionStorage) } catch { /* blocked */ }
-      if (go) {
-        replaceWithHome()
+      let to: string | null = null
+      try { to = rootForwardTarget(location.search, localStorage, sessionStorage) } catch { /* blocked */ }
+      if (to) {
+        replaceWithTimeline(to)
         return Promise.resolve()
       }
     }

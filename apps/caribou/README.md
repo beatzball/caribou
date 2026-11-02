@@ -173,7 +173,7 @@ active. Accounts live in the browser; the server keeps no session.
 |---|---|
 | `caribou.users` | every account: `[userKey, session]` pairs, in sign-in order |
 | `caribou.activeUserKey` | the active account's `userKey` (`name@server`), or `null` |
-| `caribou.prefs.<userKey>` | that account's settings (removed on its sign-out) |
+| `caribou.prefs.<userKey>` | that account's settings: `theme`, `defaultTimeline`, `lastSeenNotificationId` (removed on its sign-out) |
 | `caribou.drafts.<userKey>` | that account's compose drafts (removed on its sign-out) |
 
 **Switching reloads the page.** A switch from the account menu, a sign-out
@@ -218,7 +218,8 @@ link cannot sign a reader in to someone else's account. `/signin/done`, where
 sign-in used to end with the session in the URL fragment, now only shows
 "Something went wrong… Return to start" and stores nothing.
 
-**`/` goes to `/home` when an account is active.** The server cannot know
+**`/` goes to the default timeline when an account is active**: `/home`, or
+`/local` or `/public` when chosen on /settings. The server cannot know
 (the accounts are in the browser), so it renders the sign-in page for every
 reader. On `/` only, an inline script in the head
 (`server/lib/root-forward-head.ts`) reads the stored accounts before the
@@ -238,6 +239,32 @@ runs; a CSP added later must allow it (a hash or a nonce).
 accounts. The new account becomes active; signing in to one already stored
 replaces its token in place. Opened with no account (a stale link), it is the
 plain landing.
+
+## Settings
+
+`/settings` holds the active account's settings, saved at once in
+`caribou.prefs.<userKey>` through `readPrefs` / `updatePrefs` from
+`@beatzball/caribou-state` (they keep the other keys). The server renders
+the sign-in placeholder; the page renders the sections after it has read
+the session, so a section may read storage when it connects.
+
+**Sections** are listed in `components/_settings-sections.ts`, in page
+order. Each is its own element (`caribou-settings-<name>.ts`) that renders
+only its controls; the list gives it a `<section id>` and its `<h2>`. To add
+one, write the element and add one entry to the list.
+
+**Theme**: dark (the default), light, or system. Before the first paint an
+inline script at the end of every page's head (`server/lib/theme-head.ts`)
+sets `data-theme` on `<html>` and the theme-color meta; blocked storage
+leaves dark. After that `startTheme` (`components/_theme.ts`, from
+`app-main.ts`) follows a change on /settings, an account switch, and the
+system's setting. `<html>` is outside every template, so hydration is not
+touched. Light tokens are `[data-theme="light"]` in
+`packages/design-tokens/tokens.css`. `tests/e2e/settings.spec.ts` checks
+the first frame.
+
+**Default timeline**: Home, Local or Public. `/` forwards there (above), and
+the sign-in completion page goes there for an account that chose one.
 
 ## Shared controls
 
@@ -297,7 +324,7 @@ registers the element on the server and the client alike.
 
 `<caribou-menu icon="ellipsis" label="More">` with the items as children:
 real links, and native forms where an item must work without JavaScript.
-The phone nav bar uses it for More (Public, Bookmarks, Sign out).
+The phone nav bar uses it for More (Public, Bookmarks, Settings, Sign out).
 
 - The panel is a native popover, and the trigger names it with
   `popovertarget`. The browser opens it, closes it on Escape or a press
