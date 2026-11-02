@@ -55,6 +55,8 @@ jobs:
       - run: pnpm ${{ steps.affected.outputs.args }} typecheck
       - run: pnpm ${{ steps.affected.outputs.args }} lint
       - run: pnpm ${{ steps.affected.outputs.args }} test:coverage
+      - name: Test the Coolify deploy script
+        run: node --test scripts/ci/*.test.mjs
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: coverage, path: '**/coverage/**' }
@@ -172,9 +174,11 @@ jobs:
   # the only job with packages: write, and it runs only on a push to main.
   #
   # A SHA tag is never overwritten. If it already exists (a re-run of an old
-  # main run), the job keeps the image that is there: it passed CI the first
-  # time, and it may be what production runs now. A rebuild can differ,
-  # because the base image moves.
+  # main run), the job keeps the image that is there: it passed the smoke
+  # probe the first time, and it may be what production runs now. A rebuild
+  # can differ, because the base image moves. Only a clear "manifest unknown"
+  # from GHCR counts as absent; any other answer fails the job, so a registry
+  # error can never lead to an overwrite.
   #
   # There is no moving tag such as :main or :latest. Coolify deploys by SHA.
   publish-image:
@@ -202,13 +206,38 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push tested image
         id: push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
-          if docker manifest inspect "$image" > /dev/null 2>&1; then
-            echo "::notice::$image already exists. Keeping it; a tested SHA tag is never overwritten."
-          else
+          repo="${GITHUB_REPOSITORY,,}"
+          image="ghcr.io/${repo}:${GITHUB_SHA}"
+          # Ask GHCR for the manifest. First trade GITHUB_TOKEN for a registry
+          # token: that call rejects bad credentials, so a broken token cannot
+          # look like a missing image. Tokens go through files, never argv.
+          auth="$RUNNER_TEMP/ghcr-auth"
+          printf 'user = "x:%s"\n' "$GITHUB_TOKEN" > "$auth"
+          registry_token=$(curl -sS --fail --connect-timeout 10 --max-time 30 -K "$auth" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" 2>/dev/null | jq -r '.token // empty' || true)
+          if [[ -z "$registry_token" ]]; then
+            rm -f "$auth"
+            echo "::error::Could not get a GHCR token. Not pushing."
+            exit 1
+          fi
+          echo "::add-mask::$registry_token"
+          printf 'Authorization: Bearer %s\n' "$registry_token" > "$auth"
+          code=$(curl -sS --connect-timeout 10 --max-time 30 -o "$RUNNER_TEMP/ghcr-body" -w '%{http_code}' \
+            -H @"$auth" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${repo}/manifests/${GITHUB_SHA}" || true)
+          rm -f "$auth"
+          if [[ "$code" == 200 ]]; then
+            echo "::notice::$image already exists. Keeping it; a SHA tag is never overwritten."
+          elif [[ "$code" == 404 ]] && jq -e '.errors[]? | select(.code == "MANIFEST_UNKNOWN")' "$RUNNER_TEMP/ghcr-body" > /dev/null 2>&1; then
             docker tag caribou-app:ci "$image"
             docker push "$image"
+          else
+            echo "::error::Could not tell whether $image exists (GHCR answered HTTP $code). Not pushing, so an existing image cannot be overwritten. Re-run the job."
+            exit 1
           fi
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
@@ -320,118 +349,14 @@ jobs:
             echo "::error::The Coolify webhook answered HTTP $code."
             exit 1
           fi
+      - name: Check out the deploy script
+        if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'pinned'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
       - name: Deploy the tested image (pinned)
         if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'pinned'
-        run: |
-          api="${COOLIFY_API_URL%/}"
-          auth="$RUNNER_TEMP/coolify-auth"
-          body="$RUNNER_TEMP/coolify-body"
-          printf 'Authorization: Bearer %s\n' "$COOLIFY_API_TOKEN" > "$auth"
-          # One deadline for the whole step, inside the job's 15 minutes.
-          deadline=$(( SECONDS + 720 ))
-
-          # call METHOD PATH [curl args]: the body goes to $body, the HTTP
-          # status to stdout ("000" when there is no answer).
-          call() {
-            local method=$1 path=$2
-            shift 2
-            curl -sS --connect-timeout 10 --max-time 30 -o "$body" -w '%{http_code}' \
-              -X "$method" -H @"$auth" "$@" "$api$path" 2>/dev/null || true
-          }
-          fail() { echo "::error::$*"; exit 1; }
-          set_tag() {
-            local data code
-            data=$(jq -nc --arg name "${IMAGE%:*}" --arg tag "$1" \
-              '{docker_registry_image_name: $name, docker_registry_image_tag: $tag}')
-            code=$(call PATCH "/applications/$COOLIFY_APP_UUID" -H 'Content-Type: application/json' --data "$data")
-            [[ "$code" == 2?? ]]
-          }
-          deployment=""
-          previous=""
-          # Called when the deploy does not finish. Cancel a deployment that
-          # may still run, and put the app's tag back on the image production
-          # runs, so a manual Redeploy in Coolify does not retry this one.
-          give_up() {
-            if [[ -n "$deployment" ]]; then
-              call POST "/deployments/$deployment/cancel" > /dev/null
-            fi
-            if [[ -n "$previous" && "$previous" != "$GITHUB_SHA" ]]; then
-              if set_tag "$previous"; then
-                echo "::warning::The Coolify app tag is back on $previous."
-              else
-                echo "::warning::Could not set the Coolify app tag back to $previous. Set it by hand."
-              fi
-            fi
-            fail "$@"
-          }
-
-          # 1. Wait until no deployment of this app is queued or running.
-          # Coolify skips a deploy request while one for the same app is
-          # active, and still answers with a deployment id that does not exist.
-          while :; do
-            code=$(call GET "/deployments/applications/$COOLIFY_APP_UUID?take=20")
-            [[ "$code" == 2?? ]] || fail "Could not list the app's Coolify deployments (HTTP $code)."
-            active=$(jq -r '[.deployments[]? | select(.status == "queued" or .status == "in_progress")] | length' "$body")
-            [[ "$active" =~ ^[0-9]+$ ]] || fail "Could not read the app's Coolify deployments."
-            (( active == 0 )) && break
-            (( SECONDS < deadline )) || fail "Another Coolify deployment of the app is still active. Not deploying."
-            echo "Waiting for $active active Coolify deployment(s) to end"
-            sleep 10
-          done
-
-          # 2. The app must be a Docker Image app. Remember its current tag.
-          code=$(call GET "/applications/$COOLIFY_APP_UUID")
-          [[ "$code" == 2?? ]] || fail "Could not read the Coolify app (HTTP $code)."
-          pack=$(jq -r '.build_pack' "$body")
-          [[ "$pack" == dockerimage ]] || fail "The Coolify app is not a Docker Image app (build_pack: $pack). Not deploying. See docs/deploy.md."
-          previous=$(jq -r '.docker_registry_image_tag // empty' "$body")
-
-          # 3. Point the app at the tested image, and read it back.
-          set_tag "$GITHUB_SHA" || fail "Could not set the Coolify app tag."
-          code=$(call GET "/applications/$COOLIFY_APP_UUID")
-          tag=$(jq -r '.docker_registry_image_tag // empty' "$body" 2>/dev/null || true)
-          [[ "$code" == 2?? && "$tag" == "$GITHUB_SHA" ]] || give_up "The Coolify app tag did not change to ${GITHUB_SHA} (got '$tag')."
-
-          # 4. Start the deploy. It must be for this app and have a real id.
-          code=$(call POST "/deploy?uuid=$COOLIFY_APP_UUID&force=false")
-          [[ "$code" == 2?? ]] || give_up "Coolify refused the deploy (HTTP $code)."
-          resource=$(jq -r '.deployments[0].resource_uuid // empty' "$body")
-          deployment=$(jq -r '.deployments[0].deployment_uuid // empty' "$body")
-          message=$(jq -r '.deployments[0].message // empty' "$body")
-          [[ "$resource" == "$COOLIFY_APP_UUID" ]] || give_up "Coolify answered for a different resource. Message: $message"
-          [[ -n "$deployment" ]] || give_up "Coolify did not return a deployment id. Message: $message"
-          echo "Coolify deployment $deployment for $IMAGE: $message"
-
-          # 5. Wait for it. A 404 means Coolify did not queue it.
-          misses=0
-          status=unknown
-          while (( SECONDS < deadline )); do
-            code=$(call GET "/deployments/$deployment")
-            if [[ "$code" == 404 ]]; then
-              misses=$(( misses + 1 ))
-              (( misses < 3 )) || give_up "Coolify has no deployment $deployment; it did not queue the deploy. Message: $message"
-            elif [[ "$code" == 2?? ]]; then
-              misses=0
-              status=$(jq -r '.status // "unknown"' "$body")
-              case "$status" in
-                finished)
-                  code=$(call GET "/applications/$COOLIFY_APP_UUID")
-                  tag=$(jq -r '.docker_registry_image_tag // empty' "$body" 2>/dev/null || true)
-                  [[ "$tag" == "$GITHUB_SHA" ]] || fail "Deployment finished, but the Coolify app tag is now '$tag', not ${GITHUB_SHA}."
-                  echo "Deployed $IMAGE"
-                  exit 0
-                  ;;
-                failed | cancelled*)
-                  deployment=""
-                  give_up "Coolify deployment ended as $status."
-                  ;;
-              esac
-            else
-              echo "Coolify status check answered HTTP $code; trying again"
-            fi
-            sleep 10
-          done
-          give_up "Coolify deployment $deployment did not finish in time (last status: $status)."
+        run: bash scripts/ci/coolify-deploy.sh
       - name: Remove credentials
         if: always()
         run: rm -f "$RUNNER_TEMP/coolify-auth" "$RUNNER_TEMP/coolify-body"

@@ -21,24 +21,46 @@ done.
    tested image as a run artifact.
 2. `publish-image` pushes those same bytes to GHCR as
    `ghcr.io/beatzball/caribou:<commit sha>`. If that tag already exists (a
-   re-run), it keeps the existing image. A SHA tag is never overwritten.
+   re-run), it keeps the existing image. If GHCR gives any answer other than
+   a clear "manifest unknown", the job fails and pushes nothing. So a SHA tag
+   is never overwritten.
 3. `deploy-gate` checks that main has not moved past this commit. If it has,
    the newer run deploys instead.
-4. `deploy` takes the `deploy-prod` lock and checks main again. Then it:
-   - waits until no Coolify deployment of the app is queued or running,
+4. `deploy` takes the `deploy-prod` lock, checks main again, and runs
+   `scripts/ci/coolify-deploy.sh`. The script:
+   - waits up to 4 minutes until no Coolify deployment of the app is queued
+     or running,
    - sets the app's image tag to the commit SHA,
-   - starts a deploy, checks that Coolify really queued it,
-   - waits until Coolify reports `finished`.
-   If the deploy fails or times out, it cancels it and sets the tag back to
-   the image production runs.
+   - starts a deploy and checks that Coolify answered for this app,
+   - waits up to 8 minutes until Coolify reports `finished`.
 5. `verify-prod` checks that `https://caribou.quest/api/health` reports the
    same commit.
 
 Coolify never builds the app. It only pulls and runs the tested image.
 
-There is no `:main` or `:latest` tag. The app's tag is the SHA of the last
-deploy CI started and did not roll back. So **Redeploy** in Coolify runs that
-image again.
+`node --test scripts/ci/` tests the script against a fake Coolify. CI runs
+it in the `checks` job.
+
+### When the deploy does not finish
+
+| what happened | production | the app's tag | the job |
+|---|---|---|---|
+| Coolify refused the deploy, or reported `failed` or `cancelled` | not changed (Docker Image apps use a rolling update; the old container keeps serving) | set back to the previous SHA | fails |
+| Coolify did not queue the deploy, or it did not finish in 8 minutes | **unknown** | left on the new SHA | asks Coolify to cancel (on a timeout), then fails and prints the steps below |
+
+When the state is unknown:
+
+1. In Coolify, open the app's *Deployments*. Wait until none is queued or in
+   progress.
+2. Run `curl -sS https://caribou.quest/api/health`.
+3. If `commit` is the run's SHA, the deploy worked. Re-run the run's failed
+   jobs, so `verify-prod` runs.
+4. If not, re-run the failed jobs to deploy again. Or set the app's image
+   tag to the commit that `/api/health` reports, so **Redeploy** keeps that
+   image.
+
+There is no `:main` or `:latest` tag. **Redeploy** in Coolify runs the
+image with the app's current tag.
 
 ## Races that are left
 
@@ -51,66 +73,140 @@ image again.
 - **verify-prod runs outside the lock.** If a newer deploy finishes before an
   older run's `verify-prod`, the older run goes red although production is
   right. Check the newest run on main.
-- **A manual Redeploy at the same time as CI.** `deploy` waits for it to
-  end first. A Redeploy clicked after that wait and before CI's own deploy
-  starts can still make Coolify skip CI's request. The job then fails within
-  about 30 seconds with "did not queue the deploy". Re-run the job.
+- **A manual Redeploy at the same time as CI.** The script waits for active
+  deployments to end first. A Redeploy clicked after that wait and before
+  CI's own deploy starts can still make Coolify skip CI's request. The job
+  then fails within about 30 seconds and prints the steps above.
 
 ## Migration from the Git/Dockerfile app
 
 Production now runs a Coolify app that builds from Git with
 `apps/caribou/Dockerfile`. CI reaches it through `COOLIFY_WEBHOOK_URL`. Do
-these steps in order. The old app serves `caribou.quest` until step 9.
+these steps in order. The old app serves `caribou.quest` until step 13.
+Some steps run on the Coolify server, over SSH.
 
-1. **Merge the PR.** Nothing changes for production. CI still uses the
-   webhook, with a warning. Each push to main now also pushes an image to
-   GHCR. Wait for one push to main to finish, so an image exists.
+### Prepare (production does not change)
+
+1. **Merge the PR.** CI still uses the webhook, with a warning. Each push to
+   main now also pushes an image to GHCR. Wait for one push to main to
+   finish, so an image exists.
 2. **GHCR pull access.** Make the package `beatzball/caribou` public
    (GitHub, the package page, *Package settings*, *Change visibility*).
    Or log the Coolify server in to `ghcr.io` with a token that has
-   `read:packages`. Do this now, before CI needs it.
-3. **New app.** In Coolify, in the same project and server, add a resource
-   of type **Docker Image**. Image `ghcr.io/beatzball/caribou`, tag: the
-   full SHA of the commit from step 1. Do not give it a domain yet. Turn
-   auto deploy off.
-4. **Settings.** Copy from the old app: all env vars (including
-   `PUBLIC_BASE_URL`), port `3000`, the health check.
-5. **Keep the data.** The old app keeps state in a volume at `/data`
-   (OAuth app registrations and sessions). A new empty volume signs every
-   user out and breaks saved instance cookies. Give the new app the
-   **same** volume: in its *Persistent Storage*, add a volume with the
-   **same name** as the old app's `/data` volume, mounted at `/data`. Check
-   the name under the old app's *Persistent Storage*.
-6. **Start it.** Deploy the new app once from Coolify. Check its logs: the
-   server starts and finds its data.
-7. **API token.** In Coolify, *Keys & Tokens*, make an API token with
-   `read`, `write` and `deploy`. Save it as the repo secret
-   `COOLIFY_API_TOKEN` (the old one may lack `write`). The webhook path
-   uses the same secret, so the next deploy checks the new token.
-8. **Flip CI to the pinned path.** Add the repo secrets `COOLIFY_API_URL`
-   (for example `https://<coolify host>/api/v1`) and `COOLIFY_APP_UUID`
-   (the new app's UUID, from its URL or *General* page). Add both before the
-   next push to main. **From the next push to main, CI deploys the new app.**
-   Until step 9, its `verify-prod` fails, because `caribou.quest` still
-   points at the old app. That is expected.
-9. **Move the domain.** Coolify writes the domain into the container's
-   routing labels at deploy time, and refuses a domain that another app
-   uses. So:
-   1. On the **old** app, remove `caribou.quest` and save. Do not restart or
-      redeploy it. Its running container keeps its labels and keeps
-      serving.
-   2. On the **new** app, add `caribou.quest` and save.
-   3. On the new app, click **Redeploy**. This applies the new labels.
-   4. Check: `curl -sS https://caribou.quest/api/health` shows the new
-      app's commit.
-10. **Stop the old app.** Then re-run the red `verify-prod` job of the last
-    run on main. It passes.
-11. **Clean up.** Delete the repo secret `COOLIFY_WEBHOOK_URL`. When you are
-    sure, delete the old app. Do not delete its volume: the new app uses it.
+   `read:packages`.
+3. **Old app: auto deploy off.** In the old app, turn *Auto Deploy* off if
+   it is on. From now on only CI may deploy it.
+4. **Server: keep unused volumes.** In Coolify, open the server, *Docker
+   Cleanup*. Turn **Delete Unused Volumes** off. Reason: the new app uses
+   the old app's data folder through a directory mount (step 7). Docker does
+   not count that as a use of the volume. Once the old app stops, a cleanup
+   with this setting on runs `docker volume prune -af` and deletes the
+   production data.
 
-If the new app fails at step 6 or step 9, the old app still serves. To go
-back after step 8, delete `COOLIFY_API_URL` and `COOLIFY_APP_UUID`; CI
-uses the webhook again.
+### Build the new app
+
+5. **New app.** In Coolify, in the same project and server, add a resource
+   of type **Docker Image**. Image `ghcr.io/beatzball/caribou`, tag: the
+   full SHA of the commit from step 1. Do not give it a domain. Leave *Auto
+   Deploy* off.
+6. **Settings.** Copy from the old app:
+   - all env vars (including `PUBLIC_BASE_URL`),
+   - **Ports Exposes** `3000`. Do not add a *Ports Mappings* entry: a host
+     port mapping turns off Coolify's rolling update, so every deploy would
+     stop the old container before the new one is up.
+   - the health check, and make sure it is **enabled** (path
+     `/api/health`, port `3000`). The rolling update waits on it.
+7. **Mount the same data.** The old app keeps its state in a Docker volume
+   at `/data`: the OAuth app registrations (`/data/apps/...`) and sign-in
+   state. Do **not** add a *Volume Mount* with the old volume's name:
+   Coolify puts the new app's UUID in front of the name, so you get a new,
+   empty volume and every user is signed out. Instead:
+   1. On the server, find the old app's container and its `/data` source.
+      Use the old app's UUID from its Coolify URL:
+      ```
+      old=$(docker ps --filter "name=<old app uuid>" --format '{{.Names}}' | head -1)
+      docker inspect "$old" --format '{{range .Mounts}}{{.Type}} {{.Name}} {{.Source}} -> {{.Destination}}{{println}}{{end}}'
+      ```
+      The line that ends in `-> /data` is `volume <name> <source>`. The
+      source looks like `/var/lib/docker/volumes/<name>/_data`.
+   2. In the new app, *Persistent Storage*, *Add*, **Directory Mount**.
+      Source path: that source. Destination path: `/data`.
+      Coolify does not create, change or delete a directory outside the
+      app's own folder, so this mounts the live data as it is.
+8. **Start it.** Deploy the new app once from Coolify.
+9. **Prove the data is there, before any traffic moves.** On the server:
+   ```
+   new=$(docker ps --filter "name=<new app uuid>" --format '{{.Names}}' | head -1)
+   docker inspect "$new" --format '{{range .Mounts}}{{.Type}} {{.Source}} -> {{.Destination}}{{println}}{{end}}'
+   ```
+   It must print `bind <the source from step 7> -> /data`. Then compare the
+   app registrations in both containers:
+   ```
+   for c in "$old" "$new"; do
+     docker exec "$c" sh -c 'cd /data && find apps -type f | sort | xargs -r sha256sum | sha256sum; find apps -type f | wc -l'
+   done
+   ```
+   Both containers must print the same hash and the same count, and the
+   count must not be 0. Then check that the new container can write there:
+   ```
+   docker exec "$new" sh -c 'touch /data/.write-check && rm /data/.write-check' && echo writable
+   ```
+   If any check fails, stop here. Production is not affected. Fix the mount
+   and repeat from step 8.
+10. **API token.** In Coolify, *Keys & Tokens*, make an API token with
+    `read`, `write` and `deploy`. Save it as the repo secret
+    `COOLIFY_API_TOKEN` (the old one may lack `write`). The webhook path
+    uses the same secret, so the next deploy checks the new token.
+
+### Switch
+
+11. **Pause deploys.** Do not merge to main until step 14 is done. In the
+    repo's *Actions* tab, wait until no CI run on main is in progress.
+12. **Flip CI to the pinned path.** Add the repo secrets `COOLIFY_API_URL`
+    (for example `https://<coolify host>/api/v1`) and `COOLIFY_APP_UUID`
+    (the new app's UUID). Add both. **From the next push to main, CI deploys
+    the new app.**
+13. **Move the domain.** Coolify writes the domain into the container's
+    routing labels at deploy time, and refuses a domain that another app
+    uses. So:
+    1. On the **old** app, remove `caribou.quest` and save. Do not restart or
+       redeploy it. Its running container keeps its labels and keeps
+       serving.
+    2. On the **new** app, add `caribou.quest` and save.
+    3. On the new app, click **Redeploy**. This applies the new labels.
+    4. Check: `curl -sS https://caribou.quest/api/health` shows the new
+       app's commit. Sign in once: an existing account still works.
+14. **Stop the old app.** Deploys may resume. The next push to main deploys
+    the new app and its `verify-prod` checks it.
+
+### Clean up
+
+15. Delete the repo secret `COOLIFY_WEBHOOK_URL`.
+16. When you are sure, delete the old app. In the delete dialog, **untick
+    "Delete volumes"** (it is ticked by default). Do not remove the volume
+    from the old app's *Persistent Storage* list either: that runs
+    `docker volume rm -f`. The new app uses that volume's data.
+17. Keep **Delete Unused Volumes** off (step 4) for as long as the new app
+    mounts the old volume's folder.
+
+### Going back
+
+- **Before step 12:** nothing to undo. The old app still serves and CI
+  still deploys it. Stop or delete the new app (with *Delete volumes*
+  unticked).
+- **After step 12, before step 13:** delete `COOLIFY_API_URL` and
+  `COOLIFY_APP_UUID`. CI uses the webhook again.
+- **After step 13:** do these in order.
+  1. Pause deploys as in step 11.
+  2. If the old app is stopped, start it (Coolify *Start*/*Deploy*; it
+     builds main).
+  3. On the **new** app, remove `caribou.quest`, save, and stop the new
+     app.
+  4. On the **old** app, add `caribou.quest`, save, and **Redeploy** it, so
+     its container carries the domain again.
+  5. Check `curl -sS https://caribou.quest/api/health`.
+  6. Delete `COOLIFY_API_URL` and `COOLIFY_APP_UUID`. Deploys may resume;
+     CI uses the webhook again.
 
 ## Repository secrets
 
@@ -124,6 +220,7 @@ uses the webhook again.
 ## Roll back
 
 Re-running CI for an older commit does not roll back: the "main has moved"
-guard skips its deploy. Instead, in Coolify set the app's image tag to the
-SHA of an earlier commit that deployed and passed `verify-prod`, and click
-**Redeploy**. The next push to main deploys over it again.
+guard skips its deploy. Instead, wait until no CI deploy runs, then in
+Coolify set the app's image tag to the SHA of an earlier commit that
+deployed and passed `verify-prod`, and click **Redeploy**. The next push to
+main deploys over it again.
