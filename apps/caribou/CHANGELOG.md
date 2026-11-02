@@ -1,5 +1,20 @@
 # caribou-app
 
+## 0.10.2
+
+### Patch Changes
+
+- [#136](https://github.com/beatzball/caribou/pull/136) [`67283c2`](https://github.com/beatzball/caribou/commit/67283c2891d2faa37db44895f2efa95eab934b8c) Thanks [@beatzball](https://github.com/beatzball)! - Compose: each attached file's Remove button, Retry button and alt text field now has its own name for screen readers. The name gives the place and the file name, such as "Remove image 2, photo.jpg" and "Alt text for image 2, photo.jpg". Two files with the same name still get different names. A draft saved before this change has no file names, so its controls say "Remove image 1", "Remove video 2" and so on. The visible text is still "Remove".
+
+- [#138](https://github.com/beatzball/caribou/pull/138) [`2126fb9`](https://github.com/beatzball/caribou/commit/2126fb943d0f4d8168d395f25adc731a0fd20efd) Thanks [@beatzball](https://github.com/beatzball)! - Fix a flaky end-to-end test. The test for Enter and Space on the media button now starts waiting for the file chooser before the page loads. Before, on a busy machine, the key press could open the chooser before Playwright was ready to catch it.
+
+- [#140](https://github.com/beatzball/caribou/pull/140) [`3ec8db2`](https://github.com/beatzball/caribou/commit/3ec8db2dd78841e7fc20fcac56b1a62105bda326) Thanks [@beatzball](https://github.com/beatzball)! - Open `/` while signed in, and you now go to `/home`. The check runs in the browser before the sign-in form paints, and Back does not return to `/`. `/?add`, a sign-in error, and a signed-out reader still stay on `/`.
+
+- [#139](https://github.com/beatzball/caribou/pull/139) [`1947217`](https://github.com/beatzball/caribou/commit/19472171d3004a39f192483c69cfa672eaa7302c) Thanks [@beatzball](https://github.com/beatzball)! - Timeline errors behave better. Retry stays in place and keeps focus while it runs. When it works, focus goes to the first new post, to the new-posts button, or to the top of the list. It no longer falls to the page. When it fails again, a screen reader announces the error again. A failed check at the top no longer stops the "Older posts" link. A thread no longer takes a cached copy of itself as fresh data.
+
+- Updated dependencies [[`67283c2`](https://github.com/beatzball/caribou/commit/67283c2891d2faa37db44895f2efa95eab934b8c), [`1947217`](https://github.com/beatzball/caribou/commit/19472171d3004a39f192483c69cfa672eaa7302c)]:
+  - @beatzball/caribou-state@0.4.1
+
 ## 0.10.1
 
 ### Patch Changes
