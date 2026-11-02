@@ -96,11 +96,18 @@ export class CaribouNotifications extends LitElement {
   @state() private items: NotificationGroup[] = []
   // The groups whose list of accounts is open, by group key.
   @state() private expanded: ReadonlySet<string> = new Set()
-  // Everyone in a server group, loaded when its list is first opened. A
-  // server group comes with a sample only. Cleared with the session.
-  @state() private everyone: ReadonlyMap<string, mastodon.v1.Account[]> = new Map()
+  // Everyone in a server group, loaded when its list is opened. A server
+  // group comes with a sample only. Each list is for the group as it was at
+  // `newestId`: once a poll adds to the group, the list is loaded again.
+  // Cleared with the session.
+  @state() private everyone: ReadonlyMap<string, { newestId: string; accounts: mastodon.v1.Account[] }> = new Map()
   @state() private loadingWho: ReadonlySet<string> = new Set()
   @state() private failedWho: ReadonlySet<string> = new Set()
+  // Every session change, A -> B -> A too, starts a new activation; each
+  // list request has its own number. An answer for an older one is dropped.
+  private whoActivation = 0
+  private whoSeq = 0
+  private readonly whoRequest = new Map<string, number>()
   // The accounts the reader mutes or blocks, by id on the reader's server.
   // Their notifications leave the list at once, as Mastodon's own do, and
   // come back if the mute fails.
@@ -136,6 +143,8 @@ export class CaribouNotifications extends LitElement {
       this.everyone = new Map()
       this.loadingWho = new Set()
       this.failedWho = new Set()
+      this.whoActivation++
+      this.whoRequest.clear()
       untracked(() => this.open(this.filter))
     })
     this.disposeSilenced = effect(() => {
@@ -292,8 +301,20 @@ export class CaribouNotifications extends LitElement {
     if (opening) next.add(g.key)
     else next.delete(g.key)
     this.expanded = next
-    if (opening && !g.complete && !this.everyone.has(g.key) && !this.loadingWho.has(g.key)) {
-      void this.loadEveryone(g.key)
+    // Opening also retries a list that failed.
+    if (opening && this.needsEveryone(g)) void this.loadEveryone(g)
+  }
+
+  // A group with only a sample whose list is missing or older than the group.
+  private needsEveryone(g: NotificationGroup): boolean {
+    return !g.complete && this.everyone.get(g.key)?.newestId !== g.newestId && !this.loadingWho.has(g.key)
+  }
+
+  // An open list whose group grew in a poll loads again. One that failed
+  // waits for the reader to open it again, so a failure does not repeat.
+  protected override willUpdate() {
+    for (const g of this.items) {
+      if (this.expanded.has(g.key) && !this.failedWho.has(g.key) && this.needsEveryone(g)) void this.loadEveryone(g)
     }
   }
 
@@ -303,10 +324,13 @@ export class CaribouNotifications extends LitElement {
     return next
   }
 
-  private async loadEveryone(key: string) {
-    const session = this.session.peek()?.id
+  private async loadEveryone(g: NotificationGroup) {
+    const { key, newestId } = g
     const client = activeClient.peek()
-    if (!session || !client) return
+    if (!this.session.peek() || !client) return
+    const activation = this.whoActivation
+    const request = ++this.whoSeq
+    this.whoRequest.set(key, request)
     this.loadingWho = new Set([...this.loadingWho, key])
     this.failedWho = CaribouNotifications.without(this.failedWho, key)
     let accounts: mastodon.v1.Account[] | null = null
@@ -315,15 +339,23 @@ export class CaribouNotifications extends LitElement {
     } catch {
       accounts = null
     }
-    // Another account's list is on screen now: this answer is not for it.
-    if (this.session.peek()?.id !== session) return
+    // An answer from before a session change, or to an older request for
+    // this group, changes nothing.
+    if (activation !== this.whoActivation || this.whoRequest.get(key) !== request) return
+    this.whoRequest.delete(key)
     this.loadingWho = CaribouNotifications.without(this.loadingWho, key)
-    if (accounts) this.everyone = new Map([...this.everyone, [key, accounts]])
+    if (accounts) this.everyone = new Map([...this.everyone, [key, { newestId, accounts }]])
     else this.failedWho = new Set([...this.failedWho, key])
   }
 
+  // A row with more than one person, or with people the sample left out
+  // (the sample can be all muted, leaving one unnamed person), can list who.
+  private expandable(g: NotificationGroup): boolean {
+    return g.count > 1 || !g.complete
+  }
+
   private renderLine(icon: IconName, g: NotificationGroup, text: string) {
-    const many = g.count > 1
+    const many = this.expandable(g)
     const open = this.expanded.has(g.key)
     // A plain button, not <caribou-button>: it carries aria-expanded,
     // aria-controls and a label with the row's subject, which
@@ -342,7 +374,7 @@ export class CaribouNotifications extends LitElement {
 
   // The faces in a group and, once opened, the list of who.
   private renderGroupBody(g: NotificationGroup) {
-    if (g.count <= 1) return nothing
+    if (!this.expandable(g)) return nothing
     const open = this.expanded.has(g.key)
     return html`<div class="group-body">
       <div class="avatars" aria-hidden="true">
@@ -358,7 +390,8 @@ export class CaribouNotifications extends LitElement {
 
   // Everyone, once loaded; until then, or when the load failed, the sample.
   private renderAccounts(g: NotificationGroup, id: string) {
-    const loaded = this.everyone.get(g.key)
+    const entry = this.everyone.get(g.key)
+    const loaded = entry && entry.newestId === g.newestId ? entry.accounts : null
     const accounts = loaded ? loaded.filter((a) => !this.silenced.has(a.id)) : g.accounts
     const more = loaded ? 0 : g.count - g.accounts.length
     const loading = this.loadingWho.has(g.key)

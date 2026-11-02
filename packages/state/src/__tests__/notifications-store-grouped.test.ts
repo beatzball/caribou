@@ -131,6 +131,14 @@ describe('createNotificationsStore with grouped notifications', () => {
     expect(fetchNotifications).toHaveBeenCalledOnce()
   })
 
+  it('a 400 falls back for this load only; the next load asks the grouped endpoint again', async () => {
+    fetchGroupedNotifications.mockRejectedValueOnce(new CaribouError('unknown', 'bad request', { status: 400 }))
+    await createNotificationsStore({ clientSource: () => client() }).load()
+    const again = createNotificationsStore({ clientSource: () => client() })
+    await again.load()
+    expect(fetchGroupedNotifications).toHaveBeenCalledTimes(2)
+  })
+
   it('another error is shown, not taken for an older server', async () => {
     fetchGroupedNotifications.mockRejectedValueOnce(new CaribouError('server_error', 'boom'))
     const store = createNotificationsStore({ clientSource: () => client() })

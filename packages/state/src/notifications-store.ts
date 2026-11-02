@@ -155,7 +155,9 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
         return { grouped: await fetchGroups(client, {}), page: [] }
       } catch (err) {
         if (!isMissingEndpoint(err)) throw err
-        withoutGrouped.add(client.userKey)
+        // A 400 can be a passing proxy fault or a bad query: fall back for
+        // this load only, and ask the grouped endpoint again next time.
+        if ((err as Partial<CaribouError>).status !== 400) withoutGrouped.add(client.userKey)
       }
     }
     return { grouped: null, page: await client.fetchNotifications({ types }) }
