@@ -5,6 +5,7 @@ import {
 import '../caribou-timeline.js'
 import type { CaribouTimeline, TimelineInitial, TimelineKind } from '../caribou-timeline.js'
 import { CaribouStatusCard } from '../caribou-status-card.js'
+import { QUICK_MS, SPLASH_ID, showSplash } from '../_splash.js'
 
 const ACCT = { id: '1', acct: 'a', username: 'a', displayName: 'A', avatar: '', avatarStatic: '' }
 const mkStatus = (id: string) => ({
@@ -387,6 +388,68 @@ describe('<caribou-timeline> — states', () => {
   it('reflects kind to an attribute', async () => {
     const tl = await mount('public', asInitial([]))
     expect(tl.getAttribute('kind')).toBe('public')
+  })
+})
+
+// The screen of a forward from `/` (issue 142) stays until its timeline
+// shows something.
+describe('<caribou-timeline> — loading screen', () => {
+  const splashDone = () => document.getElementById(SPLASH_ID)?.hasAttribute('data-done')
+  // Settled within QUICK_MS of showing, the screen goes with no fade; these
+  // tests look at the fade, so the screen showed a moment ago.
+  const shownBefore = (to: string) => {
+    const el = showSplash(to, Date.now() - 1000)
+    el.dataset.shown = String(Date.now() - QUICK_MS)
+    return el
+  }
+  afterEach(() => {
+    document.getElementById(SPLASH_ID)?.remove()
+    document.body.inert = false
+  })
+
+  it('stays while Home loads its first page, and goes when the load ends', async () => {
+    shownBefore('/home')
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'home'
+    document.body.appendChild(tl)
+    await tl.updateComplete
+    expect(tl.shadowRoot!.textContent).toContain('Loading your timeline…')
+    expect(splashDone()).toBe(false)
+    // No client → the load resolves empty: the empty notice shows.
+    await new Promise((r) => setTimeout(r, 0))
+    await settle(tl)
+    expect(tl.shadowRoot!.textContent).toContain('No posts yet.')
+    expect(splashDone()).toBe(true)
+  })
+
+  it('goes when the timeline shows posts', async () => {
+    shownBefore('/local')
+    await mount('local', asInitial([mkStatus('s0')]))
+    expect(splashDone()).toBe(true)
+  })
+
+  it('goes when the first page fails, with the error and Retry on screen', async () => {
+    signIn()
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))))
+    shownBefore('/home')
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'home'
+    document.body.appendChild(tl)
+    await tl.updateComplete
+    expect(splashDone()).toBe(false)
+    await vi.waitFor(async () => {
+      await settle(tl)
+      expect(tl.shadowRoot!.querySelector('[role="alert"]')?.textContent?.trim()).toBeTruthy()
+    })
+    expect(tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]')).not.toBeNull()
+    expect(tl.shadowRoot!.querySelector('ul')).toBeNull()
+    expect(splashDone()).toBe(true)
+  })
+
+  it('is left alone by a timeline the forward did not go to', async () => {
+    shownBefore('/home')
+    await mount('local', asInitial([mkStatus('s0')]))
+    expect(splashDone()).toBe(false)
   })
 })
 
