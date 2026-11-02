@@ -1,5 +1,13 @@
 # @beatzball/caribou-state
 
+## 0.4.1
+
+### Patch Changes
+
+- [#136](https://github.com/beatzball/caribou/pull/136) [`67283c2`](https://github.com/beatzball/caribou/commit/67283c2891d2faa37db44895f2efa95eab934b8c) Thanks [@beatzball](https://github.com/beatzball)! - `DraftMedia` has an optional `name`: the name of the file the user picked. It is stored with the draft. This is on purpose: it gives each attachment's buttons a name after a reload. The name stays in the browser and is never sent to the server.
+
+- [#139](https://github.com/beatzball/caribou/pull/139) [`1947217`](https://github.com/beatzball/caribou/commit/19472171d3004a39f192483c69cfa672eaa7302c) Thanks [@beatzball](https://github.com/beatzball)! - A failed older page now waits for the reader. A background check no longer replaces its error when the check fails, and no longer clears it when the check works. This also holds while its Retry runs. So infinite scroll does not start again on its own. `retry()` and `load()` now clear `failedOp` together with `error`.
+
 ## 0.4.0
 
 ### Minor Changes
