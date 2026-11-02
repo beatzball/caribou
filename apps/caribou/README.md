@@ -104,10 +104,33 @@ it adds the instance host to a local acct.
 **Links inside a post body** are the author's server HTML; never rewrite them.
 `<caribou-status-card>` has one delegated click on `.status-content`: a plain
 click on a mention that matches `status.mentions` opens `/@acct@host` in
-Caribou. Hashtags and other links go to their real `href`. Every module that
+Caribou. A plain click on a hashtag (`.hashtag` or `rel="tag"`, text `#name`)
+whose name is in `status.tags` opens `/tags/<name>` (`tagPath` in
+`components/_tag-path.ts`). Other links go to their real `href`. Every module that
 calls DOMPurify installs `installPurifyHooks` from
 `@beatzball/caribou-mastodon-client/sanitize-opts`, so the server and the client
 output stay the same string.
+
+**A hashtag page** is `pages/tags/[tag].ts`. The server reads the tag from the
+reader's instance (the cookie) and paints the first page, like `/local`; the
+name keeps its case. `parseTagParam` accepts exactly the names Mastodon's
+`Tag::HASHTAG_NAME_RE` accepts, ported to JavaScript, and refuses the rest
+before any request. Without an instance the server sends the sign-in
+placeholder, and a signed-in reader then gets the timeline from their own
+server after the first render. `<caribou-tag-header>` shows the Follow button
+only after mount, for a signed-in reader. Follow state lives in `tagCache`
+(`@beatzball/caribou-state`), keyed by account and by `normalizeTagName`, a
+copy of Mastodon's `HashtagNormalizer` (NFKC, lowercase, its ASCII folding
+table): `#Café`, `#cafe` and `#CAFE` are one tag, for the follow state, the
+kept timeline and the match against `status.tags`. A read that fails with
+anything but 404 leaves the state as it was, and no button shows while it is
+unknown. A read that overlaps a write, or a result from an earlier account,
+is dropped. It is the one page with its own title (`#tag · Caribou`): the
+server sets it through `seoTitle`, and on the client only the connected page
+whose tag is in the address sets it; it puts `Caribou` back when it leaves.
+`tests/e2e/tags-ssr.spec.ts` starts its own server with
+`tests/e2e/fixtures/upstream-stub.mjs`, which answers the server's requests to
+`example.social`, so the server-painted page and its hydration run in CI.
 
 **A content warning hides the post body.** When the shown post (the boosted
 one, for a boost) has a `spoilerText`, the card renders the warning and a
@@ -207,6 +230,22 @@ the count only after its first update, because the server always renders 0.
 The seen marker is `lastSeenNotificationId` in `caribou.prefs.<userKey>`; only
 the unfiltered list on `/notifications` moves it, and only to a row that is on
 screen in a visible tab and a page the router has shown, for the session the list was loaded for.
+
+**The changelog is part of the build.** `scripts/write-changelog.mjs`
+(in `pnpm build-meta`) copies `CHANGELOG.md` into
+`server/changelog.generated.ts`. `pages/changelog.ts` reads it in `pageData`
+through a dynamic import, so the browser never downloads the text (Vite
+still writes it as an unreferenced chunk under `dist/client/assets`, as with
+the sanitizer); `server/lib/changelog.ts` parses it into plain data that Lit
+renders as text. Nothing from the file is used as HTML. The unread dot is
+`<caribou-changelog-dot>`: put one inside the item's `.icon-wrap` (the dot)
+and one with `text` after the label (", new version" for a screen reader).
+In the nav rail, `dot: true` on an item does both, and on a `more` item the
+phone's More trigger gets them too. It is on Settings; the About section
+of `/settings` (`caribou-settings-about.ts`) and the right rail link to
+`/changelog`. The marker is
+`lastSeenChangelogVersion` in `caribou.prefs.<userKey>`
+(`components/_changelog-seen.ts`); `app-main.ts` starts it once.
 
 ## Accounts
 

@@ -60,6 +60,11 @@ export interface CaribouClient {
   /** The reader's filters (filters v2). An older server answers 404. */
   fetchFilters(): Promise<mastodon.v2.Filter[]>
 
+  // Hashtags. `following` on the result says whether the reader follows it.
+  fetchTag(name: string): Promise<mastodon.v1.Tag>
+  followTag(name: string): Promise<mastodon.v1.Tag>
+  unfollowTag(name: string): Promise<mastodon.v1.Tag>
+
   // Compose. Writes bypass dedup: two posts with the same text are two posts.
   createStatus(params: CreateStatusInput, opts?: { idempotencyKey?: string }): Promise<mastodon.v1.Status>
   /** Resolves once the server has processed the file and it has a `url`. */
@@ -211,7 +216,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         if (kind === 'local')  return c.v1.timelines.public.list({ ...listParams, local: true })
         if (kind === 'public') return c.v1.timelines.public.list(listParams)
         if (kind === 'bookmarks') return fetchBookmarkTimeline(c, params)
-        if (kind.type === 'hashtag') return c.v1.timelines.tag.$select(kind.tag).list(listParams)
+        if (kind.type === 'hashtag') return c.v1.timelines.tag.$select(encodeURIComponent(kind.tag)).list(listParams)
         if (kind.type === 'list')    return c.v1.timelines.list.$select(kind.id).list(listParams)
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
       })
@@ -305,6 +310,19 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchFilters() {
       return run('filters', async (c) => c.v2.filters.list())
+    },
+
+    // --- tags ---
+    // masto puts the name into the path as it is; a non-ASCII name must be
+    // encoded.
+    async fetchTag(name) {
+      return run(`tag:${name}`, (c) => c.v1.tags.$select(encodeURIComponent(name)).fetch())
+    },
+    async followTag(name) {
+      return write((c) => c.v1.tags.$select(encodeURIComponent(name)).follow())
+    },
+    async unfollowTag(name) {
+      return write((c) => c.v1.tags.$select(encodeURIComponent(name)).unfollow())
     },
     async createStatus(params, opts = {}) {
       const { status, mediaIds, ...rest } = params

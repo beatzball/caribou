@@ -7,7 +7,7 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, activeUserKey, createKeepAlive, isOwnAccount, ownerGeneration,
+  activeClient, activeUser, activeUserKey, createKeepAlive, isOwnAccount, normalizeTagName, ownerGeneration,
   loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
@@ -16,6 +16,7 @@ import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import { confirmBlock } from './caribou-confirm-dialog.js'
 import { spaClick } from './_spa-link.js'
+import { tagPath } from './_tag-path.js'
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
@@ -95,6 +96,21 @@ function plural(n: number, one: string, many: string): string {
 // attribute, and `mentions[].url` is the server's raw string.
 function sameUrl(raw: string, href: string): boolean {
   try { return new URL(raw).href === href } catch { return false }
+}
+
+// The hashtag a body link stands for, as the post wrote it, or null. Mastodon
+// marks one `class="mention hashtag" rel="tag"`; other servers may set only
+// `rel="tag"`. The link text is `#name`. It counts only when the post lists
+// the tag, compared as Mastodon does (case and Unicode form ignored), so a
+// look-alike link in the text cannot open a tag page.
+function hashtagOf(a: HTMLAnchorElement, tags: readonly { name: string }[] | undefined): string | null {
+  if (!a.matches('.hashtag') && !a.relList.contains('tag')) return null
+  const text = (a.textContent ?? '').trim()
+  if (!text.startsWith('#')) return null
+  const name = text.slice(1)
+  const wanted = normalizeTagName(name)
+  if (!name || !tags?.some((t) => normalizeTagName(t.name) === wanted)) return null
+  return name
 }
 
 function hostOf(url: string): string {
@@ -694,8 +710,8 @@ export class CaribouStatusCard extends LitElement {
   // click on one to Caribou's own profile page instead, leaving the HTML
   // string alone: the sanitizers and the hydration digest never see a change,
   // and without JavaScript, or on a new-tab click, the link still opens the
-  // instance's real profile. Hashtags wait for a tags page; other links are
-  // left to the browser.
+  // instance's real profile. A hashtag the post lists in `tags` opens
+  // Caribou's tag page the same way. Other links are left to the browser.
   //
   // The anchor's `target` is not a guard here, unlike `spaClick`: it comes
   // from the remote server's HTML, not from the reader. A reader who wants a
@@ -705,8 +721,16 @@ export class CaribouStatusCard extends LitElement {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     const content = e.currentTarget as HTMLElement
     const a = (e.target as Element).closest?.('a')
-    if (!a || !content.contains(a) || !a.matches('.mention') || a.matches('.hashtag')) return
+    if (!a || !content.contains(a)) return
     const display = this.status?.reblog ?? this.status
+    const tag = hashtagOf(a, display?.tags)
+    if (tag) {
+      e.preventDefault()
+      const href = tagPath(tag)
+      void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
+      return
+    }
+    if (!a.matches('.mention') || a.matches('.hashtag')) return
     const mention = display?.mentions?.find((m) => sameUrl(m.url, a.href))
     if (!mention) return
     e.preventDefault()

@@ -7,6 +7,7 @@ import '../caribou-settings.js'
 import { SETTINGS_SECTIONS } from '../_settings-sections.js'
 import { startTheme } from '../_theme.js'
 import { switchToAccount } from '../_switch-account.js'
+import { PACKAGE_VERSION } from '../../server/build-meta.generated.js'
 
 vi.mock('../_switch-account.js', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -70,7 +71,7 @@ describe('caribou-settings', () => {
     expect(root.querySelector('h1')?.textContent).toBe('Settings')
     const sections = [...root.querySelectorAll('section')]
     expect(sections.map((s) => s.id)).toEqual(SETTINGS_SECTIONS.map((s) => s.id))
-    expect(sections.map((s) => s.id)).toEqual(['appearance', 'timeline', 'moderation', 'account'])
+    expect(sections.map((s) => s.id)).toEqual(['appearance', 'timeline', 'moderation', 'account', 'about'])
     for (const s of sections) {
       const h2 = s.querySelector('h2')!
       expect(s.getAttribute('aria-labelledby')).toBe(h2.id)
@@ -196,6 +197,18 @@ describe('caribou-settings', () => {
       await settle(root.host.shadowRoot!.querySelector('caribou-settings-timeline') as LitElement)
       expect(list.find((r) => r.checked)?.value).toBe('public')
       expect(inner(root, 'timeline').querySelector('[role="status"]')!.textContent!.trim()).toBe('')
+    })
+  })
+
+  // The unread dot is on the Settings nav item; this is where it leads.
+  describe('about', () => {
+    it('names the version and links to the changelog, with its dot', async () => {
+      const root = inner(await mount(), 'about')
+      expect(root.textContent).toContain(`Caribou ${PACKAGE_VERSION}`)
+      const link = root.querySelector('a[href="/changelog"]')!
+      expect(link.querySelector('.label')!.textContent).toBe('Changelog')
+      expect(link.querySelector('caribou-changelog-dot:not([text])')).not.toBeNull()
+      expect(link.querySelector('caribou-changelog-dot[text]')).not.toBeNull()
     })
   })
 

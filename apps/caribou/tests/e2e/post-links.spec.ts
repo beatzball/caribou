@@ -85,12 +85,22 @@ for (const [who, path] of [[BOB, '/@bob@other.example'], [CAROL, '/@carol@exampl
   })
 }
 
-test('a hashtag keeps its instance href', async ({ page }) => {
+test("a hashtag keeps its instance href and opens Caribou's tag page without a page load", async ({ page }) => {
+  await page.route('**/api/v1/timelines/tag/AI*', (route) => route.fulfill(json([POST])))
+  await page.route('**/api/v1/tags/AI', (route) => route.fulfill(json({ id: 't1', name: 'AI', url: '', following: false })))
+  await page.route((url) => url.pathname === '/tags/AI', (route) => {
+    if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
+    return route.fulfill(json({
+      kind: 'ok', statuses: [], nextMaxId: null, shell: { instance: INSTANCE }, tag: 'AI',
+    }))
+  })
   await gotoSettled(page, '/home')
+  await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true })
   const tag = page.locator('caribou-status-card .status-content a.hashtag')
   await expect(tag).toHaveAttribute('href', `https://${INSTANCE}/tags/AI`)
-  // Stop the real navigation; the card must not have routed it either.
-  await page.route(`https://${INSTANCE}/tags/AI`, (route) => route.fulfill({ status: 200, contentType: 'text/html', body: 'instance tag page' }))
   await tag.click()
-  await expect(page).toHaveURL(`https://${INSTANCE}/tags/AI`)
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/tags/AI')
+  await expect(page.locator('caribou-tag-header h1')).toHaveText('#AI')
+  expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true)
+  await expect(page).toHaveTitle('#AI · Caribou')
 })

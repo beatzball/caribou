@@ -66,6 +66,7 @@ describe('timelineFilterContext', () => {
     expect(timelineFilterContext('home')).toBe('home')
     expect(timelineFilterContext('local')).toBe('public')
     expect(timelineFilterContext('public')).toBe('public')
+    expect(timelineFilterContext('hashtag')).toBe('public')
     expect(timelineFilterContext('bookmarks')).toBeNull()
   })
 })

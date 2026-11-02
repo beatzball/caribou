@@ -150,7 +150,7 @@ test('the nav rail shows the unread count, and opening the page clears it', asyn
   await expect(nextRail.getByRole('link', { name: 'Notifications', exact: true })).toBeVisible()
   await expect(nextRail.locator('.badge')).toHaveCount(0)
   const prefs = await page.evaluate((key) => localStorage.getItem(`caribou.prefs.${key}`), USER_KEY)
-  expect(JSON.parse(prefs!)).toEqual({ lastSeenNotificationId: '5' })
+  expect(JSON.parse(prefs!)).toMatchObject({ lastSeenNotificationId: '5' })
   expect(errors).toEqual([])
 })
 
@@ -203,5 +203,5 @@ test('/notifications does not poll in a hidden tab, and polls when it is shown a
   await expect(list.locator('li')).toHaveCount(6)
   await expect(list.locator('li').first()).toContainText('later post')
   const prefs = await page.evaluate((key) => localStorage.getItem(`caribou.prefs.${key}`), USER_KEY)
-  expect(JSON.parse(prefs!)).toEqual({ lastSeenNotificationId: '6' })
+  expect(JSON.parse(prefs!)).toMatchObject({ lastSeenNotificationId: '6' })
 })

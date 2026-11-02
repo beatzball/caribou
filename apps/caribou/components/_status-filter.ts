@@ -38,6 +38,7 @@ export function filterVerdict(
 /** The filter context of a timeline; null for one that is never filtered. */
 export function timelineFilterContext(kind: string): FilterContext | null {
   if (kind === 'home') return 'home'
-  if (kind === 'local' || kind === 'public') return 'public'
+  // Mastodon files hashtag timelines under its public context.
+  if (kind === 'local' || kind === 'public' || kind === 'hashtag') return 'public'
   return null
 }

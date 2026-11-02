@@ -104,15 +104,108 @@ describe('<caribou-status-card> body links', () => {
     expect(goSpy).toHaveBeenCalledWith('/@alice@example.social')
   })
 
-  it('leaves hashtags, external links and unknown mentions to the browser', async () => {
+  it('leaves external links and unknown mentions to the browser', async () => {
     const el = await mount()
     document.addEventListener('click', stop)
-    for (const href of ['https://example.social/tags/AI', 'https://example.com/a', 'https://example.social/@carol']) {
+    for (const href of ['https://example.com/a', 'https://example.social/@carol']) {
       click(el, href)
       await flush()
       expect(goSpy, `should not route ${href}`).not.toHaveBeenCalled()
     }
-    expect(seen).toEqual([false, false, false])
+    expect(seen).toEqual([false, false])
+  })
+
+  it('routes a hashtag to its tag page, keeping the case the post wrote', async () => {
+    const el = await mount()
+    const e = click(el, 'https://example.social/tags/AI')
+    await flush()
+    expect(e.defaultPrevented).toBe(true)
+    expect(goSpy).toHaveBeenCalledWith('/tags/AI')
+  })
+
+  it('matches the tag list without regard to case', async () => {
+    const el = await mount(post({ tags: [{ name: 'ai', url: 'https://example.social/tags/ai' }] }))
+    click(el, 'https://example.social/tags/AI')
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith('/tags/AI')
+  })
+
+  // Mastodon stores `#Café` as `cafe` (ASCII folding).
+  it('matches an accented hashtag to the folded name the server lists', async () => {
+    const href = `https://example.social/tags/${encodeURIComponent('Café')}`
+    const el = await mount(post({
+      content: `<p><a href="${href}" class="mention hashtag" rel="tag">#<span>Café</span></a></p>`,
+      tags: [{ name: 'cafe', url: 'https://example.social/tags/cafe' }],
+    }))
+    click(el, href)
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith(`/tags/${encodeURIComponent('Café')}`)
+  })
+
+  // The server lists `#ΟΣ` as `οσ` (Ruby's downcase has no final-sigma rule).
+  it('matches a Greek hashtag ending in Σ to the name the server lists', async () => {
+    const href = `https://example.social/tags/${encodeURIComponent('ΟΣ')}`
+    const el = await mount(post({
+      content: `<p><a href="${href}" class="mention hashtag" rel="tag">#<span>ΟΣ</span></a></p>`,
+      tags: [{ name: 'οσ', url: `https://example.social/tags/${encodeURIComponent('οσ')}` }],
+    }))
+    click(el, href)
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith(`/tags/${encodeURIComponent('ΟΣ')}`)
+  })
+
+  it('leaves modified, non-primary and handled clicks on a hashtag to the browser', async () => {
+    const el = await mount()
+    const href = 'https://example.social/tags/AI'
+    document.addEventListener('click', stop)
+    for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      click(el, href, init)
+      await flush()
+      expect(goSpy, `should not route with ${JSON.stringify(init)}`).not.toHaveBeenCalled()
+    }
+    expect(seen).toEqual([false, false, false, false, false])
+    const a = el.shadowRoot!.querySelector(`.status-content a[href="${href}"]`)!
+    a.addEventListener('click', (e) => e.preventDefault(), { once: true })
+    click(el, href)
+    await flush()
+    expect(goSpy).not.toHaveBeenCalled()
+  })
+
+  it('routes a non-ASCII hashtag', async () => {
+    const href = `https://example.social/tags/${encodeURIComponent('日本')}`
+    const el = await mount(post({
+      content: `<p><a href="${href}" class="mention hashtag" rel="tag">#<span>日本</span></a></p>`,
+      tags: [{ name: '日本', url: href }],
+    }))
+    click(el, href)
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith(`/tags/${encodeURIComponent('日本')}`)
+  })
+
+  it('routes a remote post\'s hashtag too, by rel="tag" alone', async () => {
+    const href = 'https://other.example/tags/Rust'
+    const el = await mount(post({
+      content: `<p><a href="${href}" rel="tag">#Rust</a></p>`,
+      tags: [{ name: 'rust', url: 'https://example.social/tags/rust' }],
+    }))
+    click(el, href)
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith('/tags/Rust')
+  })
+
+  it('leaves a hashtag the post does not list to the browser', async () => {
+    const el = await mount(post({ tags: [] }))
+    document.addEventListener('click', stop)
+    click(el, 'https://example.social/tags/AI')
+    await flush()
+    expect(goSpy).not.toHaveBeenCalled()
+    expect(seen).toEqual([false])
+  })
+
+  it('keeps the hashtag\'s real href in the markup', async () => {
+    const el = await mount()
+    const a = el.shadowRoot!.querySelector('.status-content a.hashtag')!
+    expect(a.getAttribute('href')).toBe('https://example.social/tags/AI')
   })
 
   it('leaves modified, non-primary and handled clicks to the browser', async () => {

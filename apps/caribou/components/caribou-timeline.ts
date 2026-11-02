@@ -4,7 +4,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import {
-  activeClient, createKeepAlive, createTimelineStore, startPolling, type TimelineStore,
+  activeClient, createKeepAlive, createTimelineStore, normalizeTagName, startPolling, type TimelineStore,
 } from '@beatzball/caribou-state'
 import {
   createIntersectionObserver, type CaribouIntersectionObserver,
@@ -16,7 +16,7 @@ import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
 import { timelineFilterContext } from './_status-filter.js'
 import { findShell, loadReaderViewFrom } from './_shell.js'
 
-export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
+export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag'
 
 export interface TimelineInitial {
   statuses: mastodon.v1.Status[]
@@ -48,7 +48,7 @@ const isFirstPage = () => !new URLSearchParams(location.search).has('max_id')
 
 // The timelines that are kept. Bookmarks are not, yet: their pages run by a
 // bookmark cursor, and a `since_id` check by status id does not fit them.
-const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public'])
+const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public', 'hashtag'])
 
 @customElement('caribou-timeline')
 export class CaribouTimeline extends LitElement {
@@ -68,6 +68,9 @@ export class CaribouTimeline extends LitElement {
   `
 
   @property({ reflect: true }) kind: TimelineKind = 'home'
+  // The hashtag, for `kind="hashtag"`. Set once: the router makes a new
+  // page, and so a new timeline, for every tag.
+  @property({ reflect: true }) tag = ''
   // The first page, fetched by the page's `pageData` on the server. The
   // server renders straight from it; the client seeds its store with it, so
   // the first client render equals the server render and no fetch runs.
@@ -133,7 +136,9 @@ export class CaribouTimeline extends LitElement {
       return
     }
     const keep = KEPT.has(this.kind) && isFirstPage()
-    const kept = keep ? stores.get(this.kind) : undefined
+    // One kept store per tag; `#AI` and `#ai` are one tag.
+    const keepKey = this.kind === 'hashtag' ? `hashtag:${normalizeTagName(this.tag)}` : this.kind
+    const kept = keep ? stores.get(keepKey) : undefined
     if (kept) {
       this.store = kept
       this.bind(kept)
@@ -150,11 +155,12 @@ export class CaribouTimeline extends LitElement {
       }
       return
     }
-    this.store = createTimelineStore(this.kind, {
+    const storeKind = this.kind === 'hashtag' ? { type: 'hashtag' as const, tag: this.tag } : this.kind
+    this.store = createTimelineStore(storeKind, {
       clientSource: () => activeClient.value,
       ...(this.initial ? { initial: this.initial } : {}),
     })
-    if (keep) stores.set(this.kind, this.store)
+    if (keep) stores.set(keepKey, this.store)
     this.bind(this.store)
     // The server already paid for the first page when `initial` is set.
     if (!this.initial) void this.store.load()
@@ -292,7 +298,9 @@ export class CaribouTimeline extends LitElement {
     const last = statuses[statuses.length - 1]
     const context = timelineFilterContext(this.kind) ?? ''
     if (!last) {
-      return html`<div class="notice">${this.kind === 'bookmarks' ? 'No bookmarks yet.' : 'No posts yet.'}</div>`
+      const empty = this.kind === 'bookmarks' ? 'No bookmarks yet.'
+        : this.kind === 'hashtag' ? `No posts with #${this.tag} yet.` : 'No posts yet.'
+      return html`<div class="notice">${empty}</div>`
     }
     // Keyed by status id, and each card gets the status object itself. A
     // poll or a prepend therefore leaves every surviving card alone: same

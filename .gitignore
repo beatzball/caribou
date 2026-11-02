@@ -29,6 +29,7 @@ apps/*/.data/
 # HEAD change. Anything running typecheck or tests goes through pnpm scripts
 # which run write-build-meta first.
 apps/*/server/build-meta.generated.ts
+apps/*/server/changelog.generated.ts
 
 # Design-token CSS inlined at build time by scripts/write-tokens-head.mjs —
 # must be baked into the server bundle because the Docker runtime image
