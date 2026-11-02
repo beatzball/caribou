@@ -169,16 +169,16 @@ describe('<caribou-search>', () => {
   })
 
   it('opens the post a pasted address names, replacing the search entry', async () => {
-    history.replaceState(null, '', '/search?q=https%3A%2F%2Fother.social%2F%40bob%2F5')
+    history.replaceState(null, '', '/search?q=https%3A%2F%2Fother.social%2F%40bob%2F77')
     const client = signIn()
     const search = vi.spyOn(client, 'search').mockResolvedValue(result({ statuses: [status('77')] }))
     const pops: string[] = []
     const onPop = () => pops.push(location.pathname)
     window.addEventListener('popstate', onPop)
     const before = history.length
-    await mount({ q: 'https://other.social/@bob/5' })
+    await mount({ q: 'https://other.social/@bob/77' })
     window.removeEventListener('popstate', onPop)
-    expect(search).toHaveBeenCalledWith({ q: 'https://other.social/@bob/5', resolve: true, limit: 20 })
+    expect(search).toHaveBeenCalledWith({ q: 'https://other.social/@bob/77', resolve: true, limit: 20 })
     expect(location.pathname).toBe('/@bob@other.social/77')
     expect(history.length).toBe(before)
     expect(pops).toEqual(['/@bob@other.social/77'])
@@ -349,5 +349,58 @@ describe('<caribou-search>', () => {
     input.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
     vi.advanceTimersByTime(400)
     expect(history.length).toBe(before + 1)
+  })
+
+  // Review round 2 (Codex R2-1): a resolved id that would leave the route.
+  for (const id of ['..', '.', '\ud800']) {
+    it(`a resolved post with id ${JSON.stringify(id)} stays on search and settles`, async () => {
+      const q = 'https://other.social/@bob/5'
+      history.replaceState(null, '', `/search?q=${encodeURIComponent(q)}`)
+      const client = signIn()
+      vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])
+      vi.spyOn(client, 'search').mockResolvedValue(result({ statuses: [{ ...status('5'), id }] }))
+      const el = await mount({ q, type: 'statuses' })
+      expect(location.pathname).toBe('/search')
+      expect(text(el)).not.toContain('Searching…')
+    })
+  }
+
+  // Review round 2 (Codex R2-2): malformed posts on the Posts tab.
+  it('a null post and a post with no account leave the Posts tab usable', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])
+    const noAccount = { ...status('6'), account: undefined } as unknown as mastodon.v1.Status
+    vi.spyOn(client, 'search').mockResolvedValue(result({
+      statuses: [null as unknown as mastodon.v1.Status, noAccount, status('7')],
+    }))
+    const errors: unknown[] = []
+    const onError = (e: ErrorEvent) => errors.push(e.error)
+    window.addEventListener('error', onError)
+    const el = await mount({ q: 'bob', type: 'statuses' })
+    window.removeEventListener('error', onError)
+    const cards = [...el.shadowRoot!.querySelectorAll('caribou-status-card')]
+    expect(cards.map((c) => (c as unknown as { status: mastodon.v1.Status }).status.id)).toEqual(['7'])
+    expect(text(el)).not.toContain('Searching…')
+    expect(errors).toEqual([])
+  })
+
+  // Review round 2 (Fable N1): the popstate clear alone. The reader leaves
+  // and comes straight back to an earlier search before the wait ends; the
+  // old typed query must not overwrite it.
+  it('a quick Back to /search after leaving does not commit the old typed query', async () => {
+    searchPublic.mockResolvedValue(result())
+    const el = await mount({ instance: 'pub.social' })
+    vi.useFakeTimers()
+    const input = el.shadowRoot!.querySelector('input')!
+    input.value = 'new'
+    input.dispatchEvent(new InputEvent('input', { inputType: 'insertText' }))
+    history.pushState(null, '', '/about')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    // Back lands on an earlier search entry; the router builds a new page
+    // for it, so this element hears no further popstate.
+    history.replaceState(null, '', '/search?q=old')
+    vi.advanceTimersByTime(400)
+    expect(location.pathname + location.search).toBe('/search?q=old')
+    expect(searchPublic).not.toHaveBeenCalled()
   })
 })

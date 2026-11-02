@@ -13,7 +13,7 @@ import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import { tagPath } from './_tag-path.js'
 import {
-  SEARCH_TABS, isUrlQuery, parseSearch, resolvedPath, searchPath,
+  SEARCH_TABS, cleanSearch, isUrlQuery, parseSearch, resolvedPath, searchPath,
 } from './_search-query.js'
 import './caribou-auth-required.js'
 import './caribou-button.js'
@@ -205,13 +205,23 @@ export class CaribouSearch extends LitElement {
       return
     }
     if (!current()) return
-    // Only a signed-in search asked the server to resolve the address; a
-    // signed-out answer is a text search and names nothing.
-    if (client && resolve && this.goToResolved(q, data, host)) return
-    if (client) {
-      const statuses = batch(() => data.statuses.map((s) => mergeStatus(s)))
-      data = { ...data, statuses }
-      void loadRelationships(data.accounts.map((a) => a.id))
+    try {
+      // Entries the page cannot use never reach the cache or the screen.
+      data = cleanSearch(data)
+      // Only a signed-in search asked the server to resolve the address; a
+      // signed-out answer is a text search and names nothing.
+      if (client && resolve && this.goToResolved(q, data, host)) return
+      if (client) {
+        const clean = data
+        const statuses = batch(() => clean.statuses.map((s) => mergeStatus(s)))
+        data = { ...data, statuses }
+        void loadRelationships(data.accounts.map((a) => a.id))
+      }
+    } catch {
+      // A shape no check foresaw: the search ends in its error state, never
+      // stuck on "Searching…".
+      this.results = { kind: 'error', q }
+      return
     }
     this.results = { kind: 'ok', q, data, host, signedIn: !!client, resolved: !!client && resolve }
   }

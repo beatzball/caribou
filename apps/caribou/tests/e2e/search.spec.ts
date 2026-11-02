@@ -115,7 +115,7 @@ test('a deep link opens the tab and the query it names', async ({ page }) => {
 test('pasting a post address opens its thread in the app', async ({ page }) => {
   await signIn(page)
   const seen = await answerSearch(page, (q) =>
-    q === 'https://other.social/@bob/5' ? { accounts: [], statuses: [status('77', 'resolved post')], hashtags: [] } : everything())
+    q === 'https://other.social/@bob/77' ? { accounts: [], statuses: [status('77', 'resolved post')], hashtags: [] } : everything())
   await page.route(`https://${INSTANCE}/api/v1/statuses/77*`, (route) => route.fulfill(json(status('77', 'resolved post'))))
   await page.route(`https://${INSTANCE}/api/v1/statuses/77/context*`, (route) =>
     route.fulfill(json({ ancestors: [], descendants: [] })))
@@ -125,7 +125,7 @@ test('pasting a post address opens its thread in the app', async ({ page }) => {
   await input.focus()
   // A paste is an input event with inputType insertFromPaste.
   await input.evaluate((el: HTMLInputElement) => {
-    el.value = 'https://other.social/@bob/5'
+    el.value = 'https://other.social/@bob/77'
     el.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', bubbles: true, composed: true }))
   })
   await expect(page).toHaveURL(/\/@bob@other\.social\/77$/)

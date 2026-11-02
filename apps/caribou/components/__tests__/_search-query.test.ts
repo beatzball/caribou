@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isUrlQuery, parseSearch, resolvedPath, searchPath } from '../_search-query.js'
+import { cleanSearch, isUrlQuery, parseSearch, resolvedPath, searchPath } from '../_search-query.js'
 
 const account = (over: Record<string, unknown> = {}) => ({
   id: '1', acct: 'bob@other.social', url: 'https://other.social/@bob', uri: 'https://other.social/users/bob', ...over,
@@ -110,9 +110,45 @@ describe('resolvedPath', () => {
     const alias = status({ url: 'https://other.social/@bob/5', uri: 'https://other.social/users/bob/statuses/5' })
     expect(resolvedPath('https://other.social/web/statuses/5', { accounts: [], statuses: [alias] }, 'h')).toBe('/@bob@other.social/99')
   })
+  // Review round 2 (Codex R2-1): ids that would leave the thread route.
+  it('refuses a status id that is a dot segment or cannot be encoded', () => {
+    for (const id of ['.', '..', '\ud800', 'a\udc00']) {
+      expect(resolvedPath(url, { accounts: [], statuses: [status({ id })] }, 'h'), JSON.stringify(id)).toBeNull()
+    }
+  })
+  // Review round 2 (Codex R2-3): the same server is not the same thing.
+  it('refuses a lone answer on the same server that is not the address', () => {
+    const carol = account({ acct: 'carol@other.social', url: 'https://other.social/@carol', uri: 'https://other.social/users/carol' })
+    expect(resolvedPath('https://other.social/@bob', { accounts: [carol], statuses: [] }, 'h')).toBeNull()
+    const other = status({ id: '1', url: 'https://other.social/@bob/6', uri: 'https://other.social/users/bob/statuses/6' })
+    expect(resolvedPath(url, { accounts: [], statuses: [other] }, 'h')).toBeNull()
+  })
+  it('takes a lone account under another address form on its server', () => {
+    expect(resolvedPath('https://other.social/users/Bob', { accounts: [account({ url: 'https://other.social/@bob', uri: 'https://other.social/u/x' })], statuses: [] }, 'h'))
+      .toBe('/@bob@other.social')
+  })
   it('opens nothing when the match is unclear or empty', () => {
     expect(resolvedPath(url, { accounts: [], statuses: [] }, 'h')).toBeNull()
     expect(resolvedPath(url, { accounts: [account()], statuses: [status({ url: 'https://x/1', uri: 'https://x/1' })] }, 'h')).toBeNull()
     expect(resolvedPath('cats', { accounts: [account()], statuses: [] }, 'h')).toBeNull()
+  })
+})
+
+// Review round 2 (Codex R2-2): malformed entries never reach the cache or
+// the page.
+describe('cleanSearch', () => {
+  it('drops malformed accounts, posts and hashtags and keeps the rest', () => {
+    const good = status()
+    const out = cleanSearch({
+      accounts: [account(), null, account({ acct: '../x' }), { acct: 'bob' }],
+      statuses: [good, null, { ...status(), account: undefined }, status({ id: '' }), status({ reblog: { id: '2', account: null } })],
+      hashtags: [{ name: 'cats' }, null, { name: '' }, { name: 5 }],
+    })
+    expect(out.accounts).toHaveLength(1)
+    expect(out.statuses).toEqual([good])
+    expect(out.hashtags).toEqual([{ name: 'cats' }])
+  })
+  it('turns a missing list into an empty one', () => {
+    expect(cleanSearch({} as never)).toEqual({ accounts: [], statuses: [], hashtags: [] })
   })
 })
