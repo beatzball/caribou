@@ -104,10 +104,23 @@ it adds the instance host to a local acct.
 **Links inside a post body** are the author's server HTML; never rewrite them.
 `<caribou-status-card>` has one delegated click on `.status-content`: a plain
 click on a mention that matches `status.mentions` opens `/@acct@host` in
-Caribou. Hashtags and other links go to their real `href`. Every module that
+Caribou. A plain click on a hashtag (`.hashtag` or `rel="tag"`, text `#name`)
+whose name is in `status.tags` opens `/tags/<name>` (`tagPath` in
+`components/_tag-path.ts`). Other links go to their real `href`. Every module that
 calls DOMPurify installs `installPurifyHooks` from
 `@beatzball/caribou-mastodon-client/sanitize-opts`, so the server and the client
 output stay the same string.
+
+**A hashtag page** is `pages/tags/[tag].ts`. The server reads the tag from the
+reader's instance (the cookie) and paints the first page, like `/local`; the
+name keeps its case, and `parseTagParam` refuses a name no hashtag can have.
+Without an instance the server sends the sign-in placeholder, and a signed-in
+reader then gets the timeline from their own server after the first render.
+`<caribou-tag-header>` shows the Follow button only after mount, for a signed-in
+reader; follow state lives in `tagCache` (`@beatzball/caribou-state`), keyed by
+account and folded name, so `#AI` and `#ai` are one tag. It is the one page
+with its own title (`#tag · Caribou`): the server sets it through `seoTitle`,
+the page sets it on a client-side move and puts `Caribou` back when it leaves.
 
 **A content warning hides the post body.** When the shown post (the boosted
 one, for a boost) has a `spoilerText`, the card renders the warning and a
