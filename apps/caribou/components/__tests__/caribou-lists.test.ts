@@ -320,14 +320,15 @@ describe('review round 1', () => {
     expect($$(el, '#members li').map((li) => li.dataset.accountId)).toEqual(['7'])
     const oldRemove = $(el, '#members li caribou-button.remove')!
 
-    // Bob's reads are held, so nothing of his list is known yet.
+    // The new account's reads are held, so nothing of its list is known yet.
+    const net = vi.spyOn(globalThis, 'fetch').mockReturnValue(new Promise(() => {}))
     const carol = signIn('carol')
-    vi.spyOn(carol, 'fetchList').mockReturnValue(new Promise(() => {}))
-    vi.spyOn(carol, 'fetchListAccounts').mockReturnValue(new Promise(() => {}))
     const remove = vi.spyOn(carol, 'removeListAccounts').mockResolvedValue()
     oldRemove.click()
     await settle(el)
     expect(remove).not.toHaveBeenCalled()
+    const method = (c: Parameters<typeof fetch>) => (c[0] instanceof Request ? c[0].method : c[1]?.method ?? 'GET')
+    expect(net.mock.calls.map(method)).not.toContain('DELETE')
     expect($$(el, '#members li')).toEqual([])
     expect($(el, '#members .notice')!.textContent).toBe('Loading the members…')
   })

@@ -136,7 +136,8 @@ async function read<T>(
   const generation = ownerGeneration()
   const ks = keys(client)
   for (let i = 0; i < MAX_READ_TRIES; i++) {
-    await idle(ks)
+    // Starts at once when no write is out, so the request goes now.
+    if (busy(ks)) await idle(ks)
     if (generation !== ownerGeneration()) return
     const revs = ks.map(revision)
     let value: T
