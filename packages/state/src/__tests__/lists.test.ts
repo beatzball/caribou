@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import {
   accountListIds, accountListsCache, createList, deleteList, listById, listMembers, listMembersCache,
   listsCache, loadAccountLists, loadList, loadListMembers, loadLists, setListMember, updateList, userLists,
+  _resetListsForTests,
 } from '../lists.js'
 import { activeUserKey } from '../users.js'
 
@@ -44,6 +46,7 @@ let toasts: { kind: string; message: string }[]
 const onToast = (e: Event) => toasts.push((e as CustomEvent).detail)
 
 beforeEach(() => {
+  _resetListsForTests()
   listsCache.value = new Map()
   listMembersCache.value = new Map()
   accountListsCache.value = new Map()
@@ -379,4 +382,84 @@ it('an added member goes where `at` says', async () => {
   await loadListMembers('1', { clientSource: () => fakeClient() })
   await setListMember('1', account('9'), true, { clientSource: () => fakeClient(), at: 1 })
   expect(listMembers('1')?.map((a) => a.id)).toEqual(['7', '9', '8'])
+})
+
+describe('review round 2', () => {
+  it('a read that keeps crossing writes gives up with an error the page can retry (codex P3)', async () => {
+    let fetches = 0
+    const client = fakeClient({
+      // Every answer crosses a new write, so none can be kept.
+      fetchLists: vi.fn(async () => {
+        fetches += 1
+        await createList({ title: `L${fetches}` }, { clientSource: () => fakeClient() })
+        return [list('1', 'Friends')]
+      }),
+    })
+    await expect(loadLists({ clientSource: () => client })).rejects.toMatchObject({ code: 'unknown' })
+    expect(fetches).toBe(5)
+    expect(userLists()).toBeUndefined()
+  })
+
+  it('only the last of several writes puts its answer in the cache (fable 4)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    const second = deferred<mastodon.v1.List>()
+    let calls = 0
+    const client = fakeClient({
+      updateList: vi.fn(async (id: string, input: { title: string }) =>
+        (++calls === 1 ? list(id, input.title) : second.promise)),
+    })
+    const a = updateList('1', { title: 'Family' }, { clientSource: () => client })
+    const b = updateList('1', { title: 'Cats' }, { clientSource: () => client })
+    await a
+    // The first answer is in, the second is not: the newest intent shows.
+    expect(listById('1')?.title).toBe('Cats')
+    second.resolve(list('1', 'Cats'))
+    await b
+    expect(listById('1')?.title).toBe('Cats')
+  })
+
+  it('a reset empties the queues, so one stuck write does not hold the next test (fable 3)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    void deleteList('1', { clientSource: () => fakeClient({ deleteList: vi.fn(() => new Promise<void>(() => {})) }) })
+    _resetListsForTests()
+    listsCache.value = new Map([[ME, [list('1', 'Friends')]]])
+    // With the stuck delete forgotten, a read is free to go.
+    await loadLists({ clientSource: () => fakeClient({ fetchLists: vi.fn(async () => [list('1', 'Friends')]) }) })
+    expect(listById('1')?.title).toBe('Friends')
+  })
+})
+
+it('a read that wakes as a new write starts waits for that one too (fable 1)', async () => {
+  _resetListsForTests()
+  activeUserKey.value = ME
+  listsCache.value = new Map()
+  await loadLists({ clientSource: () => fakeClient() })
+  const gone = new Set<string>()
+  const dA = deferred<void>()
+  const dB = deferred<void>()
+  const server = fakeClient({
+    fetchLists: vi.fn(async () => [list('1', 'Friends'), list('2', 'News')].filter((l) => !gone.has(l.id))),
+    deleteList: vi.fn((id: string) => (id === '1' ? dA.promise : dB.promise).then(() => { gone.add(id) })),
+  })
+  const a = deleteList('1', { clientSource: () => server })
+  const r = loadLists({ clientSource: () => server })
+  // The first delete clears its members right before it ends. A microtask
+  // queued then runs after the end but before the waiting read goes on: a
+  // second delete starts in that gap.
+  let b: Promise<boolean> | undefined
+  let armed = false
+  const stop = effect(() => {
+    void listMembersCache.value
+    if (armed && !b) queueMicrotask(() => { b = deleteList('2', { clientSource: () => server }) })
+  })
+  armed = true
+  dA.resolve()
+  await a
+  stop()
+  await new Promise((res) => setTimeout(res, 0))
+  expect(userLists()?.map((l) => l.id)).toEqual([])
+  dB.resolve()
+  await b!
+  await r
+  expect(userLists()?.map((l) => l.id)).toEqual([])
 })

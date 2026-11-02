@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, ListInput } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type CaribouClient, type ListInput } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
 import { activeClient, activeUserKey } from './users.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -136,8 +136,9 @@ async function read<T>(
   const generation = ownerGeneration()
   const ks = keys(client)
   for (let i = 0; i < MAX_READ_TRIES; i++) {
-    // Starts at once when no write is out, so the request goes now.
-    if (busy(ks)) await idle(ks)
+    // Starts at once when no write is out, so the request goes now. A loop:
+    // a write can start between the wake and this check.
+    while (busy(ks)) await idle(ks)
     if (generation !== ownerGeneration()) return
     const revs = ks.map(revision)
     let value: T
@@ -153,6 +154,9 @@ async function read<T>(
       return
     }
   }
+  // Every answer crossed a write. Say so, so the page offers Retry instead
+  // of waiting for an answer that will not come.
+  throw new CaribouError('unknown', 'Your lists changed while they loaded. Try again.')
 }
 
 const membersKey = (userKey: UserKey, listId: string) => listKey(userKey, `members ${listId}`)
@@ -374,4 +378,18 @@ export async function setListMember(
     end(keys)
     return ok
   })
+}
+
+/**
+ * Test-only — do not use in production code. Forgets every queued write,
+ * pending mark and waiting read, so a write a test left hanging does not
+ * hold the next test. The caches are the test's to reset.
+ */
+export function _resetListsForTests(): void {
+  queues.clear()
+  pending.clear()
+  revisions.clear()
+  idleWaiters.clear()
+  listWrites.clear()
+  memberWrites.clear()
 }
