@@ -92,3 +92,83 @@ export async function toggleFollow(
     writing.delete(key)
   }
 }
+
+type RelationshipFlags = Partial<Pick<mastodon.v1.Relationship,
+  'muting' | 'mutingNotifications' | 'blocking' | 'following' | 'requested'>>
+
+type Account = Pick<mastodon.v1.Account, 'id' | 'acct'>
+
+/** True when the reader mutes or blocks the account (as far as is known). */
+export function isMutedOrBlocked(
+  accountId: string, userKey: UserKey | null = activeUserKey.value,
+): boolean {
+  const rel = relationshipFor(accountId, userKey)
+  return rel?.muting === true || rel?.blocking === true
+}
+
+// Writes `patch` at once, then asks the server. The server's answer
+// replaces the whole relationship. A failure puts back only the fields this
+// write changed, so a follow that finished meanwhile keeps its result.
+// Resolves true when the server took the change.
+async function writeFlags(
+  kind: 'mute' | 'block', account: Account, patch: RelationshipFlags,
+  call: (client: CaribouClient) => Promise<mastodon.v1.Relationship>,
+  failure: string, opts: RelationshipOpts,
+): Promise<boolean> {
+  const client = (opts.clientSource ?? defaultSource)()
+  if (!client) return false
+  const key = relationshipKey(client.userKey, account.id)
+  const lock = `${key} ${kind}`
+  if (writing.has(lock)) return false
+  const before = relationshipCache.value.get(key)
+  const base = before ?? ({ id: account.id } as mastodon.v1.Relationship)
+  put(key, { ...base, ...patch })
+  writing.add(lock)
+  const revision = (revisions.get(key) ?? 0) + 1
+  revisions.set(key, revision)
+  try {
+    put(key, await call(client))
+    return true
+  } catch {
+    // Nothing else wrote meanwhile and nothing was known before: forget it.
+    if (!before && revisions.get(key) === revision) {
+      put(key, undefined)
+    } else {
+      const undo: Record<string, boolean> = {}
+      for (const field of Object.keys(patch)) {
+        undo[field] = (before as Record<string, unknown> | undefined)?.[field] === true
+      }
+      put(key, { ...(relationshipCache.value.get(key) ?? base), ...undo })
+    }
+    toast(failure)
+    return false
+  } finally {
+    writing.delete(lock)
+  }
+}
+
+/**
+ * Mutes the account (its posts and its notifications), or unmutes it. The
+ * cache changes at once, so every post by the account leaves the lists; a
+ * failure puts the old state back and says so.
+ */
+export function setMute(account: Account, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
+  return on
+    ? writeFlags('mute', account, { muting: true, mutingNotifications: true },
+        (c) => c.mute(account.id), `Couldn't mute @${account.acct}.`, opts)
+    : writeFlags('mute', account, { muting: false, mutingNotifications: false },
+        (c) => c.unmute(account.id), `Couldn't unmute @${account.acct}.`, opts)
+}
+
+/**
+ * Blocks the account, or unblocks it. A block also ends a follow either
+ * way, so the follow flags drop with it. Ask the reader first: a block
+ * removes the reader as a follower too.
+ */
+export function setBlock(account: Account, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
+  return on
+    ? writeFlags('block', account, { blocking: true, following: false, requested: false },
+        (c) => c.block(account.id), `Couldn't block @${account.acct}.`, opts)
+    : writeFlags('block', account, { blocking: false },
+        (c) => c.unblock(account.id), `Couldn't unblock @${account.acct}.`, opts)
+}

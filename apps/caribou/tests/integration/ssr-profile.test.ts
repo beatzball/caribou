@@ -80,7 +80,7 @@ describe('caribou-profile SSR', () => {
 
   it('renders each card in order, as a timeline card that carries its status id and content', async () => {
     const out = await render(INITIAL)
-    const ids = [...out.matchAll(/<caribou-status-card\s+variant="timeline"\s+data-status-id="(\d+)"/g)].map((m) => m[1])
+    const ids = [...out.matchAll(/<caribou-status-card\s+variant="timeline"\s+filter-context="account"\s+data-status-id="(\d+)"/g)].map((m) => m[1])
     expect(ids).toEqual(['210', '209'])
     expect(out.indexOf('<p>post 210</p>')).toBeGreaterThan(-1)
     expect(out.indexOf('<p>post 209</p>')).toBeGreaterThan(out.indexOf('<p>post 210</p>'))

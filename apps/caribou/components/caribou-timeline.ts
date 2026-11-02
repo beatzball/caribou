@@ -13,6 +13,7 @@ import './caribou-status-card.js'
 import './caribou-new-posts-banner.js'
 import './caribou-button.js'
 import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
+import { timelineFilterContext } from './_status-filter.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
 
@@ -53,6 +54,8 @@ export class CaribouTimeline extends LitElement {
   static override styles = css`
     :host { display: block; }
     ul { list-style: none; margin: 0; padding: 0; }
+    /* A card hidden by a filter, a mute or a block takes its row with it. */
+    li:has(> caribou-status-card[hidden]) { display: none; }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
     .failed { display: flex; align-items: center; gap: var(--space-2); padding-inline-end: var(--space-4); }
@@ -275,6 +278,7 @@ export class CaribouTimeline extends LitElement {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
     const last = statuses[statuses.length - 1]
+    const context = timelineFilterContext(this.kind) ?? ''
     if (!last) {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'No bookmarks yet.' : 'No posts yet.'}</div>`
     }
@@ -294,7 +298,8 @@ export class CaribouTimeline extends LitElement {
         ></caribou-new-posts-banner>
         <ul>
           ${repeat(statuses, (s) => s.id, (s) => html`
-            <li><caribou-status-card data-status-id=${s.id} .status=${s}></caribou-status-card></li>
+            <li><caribou-status-card data-status-id=${s.id} .status=${s}
+              filter-context=${context}></caribou-status-card></li>
           `)}
         </ul>
         ${failed && failedOlder

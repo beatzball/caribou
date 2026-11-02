@@ -64,4 +64,17 @@ describe('mergeStatus', () => {
     expect(statusCache.value.get('p')!.content).toBe('<p>edited</p>')
     expect(statusCache.value.get('p')!.favourited).toBe(true)
   })
+
+  // Mastodon sends `filtered` only to a reader with a token, so a copy that
+  // has it is the reader's own, newer than the one cached: a filter the
+  // reader added or removed since must show.
+  it('takes `filtered` from a fresh copy that has it, and keeps it from one that does not', () => {
+    const match = [{ filter: { id: 'f', title: 'Spoilers', context: ['home'], filterAction: 'hide' } }]
+    cacheStatus({ ...makeStatus('3'), filtered: match } as unknown as mastodon.v1.Status)
+    expect(mergeStatus(makeStatus('3')).filtered).toEqual(match)
+    expect(mergeStatus({ ...makeStatus('3'), filtered: [] } as mastodon.v1.Status).filtered).toEqual([])
+    const again = [{ filter: { id: 'g', title: 'Sports', context: ['home'], filterAction: 'warn' } }]
+    expect(mergeStatus({ ...makeStatus('3'), filtered: again } as unknown as mastodon.v1.Status).filtered)
+      .toEqual(again)
+  })
 })

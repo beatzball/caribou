@@ -55,6 +55,8 @@ export class CaribouNotifications extends LitElement {
     .filters button[aria-pressed="true"] { color: var(--fg-0); border-bottom-color: var(--accent); }
     .filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     ul { list-style: none; margin: 0; padding: 0; }
+    /* A post hidden by a filter, a mute or a block takes its notification with it. */
+    li:has(caribou-status-card[hidden]) { display: none; }
     li { border-bottom: 1px solid var(--border); }
     .line {
       display: flex; align-items: center; gap: var(--space-2);
@@ -230,7 +232,7 @@ export class CaribouNotifications extends LitElement {
     // the card acts on.
     const card = status
       ? html`<caribou-status-card data-status-id=${status.id} .status=${status}
-          instance=${activeUser.value?.server ?? ''}></caribou-status-card>`
+          instance=${activeUser.value?.server ?? ''} filter-context="notifications"></caribou-status-card>`
       : nothing
     // A mention is its post. Without one it gets the generic line.
     if (loose.type === 'mention' && status) {

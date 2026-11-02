@@ -41,7 +41,12 @@ const PAIRED_COUNTS = [['favourited', 'favouritesCount'], ['reblogged', 'reblogs
 function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status): mastodon.v1.Status {
   const out = { ...fresh } as Record<string, unknown>
   const had = current as unknown as Record<string, unknown>
-  for (const key of READER_FIELDS) if (key in had) out[key] = had[key]
+  for (const key of READER_FIELDS) {
+    // Only a reader with a token gets `filtered`, so a copy that has it is
+    // the reader's own and newer: a filter added or removed since shows.
+    if (key === 'filtered' && Array.isArray(out.filtered)) continue
+    if (key in had) out[key] = had[key]
+  }
   for (const [flag, count] of PAIRED_COUNTS) {
     const was = (had[count] as number | undefined) ?? 0
     const now = (out[count] as number | undefined) ?? 0

@@ -7,14 +7,17 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, createKeepAlive, isOwnAccount, statusCache,
-  toggleBookmark, toggleFavourite, toggleReblog,
+  activeClient, activeUser, createKeepAlive, isOwnAccount, relationshipCache, relationshipKey,
+  setBlock, setMute, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
+import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
+import { confirmDialog } from './caribou-confirm-dialog.js'
 import { spaClick } from './_spa-link.js'
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
+import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
 
@@ -117,6 +120,22 @@ function hostOf(url: string): string {
 // came from plus its id: another instance's post with the same id stays
 // collapsed. A keep-alive empties itself when the active account changes.
 const openedWarnings = createKeepAlive<boolean>(500)
+// Posts hidden by a filter's warning that the reader showed. Same rules.
+const shownFiltered = createKeepAlive<boolean>(500)
+
+function sameVerdict(a: FilterVerdict | null | undefined, b: FilterVerdict | null | undefined): boolean {
+  if (!a || !b) return a === b
+  return a.action === b.action && a.titles.join('\n') === b.titles.join('\n')
+}
+
+// A copy with `filtered` is the reader's own (Mastodon sends it only with a
+// token). The cached copy wins when it has one: it is the newest.
+function filterSource(own: Status, cached: Status | undefined): Status {
+  const has = (x: Status | undefined) => Array.isArray(x?.filtered) || Array.isArray(x?.reblog?.filtered)
+  return cached && has(cached) ? cached : own
+}
+
+type Moderated = { verb: 'muted' | 'blocked'; account: Status['account'] }
 
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
   return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
@@ -126,6 +145,7 @@ export function statusPermalink(s: { id: string; account: { acct: string } }): s
 export class CaribouStatusCard extends LitElement {
   static override styles = [mastodonLinkText, css`
     :host { display: block; }
+    :host([hidden]) { display: none; }
     article { padding: var(--space-4); border-bottom: 1px solid var(--border); }
     /* The avatar sits in the gutter beside the body, but it is part of the
        author link in the header, so one link holds avatar, name and acct.
@@ -192,14 +212,35 @@ export class CaribouStatusCard extends LitElement {
     .spoiler {
       margin: 0; color: var(--fg-0); white-space: pre-wrap; overflow-wrap: anywhere;
     }
-    .cw-toggle {
+    .cw-toggle, .notice button {
       margin-top: var(--space-2); padding: var(--space-1) var(--space-3);
       font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer;
       color: var(--fg-0); background: var(--bg-2);
       border: 1px solid var(--border); border-radius: var(--radius-sm);
     }
-    .cw-toggle:hover { background: var(--bg-1); }
-    .cw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .notice button { margin-top: 0; }
+    .cw-toggle:hover, .notice button:hover { background: var(--bg-1); }
+    .cw-toggle:focus-visible, .notice button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .actions caribou-menu.more { margin-inline-start: auto; }
+    .actions caribou-menu.more::part(trigger) { color: var(--fg-muted); }
+    @media (pointer: fine) {
+      .actions caribou-menu.more::part(trigger) { min-inline-size: 2.25rem; min-block-size: 2.25rem; }
+    }
+    .menu-item {
+      display: block; inline-size: 100%; padding: var(--space-2) var(--space-3);
+      font: inherit; text-align: start; color: var(--fg-1); background: none;
+      border: 0; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .menu-item:hover { background: var(--bg-1); }
+    .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .menu-item.danger { color: var(--danger); }
+    .notice {
+      display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;
+      color: var(--fg-muted);
+    }
+    .notice p { margin: 0; flex: 1; overflow-wrap: anywhere; }
+    .notice strong { color: var(--fg-0); }
+    .filtered-post:not([hidden]) { margin-top: var(--space-3); }
     .boost-attribution {
       display: flex; gap: var(--space-2); align-items: center;
       padding: 0 0 var(--space-2) var(--space-2);
@@ -215,12 +256,31 @@ export class CaribouStatusCard extends LitElement {
   // The instance the status came from. Optional: without it the card reads
   // the instance off the enclosing `<caribou-app-shell>` after mount.
   @property() instance = ''
+  // Where the card is shown, for the reader's server filters: home,
+  // notifications, public, thread or account. Empty never filters
+  // (bookmarks). In every context but account, a post by an account the
+  // reader mutes or blocks is hidden too.
+  @property({ attribute: 'filter-context' }) filterContext: FilterContext | '' = ''
 
   // Both start false, so the server and the first client render show the
   // signed-out bar. `bindActions` sets them after mount.
   @state() private canAct = false
   @state() private ownPost = false
   @state() private liveFields: ActionFields | null = null
+  // The filter verdict from the newest copy; undefined until mount, when
+  // render() reads `status` itself, as the server did.
+  @state() private liveVerdict: FilterVerdict | null | undefined = undefined
+  // The reader showed this post past its filter warning.
+  @state() private filterShown = false
+  // The reader's relationship with the author, for the menu's labels.
+  @state() private authorRel: { muting: boolean; blocking: boolean } = { muting: false, blocking: false }
+  // The author or the booster is muted or blocked, in a context that hides it.
+  @state() private relHidden = false
+  // The reader muted or blocked the author from this card's menu. The card
+  // then shows that, with Undo, where the post was, so focus has a place.
+  @state() private moderated: Moderated | null = null
+  // Set by render(), read by updated(): the host is hidden.
+  private hiddenNow = false
 
   private disposeActions: (() => void) | null = null
   private shellObserver: MutationObserver | null = null
@@ -298,6 +358,27 @@ export class CaribouStatusCard extends LitElement {
       const next = cached ? actionFields(cached) : null
       const prev = this.liveFields
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
+
+      // The reader's own posts are never filtered.
+      const verdict = s && !this.ownPost
+        ? filterVerdict(filterSource(s, cache.get(s.id)), this.filterContext || null)
+        : null
+      if (!sameVerdict(verdict, this.liveVerdict)) this.liveVerdict = verdict
+
+      // Relationship ids are the reader's server's, so only a card that can
+      // act (same instance) may look them up.
+      const rels = relationshipCache.value
+      const relOf = (id: string) => this.canAct && user ? rels.get(relationshipKey(user.userKey, id)) : undefined
+      const author = post ? relOf(post.account.id) : undefined
+      const booster = s?.reblog ? relOf(s.account.id) : undefined
+      const muting = author?.muting === true
+      const blocking = author?.blocking === true
+      if (muting !== this.authorRel.muting || blocking !== this.authorRel.blocking) {
+        this.authorRel = { muting, blocking }
+      }
+      const hides = this.filterContext !== '' && this.filterContext !== 'account'
+      const relHidden = hides && [author, booster].some((r) => r?.muting === true || r?.blocking === true)
+      if (relHidden !== this.relHidden) this.relHidden = relHidden
     })
   }
 
@@ -318,7 +399,7 @@ export class CaribouStatusCard extends LitElement {
     // The effect only re-runs on a signal change. A new `.status` must not
     // show the old post's cached fields for a render, and a new `instance`
     // decides again whether the buttons act.
-    if ((changed.has('status') || changed.has('instance')) && this.disposeActions) {
+    if ((changed.has('status') || changed.has('instance') || changed.has('filterContext')) && this.disposeActions) {
       this.rebindActions()
     }
     // The server and a hydrating render are collapsed; the server has no
@@ -327,7 +408,13 @@ export class CaribouStatusCard extends LitElement {
       const hydrating = this.adoptedServerRender && !this.hasUpdated
       const key = typeof window === 'undefined' || hydrating ? null : this.warningKey()
       this.warningOpen = key !== null && openedWarnings.get(key) === true
+      this.filterShown = key !== null && shownFiltered.get(key) === true
+      this.moderated = null
     }
+  }
+
+  protected override updated() {
+    this.toggleAttribute('hidden', this.hiddenNow)
   }
 
   // The instance the shown post came from, the same order `profileHref`
@@ -346,6 +433,60 @@ export class CaribouStatusCard extends LitElement {
     const key = this.warningKey()
     this.warningOpen = !this.warningOpen
     if (key !== null) openedWarnings.set(key, this.warningOpen)
+  }
+
+  private onToggleFiltered = () => {
+    const key = this.warningKey()
+    this.filterShown = !this.filterShown
+    if (key !== null) shownFiltered.set(key, this.filterShown)
+  }
+
+  private async focusIn(selector: string) {
+    await this.updateComplete
+    this.renderRoot.querySelector<HTMLElement>(selector)?.focus()
+  }
+
+  // Shows "You muted …" with Undo in the post's place at once, then asks
+  // the server. A failure brings the post back (the state layer says why).
+  private async moderate(verb: Moderated['verb'], write: () => Promise<boolean>) {
+    const post = this.status?.reblog ?? this.status
+    if (!post) return
+    const mine: Moderated = { verb, account: post.account }
+    this.moderated = mine
+    void this.focusIn('.notice button')
+    if (await write() || this.moderated !== mine) return
+    this.moderated = null
+    void this.focusIn('caribou-menu.more')
+  }
+
+  private onMute = () => {
+    const account = (this.status?.reblog ?? this.status)?.account
+    if (!this.canAct || !account) return
+    if (this.authorRel.muting) void setMute(account, false)
+    else void this.moderate('muted', () => setMute(account, true))
+  }
+
+  private onBlock = async () => {
+    const account = (this.status?.reblog ?? this.status)?.account
+    if (!this.canAct || !account) return
+    if (this.authorRel.blocking) {
+      void setBlock(account, false)
+      return
+    }
+    const ok = await confirmDialog({
+      title: `Block @${account.acct}?`,
+      message: `@${account.acct} will no longer be able to follow you or see your posts, and you will no longer see theirs.`,
+      confirmLabel: 'Block',
+    })
+    if (ok) void this.moderate('blocked', () => setBlock(account, true))
+  }
+
+  private onUndoModerate = () => {
+    const m = this.moderated
+    if (!m) return
+    this.moderated = null
+    void (m.verb === 'muted' ? setMute(m.account, false) : setBlock(m.account, false))
+    void this.focusIn('caribou-menu.more')
   }
 
   private onReply = () => {
@@ -413,8 +554,20 @@ export class CaribouStatusCard extends LitElement {
           hint=${hint('bookmark')} description=${hint('bookmark')}
           ?soft-disabled=${off}
           @click=${this.onBookmark}></caribou-icon-button>
+        ${this.canAct && !this.ownPost ? this.renderMenu(post) : nothing}
       </div>
     `
+  }
+
+  private renderMenu(post: Status) {
+    const acct = post.account.acct
+    const { muting, blocking } = this.authorRel
+    return html`<caribou-menu class="more" anchored icon="ellipsis" label="More actions">
+      <button type="button" class="menu-item" data-action="mute"
+        @click=${this.onMute}>${muting ? 'Unmute' : 'Mute'} @${acct}</button>
+      <button type="button" class=${blocking ? 'menu-item' : 'menu-item danger'} data-action="block"
+        @click=${this.onBlock}>${blocking ? 'Unblock' : 'Block'} @${acct}</button>
+    </caribou-menu>`
   }
 
   // Avatars sometimes truncate mid-response under CDN load
@@ -496,7 +649,42 @@ export class CaribouStatusCard extends LitElement {
 
   override render() {
     const s = this.status
+    this.hiddenNow = false
     if (!s) return nothing
+    if (this.moderated) {
+      const { verb, account } = this.moderated
+      return html`<article data-variant=${this.variant} class="moderated"><div class="notice">
+        <p id="moderated-msg">You ${verb} @${account.acct}.</p>
+        <button type="button" class="undo" aria-describedby="moderated-msg"
+          @click=${this.onUndoModerate}>Undo</button>
+      </div></article>`
+    }
+    // The server and the hydrating render read the status they were given;
+    // after mount the effect keeps `liveVerdict` from the newest copy.
+    const verdict = this.liveVerdict !== undefined
+      ? this.liveVerdict
+      : filterVerdict(s, this.filterContext || null)
+    // The post the reader opened is never removed: a hide filter warns.
+    if ((verdict?.action === 'hide' && this.variant !== 'focused') || this.relHidden) {
+      this.hiddenNow = true
+      return nothing
+    }
+    if (verdict) {
+      const shown = this.filterShown
+      return html`<article data-variant=${this.variant} class="filtered">
+        <div class="notice">
+          <p>Hidden by filter: <strong>${verdict.titles.join(', ')}</strong></p>
+          <button type="button" class="filter-toggle" aria-controls="filtered-post"
+            aria-expanded=${shown ? 'true' : 'false'}
+            @click=${this.onToggleFiltered}>${shown ? 'Hide' : 'Show'}</button>
+        </div>
+        <div class="filtered-post" id="filtered-post" ?hidden=${!shown}>${shown ? this.renderPost(s) : nothing}</div>
+      </article>`
+    }
+    return html`<article data-variant=${this.variant}>${this.renderPost(s)}</article>`
+  }
+
+  private renderPost(s: Status) {
     // For reblogs the rendered post is the inner status — boosts ARE the
     // inner post in Mastodon's data model. The wrapper carries only the
     // booster's account + a createdAt for "when this was boosted to my
@@ -522,8 +710,9 @@ export class CaribouStatusCard extends LitElement {
     // The author link is a sibling of the permalink, never around it: avatar,
     // name and acct are one link, so a keyboard user tabs once and a screen
     // reader hears the name once (the avatar's `alt` is empty).
-    return html`
-      <article data-variant=${this.variant}>
+    // One element around it all: happy-dom drops a child binding at the
+    // top level of a template (README, Tests).
+    return html`<div class="post">
         ${boostName
           ? html`<div class="boost-attribution">
                    <caribou-icon class="boost-icon" name="repeat2"></caribou-icon>
@@ -563,7 +752,6 @@ export class CaribouStatusCard extends LitElement {
             ${this.renderActions(display)}
           </div>
         </div>
-      </article>
-    `
+      </div>`
   }
 }

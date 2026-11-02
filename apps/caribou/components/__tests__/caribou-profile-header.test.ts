@@ -290,3 +290,92 @@ describe('<caribou-profile-header> follow button', () => {
     expect(button(el)).toBeNull()
   })
 })
+
+describe('<caribou-profile-header> mute and block', () => {
+  afterEach(() => {
+    document.body.replaceChildren()
+    activeUserKey.value = null
+    users.value = new Map()
+    relationshipCache.value = new Map()
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  const item = (el: CaribouProfileHeader, action: string) =>
+    el.shadowRoot!.querySelector<HTMLButtonElement>(`caribou-menu.more button[data-action="${action}"]`)
+  const badges = (el: CaribouProfileHeader) =>
+    [...el.shadowRoot!.querySelectorAll('.badge')].map((b) => b.textContent)
+  const settle = async (el: CaribouProfileHeader) => {
+    await flush()
+    await el.updateComplete
+  }
+
+  it('has no menu signed out', async () => {
+    const el = await mountWith(ACCOUNT)
+    expect(el.shadowRoot!.querySelector('caribou-menu')).toBeNull()
+  })
+
+  it('a menu beside Follow names the account in Mute and Block', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel()])
+    const el = await mountWith(ACCOUNT)
+    expect(el.shadowRoot!.querySelector('caribou-menu.more')!.getAttribute('label')).toBe('More actions for @alice@example.social')
+    expect(item(el, 'mute')!.textContent).toBe('Mute @alice@example.social')
+    expect(item(el, 'block')!.textContent).toBe('Block @alice@example.social')
+    expect(badges(el)).toEqual([])
+  })
+
+  it('Mute shows Muted at once and Unmute takes it back', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel()])
+    const mute = vi.spyOn(client, 'mute').mockResolvedValue(rel({ muting: true }))
+    const unmute = vi.spyOn(client, 'unmute').mockResolvedValue(rel())
+    const el = await mountWith(ACCOUNT)
+    item(el, 'mute')!.click()
+    await el.updateComplete
+    expect(badges(el)).toEqual(['Muted'])
+    expect(item(el, 'mute')!.textContent).toBe('Unmute @alice@example.social')
+    await settle(el)
+    expect(mute).toHaveBeenCalledWith('42')
+    item(el, 'mute')!.click()
+    await settle(el)
+    expect(unmute).toHaveBeenCalledWith('42')
+    expect(badges(el)).toEqual([])
+  })
+
+  it('a failed mute puts the header back', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel()])
+    vi.spyOn(client, 'mute').mockRejectedValue(new Error('boom'))
+    const el = await mountWith(ACCOUNT)
+    item(el, 'mute')!.click()
+    await settle(el)
+    await settle(el)
+    expect(badges(el)).toEqual([])
+    expect(item(el, 'mute')!.textContent).toBe('Mute @alice@example.social')
+  })
+
+  it('Block asks first, then shows Blocked and Unblock in place of Follow', async () => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ following: true })])
+    const block = vi.spyOn(client, 'block').mockResolvedValue(rel({ blocking: true }))
+    const unblock = vi.spyOn(client, 'unblock').mockResolvedValue(rel())
+    const el = await mountWith(ACCOUNT)
+    item(el, 'block')!.click()
+    await settle(el)
+    const dialog = document.querySelector('caribou-confirm-dialog')!
+    await (dialog as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    expect(dialog.shadowRoot!.querySelector('h2')!.textContent).toBe('Block @alice@example.social?')
+    dialog.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
+    await settle(el)
+    expect(block).toHaveBeenCalledWith('42')
+    expect(badges(el)).toEqual(['Blocked'])
+    expect(button(el)!.dataset.state).toBe('blocked')
+    expect(visibleLabel(button(el)!)).toBe('Unblock')
+    button(el)!.click()
+    await settle(el)
+    expect(unblock).toHaveBeenCalledWith('42')
+    expect(button(el)!.dataset.state).toBe('follow')
+  })
+})

@@ -30,6 +30,8 @@ export class CaribouProfile extends LitElement {
   static override styles = css`
     :host { display: block; }
     ul { list-style: none; margin: 0; padding: 0; }
+    /* A card hidden by a filter, a mute or a block takes its row with it. */
+    li:has(> caribou-status-card[hidden]) { display: none; }
     .loading { padding: var(--space-4); color: var(--fg-muted); }
     a[rel="next"] { display: block; padding: var(--space-4); color: var(--fg-muted); text-align: center; }
   `
@@ -234,7 +236,8 @@ export class CaribouProfile extends LitElement {
       <div class="posts">
         <ul>
           ${repeat(statuses, (s) => s.id, (s) => html`<li
-            ><caribou-status-card variant="timeline" data-status-id=${s.id} .status=${s}></caribou-status-card
+            ><caribou-status-card variant="timeline" data-status-id=${s.id} .status=${s}
+              filter-context="account"></caribou-status-card
           ></li>`)}
         </ul>
         ${nextHref

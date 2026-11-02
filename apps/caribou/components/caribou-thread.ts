@@ -68,6 +68,8 @@ export class CaribouThread extends LitElement {
   static override styles = css`
     :host { display: block; }
     ul { list-style: none; padding: 0; margin: 0; }
+    /* A card hidden by a filter, a mute or a block takes its row with it. */
+    li:has(> caribou-status-card[hidden]) { display: none; }
     .loading { padding: var(--space-4); color: var(--fg-muted); }
   `
 
@@ -154,7 +156,7 @@ export class CaribouThread extends LitElement {
           data-depth=${depth ?? nothing}
           style=${depth === null ? nothing : `margin-inline-start:calc(var(--space-4) * ${depth})`}
           ><caribou-status-card variant=${variant} data-id=${status.id} data-depth=${depth ?? nothing}
-            .status=${status}></caribou-status-card
+            filter-context="thread" .status=${status}></caribou-status-card
         ></li>`)}
       </ul>
     `

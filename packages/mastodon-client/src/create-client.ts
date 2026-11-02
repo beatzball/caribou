@@ -41,6 +41,18 @@ export interface CaribouClient {
   fetchRelationships(accountIds: readonly string[]): Promise<mastodon.v1.Relationship[]>
   follow(accountId: string): Promise<mastodon.v1.Relationship>
   unfollow(accountId: string): Promise<mastodon.v1.Relationship>
+  // Mute and block. Each resolves to the relationship as the server now has
+  // it. A mute hides the account's notifications too.
+  mute(accountId: string): Promise<mastodon.v1.Relationship>
+  unmute(accountId: string): Promise<mastodon.v1.Relationship>
+  block(accountId: string): Promise<mastodon.v1.Relationship>
+  unblock(accountId: string): Promise<mastodon.v1.Relationship>
+  /** The muted accounts, newest first. Pages by the cursor in `nextMaxId`. */
+  fetchMutes(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
+  /** The blocked accounts, newest first. Pages by the cursor in `nextMaxId`. */
+  fetchBlocks(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
+  /** The reader's filters (filters v2). An older server answers 404. */
+  fetchFilters(): Promise<mastodon.v2.Filter[]>
 
   // Compose. Writes bypass dedup: two posts with the same text are two posts.
   createStatus(params: CreateStatusInput, opts?: { idempotencyKey?: string }): Promise<mastodon.v1.Status>
@@ -71,6 +83,11 @@ export interface FetchNotificationsParams {
 // or null when there is no next page. Undefined means "page by the last
 // status id", as every other timeline does.
 export type TimelinePage = mastodon.v1.Status[] & { nextMaxId?: string | null }
+
+// A page of accounts. Mastodon pages mutes and blocks by the mute or block
+// id, not the account id, and names the next page only in the Link header:
+// `nextMaxId` is that cursor, or null on the last page.
+export type AccountPage = mastodon.v1.Account[] & { nextMaxId: string | null }
 
 export interface WaitForMediaOpts {
   pollIntervalMs?: number
@@ -159,6 +176,21 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     return Object.assign(res.data, { nextMaxId: nextMaxIdFromLink(res.headers.get('link')) })
   }
 
+  async function fetchAccountPage(
+    kind: 'mutes' | 'blocks', params: { maxId?: string; limit?: number },
+  ): Promise<AccountPage> {
+    return run(`${kind}:${params.maxId ?? ''}:${params.limit ?? ''}`, async (c) => {
+      const query = {
+        ...(params.maxId ? { maxId: params.maxId } : {}),
+        ...(params.limit ? { limit: params.limit } : {}),
+      }
+      const res = kind === 'mutes'
+        ? await c.v1.mutes.list.$raw(query)
+        : await c.v1.blocks.list.$raw(query)
+      return Object.assign(res.data, { nextMaxId: nextMaxIdFromLink(res.headers.get('link')) })
+    })
+  }
+
   return {
     userKey,
     async fetchTimeline(kind, params = {}) {
@@ -238,6 +270,27 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async unfollow(accountId) {
       return write((c) => c.v1.accounts.$select(accountId).unfollow())
+    },
+    async mute(accountId) {
+      return write((c) => c.v1.accounts.$select(accountId).mute({ notifications: true }))
+    },
+    async unmute(accountId) {
+      return write((c) => c.v1.accounts.$select(accountId).unmute())
+    },
+    async block(accountId) {
+      return write((c) => c.v1.accounts.$select(accountId).block())
+    },
+    async unblock(accountId) {
+      return write((c) => c.v1.accounts.$select(accountId).unblock())
+    },
+    async fetchMutes(params = {}) {
+      return fetchAccountPage('mutes', params)
+    },
+    async fetchBlocks(params = {}) {
+      return fetchAccountPage('blocks', params)
+    },
+    async fetchFilters() {
+      return run('filters', async (c) => c.v2.filters.list())
     },
     async createStatus(params, opts = {}) {
       const { status, mediaIds, ...rest } = params
