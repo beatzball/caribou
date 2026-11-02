@@ -120,3 +120,25 @@ describe('CaribouClient.fetchGroupedNotifications', () => {
     await expect(c.fetchGroupedNotifications()).rejects.toMatchObject({ code: 'not_found' })
   })
 })
+
+describe('CaribouClient.fetchNotificationGroupAccounts', () => {
+  it('GETs every account of a group, with the key encoded in the path', async () => {
+    let path = ''
+    server.use(http.get('https://fosstodon.org/api/v2/notifications/:key/accounts', ({ request }) => {
+      path = new URL(request.url).pathname
+      return HttpResponse.json([sampleAccount])
+    }))
+    const c = createCaribouClient(userKey, sessionSource())
+    const accounts = await c.fetchNotificationGroupAccounts('favourite-1/2 3')
+    expect(path).toBe('/api/v2/notifications/favourite-1%2F2%203/accounts')
+    expect(accounts.map((a) => a.id)).toEqual([sampleAccount.id])
+  })
+})
+
+describe('the HTTP status on an error', () => {
+  it('is kept, so a caller can tell a missing endpoint (501) from a failure', async () => {
+    server.use(http.get(v2url, () => HttpResponse.json({ error: 'x' }, { status: 501 })))
+    const c = createCaribouClient(userKey, sessionSource())
+    await expect(c.fetchGroupedNotifications()).rejects.toMatchObject({ code: 'server_error', status: 501 })
+  })
+})

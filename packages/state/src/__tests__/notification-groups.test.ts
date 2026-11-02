@@ -52,6 +52,14 @@ describe('groupNotifications (an older server)', () => {
     expect(summary(groups)).toEqual(['favourite:1:bob:9-9', 'favourite:1:alice:7-7'])
   })
 
+  it('keeps a server key that says ungrouped', () => {
+    const groups = groupNotifications([
+      notif('3', 'follow', 'alice', undefined, { groupKey: 'ungrouped-3' }),
+      notif('2', 'follow', 'bob', undefined, { groupKey: 'ungrouped-2' }),
+    ])
+    expect(groups.map((g) => g.key)).toEqual(['ungrouped-3', 'ungrouped-2'])
+  })
+
   it('does not group across days', () => {
     const groups = groupNotifications([
       notif('9', 'follow', 'bob'),
@@ -97,30 +105,32 @@ describe('server groups', () => {
     expect(groups[1]!.status).toBeNull()
   })
 
-  it('an older page joins the group it continues, and adds new ones below', () => {
+  it('an older page joins the group it continues, keeps the newer total, and adds new ones below', () => {
+    // notifications_count counts every notification of the group up to the
+    // top of the page, so the older page's 14 is part of the first page's 14.
     const list = groupsFromPage(page([
-      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 3, pageMinId: '10', pageMaxId: '20', sampleAccountIds: ['alice'] }),
+      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 14, pageMinId: '10', pageMaxId: '20', sampleAccountIds: ['alice'] }),
     ]))
     const older = groupsFromPage(page([
-      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 2, pageMinId: '4', pageMaxId: '8', sampleAccountIds: ['bob', 'alice'] }),
+      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 14, pageMinId: '4', pageMaxId: '8', sampleAccountIds: ['bob', 'alice'] }),
       group({ groupKey: 'ungrouped-3', type: 'mention', mostRecentNotificationId: '3', sampleAccountIds: ['carol'] }),
     ]))
     expect(summary(appendOlderGroups(list, older))).toEqual([
-      'favourite:5:alice,bob:20-4',
+      'favourite:14:alice,bob:20-4',
       'mention:1:carol:3-3',
     ])
   })
 
-  it('a newer page joins its group and moves it to the top', () => {
+  it('a newer page joins its group with the server\'s new total and moves it to the top', () => {
     const list = groupsFromPage(page([
       group({ groupKey: 'ungrouped-30', type: 'mention', mostRecentNotificationId: '30', sampleAccountIds: ['carol'] }),
-      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 3, pageMinId: '10', pageMaxId: '20', sampleAccountIds: ['alice'] }),
+      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 14, pageMinId: '10', pageMaxId: '20', sampleAccountIds: ['alice'] }),
     ]))
     const newer = groupsFromPage(page([
-      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 1, pageMinId: '40', pageMaxId: '40', sampleAccountIds: ['dave'] }),
+      group({ groupKey: 'favourite-s1', type: 'favourite', notificationsCount: 15, pageMinId: '40', pageMaxId: '40', sampleAccountIds: ['dave', 'alice'] }),
     ]))
     expect(summary(prependNewerGroups(list, newer))).toEqual([
-      'favourite:4:dave,alice:40-10',
+      'favourite:15:dave,alice:40-10',
       'mention:1:carol:30-30',
     ])
   })
@@ -152,6 +162,23 @@ describe('withoutSilencedAccounts', () => {
 
   it('keeps everything when nobody is muted', () => {
     expect(withoutSilencedAccounts(list, new Set())).toEqual(list)
+  })
+
+  it('a sample that is all muted or blocked keeps the row for the people outside it', () => {
+    const groups = groupsFromPage(page([
+      group({ groupKey: 'follow-1', type: 'follow', notificationsCount: 14, sampleAccountIds: ['alice', 'bob'] }),
+    ]))
+    expect(groups[0]!.complete).toBe(false)
+    const left = withoutSilencedAccounts(groups, new Set(['alice', 'bob']))
+    expect(summary(left)).toEqual(['follow:12::1-1'])
+  })
+
+  it('a full list that is all muted or blocked drops the row', () => {
+    const groups = groupsFromPage(page([
+      group({ groupKey: 'follow-1', type: 'follow', notificationsCount: 2, sampleAccountIds: ['alice', 'bob'] }),
+    ]))
+    expect(groups[0]!.complete).toBe(true)
+    expect(withoutSilencedAccounts(groups, new Set(['alice', 'bob']))).toEqual([])
   })
 
   it('lowers a server count by the accounts it takes out', () => {

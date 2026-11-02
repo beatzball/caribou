@@ -25,15 +25,19 @@ test('a Mastodon 4.3+ server: favourites on one post and follows show as one row
   await expect(rows.nth(2).locator('.line')).toContainText('Carol Example and Alice Example followed you')
   expect(new URLSearchParams(asked[0]).getAll('grouped_types[]')).toEqual(['favourite', 'reblog', 'follow'])
 
-  // Expanding shows who.
-  const toggle = fav.getByRole('button', { name: 'Show all' })
+  // Show all loads everyone, from the keyboard too.
+  const toggle = fav.getByRole('button', { name: 'Show all 14 who favourited your post' })
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  await toggle.click()
+  await toggle.focus()
+  await page.keyboard.press('Enter')
   const who = fav.getByRole('list', { name: 'Who' })
-  await expect(who.getByRole('link')).toHaveText(['Alice Example', 'Bob Example'])
-  await expect(who).toContainText('and 12 more')
+  await expect(who.getByRole('link')).toHaveCount(14)
+  await expect(who.getByRole('link').nth(2)).toHaveText('Carol Example')
+  await expect(who).not.toContainText('more')
   await expect(who.getByRole('link', { name: 'Bob Example' })).toHaveAttribute('href', `/@bob@${INSTANCE}`)
-  await fav.getByRole('button', { name: 'Hide' }).click()
+  const hide = fav.getByRole('button', { name: 'Hide who favourited your post' })
+  await expect(hide).toBeFocused()
+  await page.keyboard.press('Enter')
   await expect(who).toHaveCount(0)
 
   const prefs = await page.evaluate((key) => localStorage.getItem(`caribou.prefs.${key}`), `reader@${INSTANCE}`)

@@ -12,7 +12,7 @@ test('a grouped row fits the phone, and its list of who opens and closes', async
   const toggle = row.getByRole('button', { name: 'Show all' })
   await expect(toggle).toBeInViewport()
   await toggle.tap()
-  await expect(row.getByRole('list', { name: 'Who' }).getByRole('link')).toHaveText(['Alice Example', 'Bob Example'])
+  await expect(row.getByRole('list', { name: 'Who' }).getByRole('link')).toHaveCount(14)
 
   const { scroll, client } = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,

@@ -7,6 +7,7 @@ import {
   appendOlderGroups, compareNotificationIds, groupNotifications, groupsFromPage, prependNewerGroups,
   type NotificationGroup,
 } from './notification-groups.js'
+import { ownerGeneration } from './keep-alive.js'
 import { startPolling, type PollHost } from './polling.js'
 import { readPrefs, updatePrefs } from './prefs.js'
 import { activeClient, activeUser } from './users.js'
@@ -52,9 +53,18 @@ export const NOTIFICATIONS_PAGE = 40
 /** A poll pages forward this many times at most. The next poll goes on from there. */
 export const NOTIFICATIONS_POLL_MAX_PAGES = 5
 
-// The accounts whose server answered 404 for grouped notifications
-// (Mastodon before 4.3). Their lists ask for single ones and group them here.
+// The accounts whose server has no grouped notifications (Mastodon before
+// 4.3). Their lists ask for single ones and group them here.
 const withoutGrouped = new Set<string>()
+
+// How a server says it has no such path. Mastodon, GoToSocial, Akkoma and
+// Pleroma answer 404; some proxies and servers answer one of the others.
+const NO_SUCH_PATH = new Set([400, 404, 405, 410, 501])
+
+function isMissingEndpoint(err: unknown): boolean {
+  const e = err as Partial<CaribouError>
+  return e.code === 'not_found' || (e.status !== undefined && NO_SUCH_PATH.has(e.status))
+}
 
 /** For tests: forget which servers have no grouped notifications. */
 export function resetGroupedSupport(): void {
@@ -77,8 +87,11 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   const loading = signal(false)
   const error   = signal<CaribouError | null>(null)
   const hasMore = signal(true)
-  // A load() replaces the list. A reply to a request made before it is dropped.
+  // A load() replaces the list. A reply to a request made before it is
+  // dropped, and so is one that comes back under another account (also
+  // A -> B -> A). Nothing from a dropped reply reaches the shared caches.
   let generation = 0
+  const current = (mine: number, owner: number) => mine === generation && owner === ownerGeneration()
   let polling: Promise<void> | null = null
 
   // The post inside a notification comes from the status cache, so a
@@ -133,31 +146,34 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   }
 
   // The first page, from the grouped endpoint when the server has it.
-  async function fetchFirst(): Promise<{ groups: NotificationGroup[] | null; page: mastodon.v1.Notification[] }> {
+  // Nothing is cached here: the caller checks the reply is still wanted.
+  async function fetchFirst(): Promise<{ grouped: GroupedNotificationsPage | null; page: mastodon.v1.Notification[] }> {
     const client = opts.clientSource()
-    if (!client) return { groups: null, page: [] }
+    if (!client) return { grouped: null, page: [] }
     if (usesGrouped(client)) {
       try {
-        return { groups: ingestGroups(await fetchGroups(client, {})), page: [] }
+        return { grouped: await fetchGroups(client, {}), page: [] }
       } catch (err) {
-        if ((err as CaribouError).code !== 'not_found') throw err
+        if (!isMissingEndpoint(err)) throw err
         withoutGrouped.add(client.userKey)
       }
     }
-    return { groups: null, page: await client.fetchNotifications({ types }) }
+    return { grouped: null, page: await client.fetchNotifications({ types }) }
   }
 
   async function load() {
     const mine = ++generation
+    const owner = ownerGeneration()
     loading.value = true
     error.value = null
     try {
       const first = await fetchFirst()
-      if (mine !== generation) return
-      if (first.groups) {
-        serverGroups.value = first.groups
+      if (!current(mine, owner)) return
+      if (first.grouped) {
+        const groups = ingestGroups(first.grouped)
+        serverGroups.value = groups
         items.value = []
-        hasMore.value = first.groups.length > 0
+        hasMore.value = groups.length > 0
       } else {
         serverGroups.value = null
         items.value = ingest(first.page)
@@ -188,18 +204,20 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     const anchor = grouped ? oldestGroupId(grouped) : items.value[items.value.length - 1]?.id
     if (!anchor) return
     const mine = generation
+    const owner = ownerGeneration()
     loading.value = true
     try {
       if (grouped) {
         const client = opts.clientSource()
         if (!client) return
-        const older = ingestGroups(await fetchGroups(client, { maxId: anchor }))
-        if (mine !== generation) return
+        const raw = await fetchGroups(client, { maxId: anchor })
+        if (!current(mine, owner)) return
+        const older = ingestGroups(raw)
         serverGroups.value = appendOlderGroups(serverGroups.value ?? [], older)
         hasMore.value = older.length > 0
       } else {
         const page = await fetchPage({ maxId: anchor })
-        if (mine !== generation) return
+        if (!current(mine, owner)) return
         items.value = [...items.value, ...withoutKnown(ingest(page))]
         hasMore.value = page.length > 0
       }
@@ -211,47 +229,50 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     }
   }
 
-  async function pollGroups(mine: number, first: string) {
+  async function pollGroups(mine: number, owner: number, first: string) {
     const client = opts.clientSource()
     if (!client) return
     // Page forward from the newest one shown, and merge once every page is
     // in, as for single notifications below.
-    const pages: NotificationGroup[][] = []
+    const pages: GroupedNotificationsPage[] = []
     let cursor = first
     for (let i = 0; i < NOTIFICATIONS_POLL_MAX_PAGES; i++) {
       const raw = await fetchGroups(client, { minId: cursor, limit: NOTIFICATIONS_PAGE })
-      if (mine !== generation) return
-      const page = ingestGroups(raw)
-      pages.push(page)
-      const newest = newestGroupId(page)
-      if (newest && compareNotificationIds(newest, cursor) > 0) cursor = newest
+      if (!current(mine, owner)) return
+      pages.push(raw)
+      for (const g of raw.notificationGroups) {
+        const top = g.pageMaxId ?? g.mostRecentNotificationId
+        if (compareNotificationIds(top, cursor) > 0) cursor = top
+      }
       if (raw.notificationGroups.length < NOTIFICATIONS_PAGE) break
     }
     // Each page is newer than the one before it.
     let list = serverGroups.value ?? []
-    for (const page of pages) list = prependNewerGroups(list, page)
+    for (const page of pages) list = prependNewerGroups(list, ingestGroups(page))
     serverGroups.value = list
     error.value = null
   }
 
   async function pollOnce() {
     const mine = generation
+    const owner = ownerGeneration()
     const grouped = serverGroups.value
     const first = grouped ? newestGroupId(grouped) : items.value[0]?.id
     try {
       if (!first) {
         // Nothing to page from yet: ask for the first page.
         const firstPage = await fetchFirst()
-        if (mine !== generation) return
+        if (!current(mine, owner)) return
         if ((serverGroups.value?.length ?? 0) > 0 || items.value.length > 0) return
-        serverGroups.value = firstPage.groups
-        items.value = firstPage.groups ? [] : ingest(firstPage.page)
-        hasMore.value = (firstPage.groups?.length ?? firstPage.page.length) > 0
+        const groups = firstPage.grouped ? ingestGroups(firstPage.grouped) : null
+        serverGroups.value = groups
+        items.value = groups ? [] : ingest(firstPage.page)
+        hasMore.value = (groups?.length ?? firstPage.page.length) > 0
         error.value = null
         return
       }
       if (grouped) {
-        await pollGroups(mine, first)
+        await pollGroups(mine, owner, first)
         return
       }
       // Page forward from the newest one shown. `since_id` would give the
@@ -260,7 +281,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
       let cursor = first
       for (let i = 0; i < NOTIFICATIONS_POLL_MAX_PAGES; i++) {
         const page = await fetchPage({ minId: cursor, limit: NOTIFICATIONS_PAGE })
-        if (mine !== generation) return
+        if (!current(mine, owner)) return
         for (const n of page) {
           fresh.set(n.id, n)
           if (compareNotificationIds(n.id, cursor) > 0) cursor = n.id

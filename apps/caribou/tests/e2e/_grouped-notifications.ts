@@ -19,6 +19,9 @@ function person(id: string, username: string, displayName: string) {
 export const ALICE = person('a1', 'alice', 'Alice Example')
 export const BOB = person('b1', 'bob', 'Bob Example')
 export const CAROL = person('c1', 'carol', 'Carol Example')
+/** Everyone in the favourite group, as `/api/v2/notifications/:key/accounts` sends it. */
+export const EVERYONE = [ALICE, BOB, CAROL, ...Array.from({ length: 11 }, (_, i) =>
+  person(`x${i}`, `fan${i}`, `Fan ${i}`))]
 const ME = person('me', 'reader', 'Reader')
 
 export function post(id: string, content: string) {
@@ -65,6 +68,7 @@ const EMPTY_GROUPED = { accounts: [], statuses: [], notification_groups: [] }
 /** Answers the grouped endpoint: the first page, then nothing older or newer. */
 export async function serveGrouped(page: Page, first: unknown = GROUPED_PAGE): Promise<string[]> {
   const asked: string[] = []
+  await page.route('**/api/v2/notifications/*/accounts', (route) => route.fulfill({ json: EVERYONE }))
   await page.route('**/api/v2/notifications*', (route) => {
     const u = new URL(route.request().url())
     asked.push(u.search)

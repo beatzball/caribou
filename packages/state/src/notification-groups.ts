@@ -12,6 +12,8 @@ export interface NotificationGroup {
   count: number
   /** Who did it, newest first, each once. From a server group: a sample. */
   accounts: mastodon.v1.Account[]
+  /** Whether `accounts` is everyone in the group, not a sample. */
+  complete: boolean
   status: mastodon.v1.Status | null
   /** The newest and the oldest notification id the row covers. */
   newestId: string
@@ -40,12 +42,12 @@ type LooseNotification = {
   status?: mastodon.v1.Status | null
 }
 
-// The server's key when it sent one (Mastodon 4.3+ sends it on v1 too).
-// An older server sends none: the same type on the same post, or a follow,
-// on the same UTC day share a row.
+// The server's key when it sent one (Mastodon 4.3+ sends it on v1 too),
+// also one that says `ungrouped-`. An older server sends none: the same
+// type on the same post, or a follow, on the same UTC day share a row.
 function clientGroupKey(n: LooseNotification): string {
+  if (n.groupKey) return n.groupKey
   if (!GROUPABLE_NOTIFICATION_TYPES.has(n.type)) return `ungrouped-${n.id}`
-  if (n.groupKey && !n.groupKey.startsWith('ungrouped-')) return n.groupKey
   const day = (n.createdAt ?? '').slice(0, 10)
   return `${n.type}-${n.status?.id ?? ''}-${day}`
 }
@@ -71,7 +73,10 @@ export function groupNotifications(list: readonly mastodon.v1.Notification[]): N
     const key = clientGroupKey(n)
     let group = byKey.get(key)
     if (!group) {
-      group = { key, type: n.type, count: 0, accounts: [], status: n.status ?? null, newestId: n.id, oldestId: n.id }
+      group = {
+        key, type: n.type, count: 0, accounts: [], complete: true,
+        status: n.status ?? null, newestId: n.id, oldestId: n.id,
+      }
       byKey.set(key, group)
       out.push(group)
     }
@@ -90,11 +95,15 @@ export function groupsFromPage(page: GroupedNotificationsPage): NotificationGrou
   return page.notificationGroups.map((g) => {
     const list: mastodon.v1.Account[] = []
     for (const id of g.sampleAccountIds ?? []) addAccount(list, accounts.get(id))
+    // Mastodon's count covers the sample, so the guard only matters for a
+    // server that sends a wider sample than its count, or no count.
+    const count = Math.max(g.notificationsCount ?? 1, list.length, 1)
     return {
       key: g.groupKey,
       type: g.type,
-      count: Math.max(g.notificationsCount ?? 1, list.length, 1),
+      count,
       accounts: list,
+      complete: list.length >= count,
       status: g.statusId ? statuses.get(g.statusId) ?? null : null,
       newestId: g.pageMaxId ?? g.mostRecentNotificationId,
       oldestId: g.pageMinId ?? g.mostRecentNotificationId,
@@ -103,18 +112,20 @@ export function groupsFromPage(page: GroupedNotificationsPage): NotificationGrou
 }
 
 // Joins two parts of one group. `newer` covers the newer notifications.
-// Parts that do not overlap add up; parts that overlap (a reply that came
-// in twice) count the larger one.
+// Mastodon's `notifications_count` counts every notification of the group
+// up to the top of its page, older ones included. So the newer part's count
+// is the total, and the older part's is already in it: never add them.
 function join(newer: NotificationGroup, older: NotificationGroup): NotificationGroup {
-  const apart = compareNotificationIds(newer.oldestId, older.newestId) > 0
   const accounts: mastodon.v1.Account[] = []
   for (const a of newer.accounts) addAccount(accounts, a)
   for (const a of older.accounts) addAccount(accounts, a)
+  const count = Math.max(newer.count, accounts.length)
   return {
     ...older,
     status: newer.status ?? older.status,
-    count: Math.max(apart ? newer.count + older.count : Math.max(newer.count, older.count), accounts.length),
+    count,
     accounts,
+    complete: accounts.length >= count,
     newestId: compareNotificationIds(newer.newestId, older.newestId) > 0 ? newer.newestId : older.newestId,
     oldestId: compareNotificationIds(newer.oldestId, older.oldestId) < 0 ? newer.oldestId : older.oldestId,
   }
@@ -159,7 +170,9 @@ export function prependNewerGroups(list: readonly NotificationGroup[], newer: re
 
 /**
  * Takes the accounts the reader mutes or blocks out of each row. A row
- * with none left goes. A row without accounts (a poll that ended) stays.
+ * with nobody left goes. A server row knows only a sample: when the whole
+ * sample is silenced, the people outside it still count, and the row stays
+ * with no names. A row without accounts (a poll that ended) stays.
  */
 export function withoutSilencedAccounts(
   list: readonly NotificationGroup[], silenced: ReadonlySet<string>,
@@ -170,8 +183,9 @@ export function withoutSilencedAccounts(
     const accounts = g.accounts.filter((a) => !silenced.has(a.id))
     if (accounts.length === g.accounts.length) {
       out.push(g)
-    } else if (accounts.length > 0) {
-      out.push({ ...g, accounts, count: Math.max(accounts.length, g.count - (g.accounts.length - accounts.length)) })
+    } else {
+      const count = Math.max(accounts.length, g.count - (g.accounts.length - accounts.length))
+      if (accounts.length > 0 || (!g.complete && count > 0)) out.push({ ...g, accounts, count })
     }
   }
   return out

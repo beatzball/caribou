@@ -96,6 +96,11 @@ export class CaribouNotifications extends LitElement {
   @state() private items: NotificationGroup[] = []
   // The groups whose list of accounts is open, by group key.
   @state() private expanded: ReadonlySet<string> = new Set()
+  // Everyone in a server group, loaded when its list is first opened. A
+  // server group comes with a sample only. Cleared with the session.
+  @state() private everyone: ReadonlyMap<string, mastodon.v1.Account[]> = new Map()
+  @state() private loadingWho: ReadonlySet<string> = new Set()
+  @state() private failedWho: ReadonlySet<string> = new Set()
   // The accounts the reader mutes or blocks, by id on the reader's server.
   // Their notifications leave the list at once, as Mastodon's own do, and
   // come back if the mute fails.
@@ -125,6 +130,12 @@ export class CaribouNotifications extends LitElement {
       if (id === last) return
       last = id
       this.items = []
+      // Group keys are not per account (`follow-<hour>`): nothing open or
+      // loaded carries over to the next one.
+      this.expanded = new Set()
+      this.everyone = new Map()
+      this.loadingWho = new Set()
+      this.failedWho = new Set()
       untracked(() => this.open(this.filter))
     })
     this.disposeSilenced = effect(() => {
@@ -264,30 +275,67 @@ export class CaribouNotifications extends LitElement {
   private renderWho(g: NotificationGroup) {
     const shown = g.accounts.slice(0, 2)
     const others = Math.max(0, g.count - shown.length)
-    if (shown.length === 0) return nothing
+    // Every name in the sample is muted or blocked; the rest still count.
+    if (shown.length === 0) {
+      if (g.complete) return nothing
+      return g.count > 1 ? `${g.count} people` : 'Someone'
+    }
     const links = shown.map((a) => this.nameLink(a))
     if (others === 0) return links.length === 1 ? links : [links[0], ' and ', links[1]]
     const rest = `${others} ${others === 1 ? 'other' : 'others'}`
     return links.length === 1 ? [links[0], ` and ${rest}`] : [links[0], ', ', links[1], ` and ${rest}`]
   }
 
-  private toggle(key: string) {
+  private toggle(g: NotificationGroup) {
     const next = new Set(this.expanded)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
+    const opening = !next.has(g.key)
+    if (opening) next.add(g.key)
+    else next.delete(g.key)
     this.expanded = next
+    if (opening && !g.complete && !this.everyone.has(g.key) && !this.loadingWho.has(g.key)) {
+      void this.loadEveryone(g.key)
+    }
+  }
+
+  private static without<T>(set: ReadonlySet<T>, value: T): Set<T> {
+    const next = new Set(set)
+    next.delete(value)
+    return next
+  }
+
+  private async loadEveryone(key: string) {
+    const session = this.session.peek()?.id
+    const client = activeClient.peek()
+    if (!session || !client) return
+    this.loadingWho = new Set([...this.loadingWho, key])
+    this.failedWho = CaribouNotifications.without(this.failedWho, key)
+    let accounts: mastodon.v1.Account[] | null = null
+    try {
+      accounts = await client.fetchNotificationGroupAccounts(key)
+    } catch {
+      accounts = null
+    }
+    // Another account's list is on screen now: this answer is not for it.
+    if (this.session.peek()?.id !== session) return
+    this.loadingWho = CaribouNotifications.without(this.loadingWho, key)
+    if (accounts) this.everyone = new Map([...this.everyone, [key, accounts]])
+    else this.failedWho = new Set([...this.failedWho, key])
   }
 
   private renderLine(icon: IconName, g: NotificationGroup, text: string) {
     const many = g.count > 1
     const open = this.expanded.has(g.key)
-    const id = this.whoId(g)
+    // A plain button, not <caribou-button>: it carries aria-expanded,
+    // aria-controls and a label with the row's subject, which
+    // <caribou-button> does not pass to its inner button.
     return html`<div class="line">
       <caribou-icon name=${icon}></caribou-icon>
       <span>${this.renderWho(g)} <span class="what">${text}</span></span>
       ${many
-        ? html`<button type="button" class="expand" aria-expanded=${open ? 'true' : 'false'} aria-controls=${id}
-            @click=${() => this.toggle(g.key)}>${open ? 'Hide' : 'Show all'}</button>`
+        ? html`<button type="button" class="expand" aria-expanded=${open ? 'true' : 'false'}
+            aria-controls=${open ? this.whoId(g) : nothing}
+            aria-label=${open ? `Hide who ${text}` : `Show all ${g.count} who ${text}`}
+            @click=${() => this.toggle(g)}>${open ? 'Hide' : 'Show all'}</button>`
         : nothing}
     </div>`
   }
@@ -308,15 +356,21 @@ export class CaribouNotifications extends LitElement {
     return `who-${g.key.replace(/[^a-z0-9_-]/gi, '_')}`
   }
 
-  // The accounts the list knows. A server group sends a sample of them.
+  // Everyone, once loaded; until then, or when the load failed, the sample.
   private renderAccounts(g: NotificationGroup, id: string) {
-    const more = g.count - g.accounts.length
-    return html`<ul class="who" id=${id} aria-label="Who">
-      ${g.accounts.map((a) => html`<li>
+    const loaded = this.everyone.get(g.key)
+    const accounts = loaded ? loaded.filter((a) => !this.silenced.has(a.id)) : g.accounts
+    const more = loaded ? 0 : g.count - g.accounts.length
+    const loading = this.loadingWho.has(g.key)
+    const failed = this.failedWho.has(g.key)
+    return html`<ul class="who" id=${id} aria-label="Who" aria-busy=${loading ? 'true' : 'false'}>
+      ${accounts.map((a) => html`<li>
         <img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">
         ${this.nameLink(a)}
       </li>`)}
-      ${more > 0 ? html`<li class="rest">and ${more} more</li>` : nothing}
+      ${more > 0 && !loading ? html`<li class="rest">and ${more} more</li>` : nothing}
+      ${loading ? html`<li class="rest" role="status">Loading everyone…</li>` : nothing}
+      ${failed ? html`<li class="rest" role="alert">Could not load everyone. Hide and Show all to try again.</li>` : nothing}
     </ul>`
   }
 

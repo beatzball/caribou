@@ -17,6 +17,7 @@ vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
       ...real.createCaribouClient(...args),
       fetchNotifications: (...a: unknown[]) => fetchSpy(...a),
       fetchGroupedNotifications: (...a: unknown[]) => groupedSpy(...a),
+      fetchNotificationGroupAccounts: (...a: unknown[]) => accountsSpy(...a),
     }),
   }
 })
@@ -32,12 +33,13 @@ function status(id: string) {
 
 function notif(id: string, type: string, withStatus = !['follow', 'follow_request'].includes(type)) {
   return {
-    id, type, createdAt: '2026-05-08T12:00:00Z', groupKey: `ungrouped-${id}`, account: ACCT,
+    id, type, createdAt: '2026-05-08T12:00:00Z', account: ACCT,
     ...(withStatus ? { status: status(`s${id}`) } : {}),
   } as unknown as mastodon.v1.Notification
 }
 
 const fetchSpy = vi.fn(async (..._: unknown[]) => [] as mastodon.v1.Notification[])
+const accountsSpy = vi.fn(async (..._: unknown[]) => [] as mastodon.v1.Account[])
 // By default the server is older than Mastodon 4.3: no grouped endpoint.
 const groupedSpy = vi.fn(async (..._: unknown[]): Promise<GroupedNotificationsPage> => {
   throw new CaribouError('not_found', 'Not found')
@@ -80,6 +82,8 @@ beforeEach(() => {
   fetchSpy.mockReset()
   fetchSpy.mockResolvedValue([])
   groupedSpy.mockClear()
+  accountsSpy.mockReset()
+  accountsSpy.mockResolvedValue([])
   resetGroupedSupport()
   visibility = 'visible'
   users.value = new Map()
@@ -373,24 +377,108 @@ describe('caribou-notifications', () => {
       expect(lastSeenNotificationId(userKey)).toBe('30')
     })
 
-    it('expanding a group lists who did it, and collapsing hides the list', async () => {
+    const dave = person('d1', 'Dave')
+    const shadow = (el: CaribouNotifications) => el.shadowRoot!
+
+    it('Show all loads everyone in a server group, keeps focus on the button, and Hide closes it', async () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
+      let resolve!: (a: mastodon.v1.Account[]) => void
+      accountsSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
       const el = await mount()
-      const row = items(el)[0]!
-      const toggle = row.querySelector<HTMLButtonElement>('button.expand')!
-      expect(toggle.getAttribute('aria-expanded')).toBe('false')
-      expect(row.querySelector('.who')).toBeNull()
-      toggle.click()
+      const toggle = () => items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!
+      expect(toggle().getAttribute('aria-label')).toBe('Show all 14 who favourited your post')
+      expect(toggle().getAttribute('aria-expanded')).toBe('false')
+      // Nothing to point at while closed.
+      expect(toggle().hasAttribute('aria-controls')).toBe(false)
+      toggle().focus()
+      toggle().click()
       await el.updateComplete
-      expect(toggle.getAttribute('aria-expanded')).toBe('true')
-      const who = [...items(el)[0]!.querySelectorAll('.who li a')].map((a) => a.textContent?.trim())
-      expect(who).toEqual(['Alice', 'Bob'])
-      expect(items(el)[0]!.querySelector('.who')?.textContent).toContain('and 12 more')
-      toggle.click()
+      expect(accountsSpy).toHaveBeenCalledWith('favourite-s1-1')
+      expect(items(el)[0]!.querySelector('.who')?.textContent).toContain('Loading')
+      resolve([alice, ACCT, carol, dave] as unknown as mastodon.v1.Account[])
+      await settle(el)
+      const who = items(el)[0]!.querySelector('.who')!
+      expect([...who.querySelectorAll('li a')].map((a) => a.textContent?.trim())).toEqual(['Alice', 'Bob', 'Carol', 'Dave'])
+      expect(who.textContent).not.toContain('more')
+      expect(toggle().getAttribute('aria-expanded')).toBe('true')
+      expect(toggle().getAttribute('aria-controls')).toBe(who.id)
+      expect(toggle().getAttribute('aria-label')).toBe('Hide who favourited your post')
+      expect(shadow(el).activeElement).toBe(toggle())
+      toggle().click()
       await el.updateComplete
       expect(items(el)[0]!.querySelector('.who')).toBeNull()
+      // A second open uses what it loaded.
+      toggle().click()
+      await el.updateComplete
+      expect(accountsSpy).toHaveBeenCalledOnce()
       // A single row has nothing to expand.
       expect(items(el)[1]!.querySelector('button.expand')).toBeNull()
+    })
+
+    it('a failed load keeps the sample, says so, and the next open tries again', async () => {
+      groupedSpy.mockResolvedValueOnce(groupedPage())
+      accountsSpy.mockRejectedValueOnce(new Error('down'))
+      const el = await mount()
+      const toggle = () => items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!
+      toggle().click()
+      await settle(el)
+      const who = items(el)[0]!.querySelector('.who')!
+      expect([...who.querySelectorAll('li a')].map((a) => a.textContent?.trim())).toEqual(['Alice', 'Bob'])
+      expect(who.textContent).toContain('and 12 more')
+      expect(who.querySelector('[role="alert"]')?.textContent).toContain('Could not load everyone')
+      toggle().click()
+      await el.updateComplete
+      accountsSpy.mockResolvedValueOnce([alice, ACCT] as unknown as mastodon.v1.Account[])
+      toggle().click()
+      await settle(el)
+      expect(accountsSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it('a full list loaded for one account is dropped when the account changes', async () => {
+      groupedSpy.mockResolvedValueOnce(groupedPage())
+      let resolve!: (a: mastodon.v1.Account[]) => void
+      accountsSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
+      const el = await mount()
+      items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!.click()
+      await el.updateComplete
+      groupedSpy.mockResolvedValueOnce(groupedPage())
+      signIn(bobKey)
+      await settle(el)
+      resolve([dave] as unknown as mastodon.v1.Account[])
+      await settle(el)
+      // The new account's row starts closed, with nothing from the old one.
+      const toggle = items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      expect(items(el)[0]!.querySelector('.who')).toBeNull()
+      accountsSpy.mockResolvedValueOnce([alice] as unknown as mastodon.v1.Account[])
+      toggle.click()
+      await settle(el)
+      expect(accountsSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it('a group with everyone listed does not ask the server', async () => {
+      fetchSpy.mockResolvedValueOnce([
+        { ...notif('3', 'reblog'), status: status('s1'), account: carol },
+        { ...notif('2', 'reblog'), status: status('s1') },
+      ] as unknown as mastodon.v1.Notification[])
+      const el = await mount()
+      items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!.click()
+      await el.updateComplete
+      expect(accountsSpy).not.toHaveBeenCalled()
+      expect([...items(el)[0]!.querySelectorAll('.who li a')].map((a) => a.textContent?.trim())).toEqual(['Carol', 'Bob'])
+    })
+
+    it('a group whose names are all muted still counts the people outside the sample', async () => {
+      relationshipCache.value = new Map()
+      groupedSpy.mockResolvedValueOnce(groupedPage())
+      const el = await mount()
+      relationshipCache.value = new Map([
+        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as mastodon.v1.Relationship],
+        [relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as mastodon.v1.Relationship],
+      ])
+      await el.updateComplete
+      expect(lineText(items(el)[0]!)).toBe('12 people favourited your post')
+      relationshipCache.value = new Map()
     })
 
     it('groups single notifications itself on an older server', async () => {

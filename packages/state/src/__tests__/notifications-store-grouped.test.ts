@@ -4,7 +4,8 @@ import {
   CaribouError, type CaribouClient, type FetchGroupedNotificationsParams, type FetchNotificationsParams,
   type GroupedNotificationsPage, type NotificationGroupData,
 } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, statusCache } from '../caches.js'
+import { accountCache, cacheStatus, statusCache } from '../caches.js'
+import { activeUserKey } from '../users.js'
 import { createNotificationsStore, NOTIFICATIONS_PAGE, resetGroupedSupport } from '../notifications-store.js'
 
 const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<mastodon.v1.Notification[]>>()
@@ -43,6 +44,8 @@ beforeEach(() => {
   fetchGroupedNotifications.mockReset()
   fetchGroupedNotifications.mockResolvedValue(page([]))
   statusCache.value = new Map()
+  accountCache.value = new Map()
+  activeUserKey.value = null
   resetGroupedSupport()
 })
 
@@ -65,12 +68,14 @@ describe('createNotificationsStore with grouped notifications', () => {
   it('loadMore() pages below the oldest id and merges a group that goes on', async () => {
     fetchGroupedNotifications.mockResolvedValueOnce(page([
       g('ungrouped-12', 'mention', '12', '12', ['carol']),
-      g('favourite-s1', 'favourite', '5', '9', ['alice']),
+      g('favourite-s1', 'favourite', '5', '9', ['alice'], 3),
     ]))
     const store = createNotificationsStore({ clientSource: () => client() })
     await store.load()
+    // The server's count runs up to the top of the page: the older page's 3
+    // is the same three.
     fetchGroupedNotifications.mockResolvedValueOnce(page([
-      g('favourite-s1', 'favourite', '2', '4', ['bob', 'alice'], 2),
+      g('favourite-s1', 'favourite', '2', '4', ['bob', 'alice'], 3),
       g('follow-1', 'follow', '1', '1', ['dave']),
     ]))
     await store.loadMore()
@@ -88,7 +93,7 @@ describe('createNotificationsStore with grouped notifications', () => {
     ]))
     const store = createNotificationsStore({ clientSource: () => client() })
     await store.load()
-    fetchGroupedNotifications.mockResolvedValueOnce(page([g('favourite-s1', 'favourite', '13', '13', ['dave'])]))
+    fetchGroupedNotifications.mockResolvedValueOnce(page([g('favourite-s1', 'favourite', '13', '13', ['dave', 'alice'], 2)]))
     await store.poll()
     expect(fetchGroupedNotifications).toHaveBeenLastCalledWith({ types: [], minId: '12', limit: NOTIFICATIONS_PAGE })
     expect(rows(store)).toEqual(['favourite:2:dave,alice', 'mention:1:carol'])
@@ -118,6 +123,14 @@ describe('createNotificationsStore with grouped notifications', () => {
     expect(fetchGroupedNotifications).toHaveBeenCalledTimes(2)
   })
 
+  it.each([400, 405, 410, 501])('falls back too when the server answers %i for the unknown path', async (status) => {
+    fetchGroupedNotifications.mockRejectedValueOnce(new CaribouError('unknown', 'nope', { status }))
+    const store = createNotificationsStore({ clientSource: () => client() })
+    await store.load()
+    expect(store.error.value).toBeNull()
+    expect(fetchNotifications).toHaveBeenCalledOnce()
+  })
+
   it('another error is shown, not taken for an older server', async () => {
     fetchGroupedNotifications.mockRejectedValueOnce(new CaribouError('server_error', 'boom'))
     const store = createNotificationsStore({ clientSource: () => client() })
@@ -136,6 +149,61 @@ describe('createNotificationsStore with grouped notifications', () => {
     resolve(page([g('ungrouped-1', 'mention', '1', '1', ['alice'])]))
     await first
     expect(rows(store)).toEqual(['mention:1:carol'])
+  })
+
+  const post = (content: string, favourited: boolean) =>
+    ({ id: 's1', content, favourited, account: { id: 'me' } }) as unknown as mastodon.v1.Status
+  const pageWith = (id: string, content: string, favourited: boolean, by: string): GroupedNotificationsPage => ({
+    accounts: [{ ...account(by), displayName: `${by} ${content}` }],
+    statuses: [post(content, favourited)],
+    notificationGroups: [g(`ungrouped-${id}`, 'mention', id, id, [by])],
+  })
+
+  it('a superseded load writes nothing to the shared caches', async () => {
+    let release!: (p: GroupedNotificationsPage) => void
+    fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
+    const store = createNotificationsStore({ clientSource: () => client() })
+    const stale = store.load()
+    fetchGroupedNotifications.mockResolvedValueOnce(pageWith('2', 'new', false, 'bob'))
+    await store.load()
+    release(pageWith('1', 'stale', true, 'bob'))
+    await stale
+    expect(store.groups.value.map((x) => x.key)).toEqual(['ungrouped-2'])
+    expect(statusCache.value.get('s1')).toMatchObject({ content: 'new', favourited: false })
+    expect(store.groups.value[0]!.status).toMatchObject({ content: 'new', favourited: false })
+    expect(accountCache.value.get('bob')?.displayName).toBe('bob new')
+  })
+
+  it('a superseded Load older writes nothing to the shared caches', async () => {
+    fetchGroupedNotifications.mockResolvedValueOnce(pageWith('9', 'new', false, 'bob'))
+    const store = createNotificationsStore({ clientSource: () => client() })
+    await store.load()
+    let release!: (p: GroupedNotificationsPage) => void
+    fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
+    const older = store.loadMore()
+    fetchGroupedNotifications.mockResolvedValueOnce(pageWith('9', 'new', false, 'bob'))
+    await store.load()
+    release(pageWith('1', 'stale', true, 'bob'))
+    await older
+    expect(statusCache.value.get('s1')).toMatchObject({ content: 'new', favourited: false })
+  })
+
+  it('a reply held across an account change (A -> B -> A) writes nothing', async () => {
+    activeUserKey.value = 'alice@example.social' as never
+    let release!: (p: GroupedNotificationsPage) => void
+    fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
+    const old = createNotificationsStore({ clientSource: () => client() })
+    const pending = old.load()
+    activeUserKey.value = 'bob@example.social' as never
+    activeUserKey.value = 'alice@example.social' as never
+    const fresh = createNotificationsStore({ clientSource: () => client() })
+    fetchGroupedNotifications.mockResolvedValueOnce(pageWith('2', 'new', false, 'bob'))
+    await fresh.load()
+    release(pageWith('1', 'stale', true, 'bob'))
+    await pending
+    expect(old.groups.value).toEqual([])
+    expect(statusCache.value.get('s1')).toMatchObject({ content: 'new', favourited: false })
+    expect(fresh.groups.value[0]!.status).toMatchObject({ content: 'new', favourited: false })
   })
 
   it('a post changed in the cache shows in its group', async () => {
