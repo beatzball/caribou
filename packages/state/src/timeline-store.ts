@@ -112,7 +112,9 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   let nextCursor: string | undefined
 
   if (opts.initial) {
-    for (const s of opts.initial.statuses) cacheStatus(s)
+    // A merge: a copy cached earlier with the reader's token keeps its
+    // reader state (filters, flags) over the server's token-less one.
+    for (const s of opts.initial.statuses) mergeStatus(s)
     statusIds.value = opts.initial.statuses.map((s) => s.id)
     hasMore.value = opts.initial.nextMaxId != null
     firstLoadConsumed = true

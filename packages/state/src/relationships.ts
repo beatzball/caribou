@@ -26,13 +26,84 @@ export interface RelationshipOpts {
 
 const defaultSource = () => activeClient.value
 
-// One write per account at a time. A second click while the first is on its
-// way is dropped: the button already shows the state the first one asked for.
-const writing = new Set<string>()
+// Every write to one account's relationship goes through one queue, in the
+// order the reader asked: a request starts only after the one before it has
+// answered, so answers cannot arrive out of order. What the cache shows is
+// the last answer with every write still waiting laid on top. A write that
+// fails just leaves the queue, so the others keep their effect.
+type RelationshipFlags = Partial<Pick<mastodon.v1.Relationship,
+  'muting' | 'mutingNotifications' | 'blocking' | 'following' | 'requested'>>
+
+interface Queue {
+  // The relationship as the server last said, or as cached when the first
+  // write started.
+  confirmed: mastodon.v1.Relationship | undefined
+  pending: RelationshipFlags[]
+  tail: Promise<unknown>
+}
+
+const queues = new Map<string, Queue>()
+// One follow click at a time per account: a second click while the first is
+// on its way is dropped, since the button already shows what was asked.
+const following = new Set<string>()
 // Bumped when a write starts. A read compares it before and after its fetch:
 // if a write started in between — still on its way or already done — the
 // read carries older state than the write and must not replace it.
 const revisions = new Map<string, number>()
+
+/** Test-only — forgets queued writes between tests. */
+export function _testOnlyResetRelationships(): void {
+  queues.clear()
+  following.clear()
+  revisions.clear()
+}
+
+function shown(q: Queue, id: string): mastodon.v1.Relationship | undefined {
+  if (!q.confirmed && q.pending.length === 0) return undefined
+  let rel = q.confirmed ?? ({ id } as mastodon.v1.Relationship)
+  for (const patch of q.pending) rel = { ...rel, ...patch }
+  return rel
+}
+
+function enqueue(
+  client: CaribouClient, accountId: string, patch: RelationshipFlags,
+  call: (client: CaribouClient) => Promise<mastodon.v1.Relationship>, failure: string,
+): Promise<boolean> {
+  const key = relationshipKey(client.userKey, accountId)
+  let q = queues.get(key)
+  if (!q) {
+    q = { confirmed: relationshipCache.value.get(key), pending: [], tail: Promise.resolve() }
+    queues.set(key, q)
+  }
+  const queue = q
+  // Nothing ahead: the request goes out now, in this task, as a single
+  // write always did.
+  const idle = queue.pending.length === 0
+  queue.pending.push(patch)
+  revisions.set(key, (revisions.get(key) ?? 0) + 1)
+  put(key, shown(queue, accountId))
+  const start = async () => {
+    let ok = true
+    try {
+      queue.confirmed = await call(client)
+    } catch {
+      ok = false
+      toast(failure)
+    }
+    queue.pending.splice(queue.pending.indexOf(patch), 1)
+    put(key, shown(queue, accountId))
+    if (queue.pending.length === 0 && queues.get(key) === queue) queues.delete(key)
+    return ok
+  }
+  const run = idle ? start() : queue.tail.then(start)
+  queue.tail = run
+  return run
+}
+
+/** The relationship the cache shows, waiting writes included. */
+function current(client: CaribouClient, accountId: string): mastodon.v1.Relationship | undefined {
+  return relationshipCache.value.get(relationshipKey(client.userKey, accountId))
+}
 
 function put(key: string, rel: mastodon.v1.Relationship | undefined): void {
   const next = new Map(relationshipCache.value)
@@ -56,7 +127,7 @@ export async function loadRelationship(
   try {
     const [rel] = await client.fetchRelationships([accountId])
     if (!rel) return null
-    if ((revisions.get(key) ?? 0) === revision) put(key, rel)
+    if ((revisions.get(key) ?? 0) === revision && !queues.has(key)) put(key, rel)
     return relationshipCache.value.get(key) ?? rel
   } catch {
     return null
@@ -72,91 +143,52 @@ export async function toggleFollow(
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return
   const key = relationshipKey(client.userKey, account.id)
-  if (writing.has(key)) return
-  const before = relationshipCache.value.get(key)
+  if (following.has(key)) return
+  const before = current(client, account.id)
   const undo = before?.following || before?.requested
-  const base = before ?? ({ id: account.id } as mastodon.v1.Relationship)
-  put(key, undo
-    ? { ...base, following: false, requested: false }
-    // A locked account takes a request, not a follow.
-    : { ...base, following: !account.locked, requested: !!account.locked })
-  writing.add(key)
-  revisions.set(key, (revisions.get(key) ?? 0) + 1)
+  following.add(key)
   try {
-    const rel = undo ? await client.unfollow(account.id) : await client.follow(account.id)
-    put(key, rel)
-  } catch {
-    put(key, before)
-    toast(undo ? `Couldn't unfollow @${account.acct}.` : `Couldn't follow @${account.acct}.`)
+    await (undo
+      ? enqueue(client, account.id, { following: false, requested: false },
+          (c) => c.unfollow(account.id), `Couldn't unfollow @${account.acct}.`)
+      // A locked account takes a request, not a follow.
+      : enqueue(client, account.id, { following: !account.locked, requested: !!account.locked },
+          (c) => c.follow(account.id), `Couldn't follow @${account.acct}.`))
   } finally {
-    writing.delete(key)
+    following.delete(key)
   }
 }
 
-type RelationshipFlags = Partial<Pick<mastodon.v1.Relationship,
-  'muting' | 'mutingNotifications' | 'blocking' | 'following' | 'requested'>>
-
 type Account = Pick<mastodon.v1.Account, 'id' | 'acct'>
 
-/** True when the reader mutes or blocks the account (as far as is known). */
-export function isMutedOrBlocked(
-  accountId: string, userKey: UserKey | null = activeUserKey.value,
-): boolean {
-  const rel = relationshipFor(accountId, userKey)
-  return rel?.muting === true || rel?.blocking === true
-}
-
-// Writes `patch` at once, then asks the server. The server's answer
-// replaces the whole relationship. A failure puts back only the fields this
-// write changed, so a follow that finished meanwhile keeps its result.
-// Resolves true when the server took the change.
-async function writeFlags(
-  kind: 'mute' | 'block', account: Account, patch: RelationshipFlags,
+// Writes the change at once, then asks the server in turn. Asking for what
+// the cache already shows (a second Mute) sends nothing.
+function writeFlags(
+  account: Account, flag: 'muting' | 'blocking', on: boolean, patch: RelationshipFlags,
   call: (client: CaribouClient) => Promise<mastodon.v1.Relationship>,
   failure: string, opts: RelationshipOpts,
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
-  if (!client) return false
-  const key = relationshipKey(client.userKey, account.id)
-  const lock = `${key} ${kind}`
-  if (writing.has(lock)) return false
-  const before = relationshipCache.value.get(key)
-  const base = before ?? ({ id: account.id } as mastodon.v1.Relationship)
-  put(key, { ...base, ...patch })
-  writing.add(lock)
-  const revision = (revisions.get(key) ?? 0) + 1
-  revisions.set(key, revision)
-  try {
-    put(key, await call(client))
-    return true
-  } catch {
-    // Nothing else wrote meanwhile and nothing was known before: forget it.
-    if (!before && revisions.get(key) === revision) {
-      put(key, undefined)
-    } else {
-      const undo: Record<string, boolean> = {}
-      for (const field of Object.keys(patch)) {
-        undo[field] = (before as Record<string, unknown> | undefined)?.[field] === true
-      }
-      put(key, { ...(relationshipCache.value.get(key) ?? base), ...undo })
-    }
-    toast(failure)
-    return false
-  } finally {
-    writing.delete(lock)
-  }
+  if (!client) return Promise.resolve(false)
+  // Only a known state counts: a listed mute the cache has not seen yet is
+  // still a mute to undo.
+  const known = current(client, account.id)?.[flag]
+  if (known !== undefined && (known === true) === on) return Promise.resolve(true)
+  return enqueue(client, account.id, patch, call, failure)
 }
 
 /**
  * Mutes the account (its posts and its notifications), or unmutes it. The
  * cache changes at once, so every post by the account leaves the lists; a
- * failure puts the old state back and says so.
+ * failure puts the old state back and says so. An unmute while the mute is
+ * on its way runs after it, so the account ends unmuted. Resolves true when
+ * the server took the change.
  */
 export function setMute(account: Account, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
   return on
-    ? writeFlags('mute', account, { muting: true, mutingNotifications: true },
+    ? writeFlags(account, 'muting', true, { muting: true, mutingNotifications: true },
         (c) => c.mute(account.id), `Couldn't mute @${account.acct}.`, opts)
-    : writeFlags('mute', account, { muting: false, mutingNotifications: false },
+    : writeFlags(account, 'muting', false, { muting: false, mutingNotifications: false },
         (c) => c.unmute(account.id), `Couldn't unmute @${account.acct}.`, opts)
 }
 
@@ -167,8 +199,8 @@ export function setMute(account: Account, on: boolean, opts: RelationshipOpts = 
  */
 export function setBlock(account: Account, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
   return on
-    ? writeFlags('block', account, { blocking: true, following: false, requested: false },
+    ? writeFlags(account, 'blocking', true, { blocking: true, following: false, requested: false },
         (c) => c.block(account.id), `Couldn't block @${account.acct}.`, opts)
-    : writeFlags('block', account, { blocking: false },
+    : writeFlags(account, 'blocking', false, { blocking: false },
         (c) => c.unblock(account.id), `Couldn't unblock @${account.acct}.`, opts)
 }

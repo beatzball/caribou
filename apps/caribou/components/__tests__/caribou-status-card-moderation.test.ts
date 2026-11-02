@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  activeClient, activeUserKey, addUserSession, relationshipCache, relationshipKey, statusCache, users,
+  _testOnlyResetRelationships, activeClient, activeUserKey, addUserSession, relationshipCache, relationshipKey,
+  statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
@@ -59,6 +60,7 @@ async function settle(el: CaribouStatusCard) {
 const dialog = () => document.querySelector<CaribouConfirmDialog>('caribou-confirm-dialog')
 
 beforeEach(() => {
+  _testOnlyResetRelationships()
   document.body.replaceChildren()
   statusCache.value = new Map()
   relationshipCache.value = new Map()
@@ -81,7 +83,7 @@ describe('<caribou-status-card> post menu', () => {
   it('names the author in Mute and Block', async () => {
     signIn()
     const el = await mount(post('3'))
-    expect($(el, 'caribou-menu.more')!.getAttribute('label')).toBe('More actions')
+    expect($(el, 'caribou-menu.more')!.getAttribute('label')).toBe('More actions for post by @bob')
     expect(item(el, 'mute').textContent).toBe('Mute @bob')
     expect(item(el, 'block').textContent).toBe('Block @bob')
   })
@@ -106,8 +108,9 @@ describe('<caribou-status-card> post menu', () => {
     expect(mute).toHaveBeenCalledWith('42')
     expect(cached('42')?.muting).toBe(true)
     expect($(el, '#moderated-msg')!.textContent).toBe('You muted @bob.')
-    const undo = $(el, 'button.undo')!
-    expect(undo.getAttribute('aria-describedby')).toBe('moderated-msg')
+    // The shared button; its name says what it undoes.
+    const undo = $(el, 'caribou-button.undo')!
+    expect(undo.textContent).toBe('Undo mute of @bob')
     expect(el.shadowRoot!.activeElement).toBe(undo)
     expect(el.hasAttribute('hidden')).toBe(false)
     await settle(other)
@@ -140,7 +143,7 @@ describe('<caribou-status-card> post menu', () => {
     const el = await mount(post('9'))
     item(el, 'mute').click()
     await settle(el)
-    $(el, 'button.undo')!.click()
+    $(el, 'caribou-button.undo')!.click()
     await settle(el)
     expect(unmute).toHaveBeenCalledWith('42')
     expect(cached('42')?.muting).toBe(false)
@@ -202,5 +205,81 @@ describe('<caribou-status-card> post menu', () => {
     while (!(await el.updateComplete)) { /* settle */ }
     expect(el.hasAttribute('hidden')).toBe(false)
     expect($(el, 'caribou-menu.more')).toBeNull()
+  })
+
+  // Undo has focus the moment Mute is chosen, so Enter often comes before
+  // the server has answered the mute.
+  it('Undo pressed before the mute answered still unmutes, and the post stays', async () => {
+    signIn()
+    const d = deferred<Relationship>()
+    vi.spyOn(activeClient.value!, 'mute').mockReturnValue(d.promise)
+    const unmute = vi.spyOn(activeClient.value!, 'unmute').mockResolvedValue(rel('42'))
+    const el = await mount(post('20'))
+    item(el, 'mute').click()
+    await settle(el)
+    $(el, 'caribou-button.undo')!.click()
+    await settle(el)
+    expect($(el, '.status-content')).not.toBeNull()
+    d.resolve(rel('42', { muting: true, mutingNotifications: true }))
+    await settle(el)
+    expect(unmute).toHaveBeenCalledWith('42')
+    expect(cached('42')?.muting).toBe(false)
+    expect(el.hasAttribute('hidden')).toBe(false)
+    expect($(el, '.status-content')).not.toBeNull()
+  })
+
+  it('a Block dialog closes with no when the account changes, and blocks nobody', async () => {
+    signIn()
+    const block = vi.spyOn(activeClient.value!, 'block')
+    const el = await mount(post('21'))
+    item(el, 'block').click()
+    await settle(el)
+    expect(dialog()).not.toBeNull()
+    addUserSession({
+      userKey: toUserKey('carol', 'other.example'), server: 'other.example', token: 't2', vapidKey: '', createdAt: 0,
+      account: { id: 'c', acct: 'carol', username: 'carol' } as mastodon.v1.Account,
+    })
+    await settle(el)
+    expect(dialog()).toBeNull()
+    expect(block).not.toHaveBeenCalled()
+  })
+
+  it('a Block confirmed after the account changed sends nothing', async () => {
+    signIn()
+    const el = await mount(post('22'))
+    const oldClient = activeClient.value!
+    const oldBlock = vi.spyOn(oldClient, 'block')
+    item(el, 'block').click()
+    await settle(el)
+    const d = dialog()!
+    await d.updateComplete
+    // The switch lands while the dialog is open but before it notices.
+    activeUserKey.value = null
+    activeUserKey.value = ME
+    const newBlock = vi.spyOn(activeClient.value!, 'block')
+    const confirm = d.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')
+    confirm?.click()
+    await settle(el)
+    expect(oldBlock).not.toHaveBeenCalled()
+    expect(newBlock).not.toHaveBeenCalled()
+  })
+
+  it('the thread\'s main post by a muted author stays, behind a note with Show', async () => {
+    signIn()
+    relationshipCache.value = new Map([[relationshipKey(ME, '42'), rel('42', { muting: true })]])
+    const el = document.createElement('caribou-status-card') as CaribouStatusCard
+    el.instance = 'example.social'
+    el.variant = 'focused'
+    el.setAttribute('filter-context', 'thread')
+    el.status = post('23')
+    document.body.appendChild(el)
+    while (!(await el.updateComplete)) { /* settle */ }
+    expect(el.hasAttribute('hidden')).toBe(false)
+    expect($(el, '.notice p')!.textContent).toBe('You muted @bob.')
+    const show = $(el, 'button.filter-toggle')!
+    expect(show.getAttribute('aria-label')).toBe('Show post by @bob')
+    show.click()
+    await el.updateComplete
+    expect($(el, '.status-content')).not.toBeNull()
   })
 })

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { confirmDialog, type CaribouConfirmDialog } from '../caribou-confirm-dialog.js'
+import { activeUserKey } from '@beatzball/caribou-state'
+import { confirmBlock, confirmDialog, type CaribouConfirmDialog } from '../caribou-confirm-dialog.js'
 
 const OPTS = { title: 'Block @bob?', message: 'Are you sure?', confirmLabel: 'Block' }
 
@@ -39,10 +40,29 @@ describe('confirmDialog', () => {
     expect(document.querySelector('caribou-confirm-dialog')).toBeNull()
   })
 
-  it('resolves false when the dialog closes another way (Escape)', async () => {
+  it('resolves false when the dialog closes on its own, as on Escape (e2e presses the key)', async () => {
     const answer = confirmDialog(OPTS)
     const el = await opened()
     part(el, 'dialog').dispatchEvent(new Event('close'))
+    expect(await answer).toBe(false)
+  })
+
+  it('closes with no when the active account changes', async () => {
+    activeUserKey.value = 'alice@example.social' as typeof activeUserKey.value
+    const answer = confirmDialog(OPTS)
+    await opened()
+    activeUserKey.value = 'carol@other.example' as typeof activeUserKey.value
+    expect(await answer).toBe(false)
+    expect(document.querySelector('caribou-confirm-dialog')).toBeNull()
+    activeUserKey.value = null
+  })
+
+  it('confirmBlock asks about the account by name', async () => {
+    const answer = confirmBlock('bob')
+    const el = await opened()
+    expect(part(el, 'h2').textContent).toBe('Block @bob?')
+    expect(part(el, 'caribou-button.confirm').textContent).toBe('Block')
+    part(el, 'caribou-button.cancel').click()
     expect(await answer).toBe(false)
   })
 })

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { mastodon } from 'masto'
-import { activeUserKey, cacheStatus, statusCache, users } from '@beatzball/caribou-state'
+import { activeUserKey, cacheStatus, mergeStatus, statusCache, users } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
@@ -64,6 +64,8 @@ describe('<caribou-status-card> server filters', () => {
     expect($(el, '.notice p')!.textContent).toBe('Hidden by filter: Spoilers, Sports')
     const b = $(el, 'button.filter-toggle') as HTMLButtonElement
     expect(b.textContent).toBe('Show')
+    // Named with its post, so a list of buttons is not a list of "Show".
+    expect(b.getAttribute('aria-label')).toBe('Show post hidden by filter: Spoilers, Sports')
     expect(b.getAttribute('aria-expanded')).toBe('false')
     const region = $(el, '#filtered-post')!
     expect(b.getAttribute('aria-controls')).toBe(region.id)
@@ -122,6 +124,18 @@ describe('<caribou-status-card> server filters', () => {
     const el = await mount(plain, 'home')
     expect(el.hasAttribute('hidden')).toBe(false)
     cacheStatus(post('l1', { filtered: [match('Spoilers', 'hide')] }))
+    await el.updateComplete
+    expect(el.hasAttribute('hidden')).toBe(true)
+  })
+
+  it('a boost follows the newest cached copy of the post it boosts', async () => {
+    const boost = post('bb1', { reblog: post('bb2', { filtered: [] }), filtered: [] })
+    cacheStatus(boost)
+    const el = await mount(boost, 'home')
+    expect(el.hasAttribute('hidden')).toBe(false)
+    // The boosted post is fetched again elsewhere (its thread), and a new
+    // hide filter matches it there.
+    mergeStatus(post('bb2', { filtered: [match('Spoilers', 'hide')] }))
     await el.updateComplete
     expect(el.hasAttribute('hidden')).toBe(true)
   })

@@ -7,16 +7,18 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, createKeepAlive, isOwnAccount, relationshipCache, relationshipKey,
-  setBlock, setMute, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
+  activeClient, activeUser, activeUserKey, createKeepAlive, isOwnAccount, ownerGeneration,
+  relationshipCache, relationshipKey, setBlock, setMute, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
+import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
-import { confirmDialog } from './caribou-confirm-dialog.js'
+import { confirmBlock } from './caribou-confirm-dialog.js'
 import { spaClick } from './_spa-link.js'
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
+import './caribou-button.js'
 import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
@@ -84,20 +86,6 @@ function sameFields(a: ActionFields, b: ActionFields): boolean {
     && a.bookmarked === b.bookmarked && a.repliesCount === b.repliesCount
 }
 
-// The page sets the instance its data came from on the shell, and the card
-// sits inside other elements' shadow roots, so walk up through each shadow
-// host until a shell is found.
-function findShell(from: Element): Element | null {
-  let el: Element | null = from
-  while (el) {
-    const shell = el.closest('caribou-app-shell')
-    if (shell) return shell
-    const root = el.getRootNode()
-    el = root instanceof ShadowRoot ? root.host : null
-  }
-  return null
-}
-
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
@@ -135,7 +123,27 @@ function filterSource(own: Status, cached: Status | undefined): Status {
   return cached && has(cached) ? cached : own
 }
 
-type Moderated = { verb: 'muted' | 'blocked'; account: Status['account'] }
+// The session an action started under. A step that runs after an await (a
+// dialog's answer, Undo) checks it is still the one signed in: account ids
+// are minted per server, and the same id on the next account's server is
+// someone else.
+interface Owner {
+  client: NonNullable<typeof activeClient.value>
+  userKey: string
+  generation: number
+}
+
+function currentOwner(): Owner | null {
+  const client = activeClient.peek()
+  const userKey = activeUserKey.peek()
+  return client && userKey ? { client, userKey, generation: ownerGeneration() } : null
+}
+
+function stillOwner(o: Owner): boolean {
+  return activeUserKey.peek() === o.userKey && ownerGeneration() === o.generation
+}
+
+type Moderated = { verb: 'muted' | 'blocked'; account: Status['account']; owner: Owner }
 
 export function statusPermalink(s: { id: string; account: { acct: string } }): string {
   return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
@@ -234,6 +242,10 @@ export class CaribouStatusCard extends LitElement {
     .menu-item:hover { background: var(--bg-1); }
     .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     .menu-item.danger { color: var(--danger); }
+    .vh {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
     .notice {
       display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;
       color: var(--fg-muted);
@@ -276,6 +288,9 @@ export class CaribouStatusCard extends LitElement {
   @state() private authorRel: { muting: boolean; blocking: boolean } = { muting: false, blocking: false }
   // The author or the booster is muted or blocked, in a context that hides it.
   @state() private relHidden = false
+  // Who is muted or blocked, for the note on a thread's main post, which is
+  // never removed.
+  @state() private relWhy: { verb: 'muted' | 'blocked'; acct: string } | null = null
   // The reader muted or blocked the author from this card's menu. The card
   // then shows that, with Undo, where the post was, so focus has a place.
   @state() private moderated: Moderated | null = null
@@ -360,9 +375,16 @@ export class CaribouStatusCard extends LitElement {
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
 
       // The reader's own posts are never filtered.
-      const verdict = s && !this.ownPost
-        ? filterVerdict(filterSource(s, cache.get(s.id)), this.filterContext || null)
-        : null
+      // For a boost, the inner post's own cache entry too: it can be newer
+      // than the copy inside the wrapper (opened in a thread, say).
+      let source: Status | null = null
+      if (s) {
+        const wrapper = filterSource(s, cache.get(s.id))
+        source = s.reblog
+          ? { ...wrapper, reblog: filterSource(wrapper.reblog ?? s.reblog, cache.get(s.reblog.id)) }
+          : wrapper
+      }
+      const verdict = source && !this.ownPost ? filterVerdict(source, this.filterContext || null) : null
       if (!sameVerdict(verdict, this.liveVerdict)) this.liveVerdict = verdict
 
       // Relationship ids are the reader's server's, so only a card that can
@@ -376,6 +398,12 @@ export class CaribouStatusCard extends LitElement {
       if (muting !== this.authorRel.muting || blocking !== this.authorRel.blocking) {
         this.authorRel = { muting, blocking }
       }
+      type Verb = 'muted' | 'blocked'
+      const boosterMuted: Verb | null = booster?.blocking === true ? 'blocked' : booster?.muting === true ? 'muted' : null
+      const authorMuted: Verb | null = blocking ? 'blocked' : muting ? 'muted' : null
+      const why = authorMuted ? { verb: authorMuted, acct: post!.account.acct }
+        : boosterMuted ? { verb: boosterMuted, acct: s!.account.acct } : null
+      if (why?.verb !== this.relWhy?.verb || why?.acct !== this.relWhy?.acct) this.relWhy = why
       const hides = this.filterContext !== '' && this.filterContext !== 'account'
       const relHidden = hides && [author, booster].some((r) => r?.muting === true || r?.blocking === true)
       if (relHidden !== this.relHidden) this.relHidden = relHidden
@@ -448,12 +476,12 @@ export class CaribouStatusCard extends LitElement {
 
   // Shows "You muted …" with Undo in the post's place at once, then asks
   // the server. A failure brings the post back (the state layer says why).
-  private async moderate(verb: Moderated['verb'], write: () => Promise<boolean>) {
+  private async moderate(verb: Moderated['verb'], owner: Owner, write: () => Promise<boolean>) {
     const post = this.status?.reblog ?? this.status
     if (!post) return
-    const mine: Moderated = { verb, account: post.account }
+    const mine: Moderated = { verb, account: post.account, owner }
     this.moderated = mine
-    void this.focusIn('.notice button')
+    void this.focusIn('caribou-button.undo')
     if (await write() || this.moderated !== mine) return
     this.moderated = null
     void this.focusIn('caribou-menu.more')
@@ -461,31 +489,38 @@ export class CaribouStatusCard extends LitElement {
 
   private onMute = () => {
     const account = (this.status?.reblog ?? this.status)?.account
-    if (!this.canAct || !account) return
-    if (this.authorRel.muting) void setMute(account, false)
-    else void this.moderate('muted', () => setMute(account, true))
+    const owner = currentOwner()
+    if (!this.canAct || !account || !owner) return
+    const opts = { clientSource: () => owner.client }
+    if (this.authorRel.muting) void setMute(account, false, opts)
+    else void this.moderate('muted', owner, () => setMute(account, true, opts))
   }
 
   private onBlock = async () => {
     const account = (this.status?.reblog ?? this.status)?.account
-    if (!this.canAct || !account) return
+    const owner = currentOwner()
+    if (!this.canAct || !account || !owner) return
+    const opts = { clientSource: () => owner.client }
     if (this.authorRel.blocking) {
-      void setBlock(account, false)
+      void setBlock(account, false, opts)
       return
     }
-    const ok = await confirmDialog({
-      title: `Block @${account.acct}?`,
-      message: `@${account.acct} will no longer be able to follow you or see your posts, and you will no longer see theirs.`,
-      confirmLabel: 'Block',
-    })
-    if (ok) void this.moderate('blocked', () => setBlock(account, true))
+    const ok = await confirmBlock(account.acct)
+    // The account changed while the question was open: this id is not the
+    // new account's to block.
+    if (ok && stillOwner(owner)) void this.moderate('blocked', owner, () => setBlock(account, true, opts))
   }
 
+  // Undo runs after the mute or block in the queue, even while that is
+  // still on its way, so the account ends as the reader chose.
   private onUndoModerate = () => {
     const m = this.moderated
     if (!m) return
     this.moderated = null
-    void (m.verb === 'muted' ? setMute(m.account, false) : setBlock(m.account, false))
+    if (stillOwner(m.owner)) {
+      const opts = { clientSource: () => m.owner.client }
+      void (m.verb === 'muted' ? setMute(m.account, false, opts) : setBlock(m.account, false, opts))
+    }
     void this.focusIn('caribou-menu.more')
   }
 
@@ -562,7 +597,7 @@ export class CaribouStatusCard extends LitElement {
   private renderMenu(post: Status) {
     const acct = post.account.acct
     const { muting, blocking } = this.authorRel
-    return html`<caribou-menu class="more" anchored icon="ellipsis" label="More actions">
+    return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for post by @${acct}`}>
       <button type="button" class="menu-item" data-action="mute"
         @click=${this.onMute}>${muting ? 'Unmute' : 'Mute'} @${acct}</button>
       <button type="button" class=${blocking ? 'menu-item' : 'menu-item danger'} data-action="block"
@@ -653,10 +688,12 @@ export class CaribouStatusCard extends LitElement {
     if (!s) return nothing
     if (this.moderated) {
       const { verb, account } = this.moderated
+      // The button's name carries what it undoes: a description in this
+      // root cannot reach the shared button's inner one.
       return html`<article data-variant=${this.variant} class="moderated"><div class="notice">
         <p id="moderated-msg">You ${verb} @${account.acct}.</p>
-        <button type="button" class="undo" aria-describedby="moderated-msg"
-          @click=${this.onUndoModerate}>Undo</button>
+        <caribou-button class="undo" variant="secondary"
+          @click=${this.onUndoModerate}>Undo<span class="vh"> ${verb === 'muted' ? 'mute' : 'block'} of @${account.acct}</span></caribou-button>
       </div></article>`
     }
     // The server and the hydrating render read the status they were given;
@@ -664,18 +701,29 @@ export class CaribouStatusCard extends LitElement {
     const verdict = this.liveVerdict !== undefined
       ? this.liveVerdict
       : filterVerdict(s, this.filterContext || null)
-    // The post the reader opened is never removed: a hide filter warns.
-    if ((verdict?.action === 'hide' && this.variant !== 'focused') || this.relHidden) {
+    // The post the reader opened is never removed: a hide filter, a mute or
+    // a block covers it with a note instead.
+    const focused = this.variant === 'focused'
+    if (!focused && (verdict?.action === 'hide' || this.relHidden)) {
       this.hiddenNow = true
       return nothing
     }
-    if (verdict) {
+    const why = focused && this.relHidden ? this.relWhy : null
+    if (verdict || why) {
       const shown = this.filterShown
+      const titles = verdict?.titles.join(', ') ?? ''
+      const note = verdict
+        ? html`Hidden by filter: <strong>${titles}</strong>`
+        : html`<span>You ${why!.verb} @${why!.acct}.</span>`
+      // The visible word starts the name, so a voice command still finds it.
+      const name = verdict
+        ? `${shown ? 'Hide' : 'Show'} post hidden by filter: ${titles}`
+        : `${shown ? 'Hide' : 'Show'} post by @${why!.acct}`
       return html`<article data-variant=${this.variant} class="filtered">
         <div class="notice">
-          <p>Hidden by filter: <strong>${verdict.titles.join(', ')}</strong></p>
+          <p>${note}</p>
           <button type="button" class="filter-toggle" aria-controls="filtered-post"
-            aria-expanded=${shown ? 'true' : 'false'}
+            aria-expanded=${shown ? 'true' : 'false'} aria-label=${name}
             @click=${this.onToggleFiltered}>${shown ? 'Hide' : 'Show'}</button>
         </div>
         <div class="filtered-post" id="filtered-post" ?hidden=${!shown}>${shown ? this.renderPost(s) : nothing}</div>

@@ -5,8 +5,9 @@ import { effect } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { AccountPage, CaribouClient } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUser, relationshipCache, relationshipKey, setBlock, setMute,
+  activeClient, activeUser, activeUserKey, relationshipCache, relationshipKey, setBlock, setMute,
 } from '@beatzball/caribou-state'
+import { confirmBlock } from './caribou-confirm-dialog.js'
 import { boxReset } from './_shared-styles.js'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
@@ -41,17 +42,17 @@ const KINDS: Record<Kind, {
   heading: string; empty: string; on: string; off: string
   flag: 'muting' | 'blocking'
   fetch: (c: CaribouClient, maxId?: string) => Promise<AccountPage>
-  write: (a: Account, on: boolean) => Promise<boolean>
+  write: (a: Account, on: boolean, client: CaribouClient) => Promise<boolean>
 }> = {
   mutes: {
     heading: 'Muted accounts', empty: 'You have not muted anyone.', on: 'Mute', off: 'Unmute', flag: 'muting',
     fetch: (c, maxId) => c.fetchMutes(maxId ? { maxId } : {}),
-    write: (a, on) => setMute(a, on),
+    write: (a, on, client) => setMute(a, on, { clientSource: () => client }),
   },
   blocks: {
     heading: 'Blocked accounts', empty: 'You have not blocked anyone.', on: 'Block', off: 'Unblock', flag: 'blocking',
     fetch: (c, maxId) => c.fetchBlocks(maxId ? { maxId } : {}),
-    write: (a, on) => setBlock(a, on),
+    write: (a, on, client) => setBlock(a, on, { clientSource: () => client }),
   },
 }
 
@@ -78,7 +79,8 @@ export class CaribouModerationSettings extends LitElement {
     .filter p { margin: var(--space-1) 0 0; color: var(--fg-1); }
     .filter .meta { color: var(--fg-muted); font-size: 0.875rem; }
     .account { display: flex; align-items: center; gap: var(--space-3); }
-    .account img { border-radius: var(--radius-md); flex-shrink: 0; }
+    .account img, .no-avatar { border-radius: var(--radius-md); flex-shrink: 0; }
+    .no-avatar { display: block; width: 40px; height: 40px; background: var(--bg-2); }
     .who {
       flex: 1; min-width: 0; display: flex; flex-direction: column;
       color: inherit; text-decoration: none; overflow-wrap: anywhere;
@@ -170,8 +172,18 @@ export class CaribouModerationSettings extends LitElement {
     return flag === undefined ? true : flag === true
   }
 
-  private onToggle(kind: Kind, account: Account) {
-    void KINDS[kind].write(account, !this.isOn(kind, account))
+  // Unmute and Unblock act at once. Block again asks first, as everywhere,
+  // and only for the account that listed the row.
+  private async onToggle(kind: Kind, account: Account) {
+    const client = this.loadedFor
+    const userKey = activeUserKey.peek()
+    if (!client) return
+    const on = !this.isOn(kind, account)
+    if (kind === 'blocks' && on) {
+      const ok = await confirmBlock(account.acct)
+      if (!ok || activeUserKey.peek() !== userKey || this.loadedFor !== client) return
+    }
+    void KINDS[kind].write(account, on, client)
   }
 
   private onMore(kind: Kind) {
@@ -205,9 +217,12 @@ export class CaribouModerationSettings extends LitElement {
     const where = f.context.map((c) => CONTEXT_NAMES[c] ?? c).join(', ')
     const words = f.keywords.map((k) => k.keyword).join(', ')
     const posts = f.statuses.length
+    // Mastodon lists expired filters too; they no longer apply. This page
+    // renders only in the browser, so the clock is safe to read.
+    const expired = f.expiresAt != null && Date.parse(f.expiresAt) <= Date.now()
     return html`<li class="filter" data-filter-id=${f.id}>
       <h3>${f.title}</h3>
-      <p class="meta">${action} · ${where}</p>
+      <p class="meta">${expired ? 'Expired · ' : ''}${action} · ${where}</p>
       ${words ? html`<p>Words: ${words}</p>` : nothing}
       ${posts > 0 ? html`<p>${posts === 1 ? '1 post' : `${posts} posts`}</p>` : nothing}
     </li>`
@@ -228,7 +243,9 @@ export class CaribouModerationSettings extends LitElement {
         const on = this.isOn(kind, a)
         const name = a.displayName || a.username
         return html`<li class="account" data-account-id=${a.id}>
-          <img src=${a.avatarStatic || a.avatar} alt="" width="40" height="40" loading="lazy" decoding="async" />
+          ${a.avatarStatic || a.avatar
+            ? html`<img src=${a.avatarStatic || a.avatar} alt="" width="40" height="40" loading="lazy" decoding="async" />`
+            : html`<span class="no-avatar"></span>`}
           <a class="who" href=${profilePath(a.acct, this.server)} @click=${spaClick}>
             <strong>${name}</strong><span>@${a.acct}</span>
           </a>

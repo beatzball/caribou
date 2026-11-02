@@ -174,6 +174,58 @@ test.describe('mute and block on a profile', () => {
   })
 })
 
+// /local, profiles and threads are server-rendered from a fetch without the
+// reader's token, so their posts carry no `filtered`. Signed in, the page
+// asks for the reader's copies and the filters apply. The server's own
+// upstream fetch is out of `page.route`'s reach, so the test reaches /local
+// by a client-side navigation, whose page data the browser asks for.
+test('server-rendered posts get the reader\'s filters once the page runs', async ({ page }) => {
+  const errors = collectErrors(page)
+  await signIn(page)
+  await page.route(`${API}/v1/timelines/home*`, (route) => route.fulfill(json([])))
+  const camel = (id: string) => ({
+    id, uri: `https://${INSTANCE}/@bob/${id}`, url: `https://${INSTANCE}/@bob/${id}`,
+    createdAt: '2024-01-01T00:00:00.000Z', content: `<p>post ${id}</p>`, visibility: 'public',
+    sensitive: false, spoilerText: '', mediaAttachments: [], mentions: [], tags: [], emojis: [],
+    reblogsCount: 0, favouritesCount: 0, repliesCount: 0,
+    account: { id: 'b1', username: 'bob', acct: 'bob', displayName: 'BOB', avatar: '', avatarStatic: '',
+      url: `https://${INSTANCE}/@bob` },
+  })
+  await page.route((url) => url.pathname === '/local', (route) => {
+    if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
+    return route.fulfill(json({
+      kind: 'ok', statuses: [camel('1'), camel('2'), camel('3')], nextMaxId: null,
+      shell: { instance: INSTANCE, source: 'cookie' },
+    }))
+  })
+  const asked: string[][] = []
+  await page.route(`${API}/v1/statuses?*`, (route) => {
+    const ids = new URL(route.request().url()).searchParams.getAll('id[]')
+    asked.push(ids)
+    return route.fulfill(json(ids.map((id) => status(id, BOB,
+      id === '2' ? [match('Politics', 'hide', ['public'])]
+        : id === '3' ? [match('Spoilers', 'warn', ['public'])] : []))))
+  })
+  await gotoSettled(page, '/home')
+  await page.evaluate(() => {
+    history.pushState(null, '', '/local')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  })
+  await expect(card(page, '1')).toContainText('post 1')
+  await expect.poll(() => asked).toEqual([['1', '2', '3']])
+  await expect(card(page, '2')).toBeHidden()
+  await expect(card(page, '3').getByText('Hidden by filter: Spoilers')).toBeVisible()
+  await expect(card(page, '3')).not.toContainText('post 3')
+  expect(errors).toEqual([])
+})
+
+test('/settings links to the moderation page', async ({ page }) => {
+  await signIn(page)
+  await gotoSettled(page, '/settings')
+  await page.getByRole('link', { name: 'Filters, mutes and blocks' }).click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/settings/moderation')
+})
+
 test.describe('/settings/moderation', () => {
   test('signed out: asks to sign in', async ({ page }) => {
     await gotoSettled(page, '/settings/moderation')

@@ -42,6 +42,7 @@ function fakeClient(impl?: FetchImpl): FakeClient {
     fetchMutes: unused as CaribouClient['fetchMutes'],
     fetchBlocks: unused as CaribouClient['fetchBlocks'],
     fetchFilters: unused as CaribouClient['fetchFilters'],
+    fetchStatuses: unused as CaribouClient['fetchStatuses'],
     createStatus: unused as CaribouClient['createStatus'],
     uploadMedia: unused as CaribouClient['uploadMedia'],
     fetchMedia: unused as CaribouClient['fetchMedia'],

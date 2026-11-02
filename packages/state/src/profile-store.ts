@@ -1,7 +1,7 @@
 import { computed, signal, type ReadonlySignal } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { CaribouClient, CaribouError } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, statusCache } from './caches.js'
+import { cacheStatus, mergeStatus, statusCache } from './caches.js'
 
 export type ProfileTab = 'posts' | 'replies' | 'media'
 
@@ -39,7 +39,9 @@ export function createProfileStore(
 
   let firstLoadConsumed = false
   if (opts.initial) {
-    for (const s of opts.initial.statuses) cacheStatus(s)
+    // A merge: a copy cached earlier with the reader's token keeps its
+    // reader state (filters, flags) over the server's token-less one.
+    for (const s of opts.initial.statuses) mergeStatus(s)
     statusIds.value = opts.initial.statuses.map((s) => s.id)
     hasMore.value = opts.initial.nextMaxId != null
     firstLoadConsumed = true

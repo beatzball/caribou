@@ -70,7 +70,7 @@ describe('caribou-settings', () => {
     expect(root.querySelector('h1')?.textContent).toBe('Settings')
     const sections = [...root.querySelectorAll('section')]
     expect(sections.map((s) => s.id)).toEqual(SETTINGS_SECTIONS.map((s) => s.id))
-    expect(sections.map((s) => s.id)).toEqual(['appearance', 'timeline', 'account'])
+    expect(sections.map((s) => s.id)).toEqual(['appearance', 'timeline', 'moderation', 'account'])
     for (const s of sections) {
       const h2 = s.querySelector('h2')!
       expect(s.getAttribute('aria-labelledby')).toBe(h2.id)

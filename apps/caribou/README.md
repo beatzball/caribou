@@ -126,15 +126,24 @@ notifications, public, thread, account; empty, as on bookmarks, never
 filters) in `components/_status-filter.ts`. Hide removes the card and its
 row (`li:has(> caribou-status-card[hidden])`); warn shows "Hidden by filter:
 <name>" and a Show button. A hide filter on the post a thread is about
-warns instead. A server without filters v2, or a copy fetched without a
-token (all server-rendered data), has no `filtered`, so the server render
-never filters and hydration holds. A fresh copy's `filtered` replaces the
-cached one (`mergeStatus`), so a filter edited on the server shows.
+warns instead. A server without filters v2 sends no `filtered`, and nothing
+changes. Server-rendered data is fetched without a token, so it has none
+either: the server render never filters and hydration holds. Once the page
+runs with a session on the same server, the timeline, the profile and the
+thread ask for the reader's copies of those posts (`loadReaderViewFrom` in
+`components/_shell.ts`, `GET /api/v1/statuses?id[]=`, or one by one on an
+older server), and the filters apply a moment later. Stores seed with
+`mergeStatus`, so a reader's copy already cached keeps its `filtered`, and a
+fresh copy's `filtered` replaces the cached one.
 
-**Mute and block change the relationship at once.** `setMute` and
-`setBlock` in `@beatzball/caribou-state` write the relationship cache
-first, then ask the server, and put back only the fields they changed on a
-failure. In every context but a profile, a card hides a post by an account
+**Mute and block change the relationship at once.** `setMute`,
+`setBlock` and `toggleFollow` in `@beatzball/caribou-state` write the
+relationship cache first, then ask the server. Writes to one account go
+through one queue, in order, so an answer cannot overwrite a newer one, and
+an Undo pressed before the mute has answered runs after it. A failed write
+leaves the queue and the cache shows the rest. A muted or blocked
+account's notifications leave the list too. A block, and anything else that
+runs after a dialog, checks that the same account is still signed in. In every context but a profile, a card hides a post by an account
 the reader mutes or blocks, or a boost by one; only a card on the reader's
 own server reads the cache, since account ids are per server. The card
 whose menu did it shows "You muted @x." with Undo instead, so focus has a
@@ -333,6 +342,10 @@ registers the element on the server and the client alike.
   `--caribou-icon-fill: none` on boost. The status card's actions are the
   first server-rendered use; `tests/e2e/status-card-hydration.spec.ts`
   hydrates them in CI.
+- A native `<button>` is right in two places: an item in a
+  `<caribou-menu>` (the caller's light DOM, see below), and a toggle whose
+  `aria-controls` names a region in the same root (the status card's Show
+  more and Show), since an id cannot reach into a shared control's root.
 - `<caribou-button>`: the label is the slotted text. `type="submit"` submits
   its form (through `ElementInternals`) the way a native submit button
   does: after every click listener has run, and not if one of them called

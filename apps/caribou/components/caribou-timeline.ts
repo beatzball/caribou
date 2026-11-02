@@ -14,6 +14,7 @@ import './caribou-new-posts-banner.js'
 import './caribou-button.js'
 import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
 import { timelineFilterContext } from './_status-filter.js'
+import { findShell, loadReaderViewFrom } from './_shell.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
 
@@ -127,6 +128,7 @@ export class CaribouTimeline extends LitElement {
       // The page got fresh data in the background (`enterWithCache`).
       if (changed.has('initial') && this.initial && !isCachedSnapshot(this.initial)) {
         this.store.offer(this.initial.statuses, this.initial.nextMaxId)
+        this.loadReaderView(this.initial.statuses)
       }
       return
     }
@@ -138,7 +140,10 @@ export class CaribouTimeline extends LitElement {
       const old = Date.now() - kept.syncedAt.peek() > STALE_MS
       // The list is already there; what is new goes to the banner. A cached
       // snapshot is what the store was filled from, so it adds nothing.
-      if (this.initial && !isCachedSnapshot(this.initial)) kept.offer(this.initial.statuses, this.initial.nextMaxId)
+      if (this.initial && !isCachedSnapshot(this.initial)) {
+        kept.offer(this.initial.statuses, this.initial.nextMaxId)
+        this.loadReaderView(this.initial.statuses)
+      }
       if (activeClient.peek() && !firstLoadSettling()) {
         const refresh = kept.refresh()
         if (old) trackUpdate(refresh)
@@ -153,6 +158,13 @@ export class CaribouTimeline extends LitElement {
     this.bind(this.store)
     // The server already paid for the first page when `initial` is set.
     if (!this.initial) void this.store.load()
+    else this.loadReaderView(this.initial.statuses)
+  }
+
+  // The server fetched `initial` without the reader's token, so it has none
+  // of the reader's filters; ask again for the reader's copy.
+  private loadReaderView(statuses: readonly mastodon.v1.Status[]) {
+    loadReaderViewFrom(findShell(this)?.getAttribute('instance') ?? '', statuses)
   }
 
   private bind(store: TimelineStore) {

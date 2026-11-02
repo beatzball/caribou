@@ -127,6 +127,42 @@ describe('<caribou-moderation-settings>', () => {
     expect(section(el, 'blocks-h').querySelector('li.account caribou-button')!.textContent).toBe('Block @carol@other.example')
   })
 
+  it('Block again after Unblock asks first, and Cancel sends nothing', async () => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    const client = signIn()
+    stub(client)
+    vi.spyOn(client, 'unblock').mockResolvedValue({ id: '8', blocking: false } as mastodon.v1.Relationship)
+    const block = vi.spyOn(client, 'block').mockResolvedValue({ id: '8', blocking: true } as mastodon.v1.Relationship)
+    const el = await mount()
+    const button = () => section(el, 'blocks-h').querySelector<HTMLElement>('li.account caribou-button')!
+    button().click()
+    await flush()
+    await el.updateComplete
+    button().click()
+    await flush()
+    const dialog = document.querySelector('caribou-confirm-dialog')!
+    expect(dialog).not.toBeNull()
+    await (dialog as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    dialog.shadowRoot!.querySelector<HTMLElement>('caribou-button.cancel')!.click()
+    await flush()
+    expect(block).not.toHaveBeenCalled()
+    button().click()
+    await flush()
+    const again = document.querySelector('caribou-confirm-dialog')!
+    await (again as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    again.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
+    await flush()
+    await el.updateComplete
+    expect(block).toHaveBeenCalledWith('8')
+    expect(button().textContent).toBe('Unblock @carol@other.example')
+  })
+
+  it('marks an expired filter', async () => {
+    stub(signIn(), { filters: async () => [{ ...FILTER, expiresAt: '2020-01-01T00:00:00Z' }] })
+    const el = await mount()
+    expect(section(el, 'filters-h').querySelector('.meta')!.textContent).toBe('Expired · Warn · Home and lists, Conversations')
+  })
+
   it('loads more by the cursor', async () => {
     const client = signIn()
     const s = stub(client, {

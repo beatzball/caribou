@@ -378,4 +378,19 @@ describe('<caribou-profile-header> mute and block', () => {
     expect(unblock).toHaveBeenCalledWith('42')
     expect(button(el)!.dataset.state).toBe('follow')
   })
+
+  it('Unblock keeps the same button, still focused, now Follow', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ blocking: true })])
+    vi.spyOn(client, 'unblock').mockResolvedValue(rel())
+    const el = await mountWith(ACCOUNT)
+    const before = button(el)!
+    expect(before.dataset.state).toBe('blocked')
+    before.focus()
+    before.click()
+    await settle(el)
+    expect(button(el)).toBe(before)
+    expect(before.dataset.state).toBe('follow')
+    expect(el.shadowRoot!.activeElement).toBe(before)
+  })
 })

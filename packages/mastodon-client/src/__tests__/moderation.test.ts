@@ -108,3 +108,28 @@ describe('CaribouClient moderation lists', () => {
       .rejects.toMatchObject({ code: 'not_found' })
   })
 })
+
+describe('CaribouClient fetchStatuses', () => {
+  it('asks for every id in one request and returns camelCase statuses', async () => {
+    let ids: string[] = []
+    let auth: string | null = null
+    server.use(http.get(`${API}/v1/statuses`, ({ request }) => {
+      ids = new URL(request.url).searchParams.getAll('id[]')
+      auth = request.headers.get('authorization')
+      return HttpResponse.json(ids.map((id) => ({
+        id, content: '', spoiler_text: '', filtered: [{ filter: { id: 'f', title: 'T', context: ['home'], filter_action: 'hide' } }],
+      })))
+    }))
+    const statuses = await createCaribouClient(userKey, sessionSource()).fetchStatuses(['1', '2'])
+    expect(ids).toEqual(['1', '2'])
+    expect(auth).toBe('Bearer TOKEN-1')
+    expect(statuses.map((s) => s.id)).toEqual(['1', '2'])
+    expect(statuses[0]!.filtered![0]!.filter.filterAction).toBe('hide')
+  })
+
+  it('rejects with not_found on an older server', async () => {
+    server.use(http.get(`${API}/v1/statuses`, () => HttpResponse.json({ error: 'Not found' }, { status: 404 })))
+    await expect(createCaribouClient(userKey, sessionSource()).fetchStatuses(['1']))
+      .rejects.toMatchObject({ code: 'not_found' })
+  })
+})

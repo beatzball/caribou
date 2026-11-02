@@ -71,6 +71,8 @@ export function mergeStatus(fresh: mastodon.v1.Status): mastodon.v1.Status {
 function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   const cache = statusCache.peek()
   const current = cache.get(fresh.id)
+  // The same object again (a store seeded twice from one page): nothing new.
+  if (current === fresh) return current
   let next = current ? keepReaderFields(fresh, current) : fresh
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog

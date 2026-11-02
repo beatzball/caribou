@@ -6,11 +6,11 @@ import { effect, signal } from '@preact/signals-core'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import type { Account, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUser, isOwnAccount, loadRelationship, relationshipCache, relationshipKey,
+  activeClient, activeUser, activeUserKey, isOwnAccount, loadRelationship, relationshipCache, relationshipKey,
   setBlock, setMute, toggleFollow, type UserSession,
 } from '@beatzball/caribou-state'
 import { mastodonLinkText } from './_shared-styles.js'
-import { confirmDialog } from './caribou-confirm-dialog.js'
+import { confirmBlock } from './caribou-confirm-dialog.js'
 import './caribou-button.js'
 import './caribou-menu.js'
 
@@ -183,21 +183,19 @@ export class CaribouProfileHeader extends LitElement {
 
   private onBlock = async () => {
     const target = this.target
-    if (!target) return
+    const client = activeClient.peek()
+    const userKey = activeUserKey.peek()
+    if (!target || !client) return
+    const opts = { clientSource: () => client }
     if (this.relationship?.blocking) {
-      void setBlock(target, false)
+      void setBlock(target, false, opts)
       return
     }
-    const ok = await confirmDialog({
-      title: `Block @${target.acct}?`,
-      message: `@${target.acct} will no longer be able to follow you or see your posts, and you will no longer see theirs.`,
-      confirmLabel: 'Block',
-    })
-    if (ok) void setBlock(target, true)
+    const ok = await confirmBlock(target.acct)
+    // The target's id belongs to the server of the account that asked.
+    if (ok && activeUserKey.peek() === userKey && this.target === target) void setBlock(target, true, opts)
   }
 
-  // A blocked account cannot be followed: Unblock takes the Follow
-  // button's place. The button that had focus stays in place either way.
   private renderMenu(rel: Relationship) {
     const acct = this.target!.acct
     return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for @${acct}`}>
@@ -219,24 +217,21 @@ export class CaribouProfileHeader extends LitElement {
     host.toggleAttribute('data-focus-visible', e.type !== 'focusout' && inner.matches(':focus-visible'))
   }
 
+  // One template for every state, so the button the reader pressed (Follow,
+  // Unfollow or Unblock) stays the same element and keeps focus. A blocked
+  // account cannot be followed: the button then unblocks.
   private renderFollow() {
     const rel = this.relationship
     if (!this.target || !rel) return nothing
-    if (rel.blocking) {
-      return html`<div class="actions" aria-live="polite">
-        <caribou-button class="follow" data-state="blocked" variant="secondary"
-          @click=${this.onBlock}>Unblock</caribou-button>
-        ${this.renderMenu(rel)}
-      </div>`
-    }
-    const state = rel.following ? 'following' : rel.requested ? 'requested' : 'follow'
+    const state = rel.blocking ? 'blocked' : rel.following ? 'following' : rel.requested ? 'requested' : 'follow'
     const label = state === 'following'
       ? html`<span class="idle">Following</span><span class="hover">Unfollow</span>`
-      : state === 'requested' ? 'Requested' : 'Follow'
+      : state === 'blocked' ? 'Unblock' : state === 'requested' ? 'Requested' : 'Follow'
     // A live region, so a screen reader hears the new label after a click.
     return html`<div class="actions" aria-live="polite">
       <caribou-button class="follow" data-state=${state} variant=${state === 'follow' ? 'primary' : 'secondary'}
-        @click=${this.onFollowClick} @focusin=${this.onFollowFocus} @focusout=${this.onFollowFocus}
+        @click=${state === 'blocked' ? this.onBlock : this.onFollowClick}
+        @focusin=${this.onFollowFocus} @focusout=${this.onFollowFocus}
         @keydown=${this.onFollowFocus} @keyup=${this.onFollowFocus}
         >${label}</caribou-button>
       ${this.renderMenu(rel)}

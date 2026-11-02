@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import {
-  activeUserKey, lastSeenNotificationId, statusCache, unreadNotificationCount, users,
+  activeUserKey, lastSeenNotificationId, relationshipCache, relationshipKey, statusCache, unreadNotificationCount, users,
 } from '@beatzball/caribou-state'
 import '../caribou-notifications.js'
 import type { CaribouNotifications } from '../caribou-notifications.js'
@@ -295,5 +295,39 @@ describe('caribou-notifications', () => {
     await el.updateComplete
     expect(fetchSpy).toHaveBeenLastCalledWith({ types: [], maxId: '5' })
     expect(items(el)).toHaveLength(2)
+  })
+
+  // Mastodon hides a muted or blocked account's notifications; the rows
+  // already loaded go the moment the reader mutes, as the card's own do.
+  it('drops the rows of an account the reader mutes or blocks, with or without a post, and brings them back', async () => {
+    relationshipCache.value = new Map()
+    const carol = { ...ACCT, id: 'c1', acct: 'carol', username: 'carol', displayName: 'Carol' }
+    // A favourite of the reader's own post: the post's author is the reader.
+    const mine = { ...status('s9'), account: { ...ACCT, id: 'me', acct: 'alice' } }
+    fetchSpy.mockResolvedValueOnce([
+      { ...notif('9', 'favourite'), status: mine },
+      notif('8', 'follow'),
+      { ...notif('7', 'follow'), account: carol },
+    ] as unknown as mastodon.v1.Notification[])
+    const el = await mount()
+    expect(items(el)).toHaveLength(3)
+    relationshipCache.value = new Map([[relationshipKey(userKey, 'b1'), { id: 'b1', muting: true } as mastodon.v1.Relationship]])
+    await el.updateComplete
+    expect(items(el).map((li) => li.className.split(' ')[0])).toEqual(['n-follow'])
+    expect(lineText(items(el)[0]!)).toBe('Carol followed you')
+    relationshipCache.value = new Map([[relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as mastodon.v1.Relationship]])
+    await el.updateComplete
+    expect(items(el)).toHaveLength(1)
+    relationshipCache.value = new Map()
+    await el.updateComplete
+    expect(items(el)).toHaveLength(3)
+  })
+
+  it('does not drop rows for another account\'s mutes', async () => {
+    relationshipCache.value = new Map([[relationshipKey(bobKey, 'b1'), { id: 'b1', muting: true } as mastodon.v1.Relationship]])
+    fetchSpy.mockResolvedValueOnce([notif('8', 'follow')])
+    const el = await mount()
+    expect(items(el)).toHaveLength(1)
+    relationshipCache.value = new Map()
   })
 })

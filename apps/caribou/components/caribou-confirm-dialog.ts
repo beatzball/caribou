@@ -1,5 +1,7 @@
 import { LitElement, html, css } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import { effect } from '@preact/signals-core'
+import { activeUserKey } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 
@@ -35,10 +37,12 @@ export class CaribouConfirmDialog extends LitElement {
   @property({ attribute: 'confirm-label' }) confirmLabel = ''
 
   private resolve: ((ok: boolean) => void) | null = null
+  private cancelled = false
 
   /** Opens the dialog. Resolves true on confirm, false on cancel or Escape. */
   async ask(): Promise<boolean> {
     await this.updateComplete
+    if (this.cancelled) return false
     const dialog = this.renderRoot.querySelector('dialog')!
     return new Promise((resolve) => {
       this.resolve = resolve
@@ -69,11 +73,18 @@ export class CaribouConfirmDialog extends LitElement {
       </div>
     </dialog>`
   }
+
+  /** Closes the dialog as if the reader had cancelled, even before it opened. */
+  cancel() {
+    this.cancelled = true
+    this.finish(false)
+  }
 }
 
 /**
  * Asks a yes-or-no question in a modal dialog and removes the dialog after.
- * Client only.
+ * The question belongs to the account that was active when it opened: if
+ * the active account changes, it closes with no. Client only.
  */
 export async function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   const el = document.createElement('caribou-confirm-dialog') as CaribouConfirmDialog
@@ -81,11 +92,23 @@ export async function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   el.message = opts.message
   el.confirmLabel = opts.confirmLabel
   document.body.appendChild(el)
+  const owner = activeUserKey.peek()
+  const stop = effect(() => { if (activeUserKey.value !== owner) el.cancel() })
   try {
     return await el.ask()
   } finally {
+    stop()
     el.remove()
   }
+}
+
+/** The question every Block asks first. */
+export function confirmBlock(acct: string): Promise<boolean> {
+  return confirmDialog({
+    title: `Block @${acct}?`,
+    message: `@${acct} will no longer be able to follow you or see your posts, and you will no longer see theirs.`,
+    confirmLabel: 'Block',
+  })
 }
 
 declare global {

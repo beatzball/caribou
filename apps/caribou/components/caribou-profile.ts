@@ -8,6 +8,7 @@ import {
   type ProfileStore, type ProfileTab,
 } from '@beatzball/caribou-state'
 import { createIntersectionObserver, type CaribouIntersectionObserver } from '@beatzball/caribou-ui-headless'
+import { loadReaderViewFrom } from './_shell.js'
 import './caribou-profile-header.js'
 import './caribou-profile-tabs.js'
 import './caribou-status-card.js'
@@ -112,6 +113,8 @@ export class CaribouProfile extends LitElement {
         clientSource,
         initial: { statuses: this.initial.statuses, nextMaxId: this.initial.nextMaxId },
       })
+      // The server fetched them without the reader's token: no filters.
+      loadReaderViewFrom(this.instance, this.initial.statuses)
     } else {
       const server = activeUser.value?.server ?? ''
       const cache = createAccountCache(clientSource)

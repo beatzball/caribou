@@ -17,6 +17,12 @@ export interface CaribouClient {
     limit?: number
   }): Promise<TimelinePage>
   fetchStatus(statusId: string): Promise<mastodon.v1.Status>
+  /**
+   * Several statuses in one request (`GET /api/v1/statuses?id[]=`,
+   * Mastodon 4.3+), at most 20 ids. Unknown or hidden ids are left out. An
+   * older server answers 404.
+   */
+  fetchStatuses(statusIds: readonly string[]): Promise<mastodon.v1.Status[]>
   fetchThread(statusId: string): Promise<{
     ancestors: mastodon.v1.Status[]
     descendants: mastodon.v1.Status[]
@@ -212,6 +218,14 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchStatus(statusId) {
       return run(`status:${statusId}`, (c) => c.v1.statuses.$select(statusId).fetch())
+    },
+    async fetchStatuses(statusIds) {
+      // masto 7 has no typed method for this endpoint; its client builds
+      // the path from the property names, so `statuses.list` is
+      // `GET /api/v1/statuses`, with the query and the answer camel-cased.
+      type List = { list(params: { id: string[] }): Promise<mastodon.v1.Status[]> }
+      return run(`statuses:${statusIds.join(',')}`, async (c) =>
+        (c.v1.statuses as unknown as List).list({ id: [...statusIds] }))
     },
     async fetchThread(statusId) {
       return run(`thread:${statusId}`, (c) => c.v1.statuses.$select(statusId).context.fetch())
