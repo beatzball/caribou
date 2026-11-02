@@ -450,9 +450,11 @@ describe('<caribou-timeline> — older posts', () => {
       vi.spyOn(store, 'loadMore').mockImplementation(async () => {
         attempts++
         ;(store.error as Writable<unknown>).value = { message: 'offline' }
+        ;(store.failedOp as Writable<unknown>).value = 'loadMore'
       })
       const retry = vi.spyOn(store, 'retry').mockImplementation(async () => {
         ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
       })
       for (let i = 0; i < 3; i++) {
         io.fire(true)
@@ -498,6 +500,153 @@ describe('<caribou-timeline> — older posts', () => {
       expect(retry).toHaveBeenCalledOnce()
       expect(tl.shadowRoot!.querySelector('.failed')).toBeNull()
       expect([...io.targets]).toEqual([sentinel(tl)])
+    })
+
+    // #108 item 1: a failed check at the top must not stop paging, or the
+    // "Older posts" link does nothing until a check works.
+    it('keeps the link working while a failed check shows at the top', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      ;(store.error as Writable<unknown>).value = { message: 'offline' }
+      ;(store.failedOp as Writable<unknown>).value = 'poll'
+      await settle(tl)
+      expect(tl.shadowRoot!.querySelector('.failed')!.nextElementSibling!.tagName).toBe('CARIBOU-NEW-POSTS-BANNER')
+      expect([...io.targets]).toEqual([sentinel(tl)])
+      const loadMore = vi.spyOn(store, 'loadMore').mockResolvedValue()
+      io.fire(true)
+      expect(loadMore).toHaveBeenCalledOnce()
+    })
+
+    // #108 item 2: the reader pressed Retry from the keyboard. Focus must
+    // not fall to the page while it runs, or after it works.
+    it('keeps Retry focused and busy while it runs, then focuses the first new post', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = { message: 'offline' }
+        ;(store.failedOp as Writable<unknown>).value = 'loadMore'
+      })
+      let finish!: () => void
+      vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+        await new Promise<void>((r) => { finish = r })
+        // What a working older page does: one more post at the end.
+        statusCache.value = new Map([...statusCache.value, ['older', mkStatus('older') as never]])
+        ;(store.statusIds as Writable<string[]>).value = ['s0', 'older']
+      })
+      io.fire(true)
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement & { loading: boolean }
+      button.focus()
+      expect(tl.shadowRoot!.activeElement).toBe(button)
+      button.click()
+      await settle(tl)
+      expect(tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]')).toBe(button)
+      expect(button.loading).toBe(true)
+      expect(tl.shadowRoot!.activeElement).toBe(button)
+
+      finish()
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(button.isConnected).toBe(false)
+      const focused = tl.shadowRoot!.activeElement!
+      expect(focused).toBe(listItems(tl)[1])
+      expect(focused.querySelector('caribou-status-card')!.getAttribute('data-status-id')).toBe('older')
+      expect(document.activeElement).toBe(tl)
+    })
+
+    // Review of #139: Retry fails again. The same button keeps focus, and
+    // the alert changes, so a screen reader hears the failure again.
+    it('keeps the same focused button when Retry fails again, and announces it again', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const io = FakeIntersectionObserver.instances.at(-1)!
+      const store = storeOf(tl)
+      const failOlder = () => {
+        ;(store.error as Writable<unknown>).value = { message: 'offline' }
+        ;(store.failedOp as Writable<unknown>).value = 'loadMore'
+      }
+      vi.spyOn(store, 'loadMore').mockImplementation(async () => { failOlder() })
+      let finish!: () => void
+      vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+        await new Promise<void>((r) => { finish = r })
+        failOlder()
+      })
+      io.fire(true)
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement & { loading: boolean }
+      const alert = () => tl.shadowRoot!.querySelector('[role="alert"]')!
+      button.focus()
+      button.click()
+      await settle(tl)
+      // While it runs the alert is empty, so the next failure is new text.
+      expect(alert().textContent).toBe('')
+
+      finish()
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]')).toBe(button)
+      expect(button.isConnected).toBe(true)
+      expect(button.loading).toBe(false)
+      expect(tl.shadowRoot!.activeElement).toBe(button)
+      expect(alert().textContent).toBe('offline')
+    })
+
+    it('runs Retry for an error with an empty message', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const store = storeOf(tl)
+      ;(store.error as Writable<unknown>).value = { message: '' }
+      ;(store.failedOp as Writable<unknown>).value = 'poll'
+      const retry = vi.spyOn(store, 'retry').mockResolvedValue()
+      await settle(tl)
+      ;(tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement).click()
+      expect(retry).toHaveBeenCalledOnce()
+    })
+
+    it('focuses the new-posts button when a Retry at the top brings new posts', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const store = storeOf(tl)
+      ;(store.error as Writable<unknown>).value = { message: 'offline' }
+      ;(store.failedOp as Writable<unknown>).value = 'poll'
+      vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+        store._testOnlyPrepend(asStatuses([mkStatus('s1')]))
+      })
+      await settle(tl)
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement
+      button.focus()
+      button.click()
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(tl.shadowRoot!.activeElement).toBe(banner(tl))
+      expect(banner(tl).shadowRoot!.activeElement).toBe(bannerButton(tl))
+    })
+
+    it('focuses the top of the list after a Retry at the top works', async () => {
+      const tl = await mount('local', asInitial([mkStatus('s0')], 's0'))
+      const store = storeOf(tl)
+      ;(store.error as Writable<unknown>).value = { message: 'offline' }
+      ;(store.failedOp as Writable<unknown>).value = 'poll'
+      vi.spyOn(store, 'retry').mockImplementation(async () => {
+        ;(store.error as Writable<unknown>).value = null
+        ;(store.failedOp as Writable<unknown>).value = null
+      })
+      await settle(tl)
+      const button = tl.shadowRoot!.querySelector('caribou-button[data-action="retry"]') as HTMLElement
+      button.focus()
+      button.click()
+      await new Promise((r) => setTimeout(r, 0))
+      await settle(tl)
+      expect(tl.shadowRoot!.activeElement).toBe(tl.shadowRoot!.querySelector('ul'))
     })
 
     it('observes the link again after a page loads, so a short page keeps loading', async () => {

@@ -11,7 +11,10 @@ export interface TimelineStore {
   statuses:      ReadonlySignal<mastodon.v1.Status[]>
   loading:       ReadonlySignal<boolean>
   error:         ReadonlySignal<CaribouError | null>
-  /** Which fetch set `error`, so the view can show it where it belongs. */
+  /**
+   * Which fetch set `error`, so the view can show it where it belongs. It is
+   * set and cleared together with `error`: null whenever `error` is null.
+   */
   failedOp:      ReadonlySignal<TimelineOp | null>
   hasMore:       ReadonlySignal<boolean>
   /** True while `refresh()` is fetching in the background. */
@@ -143,9 +146,23 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     })
   }
   function succeed() {
-    error.value = null
-    failedOp.value = null
+    batch(() => {
+      error.value = null
+      failedOp.value = null
+    })
   }
+
+  // A failed older page waits for the reader. The reader is at the bottom,
+  // looking at its Retry, so a background check neither takes that place
+  // when it fails nor clears it when it works. A check that works says
+  // nothing about the older page, and clearing the error would start
+  // infinite scroll again on its own: an automatic retry the reader did not
+  // ask for. The error stays until the reader presses Retry (or a reload
+  // starts the list again). While that Retry runs the error is cleared, but
+  // the older page is still pending, so a check in that window keeps out
+  // of the way too.
+  let retryingOlder = false
+  const olderPagePending = () => failedOp.value === 'loadMore' || retryingOlder
 
   // Posts go to the buffer only when the list does not show them yet; a
   // post can come back from the page data and from a check at once. A page
@@ -169,7 +186,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     }
     const generation = ownerGeneration()
     loading.value = true
-    error.value = null
+    succeed()
     try {
       const page = await runFetch(undefined)
       if (generation !== ownerGeneration()) return
@@ -222,12 +239,12 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       batch(() => {
         syncedAt.value = Date.now()
         // A failed check earlier left an error; this one worked.
-        succeed()
+        if (!olderPagePending()) succeed()
         const ids = ingest(page)
         if (ids.length > 0) buffer(ids)
       })
     } catch (err) {
-      if (generation === ownerGeneration()) fail(err, 'poll')
+      if (generation === ownerGeneration() && !olderPagePending()) fail(err, 'poll')
     }
   }
 
@@ -250,8 +267,14 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   async function retry() {
     const op = failedOp.value
     if (!op) return
-    error.value = null
-    await ops[op]()
+    succeed()
+    if (op !== 'loadMore') return ops[op]()
+    retryingOlder = true
+    try {
+      await ops[op]()
+    } finally {
+      retryingOlder = false
+    }
   }
 
   function offer(page: mastodon.v1.Status[], nextMaxId?: string | null) {

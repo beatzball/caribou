@@ -4,9 +4,22 @@ import {
   activeClient, activeUserKey, addUserSession, clearKeptAlive, users,
   type ThreadStore, type UserSession,
 } from '@beatzball/caribou-state'
+
+// Lets a test mark an object as a page-cache snapshot without going through
+// `enterWithCache`.
+const snapshots = vi.hoisted(() => new WeakSet<object>())
+vi.mock('../_page-cache.js', async (importOriginal) => {
+  const real = await importOriginal<typeof PageCache>()
+  return {
+    ...real,
+    isCachedSnapshot: (data: unknown) =>
+      (typeof data === 'object' && data !== null && snapshots.has(data)) || real.isCachedSnapshot(data),
+  }
+})
 import '../caribou-thread.js'
 import type { CaribouThread, ThreadInitial } from '../caribou-thread.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
+import type * as PageCache from '../_page-cache.js'
 
 const ACCT = { id: '1', acct: 'a', username: 'a', displayName: 'A', avatar: '', avatarStatic: '' }
 
@@ -151,6 +164,28 @@ describe('<caribou-thread> — fresh thread on a revisit', () => {
     await el.updateComplete
     expect(cards(el).map((c) => c.getAttribute('data-id'))).toEqual(['a', 'f', 'c', 'h'])
     expect(cards(el)[1]!.status!.content).toBe('<p>edited</p>')
+  })
+})
+
+describe('<caribou-thread> — cached snapshot', () => {
+  // #108 item 6, as in `caribou-timeline`: a snapshot is what the store was
+  // filled from, so it must not be offered back as fresh data.
+  it('does not offer a cached snapshot set after the store exists', async () => {
+    const el = await mount({ focused: F, ancestors: [A], descendants: [C] })
+    const store = (el as unknown as { store: ThreadStore }).store
+    const offer = vi.spyOn(store, 'offer')
+    const snapshot: ThreadInitial = { focused: F, ancestors: [A], descendants: [C] }
+    snapshots.add(snapshot)
+    el.initial = snapshot
+    await flush()
+    await el.updateComplete
+    expect(offer).not.toHaveBeenCalled()
+
+    const fresh: ThreadInitial = { focused: F, ancestors: [A], descendants: [C] }
+    el.initial = fresh
+    await flush()
+    await el.updateComplete
+    expect(offer).toHaveBeenCalledWith(fresh)
   })
 })
 

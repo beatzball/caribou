@@ -155,6 +155,35 @@ test('/home loads older posts when the pagination link scrolls into view', async
   await expect(page.locator('a[data-sentinel]')).toHaveCount(0)
 })
 
+// #108 item 2: Retry from the keyboard. Focus must not fall to the page.
+test('/home keeps focus off the page after a keyboard Retry of older posts', async ({ page }) => {
+  let failOlder = true
+  await page.route('**/api/v1/timelines/home*', (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('since_id')) return route.fulfill({ json: [] })
+    const maxId = u.searchParams.get('max_id')
+    if (maxId === null) return route.fulfill({ json: [makeStatus('c', '<p>newest</p>')] })
+    if (failOlder) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+    return route.fulfill({ json: maxId === 'c' ? [makeStatus('b', '<p>older one</p>')] : [] })
+  })
+  await gotoSettled(page, '/home')
+  const retry = page.locator('caribou-timeline caribou-button[data-action="retry"]')
+  await expect(retry).toBeVisible()
+  failOlder = false
+  await retry.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByText('older one')).toBeVisible()
+  await expect(retry).toHaveCount(0)
+  // The deepest focused element, through the shadow roots.
+  const focused = await page.evaluate(() => {
+    let el: Element | null = document.activeElement
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
+    return el ? { tag: el.tagName, text: el.textContent ?? '' } : null
+  })
+  expect(focused?.tag).toBe('LI')
+  await expect(page.locator('caribou-timeline li:focus')).toContainText('older one')
+})
+
 test('/home surfaces a "new posts" banner when polling finds newer statuses', async ({ page }) => {
   let sawInitial = false
   // The "Older posts →" anchor is initially in view (single short post),
