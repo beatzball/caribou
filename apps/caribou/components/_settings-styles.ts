@@ -13,4 +13,5 @@ export const choiceStyles = css`
   label:hover { background: var(--bg-1); }
   input { margin: 0; accent-color: var(--accent); width: 18px; height: 18px; }
   .hint { color: var(--fg-muted); font-size: 0.875em; }
+  .status { margin: var(--space-2) 0 0; min-height: 1.25em; color: var(--danger); font-size: 0.875em; }
 `

@@ -251,10 +251,19 @@ the session, so a section may read storage when it connects.
 **Sections** are listed in `components/_settings-sections.ts`, in page
 order. Each is its own element (`caribou-settings-<name>.ts`) that renders
 only its controls; the list gives it a `<section id>` and its `<h2>`. To add
-one, write the element and add one entry to the list.
+one, write the element and add one entry to the list. `/settings#<id>`
+scrolls to a section (`<caribou-settings>` does it, because the sections are
+in its shadow root, out of reach of the browser's own fragment scroll).
+
+**Storage can refuse.** The page reads the session from `activeUserKey`, not
+from storage, so it never throws. With storage blocked it shows the defaults
+and a note that they cannot be saved. When a save is refused (blocked or
+full), the control goes back to the stored value and a `role="status"` line
+says it was not saved.
 
 **Theme**: dark (the default), light, or system. Before the first paint an
-inline script at the end of every page's head (`server/lib/theme-head.ts`)
+inline script at the end of every page's head (`server/lib/theme-head.ts`;
+also the 404 page and both sign-in pages, whose CSP allows it by hash)
 sets `data-theme` on `<html>` and the theme-color meta; blocked storage
 leaves dark. After that `startTheme` (`components/_theme.ts`, from
 `app-main.ts`) follows a change on /settings, an account switch, and the

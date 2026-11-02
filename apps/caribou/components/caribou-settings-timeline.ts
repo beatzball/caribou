@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
+import { live } from 'lit/directives/live.js'
 import {
   activeUserKey, defaultTimelineOf, readPrefs, updatePrefs, type DefaultTimeline,
 } from '@beatzball/caribou-state'
@@ -19,6 +20,7 @@ export class CaribouSettingsTimeline extends LitElement {
   static override styles = choiceStyles
 
   @state() private value: DefaultTimeline = 'home'
+  @state() private status = ''
 
   override connectedCallback() {
     super.connectedCallback()
@@ -29,9 +31,15 @@ export class CaribouSettingsTimeline extends LitElement {
   private onChange = (e: Event) => {
     const value = (e.target as HTMLInputElement).value as DefaultTimeline
     const key = activeUserKey.peek()
-    if (!key) return
-    this.value = value
-    updatePrefs(key, { defaultTimeline: value })
+    if (key && updatePrefs(key, { defaultTimeline: value })) {
+      this.value = value
+      this.status = ''
+    } else {
+      // The browser has checked the new radio; `live` puts the stored one back.
+      this.value = key ? defaultTimelineOf(readPrefs(key)) : 'home'
+      this.status = 'Not saved. This browser did not let Caribou store the setting.'
+      this.requestUpdate()
+    }
   }
 
   override render() {
@@ -40,10 +48,11 @@ export class CaribouSettingsTimeline extends LitElement {
         <legend>Open after sign-in</legend>
         ${OPTIONS.map((o) => html`
           <label>
-            <input type="radio" name="default-timeline" value=${o.value} .checked=${this.value === o.value} @change=${this.onChange} />
+            <input type="radio" name="default-timeline" value=${o.value} .checked=${live(this.value === o.value)} @change=${this.onChange} />
             ${o.label}
           </label>`)}
       </fieldset>
+      <p class="status" role="status">${this.status}</p>
     `
   }
 }

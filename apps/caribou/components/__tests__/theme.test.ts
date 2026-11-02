@@ -12,6 +12,7 @@ type Store = Record<string, string>
 const KEY = 'alice@example.social'
 const active = (prefs?: unknown): Store => ({
   'caribou.activeUserKey': JSON.stringify(KEY),
+  'caribou.users': JSON.stringify([[KEY, { userKey: KEY }]]),
   ...(prefs === undefined ? {} : { [`caribou.prefs.${KEY}`]: typeof prefs === 'string' ? prefs : JSON.stringify(prefs) }),
 })
 
@@ -30,6 +31,9 @@ const CASES: Array<[string, Store | null, boolean, 'dark' | 'light']> = [
   ['prefs not an object', active('["light"]'), true, 'dark'],
   ['no active account', { 'caribou.activeUserKey': 'null', [`caribou.prefs.${KEY}`]: '{"theme":"light"}' }, false, 'dark'],
   ['broken active key', { 'caribou.activeUserKey': '{' }, false, 'dark'],
+  ['active key names no stored account', { ...active({ theme: 'light' }), 'caribou.users': '[]' }, false, 'dark'],
+  ['users not a list', { ...active({ theme: 'light' }), 'caribou.users': '{}' }, false, 'dark'],
+  ['broken users JSON', { ...active({ theme: 'light' }), 'caribou.users': '[' }, false, 'dark'],
   ['storage blocked', null, true, 'dark'],
 ]
 

@@ -1,5 +1,6 @@
 import { LitElement, html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
+import { live } from 'lit/directives/live.js'
 import type { ThemePref } from '@beatzball/caribou-state'
 import { currentThemePref, setThemePref } from './_theme.js'
 import { choiceStyles } from './_settings-styles.js'
@@ -18,6 +19,7 @@ export class CaribouSettingsAppearance extends LitElement {
   static override styles = choiceStyles
 
   @state() private theme: ThemePref = 'dark'
+  @state() private status = ''
 
   override connectedCallback() {
     super.connectedCallback()
@@ -26,8 +28,15 @@ export class CaribouSettingsAppearance extends LitElement {
 
   private onChange = (e: Event) => {
     const value = (e.target as HTMLInputElement).value as ThemePref
-    this.theme = value
-    setThemePref(value)
+    if (setThemePref(value)) {
+      this.theme = value
+      this.status = ''
+    } else {
+      // The browser has checked the new radio; `live` puts the stored one back.
+      this.theme = currentThemePref()
+      this.status = 'Not saved. This browser did not let Caribou store the setting.'
+      this.requestUpdate()
+    }
   }
 
   override render() {
@@ -36,10 +45,11 @@ export class CaribouSettingsAppearance extends LitElement {
         <legend>Theme</legend>
         ${OPTIONS.map((o) => html`
           <label>
-            <input type="radio" name="theme" value=${o.value} .checked=${this.theme === o.value} @change=${this.onChange} />
+            <input type="radio" name="theme" value=${o.value} .checked=${live(this.theme === o.value)} @change=${this.onChange} />
             ${o.label}${o.hint ? html` <span class="hint">${o.hint}</span>` : ''}
           </label>`)}
       </fieldset>
+      <p class="status" role="status">${this.status}</p>
     `
   }
 }

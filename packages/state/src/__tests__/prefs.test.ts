@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  defaultTimelineOf, defaultTimelinePath, readPrefs, themeOf, updatePrefs,
+  defaultTimelineOf, readPrefs, storageWorks, themeOf, updatePrefs,
 } from '../prefs.js'
 
 const key = toUserKey('alice', 'example.social')
@@ -59,9 +59,25 @@ describe('defaultTimelineOf', () => {
     expect(defaultTimelineOf({ defaultTimeline: '/evil' })).toBe('home')
   })
 
-  it('names the path', () => {
-    localStorage.setItem(storageKey, JSON.stringify({ defaultTimeline: 'public' }))
-    expect(defaultTimelinePath(key)).toBe('/public')
-    expect(defaultTimelinePath(toUserKey('bob', 'example.social'))).toBe('/home')
+  it('is home for a value that is not a string', () => {
+    expect(defaultTimelineOf({ defaultTimeline: ['local'] })).toBe('home')
+  })
+})
+
+describe('storageWorks', () => {
+  it('is true when a write works, and leaves nothing behind', () => {
+    expect(storageWorks()).toBe(true)
+    expect(localStorage.length).toBe(0)
+  })
+
+  it('is false when storage refuses the write', () => {
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError')
+    })
+    try {
+      expect(storageWorks()).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

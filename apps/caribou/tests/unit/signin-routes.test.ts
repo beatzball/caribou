@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createApp, createRouter, toNodeListener } from 'h3'
 import type { CompleteSigninResult } from '../../server/lib/signin-callback.js'
 import { jsonForScript } from '../../server/lib/signin-complete-page.js'
+import { THEME_SCRIPT } from '../../server/lib/theme-head.js'
 
 // The sign-in routes as a browser meets them: real h3, real cookies and
 // headers. The token exchange is a request to the user's server, so the
@@ -80,10 +81,11 @@ describe('GET /api/signin/callback', () => {
     ['default timeline public', '{"defaultTimeline":"public"}', '/public'],
     ['unknown value', '{"defaultTimeline":"//evil.example"}', '/feed'],
     ['broken prefs', '{', '/feed'],
+    ['prefs an array', '["local"]', '/feed'],
   ])('the page goes on to the default timeline: %s', async (_name, prefs, expected) => {
     complete.mockResolvedValue({ kind: 'ok', server: 'two.example', session: SESSION })
     const html = await (await callback()).text()
-    const script = html.match(/<script>([\s\S]*?)<\/script>/)![1]!
+    const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).find((s) => s !== THEME_SCRIPT)!
     const store = new Map<string, string>(prefs ? [[`caribou.prefs.${SESSION.userKey}`, prefs]] : [])
     const localStorage = {
       getItem: (k: string) => store.get(k) ?? null,
@@ -120,8 +122,11 @@ describe('GET /api/signin/callback', () => {
     const inline = (tag: string) => [...html.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'g'))].map((m) => m[1]!)
     const hash = (t: string) => `'sha256-${createHash('sha256').update(t).digest('base64')}'`
     expect(csp).toContain("default-src 'none'")
-    expect(inline('script')).toHaveLength(1)
-    expect(csp).toContain(`script-src ${hash(inline('script')[0]!)}`)
+    // The theme script, then the page's own.
+    const scripts = inline('script')
+    expect(scripts).toHaveLength(2)
+    expect(scripts[0]).toBe(THEME_SCRIPT)
+    expect(csp).toContain(`script-src ${hash(scripts[1]!)} ${hash(scripts[0]!)}`)
     expect(csp).toContain(`style-src ${hash(inline('style')[0]!)}`)
   })
 
@@ -137,11 +142,14 @@ describe('GET /api/signin/callback', () => {
 })
 
 describe('GET /signin/done', () => {
-  it('takes nothing from the URL: it has no script, only the way back', async () => {
+  it('takes nothing from the URL: its one script is the theme, and it offers the way back', async () => {
     const res = await fetch(`${base}/signin/done`)
     expect(res.status).toBe(200)
     const html = await res.text()
-    expect(html).not.toContain('<script')
+    // The theme script reads only the stored theme, never the URL.
+    const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1])
+    expect(scripts).toEqual([THEME_SCRIPT])
+    expect(THEME_SCRIPT).not.toMatch(/location|hash|search/)
     expect(html).toContain('Something went wrong completing sign-in.')
     expect(html).toMatch(/<p id="fallback">/)
   })

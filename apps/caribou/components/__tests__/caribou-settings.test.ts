@@ -33,8 +33,9 @@ async function settle(el: LitElement) {
 }
 
 // The settings element and each section element, all settled.
-async function mount(): Promise<ShadowRoot> {
+async function mount(attrs: Record<string, string> = {}): Promise<ShadowRoot> {
   const el = document.createElement('caribou-settings') as LitElement
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
   document.body.append(el)
   await settle(el)
   for (const child of el.shadowRoot!.querySelectorAll('*')) {
@@ -77,6 +78,35 @@ describe('caribou-settings', () => {
     }
   })
 
+  it('without storage, notes that settings cannot be saved', async () => {
+    const root = await mount({ 'storage-blocked': '' })
+    expect(root.querySelector('.note')?.textContent).toMatch(/cannot save settings/i)
+    expect((await mount()).querySelector('.note')).toBeNull()
+  })
+
+  it('scrolls to the section named in the URL fragment', async () => {
+    const happyDOM = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM
+    happyDOM.setURL('http://localhost/settings#account')
+    const scroll = vi.fn()
+    const proto = HTMLElement.prototype as unknown as { scrollIntoView: () => void }
+    const original = proto.scrollIntoView
+    proto.scrollIntoView = function (this: HTMLElement) { scroll(this.id) }
+    try {
+      await mount()
+      expect(scroll).toHaveBeenCalledWith('account')
+    } finally {
+      proto.scrollIntoView = original
+      happyDOM.setURL('http://localhost/')
+    }
+  })
+
+  // A write that storage refuses (full, or blocked) must not look saved.
+  function refuseWrites() {
+    return vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError')
+    })
+  }
+
   describe('theme', () => {
     const radios = (root: ShadowRoot) =>
       [...inner(root, 'appearance').querySelectorAll<HTMLInputElement>('input[name="theme"]')]
@@ -101,6 +131,24 @@ describe('caribou-settings', () => {
       expect(prefs().theme).toBe('light')
       expect(document.documentElement.dataset.theme).toBe('light')
     })
+
+    it('a refused save keeps the stored choice and says so', async () => {
+      stopTheme = startTheme(window, document)
+      const root = await mount()
+      const list = radios(root)
+      const spy = refuseWrites()
+      try {
+        list[1]!.checked = true
+        list[1]!.dispatchEvent(new Event('change', { bubbles: true }))
+        await settle(root.host.shadowRoot!.querySelector('caribou-settings-appearance') as LitElement)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(list.find((r) => r.checked)?.value).toBe('dark')
+      expect(document.documentElement.dataset.theme).toBe('dark')
+      const status = inner(root, 'appearance').querySelector('[role="status"]')!
+      expect(status.textContent).toMatch(/not saved/i)
+    })
   })
 
   describe('default timeline', () => {
@@ -119,6 +167,35 @@ describe('caribou-settings', () => {
       list[2]!.checked = true
       list[2]!.dispatchEvent(new Event('change', { bubbles: true }))
       expect(prefs()).toEqual({ theme: 'light', lastSeenNotificationId: '7', defaultTimeline: 'public' })
+    })
+
+    it('a refused save keeps the stored choice and says so', async () => {
+      const root = await mount()
+      const list = radios(root)
+      const spy = refuseWrites()
+      try {
+        list[1]!.checked = true
+        list[1]!.dispatchEvent(new Event('change', { bubbles: true }))
+        await settle(root.host.shadowRoot!.querySelector('caribou-settings-timeline') as LitElement)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(list.find((r) => r.checked)?.value).toBe('home')
+      expect(inner(root, 'timeline').querySelector('[role="status"]')!.textContent).toMatch(/not saved/i)
+    })
+
+    it('a saved choice clears the message', async () => {
+      const root = await mount()
+      const list = radios(root)
+      const spy = refuseWrites()
+      list[1]!.checked = true
+      list[1]!.dispatchEvent(new Event('change', { bubbles: true }))
+      spy.mockRestore()
+      list[2]!.checked = true
+      list[2]!.dispatchEvent(new Event('change', { bubbles: true }))
+      await settle(root.host.shadowRoot!.querySelector('caribou-settings-timeline') as LitElement)
+      expect(list.find((r) => r.checked)?.value).toBe('public')
+      expect(inner(root, 'timeline').querySelector('[role="status"]')!.textContent!.trim()).toBe('')
     })
   })
 

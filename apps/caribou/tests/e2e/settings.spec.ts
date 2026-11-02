@@ -150,13 +150,94 @@ test('system follows the device, also while the page is open', async ({ page, co
   expect(await bodyBg(page)).toBe(DARK_BG)
 })
 
-test('blocked storage leaves the dark theme and the page works', async ({ page }) => {
+test('pages outside the app shell paint the chosen theme too', async ({ page, context }) => {
+  await signIn(page, context, { theme: 'light' })
+  await watchFirstPaint(page)
+
+  const notFound = await page.goto('/no-such-page')
+  expect(notFound?.status()).toBe(404)
+  expect(await firstPaint(page)).toEqual({ theme: 'light', bg: LIGHT_BG })
+
+  await page.goto('/signin/done')
+  expect(await firstPaint(page)).toEqual({ theme: 'light', bg: LIGHT_BG })
+
+  // The sign-in completion page, under its own strict CSP. An empty token
+  // makes its script show the fallback and stay, so the page can be looked at.
+  const errors = consoleErrors(page)
+  const origin = new URL(page.url()).origin
+  await page.route(`${origin}/api/signin/callback?code=E2E-OK**`, (route) => route.fulfill({
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': COMPLETE_PAGE_CSP },
+    body: completeSigninPage({ token: '', server: INSTANCE, userKey: USER_KEY, vapidKey: '' }),
+  }))
+  await page.goto('/api/signin/callback?code=E2E-OK&state=S')
+  // The page's own script ran (the CSP let it) and showed the fallback.
+  await expect(page.getByText('Something went wrong completing sign-in.')).toBeVisible()
+  expect(await firstPaint(page)).toEqual({ theme: 'light', bg: LIGHT_BG })
+  expect(await page.locator('meta[name="theme-color"]').getAttribute('content')).toBe('#fafafa')
+  // No script or style was refused by the CSP.
+  expect(errors.filter((e) => /Content Security Policy/i.test(e))).toEqual([])
+})
+
+// Every read and write of localStorage throws, as in a browser that blocks
+// site data.
+async function blockStorage(page: Page) {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError') } })
   })
+}
+
+test('blocked storage leaves the dark theme and the page works', async ({ page }) => {
+  await blockStorage(page)
   await watchFirstPaint(page)
   await page.goto('/about')
   expect(await firstPaint(page)).toEqual({ theme: 'dark', bg: DARK_BG })
+})
+
+test('with storage blocked, Settings shows the defaults and says they cannot be saved', async ({ page }) => {
+  await blockStorage(page)
+  const errors: string[] = []
+  page.on('pageerror', (e) => { errors.push(e.message) })
+
+  // A full load.
+  await gotoSettled(page, '/settings')
+  await expect(page.getByText(/cannot save settings here/)).toBeVisible()
+  await expect(page.getByRole('radio', { name: 'Dark' })).toBeChecked()
+  await expect(page.getByRole('radio', { name: 'Home' })).toBeChecked()
+  await page.getByRole('radio', { name: 'Light' }).click()
+  await expect(page.getByRole('region', { name: 'Appearance' }).getByRole('status')).toHaveText(/Not saved/)
+  await expect(page.getByRole('radio', { name: 'Dark' })).toBeChecked()
+  expect(await htmlTheme(page)).toBe('dark')
+
+  // A client-side navigation: the router must show the page.
+  await gotoSettled(page, '/about')
+  await page.locator('page-about caribou-nav-rail nav > a[href="/settings"]').click()
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/settings')
+  await expect(page.locator('page-settings')).toBeVisible()
+  await expect(page.locator('page-about')).toHaveCount(0)
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('a refused save puts the control back and says so', async ({ page, context }) => {
+  await signIn(page, context)
+  await gotoSettled(page, '/settings')
+  // Storage is full: reads work, writes do not.
+  await page.evaluate(() => {
+    Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError') }
+  })
+  await page.getByRole('radio', { name: 'Public' }).click()
+  await expect(page.getByRole('region', { name: 'Timeline' }).getByRole('status')).toHaveText(/Not saved/)
+  await expect(page.getByRole('radio', { name: 'Home' })).toBeChecked()
+  await expect(page.getByRole('radio', { name: 'Public' })).not.toBeChecked()
+})
+
+test('/settings#<id> opens at that section', async ({ page, context }) => {
+  await page.setViewportSize({ width: 1280, height: 400 })
+  await signIn(page, context)
+  await gotoSettled(page, '/settings#account')
+  await expect(page.getByRole('heading', { level: 2, name: 'Account' })).toBeInViewport()
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).not.toBeInViewport()
 })
 
 test('the default timeline is where / goes', async ({ page, context }) => {
@@ -172,12 +253,19 @@ test('the default timeline is where / goes', async ({ page, context }) => {
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   await expect(page.locator('page-local')).toBeAttached()
 
-  // A client-side navigation to `/`: the page's own check.
+  // A client-side navigation to `/`, from another page: the page's own check.
+  const errors = consoleErrors(page)
+  await gotoSettled(page, '/about')
   await page.evaluate(() => {
     history.pushState(null, '', '/')
     window.dispatchEvent(new PopStateEvent('popstate'))
   })
   await expect.poll(() => new URL(page.url()).pathname).toBe('/local')
+  await expect(page.locator('page-local')).toBeVisible()
+  await expect(page.locator('page-about')).toHaveCount(0)
+  await expect(page.locator('caribou-landing')).toHaveCount(0)
+  await expect(page.locator('page-index')).toHaveCount(0)
+  expect(errors).toEqual([])
 })
 
 test('signing in again to an account that chose a timeline opens that timeline', async ({ page, context }) => {

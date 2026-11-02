@@ -36,7 +36,10 @@ export function resolveTheme(pref: ThemePref, systemLight: boolean): ResolvedThe
 export function themeFromStorage(local: Pick<Storage, 'getItem'>): ThemePref {
   try {
     const key: unknown = JSON.parse(local.getItem('caribou.activeUserKey') ?? 'null')
-    if (typeof key !== 'string' || !isUserKey(key)) return 'dark'
+    const users: unknown = JSON.parse(local.getItem('caribou.users') ?? '[]')
+    if (typeof key !== 'string' || !isUserKey(key) || !Array.isArray(users)) return 'dark'
+    // `loadFromStorage` drops an active key that names no stored account.
+    if (!users.some((e) => Array.isArray(e) && e[0] === key)) return 'dark'
     const raw: unknown = JSON.parse(local.getItem(`caribou.prefs.${key}`) ?? 'null')
     return raw && typeof raw === 'object' && !Array.isArray(raw) ? themeOf(raw as Record<string, unknown>) : 'dark'
   } catch {
@@ -58,12 +61,15 @@ export function currentThemePref(): ThemePref {
   return key ? themeOf(readPrefs(key)) : 'dark'
 }
 
-/** Saves the active account's theme and applies it at once. */
-export function setThemePref(pref: ThemePref): void {
+/**
+ * Saves the active account's theme and applies it. False, and nothing
+ * changes, when there is no active account or storage refused the write.
+ */
+export function setThemePref(pref: ThemePref): boolean {
   const key = activeUserKey.peek()
-  if (!key) return
-  updatePrefs(key, { theme: pref })
+  if (!key || !updatePrefs(key, { theme: pref })) return false
   changed.value++
+  return true
 }
 
 /** Applies the theme now and on every change. Returns a stop function. */

@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     setResponseHeader(event, 'content-type', 'text/html; charset=utf-8');
     return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}</head>
+<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}${TOKENS_HEAD}${THEME_HEAD}</head>
 <body><h1>404 — Not Found</h1><p>No page matched <code>${escapeHtml(pathname)}</code>.</p></body>
 </html>`;
   }

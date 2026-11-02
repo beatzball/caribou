@@ -53,6 +53,18 @@ export function defaultTimelineOf(prefs: Record<string, unknown>): DefaultTimeli
   return t === 'local' || t === 'public' ? t : 'home'
 }
 
-export function defaultTimelinePath(userKey: UserKey): `/${DefaultTimeline}` {
-  return `/${defaultTimelineOf(readPrefs(userKey))}`
+/**
+ * Whether this browser lets the app write to localStorage. False when
+ * storage is blocked (a setting, some private windows) or full: then no
+ * setting can be saved, and no session either.
+ */
+export function storageWorks(): boolean {
+  try {
+    const probe = 'caribou.__probe__'
+    localStorage.setItem(probe, '1')
+    localStorage.removeItem(probe)
+    return true
+  } catch {
+    return false
+  }
 }
