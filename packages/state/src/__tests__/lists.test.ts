@@ -96,12 +96,17 @@ describe('loadLists', () => {
     const client = fakeClient()
     await loadLists({ clientSource: () => client })
     const read = deferred<mastodon.v1.List[]>()
-    const slow = fakeClient({ fetchLists: vi.fn(() => read.promise) })
+    // The first answer left before the save; a read after it sees the save.
+    let reads = 0
+    const slow = fakeClient({
+      fetchLists: vi.fn(() => (++reads === 1 ? read.promise : Promise.resolve([list('1', 'Family'), list('2', 'News')]))),
+    })
     const p = loadLists({ clientSource: () => slow })
     await updateList('1', { title: 'Family' }, { clientSource: () => client })
     read.resolve([list('1', 'Friends'), list('2', 'News')])
     await p
     expect(listById('1')?.title).toBe('Family')
+    expect(reads).toBe(2)
   })
 })
 
@@ -251,5 +256,119 @@ describe('members', () => {
     await loadAccountLists('7', { clientSource: () => fakeClient() })
     await deleteList('1', { clientSource: () => fakeClient() })
     expect(accountListIds('7')).toEqual([])
+  })
+})
+
+describe('review round 1: races', () => {
+  it('a read that starts and ends inside a pending delete does not bring the list back (codex 2)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    const del = deferred<void>()
+    const p = deleteList('1', { clientSource: () => fakeClient({ deleteList: vi.fn(() => del.promise) }) })
+    // The server lists the list until its delete is done.
+    let deleted = false
+    const reader = fakeClient({
+      fetchLists: vi.fn(async () => (deleted ? [list('2', 'News')] : [list('1', 'Friends'), list('2', 'News')])),
+    })
+    const early = loadLists({ clientSource: () => reader })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(userLists()?.map((l) => l.id)).toEqual(['2'])
+    const r = early
+    deleted = true
+    del.resolve()
+    await p
+    await r
+    expect(userLists()?.map((l) => l.id)).toEqual(['2'])
+  })
+
+  it('check then uncheck of one box runs in order and ends unchecked (codex 3)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    await loadAccountLists('7', { clientSource: () => fakeClient({ fetchAccountLists: vi.fn(async () => []) }) })
+    const order: string[] = []
+    const add = deferred<void>()
+    const client = fakeClient({
+      addListAccounts: vi.fn(async () => { order.push('add start'); await add.promise; order.push('add end') }),
+      removeListAccounts: vi.fn(async () => { order.push('remove') }),
+    })
+    const a = setListMember('1', account('7'), true, { clientSource: () => client })
+    const b = setListMember('1', account('7'), false, { clientSource: () => client })
+    expect(accountListIds('7')).toEqual([])
+    await Promise.resolve()
+    expect(order).toEqual(['add start'])
+    add.resolve()
+    await Promise.all([a, b])
+    expect(order).toEqual(['add start', 'add end', 'remove'])
+    expect(accountListIds('7')).toEqual([])
+  })
+
+  it('a failed earlier toggle does not undo a later one (codex 3)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    await loadAccountLists('7', { clientSource: () => fakeClient({ fetchAccountLists: vi.fn(async () => []) }) })
+    const add = deferred<void>()
+    const client = fakeClient({ addListAccounts: vi.fn(() => add.promise) })
+    const a = setListMember('1', account('7'), true, { clientSource: () => client })
+    const b = setListMember('1', account('7'), false, { clientSource: () => client })
+    add.reject(new CaribouError('server_error', 'boom'))
+    await Promise.all([a, b])
+    expect(accountListIds('7')).toEqual([])
+    expect(client.removeListAccounts).toHaveBeenCalledTimes(1)
+  })
+
+  it('an older failed edit does not overwrite a newer saved one (codex 4)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    const first = deferred<mastodon.v1.List>()
+    let calls = 0
+    const client = fakeClient({
+      updateList: vi.fn(async (id: string, input: { title: string }) => (++calls === 1 ? first.promise : list(id, input.title))),
+    })
+    const a = updateList('1', { title: 'Family' }, { clientSource: () => client })
+    const b = updateList('1', { title: 'Cats' }, { clientSource: () => client })
+    expect(listById('1')?.title).toBe('Cats')
+    first.reject(new CaribouError('server_error', 'boom'))
+    await Promise.all([a, b])
+    expect(listById('1')?.title).toBe('Cats')
+  })
+
+  it('a list made during the first read shows up with the others (codex 5, fable 1)', async () => {
+    const first = deferred<mastodon.v1.List[]>()
+    let reads = 0
+    const client = fakeClient({
+      fetchLists: vi.fn(() => (++reads === 1 ? first.promise : Promise.resolve([list('1', 'Friends'), list('9', 'Cats')]))),
+    })
+    const r = loadLists({ clientSource: () => client })
+    await createList({ title: 'Cats' }, { clientSource: () => client })
+    first.resolve([list('1', 'Friends')])
+    await r
+    expect(userLists()?.map((l) => l.title)).toEqual(['Friends', 'Cats'])
+  })
+
+  it('a member read that overlaps a delete does not bring the list back (fable 2)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    await loadAccountLists('7', { clientSource: () => fakeClient() })
+    const read = deferred<mastodon.v1.List[]>()
+    let reads = 0
+    const reader = fakeClient({
+      fetchAccountLists: vi.fn(() => (++reads === 1 ? read.promise : Promise.resolve([]))),
+    })
+    const r = loadAccountLists('7', { clientSource: () => reader })
+    await deleteList('1', { clientSource: () => fakeClient() })
+    read.resolve([list('1', 'Friends')])
+    await r
+    expect(accountListIds('7')).toEqual([])
+  })
+
+  it('a failed removal puts the member back in its place (fable 3)', async () => {
+    await loadListMembers('1', { clientSource: () => fakeClient() })
+    await setListMember('1', account('7'), false,
+      { clientSource: () => fakeClient({ removeListAccounts: vi.fn(fail) }) })
+    expect(listMembers('1')?.map((a) => a.id)).toEqual(['7', '8'])
+  })
+
+  it('delete removes the list before the server answers (fable 7)', async () => {
+    await loadLists({ clientSource: () => fakeClient() })
+    const del = deferred<void>()
+    const p = deleteList('1', { clientSource: () => fakeClient({ deleteList: vi.fn(() => del.promise) }) })
+    expect(userLists()?.map((l) => l.id)).toEqual(['2'])
+    del.resolve()
+    await p
   })
 })

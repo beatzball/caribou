@@ -46,14 +46,6 @@ function toast(message: string): void {
   window.dispatchEvent(new CustomEvent('caribou:toast', { detail: { kind: 'error', message } }))
 }
 
-const named = (list: mastodon.v1.List | undefined) => (list ? `the list "${list.title}"` : 'the list')
-
-// A read that overlaps a write carries older state and is dropped. The
-// revision of a key is bumped when a write starts and again when it ends.
-const revisions = new Map<string, number>()
-const bump = (key: string) => revisions.set(key, (revisions.get(key) ?? 0) + 1)
-const revision = (key: string) => revisions.get(key) ?? 0
-
 function setIn<K, V>(sig: { value: Map<K, V> }, key: K, value: V | undefined): void {
   const next = new Map(sig.value)
   if (value === undefined) next.delete(key)
@@ -67,41 +59,113 @@ function putLists(userKey: UserKey, fn: (lists: mastodon.v1.List[]) => mastodon.
   setIn(listsCache, userKey, fn(current))
 }
 
+const named = (list: mastodon.v1.List | undefined) => (list ? `the list "${list.title}"` : 'the list')
+
+// --- Reads and writes that overlap ---------------------------------------
+//
+// Every write marks the keys it changes as busy from the moment it changes
+// the cache (optimistic) until the server has answered. A read waits until
+// its keys are idle, and drops its answer and asks again when a write
+// started or ended while it was out: an answer that crossed a write may
+// hold the state from before it. So a read never undoes a pending write,
+// and a dropped read still ends with the server's current state.
+//
+// Keys: the account (`userKey`) for the lists themselves; every member and
+// membership read also waits on it, so a delete keeps a late read from
+// bringing its list back. `members <list>` and `account <id>` for the two
+// views of one membership.
+
+const pending = new Map<string, number>()
+const revisions = new Map<string, number>()
+const idleWaiters = new Set<() => void>()
+const revision = (key: string) => revisions.get(key) ?? 0
+const bump = (key: string) => revisions.set(key, revision(key) + 1)
+const busy = (keys: readonly string[]) => keys.some((k) => (pending.get(k) ?? 0) > 0)
+
+function begin(keys: readonly string[]): void {
+  for (const k of keys) { pending.set(k, (pending.get(k) ?? 0) + 1); bump(k) }
+}
+
+function end(keys: readonly string[]): void {
+  for (const k of keys) {
+    const n = (pending.get(k) ?? 1) - 1
+    if (n > 0) pending.set(k, n)
+    else pending.delete(k)
+    bump(k)
+  }
+  for (const wake of [...idleWaiters]) wake()
+}
+
+function idle(keys: readonly string[]): Promise<void> {
+  if (!busy(keys)) return Promise.resolve()
+  return new Promise((resolve) => {
+    const wake = () => {
+      if (busy(keys)) return
+      idleWaiters.delete(wake)
+      resolve()
+    }
+    idleWaiters.add(wake)
+  })
+}
+
+// Writes to one thing (one list, one membership) run one at a time, in the
+// order they were asked for, so the server ends with the last intent.
+const queues = new Map<string, Promise<unknown>>()
+function enqueue<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const prev = queues.get(key) ?? Promise.resolve()
+  const next = prev.then(run, run)
+  const tail = next.catch(() => undefined)
+  queues.set(key, tail)
+  void tail.then(() => { if (queues.get(key) === tail) queues.delete(key) })
+  return next
+}
+
+const MAX_READ_TRIES = 5
+
 // Each request reads the owner generation first and checks it again before
 // it writes or says anything (`ownerGeneration()` in keep-alive.ts): a slow
 // answer for an earlier account never lands in the new one, even after a
 // switch and back. A read that fails for the current account throws, so the
 // page can show its error; one for an earlier account resolves quietly.
-
 async function read<T>(
-  opts: ListsOpts, key: (client: CaribouClient) => string,
+  opts: ListsOpts, keys: (client: CaribouClient) => string[],
   fetch: (client: CaribouClient) => Promise<T>, store: (client: CaribouClient, value: T) => void,
 ): Promise<void> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return
   const generation = ownerGeneration()
-  const k = key(client)
-  const rev = revision(k)
-  let value: T
-  try {
-    value = await fetch(client)
-  } catch (err) {
+  const ks = keys(client)
+  for (let i = 0; i < MAX_READ_TRIES; i++) {
+    await idle(ks)
     if (generation !== ownerGeneration()) return
-    throw err
+    const revs = ks.map(revision)
+    let value: T
+    try {
+      value = await fetch(client)
+    } catch (err) {
+      if (generation !== ownerGeneration()) return
+      throw err
+    }
+    if (generation !== ownerGeneration()) return
+    if (ks.every((k, j) => revision(k) === revs[j])) {
+      store(client, value)
+      return
+    }
   }
-  if (generation !== ownerGeneration() || revision(k) !== rev) return
-  store(client, value)
 }
 
+const membersKey = (userKey: UserKey, listId: string) => listKey(userKey, `members ${listId}`)
+const accountKey = (userKey: UserKey, accountId: string) => listKey(userKey, `account ${accountId}`)
+
 export function loadLists(opts: ListsOpts = {}): Promise<void> {
-  return read(opts, (c) => c.userKey, (c) => c.fetchLists(), (c, lists) => {
+  return read(opts, (c) => [c.userKey], (c) => c.fetchLists(), (c, lists) => {
     setIn(listsCache, c.userKey, lists)
   })
 }
 
 /** Reads one list, for a page opened at its address; it joins the known ones. */
 export function loadList(id: string, opts: ListsOpts = {}): Promise<void> {
-  return read(opts, (c) => c.userKey, (c) => c.fetchList(id), (c, list) => {
+  return read(opts, (c) => [c.userKey], (c) => c.fetchList(id), (c, list) => {
     const lists = listsCache.value.get(c.userKey) ?? []
     const at = lists.findIndex((l) => l.id === list.id)
     setIn(listsCache, c.userKey, at < 0 ? [...lists, list] : lists.map((l, i) => (i === at ? list : l)))
@@ -109,22 +173,26 @@ export function loadList(id: string, opts: ListsOpts = {}): Promise<void> {
 }
 
 export function loadListMembers(id: string, opts: ListsOpts = {}): Promise<void> {
-  return read(opts, (c) => listKey(c.userKey, `members ${id}`), (c) => c.fetchListAccounts(id), (c, accounts) => {
+  return read(opts, (c) => [c.userKey, membersKey(c.userKey, id)], (c) => c.fetchListAccounts(id), (c, accounts) => {
     setIn(listMembersCache, listKey(c.userKey, id), accounts)
   })
 }
 
 export function loadAccountLists(accountId: string, opts: ListsOpts = {}): Promise<void> {
-  return read(opts, (c) => listKey(c.userKey, `account ${accountId}`), (c) => c.fetchAccountLists(accountId),
+  return read(opts, (c) => [c.userKey, accountKey(c.userKey, accountId)], (c) => c.fetchAccountLists(accountId),
     (c, lists) => { setIn(accountListsCache, listKey(c.userKey, accountId), lists.map((l) => l.id)) })
 }
 
-/** Makes a list. Resolves to it, or to null when it failed (a toast says so). */
+/**
+ * Makes a list. Resolves to it, or to null when it failed (a toast says so).
+ * A read of the lists that was out meanwhile asks again, so the new list
+ * shows with the others even on a first visit.
+ */
 export async function createList(input: ListInput, opts: ListsOpts = {}): Promise<mastodon.v1.List | null> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return null
   const generation = ownerGeneration()
-  bump(client.userKey)
+  begin([client.userKey])
   try {
     const made = await client.createList(input)
     if (generation !== ownerGeneration()) return null
@@ -135,73 +203,113 @@ export async function createList(input: ListInput, opts: ListsOpts = {}): Promis
     if (generation === ownerGeneration()) toast(`Couldn't create the list "${input.title}".`)
     return null
   } finally {
-    bump(client.userKey)
+    end([client.userKey])
   }
+}
+
+// One list's writes: the server's last known copy, and how many writes are
+// queued. Only the last write of a run puts its answer (or, on a failure,
+// the last known copy) in the cache; until then the newest intent shows.
+interface ListWrites { confirmed: mastodon.v1.List | undefined; count: number }
+const listWrites = new Map<string, ListWrites>()
+
+function listWritesFor(userKey: UserKey, id: string): ListWrites {
+  const key = listKey(userKey, `list ${id}`)
+  let w = listWrites.get(key)
+  if (!w) {
+    w = { confirmed: listById(id, userKey), count: 0 }
+    listWrites.set(key, w)
+  }
+  return w
+}
+
+function doneWith(userKey: UserKey, id: string, w: ListWrites): boolean {
+  w.count -= 1
+  if (w.count > 0) return false
+  listWrites.delete(listKey(userKey, `list ${id}`))
+  return true
 }
 
 /** Saves a list's fields. The change shows at once and goes back on a failure. */
 export async function updateList(id: string, input: ListInput, opts: ListsOpts = {}): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return false
+  const userKey = client.userKey
   const generation = ownerGeneration()
-  const before = listById(id, client.userKey)
+  const w = listWritesFor(userKey, id)
+  w.count += 1
   const patch = { title: input.title,
     ...(input.repliesPolicy ? { repliesPolicy: input.repliesPolicy } : {}),
     ...(input.exclusive !== undefined ? { exclusive: input.exclusive } : {}) }
-  putLists(client.userKey, (lists) => lists.map((l) => (l.id === id ? { ...l, ...patch } : l)))
-  bump(client.userKey)
-  try {
-    const saved = await client.updateList(id, input)
-    if (generation === ownerGeneration()) putLists(client.userKey, (lists) => lists.map((l) => (l.id === id ? saved : l)))
-    return true
-  } catch {
-    // Keyed by account, so the old account's copy goes back even after a
+  putLists(userKey, (lists) => lists.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  begin([userKey])
+  return enqueue(listKey(userKey, `list ${id}`), async () => {
+    let ok = false
+    try {
+      w.confirmed = await client.updateList(id, input)
+      ok = true
+    } catch {
+      if (generation === ownerGeneration()) toast(`Couldn't save the list "${input.title}".`)
+    }
+    // Keyed by account, so the old account's copy is right even after a
     // switch; only the toast is for the account that is still active.
-    if (before) putLists(client.userKey, (lists) => lists.map((l) => (l.id === id ? before : l)))
-    if (generation === ownerGeneration()) toast(`Couldn't save the list "${input.title}".`)
-    return false
-  } finally {
-    bump(client.userKey)
-  }
+    const last = doneWith(userKey, id, w)
+    const settled = w.confirmed
+    if (last && settled) putLists(userKey, (lists) => lists.map((l) => (l.id === id ? settled : l)))
+    end([userKey])
+    return ok
+  })
 }
 
 /** Deletes a list. It goes at once and comes back in its place on a failure. */
 export async function deleteList(id: string, opts: ListsOpts = {}): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return false
+  const userKey = client.userKey
   const generation = ownerGeneration()
-  const lists = listsCache.value.get(client.userKey)
+  const w = listWritesFor(userKey, id)
+  w.count += 1
+  const lists = listsCache.value.get(userKey)
   const at = lists?.findIndex((l) => l.id === id) ?? -1
-  const before = at >= 0 ? lists![at] : undefined
-  putLists(client.userKey, (ls) => ls.filter((l) => l.id !== id))
-  bump(client.userKey)
-  try {
-    await client.deleteList(id)
-    // The list is gone for every account it held.
-    const prefix = `${client.userKey} `
-    const next = new Map(accountListsCache.value)
-    for (const [k, ids] of next) if (k.startsWith(prefix) && ids.includes(id)) next.set(k, ids.filter((x) => x !== id))
-    accountListsCache.value = next
-    setIn(listMembersCache, listKey(client.userKey, id), undefined)
-    return true
-  } catch {
-    if (before) putLists(client.userKey, (ls) => (ls.some((l) => l.id === id) ? ls : [...ls.slice(0, at), before, ...ls.slice(at)]))
-    if (generation === ownerGeneration()) toast(`Couldn't delete ${named(before)}.`)
-    return false
-  } finally {
-    bump(client.userKey)
-  }
+  putLists(userKey, (ls) => ls.filter((l) => l.id !== id))
+  begin([userKey])
+  return enqueue(listKey(userKey, `list ${id}`), async () => {
+    let ok = false
+    try {
+      await client.deleteList(id)
+      ok = true
+      // The list is gone for every account it held.
+      const prefix = `${userKey} `
+      const next = new Map(accountListsCache.value)
+      for (const [k, ids] of next) if (k.startsWith(prefix) && ids.includes(id)) next.set(k, ids.filter((x) => x !== id))
+      accountListsCache.value = next
+      setIn(listMembersCache, listKey(userKey, id), undefined)
+    } catch {
+      if (generation === ownerGeneration()) toast(`Couldn't delete ${named(w.confirmed)}.`)
+    }
+    doneWith(userKey, id, w)
+    const before = w.confirmed
+    if (!ok && before) {
+      putLists(userKey, (ls) => (ls.some((l) => l.id === id) ? ls
+        : [...ls.slice(0, Math.max(0, at)), before, ...ls.slice(Math.max(0, at))]))
+    }
+    end([userKey])
+    return ok
+  })
 }
 
 // Adds or removes the account in what is known: the list's members and the
-// account's lists. A rollback is the opposite change, so another change made
-// meanwhile (to another list, or another account) stays.
-function applyMember(userKey: UserKey, listId: string, account: mastodon.v1.Account, member: boolean): void {
+// account's lists. `at` puts a member back where it was.
+function applyMember(
+  userKey: UserKey, listId: string, account: mastodon.v1.Account, member: boolean, at = -1,
+): void {
   const mKey = listKey(userKey, listId)
   const members = listMembersCache.value.get(mKey)
   if (members) {
     const without = members.filter((a) => a.id !== account.id)
-    setIn(listMembersCache, mKey, member ? [...without, account] : without)
+    const back = at >= 0 && at <= without.length
+      ? [...without.slice(0, at), account, ...without.slice(at)] : [...without, account]
+    setIn(listMembersCache, mKey, member ? back : without)
   }
   const aKey = listKey(userKey, account.id)
   const ids = accountListsCache.value.get(aKey)
@@ -211,32 +319,57 @@ function applyMember(userKey: UserKey, listId: string, account: mastodon.v1.Acco
   }
 }
 
+// One membership's writes: whether the server has it, where the member
+// stood in the list, and how many writes are queued.
+interface MemberWrites { confirmed: boolean; at: number; count: number }
+const memberWrites = new Map<string, MemberWrites>()
+
 /**
- * Adds the account to the list, or removes it. The change shows at once; a
- * failure puts it back and says so. The server adds only an account the
- * reader follows.
+ * Adds the account to the list, or removes it. The change shows at once.
+ * Changes to one membership go to the server in order; when the last one
+ * has answered, the cache shows what the server has, and a failure says so.
+ * The server adds only an account the reader follows.
  */
 export async function setListMember(
   listId: string, account: mastodon.v1.Account, member: boolean, opts: ListsOpts = {},
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return false
+  const userKey = client.userKey
   const generation = ownerGeneration()
-  const keys = [listKey(client.userKey, `members ${listId}`), listKey(client.userKey, `account ${account.id}`)]
-  applyMember(client.userKey, listId, account, member)
-  keys.forEach(bump)
-  try {
-    if (member) await client.addListAccounts(listId, [account.id])
-    else await client.removeListAccounts(listId, [account.id])
-    return true
-  } catch {
-    applyMember(client.userKey, listId, account, !member)
-    if (generation === ownerGeneration()) {
-      const title = named(listById(listId, client.userKey))
-      toast(member ? `Couldn't add @${account.acct} to ${title}.` : `Couldn't remove @${account.acct} from ${title}.`)
-    }
-    return false
-  } finally {
-    keys.forEach(bump)
+  const key = listKey(userKey, `member ${listId} ${account.id}`)
+  let w = memberWrites.get(key)
+  if (!w) {
+    const at = listMembers(listId, userKey)?.findIndex((a) => a.id === account.id) ?? -1
+    w = { confirmed: !member, at, count: 0 }
+    memberWrites.set(key, w)
   }
+  const writes = w
+  writes.count += 1
+  applyMember(userKey, listId, account, member)
+  const keys = [membersKey(userKey, listId), accountKey(userKey, account.id)]
+  begin(keys)
+  return enqueue(key, async () => {
+    let ok = false
+    try {
+      if (member) await client.addListAccounts(listId, [account.id])
+      else await client.removeListAccounts(listId, [account.id])
+      writes.confirmed = member
+      ok = true
+    } catch {
+      if (generation === ownerGeneration()) {
+        const title = named(listById(listId, userKey))
+        toast(member ? `Couldn't add @${account.acct} to ${title}.` : `Couldn't remove @${account.acct} from ${title}.`)
+      }
+    }
+    writes.count -= 1
+    if (writes.count === 0) {
+      memberWrites.delete(key)
+      // This was the last write, so the cache shows its intent; put the
+      // server's state back if that failed.
+      if (writes.confirmed !== member) applyMember(userKey, listId, account, writes.confirmed, writes.at)
+    }
+    end(keys)
+    return ok
+  })
 }
