@@ -5,6 +5,7 @@ import {
   type CaribouClient, type SessionSource,
 } from '@beatzball/caribou-mastodon-client'
 import type { mastodon } from 'masto'
+import { prefsKey } from './prefs.js'
 
 export interface UserSession {
   userKey: UserKey
@@ -104,7 +105,7 @@ function dropSession(key: UserKey): void {
   const next = new Map(users.value)
   next.delete(key)
   users.value = next
-  localStorage.removeItem(`caribou.prefs.${key}`)
+  localStorage.removeItem(prefsKey(key))
   localStorage.removeItem(`caribou.drafts.${key}`)
 }
 

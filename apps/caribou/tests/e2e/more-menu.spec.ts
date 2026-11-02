@@ -30,6 +30,8 @@ test('Enter opens More and focuses the first item; Tab walks the items; Escape c
 
   await page.keyboard.press(tab)
   await expect(rail(page).getByRole('link', { name: 'Bookmarks', exact: true })).toBeFocused()
+  await page.keyboard.press(tab)
+  await expect(rail(page).getByRole('link', { name: 'Settings', exact: true })).toBeFocused()
   // No account is stored here, so the account part is Add account and Sign out.
   await page.keyboard.press(tab)
   await expect(rail(page).locator('caribou-menu.more').getByRole('link', { name: 'Add account', exact: true })).toBeFocused()

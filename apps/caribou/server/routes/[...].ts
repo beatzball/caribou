@@ -8,6 +8,7 @@ import { APP_SCRIPT_URL } from '../lib/app-entry.js';
 import { ICONS_HEAD, PAGE_TITLE, brandHead } from '../lib/brand-head.js';
 import { resolveOrigin } from '../lib/public-origin.js';
 import { ROOT_FORWARD_HEAD } from '../lib/root-forward-head.js';
+import { THEME_HEAD } from '../lib/theme-head.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
 // not every client encodes, so escape it rather than trust that.
@@ -24,7 +25,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     setResponseHeader(event, 'content-type', 'text/html; charset=utf-8');
     return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}</head>
+<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}${TOKENS_HEAD}${THEME_HEAD}</head>
 <body><h1>404 — Not Found</h1><p>No page matched <code>${escapeHtml(pathname)}</code>.</p></body>
 </html>`;
   }
@@ -46,10 +47,12 @@ export default defineEventHandler(async (event) => {
     //   • BASE_HEAD   — document-level rules that no shadow root owns.
     // brandHead adds the icons, the manifest and the link-preview tags.
     // ROOT_FORWARD_HEAD (only on `/`) sends a signed-in reader to /home
-    // before the sign-in form paints.
+    // before the sign-in form paints. THEME_HEAD comes last, after the
+    // theme-color meta it updates: it puts the reader's theme on <html>
+    // before the first paint.
     routeMeta: {
       title: PAGE_TITLE,
-      head: (matched.path === '/' ? ROOT_FORWARD_HEAD : '') + TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)),
+      head: (matched.path === '/' ? ROOT_FORWARD_HEAD : '') + TOKENS_HEAD + BASE_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD,
     },
     appScriptUrl: APP_SCRIPT_URL,
   });

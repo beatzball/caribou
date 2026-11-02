@@ -1,4 +1,6 @@
-// `/` goes to `/home` when an account is active (issue 135).
+// `/` goes to the active account's default timeline when an account is
+// active (issue 135): `/home`, or `/local` or `/public` when chosen on
+// /settings (`defaultTimeline` in `caribou.prefs.<userKey>`, issue 49).
 //
 // Two checks share these rules. The inline script in the head of `/`
 // (`server/lib/root-forward-head.ts`) decides on a full page load, before the
@@ -16,29 +18,44 @@
  */
 export const DECIDED_ATTR = 'data-caribou-root'
 
-export function forwardsToHome(
+/** Where `/` goes, or null when it stays the sign-in page. */
+export function rootForwardTarget(
   search: string,
   local: Pick<Storage, 'getItem'>,
   session: Pick<Storage, 'getItem'>,
-): boolean {
+): string | null {
   try {
     const q = new URLSearchParams(search)
-    if (q.has('add') || q.has('error') || session.getItem('caribou.error')) return false
+    if (q.has('add') || q.has('error') || session.getItem('caribou.error')) return null
     const key: unknown = JSON.parse(local.getItem('caribou.activeUserKey') ?? 'null')
     const users: unknown = JSON.parse(local.getItem('caribou.users') ?? '[]')
-    if (typeof key !== 'string' || !Array.isArray(users)) return false
+    if (typeof key !== 'string' || !Array.isArray(users)) return null
     // The same test as `isUserKey` in the auth package: `name@server`, both
     // parts non-empty. `loadFromStorage` drops any other key.
     const [name, server, ...rest] = key.split('@')
-    if (!name || !server || rest.length > 0) return false
-    return users.some((entry) => Array.isArray(entry) && entry[0] === key)
+    if (!name || !server || rest.length > 0) return null
+    if (!users.some((entry) => Array.isArray(entry) && entry[0] === key)) return null
+    return defaultTimeline(local, key)
   } catch {
-    return false
+    return null
+  }
+}
+
+// `defaultTimelineOf` in `@beatzball/caribou-state`, read from `local`. Bad
+// prefs are not a reason to stay on `/`: they mean Home.
+function defaultTimeline(local: Pick<Storage, 'getItem'>, key: string): string {
+  try {
+    const prefs: unknown = JSON.parse(local.getItem(`caribou.prefs.${key}`) ?? 'null')
+    const t = prefs && typeof prefs === 'object' && !Array.isArray(prefs)
+      ? (prefs as Record<string, unknown>).defaultTimeline : null
+    return t === 'local' || t === 'public' ? `/${t}` : '/home'
+  } catch {
+    return '/home'
   }
 }
 
 /**
- * Replaces `/` with `/home` in the router: no history entry for `/`, so Back
+ * Replaces `/` with `path` in the router: no history entry for `/`, so Back
  * does not return to it. The router reads the synthetic popstate as a
  * navigation and drops the `/` render it was making.
  *
@@ -47,10 +64,10 @@ export function forwardsToHome(
  * The router has no replace navigation, so it treats this as Back/Forward
  * and restores the saved scroll offset of `/home` instead of the top.
  */
-export function replaceWithHome(): void {
+export function replaceWithTimeline(path: string): void {
   // The SSR data of the first page is read once, by the first page the
-  // router enters. If any is left, it is not `/home`'s: Home must not read it.
+  // router enters. If any is left, it is not the timeline's: it must not read it.
   document.getElementById('__litro_data__')?.remove()
-  history.replaceState(null, '', '/home')
+  history.replaceState(null, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }

@@ -57,6 +57,7 @@ for (const width of [320, 360, 393]) {
     // Moved into More: not shown, and so not in the accessibility tree.
     await expect(rail(page).locator('nav > a[href="/public"]')).toBeHidden()
     await expect(rail(page).locator('nav > a[href="/bookmarks"]')).toBeHidden()
+    await expect(rail(page).locator('nav > a[href="/settings"]')).toBeHidden()
     await expect(rail(page).locator('caribou-menu.account')).toBeHidden()
     // getByRole still finds a slotted item in the closed panel (its own
     // style is not display: none); the accessibility snapshot does not.
@@ -64,6 +65,7 @@ for (const width of [320, 360, 393]) {
     expect(tree).toContain('button "More"')
     expect(tree).not.toContain('Public')
     expect(tree).not.toContain('Bookmarks')
+    expect(tree).not.toContain('Settings')
     expect(tree).not.toContain('Sign out')
     expect(tree).not.toContain('Accounts')
   })
@@ -84,7 +86,7 @@ test('a tap opens More above the bar, inside the viewport, with 44px items', asy
   expect(p.x).toBeGreaterThanOrEqual(0)
   expect(p.x + p.width).toBeLessThanOrEqual(320)
 
-  for (const name of ['Public', 'Bookmarks']) {
+  for (const name of ['Public', 'Bookmarks', 'Settings']) {
     const link = rail(page).getByRole('link', { name, exact: true })
     await expect(link).toBeVisible()
     expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44)

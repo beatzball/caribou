@@ -5,10 +5,13 @@
 
 export const APP_NAME = 'Caribou'
 
-// The page background, `--bg-0` in packages/design-tokens/tokens.css. The
-// app has one theme today (the dark one), so there is one theme colour.
-// `public/site.webmanifest` repeats it; a test checks that all three agree.
+// The page background, `--bg-0` in packages/design-tokens/tokens.css. Dark
+// is the default theme, so the server sends its colour;
+// `public/site.webmanifest` repeats it, and a test checks that all three
+// agree. A reader who chose light gets LIGHT_THEME_COLOR from the theme head
+// script (`theme-head.ts`) before the first paint.
 export const THEME_COLOR = '#0d0d12'
+export const LIGHT_THEME_COLOR = '#fafafa'
 
 // The router does not change document.title on client-side navigation, so
 // a page title such as "Home · Caribou" would stay on the tab after the

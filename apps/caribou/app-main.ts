@@ -17,12 +17,16 @@ import {
   healInstanceCookie, installRestoreHandler, land, readShellInfo,
 } from './components/_switch-account.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
+import { startTheme } from './components/_theme.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
 // Hydrate session from localStorage before any component reads it.
 if (typeof window !== 'undefined') {
   loadFromStorage()
+  // The head script set the theme before the first paint; this keeps it in
+  // step with /settings, an account switch and the system setting.
+  startTheme(window, document)
   // A session from sign-in has no account yet. Load it in the background,
   // now and whenever the active user changes.
   activeUserKey.subscribe(() => { void loadActiveAccount() })
