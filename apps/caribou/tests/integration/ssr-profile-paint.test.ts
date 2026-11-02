@@ -147,7 +147,7 @@ describe.skipIf(SKIP)('SSR profile-paint: /@handle emits header + status cards',
     // and its status id.
     expect((body.match(/<li\s*><caribou-status-card\s/g) ?? []).length).toBe(cardMatches.length)
     expect((body.match(/data-status-id="/g) ?? []).length).toBe(cardMatches.length)
-    expect((body.match(/<caribou-status-card\s+variant="timeline"/g) ?? []).length).toBe(cardMatches.length)
+    expect((body.match(/<caribou-status-card\s+(?:[a-z-]+="[^"]*"\s+)*?variant="timeline"/g) ?? []).length).toBe(cardMatches.length)
 
     // Each card's own shadow root is in the HTML, with the post inside it.
     expect((body.match(/<div class="status-content"\s*>/g) ?? []).length).toBe(cardMatches.length)
@@ -167,7 +167,7 @@ describe.skipIf(SKIP)('SSR thread-paint: /@handle/id emits the whole thread', ()
     expect(raw).toContain('"kind":"ok"')
     expect(body).toMatch(/<caribou-thread\s[^>]*>\s*<template shadowroot="open" shadowrootmode="open">/)
 
-    const variants = [...body.matchAll(/<caribou-status-card\s+variant="([a-z]+)"/g)].map((m) => m[1]!)
+    const variants = [...body.matchAll(/<caribou-status-card\s+(?:[a-z-]+="[^"]*"\s+)*?variant="([a-z]+)"/g)].map((m) => m[1]!)
     expect(variants.filter((v) => v === 'focused')).toHaveLength(1)
     expect(variants).not.toContain('timeline')
     // A reply has at least one status above it, and the server puts
@@ -181,7 +181,7 @@ describe.skipIf(SKIP)('SSR thread-paint: /@handle/id emits the whole thread', ()
     expect((body.match(/<div class="status-content"\s*>/g) ?? []).length).toBe(variants.length)
 
     // Each descendant row carries its depth and the matching indent.
-    const descendantRows = [...body.matchAll(/<li([^>]*)><caribou-status-card\s+variant="descendant"/g)]
+    const descendantRows = [...body.matchAll(/<li([^>]*)><caribou-status-card\s+(?:[a-z-]+="[^"]*"\s+)*?variant="descendant"/g)]
     expect(descendantRows.length).toBe(variants.filter((v) => v === 'descendant').length)
     for (const [, attrs] of descendantRows) {
       const depth = /data-depth="([1-3])"/.exec(attrs!)?.[1]

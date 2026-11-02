@@ -119,6 +119,30 @@ memory empties on an account change. Without JavaScript a post with a
 content warning cannot be opened: the server sends the collapsed card and
 no fallback. Read such a post on its home instance.
 
+**The reader's server filters hide or warn.** A status fetched with a
+token carries `filtered`: every filter that matches it, whatever the
+context. The card picks the ones for its `filter-context` attribute (home,
+notifications, public, thread, account; empty, as on bookmarks, never
+filters) in `components/_status-filter.ts`. Hide removes the card and its
+row (`li:has(> caribou-status-card[hidden])`); warn shows "Hidden by filter:
+<name>" and a Show button. A hide filter on the post a thread is about
+warns instead. A server without filters v2, or a copy fetched without a
+token (all server-rendered data), has no `filtered`, so the server render
+never filters and hydration holds. A fresh copy's `filtered` replaces the
+cached one (`mergeStatus`), so a filter edited on the server shows.
+
+**Mute and block change the relationship at once.** `setMute` and
+`setBlock` in `@beatzball/caribou-state` write the relationship cache
+first, then ask the server, and put back only the fields they changed on a
+failure. In every context but a profile, a card hides a post by an account
+the reader mutes or blocks, or a boost by one; only a card on the reader's
+own server reads the cache, since account ids are per server. The card
+whose menu did it shows "You muted @x." with Undo instead, so focus has a
+place. Block asks first (`confirmDialog` in
+`components/caribou-confirm-dialog.ts`). `/settings/moderation` lists the
+filters (read only, with a link to the server's own page), the muted and
+the blocked accounts.
+
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
 header. The client returns it as the page's `nextMaxId`, and the timeline
@@ -313,7 +337,9 @@ The phone nav bar uses it for More (Public, Bookmarks, Sign out).
   so on a phone its items are out of reach there.
 - The panel is fixed above the viewport's bottom-right corner;
   `--caribou-menu-bottom` and `--caribou-menu-right` move it. It never grows
-  past the viewport. Parts: `trigger`, `icon`, `panel`.
+  past the viewport. With `anchored` it opens next to its trigger instead
+  (below it, or above it low in the viewport), as in a post's menu.
+  `focus()` focuses the trigger. Parts: `trigger`, `icon`, `panel`.
 - The items are the caller's light DOM, so the caller styles them. An item
   that is also shown elsewhere at another width must be `display: none`
   there, so its name is in the accessibility tree once. In e2e, check that
