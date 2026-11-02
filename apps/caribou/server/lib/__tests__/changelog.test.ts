@@ -117,9 +117,9 @@ describe('parseChangelog', () => {
     expect(releases.map((r) => r.version)).toEqual(headings)
     // No item is a dependency-bump line. A note may still mention the words,
     // as the changelog page's own release note does.
-    const firstText = (item: { blocks: { c?: { v?: string }[] }[] }) => item.blocks[0]?.c?.[0]?.v ?? ''
     const items = releases.flatMap((r) => r.groups.flatMap((g) => g.items))
-    expect(items.filter((i) => firstText(i).startsWith('Updated dependencies'))).toEqual([])
+    const bumps = items.filter((i) => JSON.stringify(i.blocks[0] ?? {}).startsWith('{"t":"p","c":[{"t":"text","v":"Updated dependencies'))
+    expect(bumps).toEqual([])
     expect(JSON.stringify(releases)).not.toContain('Thanks [@')
   })
 })
