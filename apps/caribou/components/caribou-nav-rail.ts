@@ -31,6 +31,14 @@ const ITEMS: NavItem[] = [
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
 ]
 
+// Whether the item is the page shown: its own path, or for Profile and
+// Lists a page under it (a post of mine, one of my lists).
+function isCurrent(it: NavItem, active: string): boolean {
+  if (it.href === active) return true
+  if (it.href === '/@me') return active.startsWith('/@me')
+  return it.href === '/lists' && active.startsWith('/lists/')
+}
+
 const PROFILE: NavItem = { label: 'Profile', icon: 'user', href: '/@me' }
 
 /** `@name@server`: the handle that names the account on any server. */
@@ -337,7 +345,7 @@ export class CaribouNavRail extends LitElement {
   }
 
   private renderItem(it: NavItem, active: string) {
-    const isActive = it.href === active || (it.href === '/@me' && active.startsWith('/@me'))
+    const isActive = isCurrent(it, active)
     const isPending = it.href === this.pending || (it.href === '/@me' && this.pending.startsWith('/@me/'))
     return html`<a href=${it.href} aria-current=${isActive ? 'page' : nothing}
       class=${[it.more ? 'in-more' : '', it.signedIn ? 'signed-in-only' : ''].join(' ').trim() || nothing} ?data-pending=${isPending} aria-busy=${isPending ? 'true' : nothing} @click=${spaClick}
@@ -404,11 +412,11 @@ export class CaribouNavRail extends LitElement {
           ><caribou-icon class="icon" name="squarePen"></caribou-icon><span class="label">New post</span></caribou-button>
         ${this.renderItem(PROFILE, active)}
         <caribou-menu class="more" icon="ellipsis" label="More"
-          ?data-current=${moved.some((it) => it.href === active)}
+          ?data-current=${moved.some((it) => isCurrent(it, active))}
           ?data-pending=${moved.some((it) => it.href === this.pending)}>
           ${moved.some((it) => it.dot) ? this.renderMoreTrigger() : nothing}
           ${moved.map((it) => html`<a href=${it.href} class=${it.signedIn ? 'menu-item signed-in-only' : 'menu-item'}
-            aria-current=${it.href === active ? 'page' : nothing} @click=${spaClick}
+            aria-current=${isCurrent(it, active) ? 'page' : nothing} @click=${spaClick}
             >${it.dot ? this.withDot(html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`)
               : html`<caribou-icon class="icon" name=${it.icon}></caribou-icon>`}${it.label}${it.dot
               ? html`<caribou-changelog-dot text></caribou-changelog-dot>` : nothing}</a>`)}

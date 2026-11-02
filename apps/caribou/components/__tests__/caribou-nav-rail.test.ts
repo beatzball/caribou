@@ -297,6 +297,13 @@ describe('caribou-nav-rail', () => {
       expect(inMore.classList.contains('signed-in-only')).toBe(true)
     })
 
+    it('marks Lists current on a list\'s page, in the rail and on More', async () => {
+      const el = await mount('/lists/3')
+      expect(el.shadowRoot!.querySelector('nav > a[href="/lists"]')!.getAttribute('aria-current')).toBe('page')
+      expect(el.shadowRoot!.querySelector('caribou-menu.more a[href="/lists"]')!.getAttribute('aria-current')).toBe('page')
+      expect(el.shadowRoot!.querySelector('caribou-menu.more')!.hasAttribute('data-current')).toBe(true)
+    })
+
     it('marks More when a moved item is current, since its bar copy is hidden', async () => {
       const menu = (el: CaribouNavRail) => el.shadowRoot!.querySelector('caribou-menu.more')!
       expect(menu(await mount('/bookmarks')).hasAttribute('data-current')).toBe(true)
