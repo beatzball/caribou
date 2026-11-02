@@ -9,6 +9,9 @@ export interface DraftMedia {
   url: string
   previewUrl: string | null
   description: string
+  // The name of the file the user picked. Drafts stored before this field
+  // existed have none.
+  name?: string
 }
 
 export interface ComposeDraft {
