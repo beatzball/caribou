@@ -213,11 +213,17 @@ for (const key of ['Enter', 'Space']) {
   test(`${key} on the focused media picker opens the file chooser`, async ({ page }) => {
     await seedSession(page)
     await mockApi(page)
+    // Start waiting before the page loads. Playwright tells the browser to
+    // catch file choosers when the wait starts, and does not wait for the
+    // browser to agree. The key press below is one quick step, so on a
+    // busy machine it can open the chooser before the browser catches it,
+    // and the event never comes.
+    const chooser = page.waitForEvent('filechooser')
     await gotoSettled(page, '/home')
     await page.keyboard.press('n')
     const picker = page.getByRole('dialog', { name: 'New post' }).getByLabel('Add images or video')
     await picker.focus()
-    const chooser = page.waitForEvent('filechooser')
+    await expect(picker).toBeFocused()
     await page.keyboard.press(key)
     await chooser
   })
