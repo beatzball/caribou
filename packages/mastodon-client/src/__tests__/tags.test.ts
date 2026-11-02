@@ -9,22 +9,22 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers(...handlers))
 afterAll(() => server.close())
 
-const userKey = toUserKey('beatzball', 'fosstodon.org')
+const userKey = toUserKey('alice', 'example.social')
 
 function sessionSource() {
   return {
-    get: () => ({ userKey, server: 'fosstodon.org', token: 'TOKEN-1' }),
+    get: () => ({ userKey, server: 'example.social', token: 'TOKEN-1' }),
     onUnauthorized: vi.fn(),
   }
 }
 
 const tag = (name: string, following: boolean) => ({
-  id: '5', name, url: `https://fosstodon.org/tags/${name}`, history: [], following,
+  id: '5', name, url: `https://example.social/tags/${name}`, history: [], following,
 })
 
 describe('CaribouClient tags', () => {
   it('fetchTag reads the tag and whether the reader follows it', async () => {
-    server.use(http.get('https://fosstodon.org/api/v1/tags/:name', ({ params }) =>
+    server.use(http.get('https://example.social/api/v1/tags/:name', ({ params }) =>
       HttpResponse.json(tag(String(params.name), true))))
     const c = createCaribouClient(userKey, sessionSource())
     const t = await c.fetchTag('caturday')
@@ -34,7 +34,7 @@ describe('CaribouClient tags', () => {
 
   it('encodes a non-ASCII tag name in the path', async () => {
     const paths: string[] = []
-    server.use(http.get('https://fosstodon.org/api/v1/tags/:name', ({ request, params }) => {
+    server.use(http.get('https://example.social/api/v1/tags/:name', ({ request, params }) => {
       paths.push(new URL(request.url).pathname)
       return HttpResponse.json(tag(String(params.name), false))
     }))
@@ -46,11 +46,11 @@ describe('CaribouClient tags', () => {
   it('followTag and unfollowTag post to the tag', async () => {
     const calls: string[] = []
     server.use(
-      http.post('https://fosstodon.org/api/v1/tags/:name/follow', ({ params }) => {
+      http.post('https://example.social/api/v1/tags/:name/follow', ({ params }) => {
         calls.push(`follow ${String(params.name)}`)
         return HttpResponse.json(tag(String(params.name), true))
       }),
-      http.post('https://fosstodon.org/api/v1/tags/:name/unfollow', ({ params }) => {
+      http.post('https://example.social/api/v1/tags/:name/unfollow', ({ params }) => {
         calls.push(`unfollow ${String(params.name)}`)
         return HttpResponse.json(tag(String(params.name), false))
       }),
@@ -63,7 +63,7 @@ describe('CaribouClient tags', () => {
 
   it('reads a hashtag timeline with the name encoded once', async () => {
     const paths: string[] = []
-    server.use(http.get('https://fosstodon.org/api/v1/timelines/tag/:name', ({ request }) => {
+    server.use(http.get('https://example.social/api/v1/timelines/tag/:name', ({ request }) => {
       paths.push(new URL(request.url).pathname)
       return HttpResponse.json([])
     }))

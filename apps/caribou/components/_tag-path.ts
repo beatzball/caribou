@@ -6,11 +6,15 @@ export function tagPath(name: string): string {
   return `/tags/${encodeURIComponent(name)}`
 }
 
-// Mastodon's rule, roughly: letters, marks, digits, `_`, the middle dot and
-// the zero-width non-joiner, with at least one letter. Anything else is not
-// a hashtag the server could have.
-const TAG_NAME = /^[\p{L}\p{M}\p{N}_·‌]+$/u
-const HAS_LETTER = /\p{L}/u
+// Mastodon's `Tag::HASHTAG_NAME_RE` (app/models/tag.rb), in JavaScript.
+// Ruby's `[[:word:]]` is Alphabetic, a mark, a decimal digit or connector
+// punctuation; `[[:alpha:]]` is Alphabetic.
+const WORD = '\\p{Alphabetic}\\p{M}\\p{Nd}\\p{Pc}'
+const ALPHA = '\\p{Alphabetic}'
+const SEPARATORS = '_\\u00B7\\u30FB\\u200C'
+const FIRST = `[${WORD}_][${WORD}${SEPARATORS}]*[${ALPHA}${SEPARATORS}][${WORD}${SEPARATORS}]*[${WORD}_]`
+const LAST = `[${WORD}_]*[${ALPHA}][${WORD}_]*`
+const TAG_NAME = new RegExp(`^(?:${FIRST}|${LAST})$`, 'u')
 const MAX_LENGTH = 200
 
 /**
@@ -27,6 +31,6 @@ export function parseTagParam(raw: string): string | null {
   }
   name = name.replace(/^#/, '').normalize('NFC')
   if (name.length === 0 || name.length > MAX_LENGTH) return null
-  if (!TAG_NAME.test(name) || !HAS_LETTER.test(name)) return null
+  if (!TAG_NAME.test(name)) return null
   return name
 }

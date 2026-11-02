@@ -52,7 +52,10 @@ test.describe('signed out', () => {
     expect(body).not.toContain('class="follow"')
   })
 
-  test('a non-ASCII tag is decoded in the title', async ({ page }) => {
+  test('a non-ASCII tag is decoded in the title', async ({ page, request }) => {
+    // The server's own <title>, not the one the page sets after it loads.
+    const body = await (await request.get(`/tags/${encodeURIComponent('日本')}`)).text()
+    expect(body).toContain('<title>#日本 · Caribou</title>')
     await page.goto(`/tags/${encodeURIComponent('日本')}`)
     await expect(page).toHaveTitle('#日本 · Caribou')
   })
@@ -91,7 +94,9 @@ test.describe('signed in', () => {
       route.fulfill(json(new URL(route.request().url()).searchParams.get('max_id') ? [] : [POST])))
   })
 
-  test('loads the tag timeline from the reader\'s server, and hydrates cleanly', async ({ page }) => {
+  // With no instance cookie the server sends the placeholder; the cards come
+  // from the reader's server after it. tags-ssr.spec.ts hydrates server cards.
+  test('swaps the placeholder for the tag timeline from the reader\'s server', async ({ page }) => {
     const errors: string[] = []
     page.on('pageerror', (e) => errors.push(String(e)))
     await page.route('**/api/v1/tags/AI', (route) => route.fulfill(json(tag(false))))

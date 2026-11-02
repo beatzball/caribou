@@ -34,6 +34,17 @@ const escapeHtml = (text: string): string =>
 
 const titleFor = (tag: string) => `#${tag} · ${PAGE_TITLE}`
 
+// Whether the address bar shows the page for `tag`: the path segment names
+// it, as the page data read it (decoded for a name that is not a hashtag,
+// parsed for one that is).
+function atTagPath(tag: string): boolean {
+  const m = /^\/tags\/([^/]+)$/.exec(location.pathname)
+  if (!m) return false
+  let decoded: string | null = null
+  try { decoded = decodeURIComponent(m[1]!) } catch { /* keep it null */ }
+  return decoded === tag || parseTagParam(m[1]!) === tag
+}
+
 export const pageData = definePageData<TagPageData>(async (event) => {
   const raw = String((getRouterParams(event) as { tag?: string }).tag ?? '')
   const resolution = await resolveInstanceForRoute(event, {}, { storage: getStorage() })
@@ -50,10 +61,10 @@ export const pageData = definePageData<TagPageData>(async (event) => {
   const query = getQuery(event)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
-    const raw = await fetchTagTimeline({ instance: resolution.instance, tag, maxId })
+    const fetched = await fetchTagTimeline({ instance: resolution.instance, tag, maxId })
     // Dynamic import keeps jsdom out of the client bundle (see local.ts).
     const { sanitizeStatus } = await import('../../server/lib/sanitize.js')
-    const statuses = raw.map((s) => sanitizeStatus(s))
+    const statuses = fetched.map((s) => sanitizeStatus(s))
     const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
     return { kind: 'ok', statuses, nextMaxId, shell, tag, seoTitle }
   } catch (err) {
@@ -92,9 +103,12 @@ export class TagPage extends LitroPage {
   // the app's title back when it leaves. On a full load the router swaps in
   // a second copy of the page before the first one leaves; that copy keeps
   // the title.
+  //
+  // Only the page at the address sets it. A page the reader has left can
+  // still render: `enterWithCache` hands it fresh data after it is gone.
   protected override updated() {
     const data = this.serverData as TagPageData | null
-    if (data?.tag) document.title = titleFor(data.tag)
+    if (data?.tag && this.isConnected && atTagPath(data.tag)) document.title = titleFor(data.tag)
   }
 
   override disconnectedCallback() {

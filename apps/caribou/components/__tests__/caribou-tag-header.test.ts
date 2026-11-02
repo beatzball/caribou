@@ -95,6 +95,27 @@ describe('<caribou-tag-header>', () => {
     expect(button(el)?.dataset.state).toBe('following')
   })
 
+  it('reads the new tag when its name changes', async () => {
+    const client = signIn()
+    const fetchTag = vi.spyOn(client, 'fetchTag').mockImplementation(async (n) => tag(n, n === 'rust'))
+    const el = await mount('ai')
+    expect(button(el)?.dataset.state).toBe('follow')
+    el.name = 'rust'
+    await el.updateComplete
+    await flush()
+    await el.updateComplete
+    expect(fetchTag).toHaveBeenLastCalledWith('rust')
+    expect(el.shadowRoot!.querySelector('h1')!.textContent).toBe('#rust')
+    expect(button(el)?.dataset.state).toBe('following')
+  })
+
+  it('shows no button when the read fails for a reason other than 404', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchTag').mockRejectedValue(Object.assign(new Error('503'), { code: 'server_error' }))
+    const el = await mount('ai')
+    expect(button(el)).toBeNull()
+  })
+
   it('goes back to Follow when the follow fails', async () => {
     const client = signIn()
     vi.spyOn(client, 'fetchTag').mockResolvedValue(tag('ai', false))

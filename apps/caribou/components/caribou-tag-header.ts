@@ -1,6 +1,6 @@
-import { LitElement, html, css, nothing } from 'lit'
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
-import { effect } from '@preact/signals-core'
+import { effect, signal } from '@preact/signals-core'
 import { activeClient, activeUserKey, loadTag, tagCache, tagKey, toggleTagFollow } from '@beatzball/caribou-state'
 import './caribou-button.js'
 
@@ -29,6 +29,12 @@ export class CaribouTagHeader extends LitElement {
   @state() private following: boolean | undefined = undefined
 
   private dispose: (() => void) | null = null
+  // `name` as a signal too, so the effects below see a new name.
+  private nameSignal = signal('')
+
+  protected override willUpdate(changed: PropertyValues<this>) {
+    if (changed.has('name')) this.nameSignal.value = this.name
+  }
 
   override connectedCallback() {
     super.connectedCallback()
@@ -49,11 +55,13 @@ export class CaribouTagHeader extends LitElement {
   private bind() {
     // A new session asks its own server again.
     const disposeLoad = effect(() => {
-      if (activeClient.value && this.name) void loadTag(this.name)
+      const name = this.nameSignal.value
+      if (activeClient.value && name) void loadTag(name)
     })
     const disposeRead = effect(() => {
       const userKey = activeUserKey.value
-      this.following = userKey ? tagCache.value.get(tagKey(userKey, this.name)) : undefined
+      const name = this.nameSignal.value
+      this.following = userKey ? tagCache.value.get(tagKey(userKey, name)) : undefined
     })
     this.dispose = () => { disposeLoad(); disposeRead() }
   }

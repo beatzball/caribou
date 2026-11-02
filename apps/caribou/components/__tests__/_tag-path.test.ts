@@ -33,8 +33,17 @@ describe('parseTagParam', () => {
     expect(parseTagParam(encodeURIComponent('l·l'))).toBe('l·l')
   })
 
+  // Names Mastodon's HASHTAG_NAME_RE accepts (checked against the Ruby
+  // expression from app/models/tag.rb).
+  it('accepts every name Mastodon accepts', () => {
+    for (const name of ['1_2', 'トム・ジェリー', 'a', '_a', '1a', 'a_', 'ＡＩ', 'हिन्दी', 'a\u200cb', 'Ⓐbc']) {
+      expect(parseTagParam(encodeURIComponent(name)), name).toBe(name.normalize('NFC'))
+    }
+  })
+
   it('refuses a name that cannot be a hashtag', () => {
-    for (const raw of ['', '%23', 'a%20b', 'a-b', '123', 'a%2Fb', '%E0%A4%A', 'x'.repeat(201)]) {
+    for (const raw of ['', '%23', 'a%20b', 'a-b', '123', '_', '__', '_1_', 'a%2Fb', '..', '%2e%2e', 'ai%00',
+      'ai%3Fx', 'ai%23x', 'a%5Cb', '%F0%9F%98%80', '%E0%A4%A', 'x'.repeat(201)]) {
       expect(parseTagParam(raw), raw).toBeNull()
     }
   })

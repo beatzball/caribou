@@ -130,6 +130,35 @@ describe('<caribou-status-card> body links', () => {
     expect(goSpy).toHaveBeenCalledWith('/tags/AI')
   })
 
+  // Mastodon stores `#Café` as `cafe` (ASCII folding).
+  it('matches an accented hashtag to the folded name the server lists', async () => {
+    const href = `https://example.social/tags/${encodeURIComponent('Café')}`
+    const el = await mount(post({
+      content: `<p><a href="${href}" class="mention hashtag" rel="tag">#<span>Café</span></a></p>`,
+      tags: [{ name: 'cafe', url: 'https://example.social/tags/cafe' }],
+    }))
+    click(el, href)
+    await flush()
+    expect(goSpy).toHaveBeenCalledWith(`/tags/${encodeURIComponent('Café')}`)
+  })
+
+  it('leaves modified, non-primary and handled clicks on a hashtag to the browser', async () => {
+    const el = await mount()
+    const href = 'https://example.social/tags/AI'
+    document.addEventListener('click', stop)
+    for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      click(el, href, init)
+      await flush()
+      expect(goSpy, `should not route with ${JSON.stringify(init)}`).not.toHaveBeenCalled()
+    }
+    expect(seen).toEqual([false, false, false, false, false])
+    const a = el.shadowRoot!.querySelector(`.status-content a[href="${href}"]`)!
+    a.addEventListener('click', (e) => e.preventDefault(), { once: true })
+    click(el, href)
+    await flush()
+    expect(goSpy).not.toHaveBeenCalled()
+  })
+
   it('routes a non-ASCII hashtag', async () => {
     const href = `https://example.social/tags/${encodeURIComponent('日本')}`
     const el = await mount(post({

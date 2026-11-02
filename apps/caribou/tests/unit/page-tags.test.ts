@@ -58,12 +58,22 @@ describe('/tags/[tag] pageData', () => {
     )
   })
 
-  it('names the tag in the document title, escaped', async () => {
+  it('names the tag in the document title', async () => {
     signedIn()
     vi.mocked(fetchTagTimeline).mockResolvedValue([])
     const { pageData } = await import('../../pages/tags/[tag].js')
     const result = await pageData.fetcher(eventFor('Caturday'))
     expect(result.seoTitle).toBe('#Caturday · Caribou')
+  })
+
+  // Litro writes `seoTitle` into <title> as it is. Only a name that is not a
+  // hashtag can hold markup, so that branch is the one to pin.
+  it('escapes markup in the title of a name that is not a hashtag', async () => {
+    signedIn()
+    const { pageData } = await import('../../pages/tags/[tag].js')
+    const result = await pageData.fetcher(eventFor(encodeURIComponent('</title><script>"x"&\'y\'')))
+    expect(result.kind).toBe('not-found')
+    expect(result.seoTitle).toBe('#&lt;/title&gt;&lt;script&gt;&quot;x&quot;&amp;&#39;y&#39; · Caribou')
   })
 
   it('decodes a non-ASCII tag', async () => {
@@ -151,10 +161,40 @@ describe('<page-tags-tag> render', () => {
   })
 
   it('sets the document title, and puts the app title back when it leaves', async () => {
+    history.replaceState(null, '', '/tags/ai')
     const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' })
     expect(document.title).toBe('#ai · Caribou')
     el.remove()
     expect(document.title).toBe('Caribou')
+  })
+
+  // `enterWithCache` can hand a page its fresh data after the reader has
+  // left it. That late render must not take the title of the page now shown.
+  it('a page the reader has left does not change the title', async () => {
+    history.replaceState(null, '', '/tags/ai')
+    const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' })
+    el.remove()
+    history.replaceState(null, '', '/home')
+    el.serverData = { kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' }
+    await el.updateComplete
+    expect(document.title).toBe('Caribou')
+  })
+
+  it('a page that is not the one at the address does not change the title', async () => {
+    history.replaceState(null, '', '/home')
+    document.title = 'Caribou'
+    await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' })
+    expect(document.title).toBe('Caribou')
+  })
+
+  it('sets the title of a non-ASCII tag, and of a name that is not a hashtag', async () => {
+    history.replaceState(null, '', `/tags/${encodeURIComponent('日本')}`)
+    const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: '日本' })
+    expect(document.title).toBe('#日本 · Caribou')
+    el.remove()
+    history.replaceState(null, '', '/tags/a-b')
+    await mount({ kind: 'not-found', shell, tag: 'a-b' })
+    expect(document.title).toBe('#a-b · Caribou')
   })
 
   it('says a name is not a hashtag', async () => {
