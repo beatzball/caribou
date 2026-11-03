@@ -1,5 +1,17 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.2
+
+### Patch Changes
+
+- [#152](https://github.com/beatzball/caribou/pull/152) [`33c430f`](https://github.com/beatzball/caribou/commit/33c430f33b6bc95e79ba80f69f5224033fdb80a8) Thanks [@beatzball](https://github.com/beatzball)! - New calls to edit and delete a post: `fetchStatusSource`, `editStatus`, `deleteStatus` and `fetchStatusHistory`.
+
+- [#155](https://github.com/beatzball/caribou/pull/155) [`97df338`](https://github.com/beatzball/caribou/commit/97df33801f763ac23c5b7ad8d70ab2038289b5ff) Thanks [@beatzball](https://github.com/beatzball)! - Add `fetchGroupedNotifications`: grouped notifications from `GET /api/v2/notifications` (Mastodon 4.3+). Favourites, boosts and follows are grouped. An older server answers `not_found`. `fetchNotificationGroupAccounts` loads everyone in a group. A `CaribouError` now keeps the HTTP `status`.
+
+- [#153](https://github.com/beatzball/caribou/pull/153) [`58ef9e1`](https://github.com/beatzball/caribou/commit/58ef9e13b885ada30c4b4a8b94c9cadfe9ad71dc) Thanks [@beatzball](https://github.com/beatzball)! - Add list calls: `fetchLists`, `fetchList`, `createList`, `updateList`, `deleteList`, `fetchListAccounts` (every page), `addListAccounts`, `removeListAccounts` and `fetchAccountLists`.
+
+- [#156](https://github.com/beatzball/caribou/pull/156) [`e551dda`](https://github.com/beatzball/caribou/commit/e551dda63b62327b9fb5ccdfd10901639d4941be) Thanks [@beatzball](https://github.com/beatzball)! - Add `search` (`GET /api/v2/search`, with `resolve` for a signed-in reader) and `searchPublic`, a search with no token that never sends `resolve`.
+
 ## 0.4.1
 
 ### Patch Changes

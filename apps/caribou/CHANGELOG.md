@@ -1,5 +1,21 @@
 # caribou-app
 
+## 0.10.4
+
+### Patch Changes
+
+- [#152](https://github.com/beatzball/caribou/pull/152) [`33c430f`](https://github.com/beatzball/caribou/commit/33c430f33b6bc95e79ba80f69f5224033fdb80a8) Thanks [@beatzball](https://github.com/beatzball)! - Edit and delete your own posts. The post menu on your own posts has Edit, Delete and Delete & redraft. Edit opens the compose dialog with the post's text as the server has it now; visibility and media stay as they are. A post with a poll cannot be edited, because Mastodon would remove the poll and its votes. Delete asks first, and focus moves to the next post. Delete & redraft opens a new post with what the deleted one had, saved as a draft at once; it never replaces another unsent draft, and opens first the next time you write a new post. An edited post shows "edited" next to its time; it opens the edit history, newest first.
+
+- [#155](https://github.com/beatzball/caribou/pull/155) [`97df338`](https://github.com/beatzball/caribou/commit/97df33801f763ac23c5b7ad8d70ab2038289b5ff) Thanks [@beatzball](https://github.com/beatzball)! - /notifications groups favourites and boosts on the same post, and follows, into one row: "Alice, Bob and 12 others favourited your post", with a row of avatars. Show all loads and lists everyone in the group. Mentions and other types stay one row each. A muted or blocked account leaves its group.
+
+- [#153](https://github.com/beatzball/caribou/pull/153) [`58ef9e1`](https://github.com/beatzball/caribou/commit/58ef9e13b885ada30c4b4a8b94c9cadfe9ad71dc) Thanks [@beatzball](https://github.com/beatzball)! - Add lists. `/lists` shows your lists, with New list, Edit (title, who to show replies to, and on Mastodon 4.2+ whether to hide the posts from Home) and Delete, which asks first. `/lists/<id>` shows the list's timeline, with its title, Edit list and a Members panel where you can remove an account. A profile's menu has "Add to lists". Lists is in the nav for a signed-in reader. A removed member gets a toast with Undo; a toast can now carry one action button, and such a toast stays until it is used or dismissed.
+
+- [#156](https://github.com/beatzball/caribou/pull/156) [`e551dda`](https://github.com/beatzball/caribou/commit/e551dda63b62327b9fb5ccdfd10901639d4941be) Thanks [@beatzball](https://github.com/beatzball)! - Add search. `/search?q=` has People, Hashtags and Posts tabs, and the address follows the box as you type. A search box sits in the right rail, and Search is in the nav rail (in More on a phone). Pasting a post or profile address opens it in the app. Signed out, search asks the server the public timelines use, which finds people and hashtags but not posts.
+
+- Updated dependencies [[`33c430f`](https://github.com/beatzball/caribou/commit/33c430f33b6bc95e79ba80f69f5224033fdb80a8), [`33c430f`](https://github.com/beatzball/caribou/commit/33c430f33b6bc95e79ba80f69f5224033fdb80a8), [`97df338`](https://github.com/beatzball/caribou/commit/97df33801f763ac23c5b7ad8d70ab2038289b5ff), [`97df338`](https://github.com/beatzball/caribou/commit/97df33801f763ac23c5b7ad8d70ab2038289b5ff), [`58ef9e1`](https://github.com/beatzball/caribou/commit/58ef9e13b885ada30c4b4a8b94c9cadfe9ad71dc), [`58ef9e1`](https://github.com/beatzball/caribou/commit/58ef9e13b885ada30c4b4a8b94c9cadfe9ad71dc), [`e551dda`](https://github.com/beatzball/caribou/commit/e551dda63b62327b9fb5ccdfd10901639d4941be), [`e551dda`](https://github.com/beatzball/caribou/commit/e551dda63b62327b9fb5ccdfd10901639d4941be)]:
+  - @beatzball/caribou-mastodon-client@0.4.2
+  - @beatzball/caribou-state@0.4.3
+
 ## 0.10.3
 
 ### Patch Changes
