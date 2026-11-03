@@ -119,3 +119,60 @@ describe('<caribou-toaster>', () => {
     expect(messages(el, 'status')).toEqual([])
   })
 })
+
+describe('<caribou-toaster> action', () => {
+  it('shows the action as a button, runs it once and closes the toast', async () => {
+    const el = await mount()
+    const run = vi.fn()
+    toast({ kind: 'info', message: 'Removed @bob.', action: { label: 'Undo', run } })
+    await el.updateComplete
+    const button = el.shadowRoot!.querySelector<HTMLElement>('.toast caribou-button.action')!
+    expect(button.textContent).toBe('Undo')
+    button.click()
+    await el.updateComplete
+    expect(run).toHaveBeenCalledOnce()
+    expect(el.shadowRoot!.querySelectorAll('.toast')).toHaveLength(0)
+  })
+
+  it('a toast with an action waits for the reader: it does not time out', async () => {
+    const el = await mount()
+    toast({ kind: 'info', message: 'Removed @bob.', action: { label: 'Undo', run: () => {} } })
+    await el.updateComplete
+    vi.advanceTimersByTime(TOAST_TIMEOUT_MS * 3)
+    await el.updateComplete
+    expect(messages(el, 'status')).toEqual(['Removed @bob.'])
+  })
+
+  it('ignores an action without a label or a function', async () => {
+    const el = await mount()
+    toast({ kind: 'info', message: 'Hi', action: { label: '', run: () => {} } })
+    toast({ kind: 'info', message: 'Ho', action: { label: 'Undo' } as never })
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('caribou-button.action')).toBeNull()
+  })
+})
+
+it('an Undo toast is never pushed out by later toasts (codex P3, fable 5)', async () => {
+  const el = await mount()
+  toast({ kind: 'info', message: 'Removed @bob.', action: { label: 'Undo', run: () => {} } })
+  for (let i = 1; i <= 6; i++) toast({ kind: 'info', message: `Note ${i}` })
+  await el.updateComplete
+  const shown = messages(el, 'status')
+  expect(shown).toContain('Removed @bob.')
+  expect(shown.length).toBeLessThanOrEqual(4)
+})
+
+it('an error still shows when four Undo toasts are up, and the Undo toasts stay (codex round 3)', async () => {
+  const el = await mount()
+  for (let i = 1; i <= 4; i++) toast({ kind: 'info', message: `Removal ${i}`, action: { label: 'Undo', run: () => {} } })
+  toast({ kind: 'error', message: "Couldn't save the list." })
+  await el.updateComplete
+  expect(messages(el, 'alert')).toEqual(["Couldn't save the list."])
+  expect(messages(el, 'status')).toEqual(['Removal 1', 'Removal 2', 'Removal 3', 'Removal 4'])
+  expect(el.shadowRoot!.querySelectorAll('caribou-button.action')).toHaveLength(4)
+  // A newer error takes the older error's place, not an Undo's.
+  toast({ kind: 'error', message: "Couldn't delete the list." })
+  await el.updateComplete
+  expect(messages(el, 'alert')).toEqual(["Couldn't delete the list."])
+  expect(messages(el, 'status')).toHaveLength(4)
+})
