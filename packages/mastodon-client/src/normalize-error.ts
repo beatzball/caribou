@@ -18,15 +18,16 @@ export function normalizeError(err: unknown): CaribouError {
 
   if (isHttpErrorLike(err)) {
     const { statusCode, headers, message } = err
-    if (statusCode === 401) return new CaribouError('unauthorized', message)
-    if (statusCode === 404) return new CaribouError('not_found', message)
+    const status = { status: statusCode }
+    if (statusCode === 401) return new CaribouError('unauthorized', message, status)
+    if (statusCode === 404) return new CaribouError('not_found', message, status)
     if (statusCode === 429) {
       const retryAfterHeader = headers?.['retry-after']
       const retryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined
-      return new CaribouError('rate_limited', message, { retryAfter })
+      return new CaribouError('rate_limited', message, { retryAfter, status: statusCode })
     }
-    if (statusCode >= 500) return new CaribouError('server_error', message)
-    return new CaribouError('unknown', message)
+    if (statusCode >= 500) return new CaribouError('server_error', message, status)
+    return new CaribouError('unknown', message, status)
   }
 
   if (err instanceof TypeError && /fetch failed|network|Failed to fetch/i.test(err.message)) {

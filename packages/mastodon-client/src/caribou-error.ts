@@ -9,15 +9,18 @@ export type CaribouErrorCode =
 export class CaribouError extends Error {
   readonly code: CaribouErrorCode
   readonly retryAfter?: number
+  /** The HTTP status, when the server answered. */
+  readonly status?: number
 
   constructor(
     code: CaribouErrorCode,
     message: string,
-    opts: { retryAfter?: number } = {},
+    opts: { retryAfter?: number; status?: number } = {},
   ) {
     super(message)
     this.name = 'CaribouError'
     this.code = code
     if (opts.retryAfter !== undefined) this.retryAfter = opts.retryAfter
+    if (opts.status !== undefined) this.status = opts.status
   }
 }

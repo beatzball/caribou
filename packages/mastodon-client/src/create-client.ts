@@ -104,6 +104,14 @@ export interface CaribouClient {
 
   // Notifications.
   fetchNotifications(params?: FetchNotificationsParams): Promise<mastodon.v1.Notification[]>
+  /**
+   * Grouped notifications (`GET /api/v2/notifications`, Mastodon 4.3+).
+   * Favourites, boosts and follows are grouped; every other type comes as
+   * a group of one. An older server answers 404 (`not_found`).
+   */
+  fetchGroupedNotifications(params?: FetchGroupedNotificationsParams): Promise<GroupedNotificationsPage>
+  /** Every account in one notification group (`GET /api/v2/notifications/:group_key/accounts`). */
+  fetchNotificationGroupAccounts(groupKey: string): Promise<mastodon.v1.Account[]>
 
   /**
    * Accounts, hashtags and posts that match `q` (`GET /api/v2/search`).
@@ -111,6 +119,38 @@ export interface CaribouClient {
    * know yet.
    */
   search(params: SearchInput): Promise<mastodon.v2.Search>
+}
+
+export type FetchGroupedNotificationsParams = Omit<FetchNotificationsParams, 'sinceId'>
+
+/** The notification types the server groups for Caribou. */
+export const GROUPED_NOTIFICATION_TYPES = ['favourite', 'reblog', 'follow'] as const
+
+/**
+ * One notification group as the server sends it. masto types
+ * `sample_account_ids` as a string; it is a list.
+ */
+export interface NotificationGroupData {
+  groupKey: string
+  type: string
+  /**
+   * How many notifications the group has up to the top of this page,
+   * older ones included: a running total, not a count for the page.
+   */
+  notificationsCount: number
+  mostRecentNotificationId: string
+  pageMinId?: string
+  pageMaxId?: string
+  latestPageNotificationAt?: string
+  /** Some of the newest accounts in the group, newest first. A sample, not all of them. */
+  sampleAccountIds: string[]
+  statusId?: string | null
+}
+
+export interface GroupedNotificationsPage {
+  accounts: mastodon.v1.Account[]
+  statuses: mastodon.v1.Status[]
+  notificationGroups: NotificationGroupData[]
 }
 
 export type SearchType = 'accounts' | 'hashtags' | 'statuses'
@@ -524,6 +564,31 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         ...(params.maxId ? { maxId: params.maxId } : {}),
         ...(params.limit ? { limit: params.limit } : {}),
       }))
+    },
+    async fetchGroupedNotifications(params = {}) {
+      const key = `grouped-notifications:${JSON.stringify(params)}`
+      return run(key, async (c) => {
+        // masto's group-type union collapses to three members; the server
+        // takes any notification type here.
+        type Types = mastodon.rest.v2.ListNotificationsParams['types']
+        const page = await c.v2.notifications.list({
+          groupedTypes: GROUPED_NOTIFICATION_TYPES as unknown as Types,
+          expandAccounts: 'full',
+          ...(params.types && params.types.length > 0 ? { types: params.types as unknown as Types } : {}),
+          ...(params.minId ? { minId: params.minId } : {}),
+          ...(params.maxId ? { maxId: params.maxId } : {}),
+          ...(params.limit ? { limit: params.limit } : {}),
+        })
+        return {
+          accounts: page.accounts ?? [],
+          statuses: page.statuses ?? [],
+          notificationGroups: (page.notificationGroups ?? []) as unknown as NotificationGroupData[],
+        }
+      })
+    },
+    async fetchNotificationGroupAccounts(groupKey) {
+      return run(`notification-group-accounts:${groupKey}`, (c) =>
+        c.v2.notifications.$select(encodeURIComponent(groupKey)).accounts.fetch())
     },
 
     // --- search ---
