@@ -38,6 +38,13 @@ const ROUTES: Array<{ route: string; adds: string[] }> = [
   { route: '/public', adds: [] },
   { route: '/notifications', adds: [] },
   { route: '/@alice@example.social/123', adds: [] },
+  { route: '/search', adds: [] },
+  // No session and no instance: after mount the notice line hides and the
+  // sign-in placeholder follows it. Nothing the server sent goes away.
+  { route: '/search?q=cats&type=hashtags', adds: [
+    'div > caribou-auth-required', 'caribou-auth-required > article', 'article > h1', 'article > p',
+    'p > litro-link', 'litro-link > a', 'a > slot',
+  ] },
 ]
 
 function collectErrors(page: Page): string[] {

@@ -184,7 +184,9 @@ test('a failed add unchecks the box and says why', async ({ page }) => {
   const picker = page.getByRole('dialog', { name: 'Lists for @bob' })
   await expect(picker.getByText('Only accounts you follow can be added to a list.')).toBeVisible()
   const box = picker.getByRole('checkbox', { name: 'Friends' })
-  await box.check()
+  // The failed add unchecks the box at once, so check() can see it
+  // unchecked again and fail. Click, then assert where the box ends.
+  await box.click()
   await expect(page.locator('caribou-toaster')).toContainText('Couldn\'t add @bob to the list "Friends".')
   await expect(box).not.toBeChecked()
 })

@@ -112,6 +112,13 @@ export interface CaribouClient {
   fetchGroupedNotifications(params?: FetchGroupedNotificationsParams): Promise<GroupedNotificationsPage>
   /** Every account in one notification group (`GET /api/v2/notifications/:group_key/accounts`). */
   fetchNotificationGroupAccounts(groupKey: string): Promise<mastodon.v1.Account[]>
+
+  /**
+   * Accounts, hashtags and posts that match `q` (`GET /api/v2/search`).
+   * `resolve` asks the server to fetch a remote URL or handle it does not
+   * know yet.
+   */
+  search(params: SearchInput): Promise<mastodon.v2.Search>
 }
 
 export type FetchGroupedNotificationsParams = Omit<FetchNotificationsParams, 'sinceId'>
@@ -144,6 +151,43 @@ export interface GroupedNotificationsPage {
   accounts: mastodon.v1.Account[]
   statuses: mastodon.v1.Status[]
   notificationGroups: NotificationGroupData[]
+}
+
+export type SearchType = 'accounts' | 'hashtags' | 'statuses'
+
+export interface SearchInput {
+  q: string
+  /** Only this kind of result. Omitted means all three. */
+  type?: SearchType
+  resolve?: boolean
+  limit?: number
+}
+
+// Mastodon refuses `resolve` and `offset` without a token (401), so only a
+// signed-in search sends them.
+function searchQuery(params: SearchInput, signedIn: boolean) {
+  return {
+    q: params.q,
+    ...(params.type ? { type: params.type } : {}),
+    ...(signedIn && params.resolve ? { resolve: true } : {}),
+    ...(params.limit ? { limit: params.limit } : {}),
+  }
+}
+
+/**
+ * A search on `server` with no token, for a reader who is not signed in.
+ * Mastodon answers accounts and hashtags; it finds no posts without a
+ * token, and it never resolves a remote URL.
+ */
+export async function searchPublic(
+  server: string, params: Omit<SearchInput, 'resolve'>,
+): Promise<mastodon.v2.Search> {
+  try {
+    const c = createRestAPIClient({ url: `https://${server}` })
+    return await c.v2.search.list(searchQuery(params, false))
+  } catch (err) {
+    throw normalizeError(err)
+  }
 }
 
 export interface FetchNotificationsParams {
@@ -545,6 +589,12 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     async fetchNotificationGroupAccounts(groupKey) {
       return run(`notification-group-accounts:${groupKey}`, (c) =>
         c.v2.notifications.$select(encodeURIComponent(groupKey)).accounts.fetch())
+    },
+
+    // --- search ---
+    async search(params) {
+      return run(`search:${JSON.stringify(params)}`, async (c) =>
+        c.v2.search.list(searchQuery(params, true)))
     },
   }
 }

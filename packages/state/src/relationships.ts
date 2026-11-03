@@ -138,6 +138,42 @@ export async function loadRelationship(
   }
 }
 
+/**
+ * Reads the relationships of several accounts, 40 ids per request (a list
+ * of search results). Like `loadRelationship`, an account with a write
+ * started meanwhile keeps what the write shows. A failed read changes
+ * nothing.
+ */
+export async function loadRelationships(
+  accountIds: readonly string[], opts: RelationshipOpts = {},
+): Promise<void> {
+  const client = (opts.clientSource ?? defaultSource)()
+  if (!client || accountIds.length === 0) return
+  const chunks: string[][] = []
+  for (let i = 0; i < accountIds.length; i += 40) chunks.push(accountIds.slice(i, i + 40))
+  await Promise.all(chunks.map(async (ids) => {
+    const before = new Map(ids.map((id) => [id, revisions.get(relationshipKey(client.userKey, id)) ?? 0]))
+    let rels: mastodon.v1.Relationship[]
+    try {
+      rels = await client.fetchRelationships(ids)
+    } catch {
+      return
+    }
+    // One new map for the whole batch, so the cache changes once.
+    const next = new Map(relationshipCache.value)
+    let changed = false
+    for (const rel of rels) {
+      const key = relationshipKey(client.userKey, rel.id)
+      if (!before.has(rel.id)) continue
+      if ((revisions.get(key) ?? 0) === before.get(rel.id) && !queues.has(key)) {
+        next.set(key, rel)
+        changed = true
+      }
+    }
+    if (changed) relationshipCache.value = next
+  }))
+}
+
 // Follows the account, or unfollows it when it is followed or a follow
 // request is pending (unfollow also withdraws a request). The button changes
 // at once; a failed request puts the old state back and says so.

@@ -132,6 +132,26 @@ whose tag is in the address sets it; it puts `Caribou` back when it leaves.
 `tests/e2e/fixtures/upstream-stub.mjs`, which answers the server's requests to
 `example.social`, so the server-painted page and its hydration run in CI.
 
+**Search** is `pages/search.ts` and `<caribou-search>`. The address is the
+source of truth: `q` is the query, `type` the tab (`accounts`, the default,
+`hashtags` or `statuses`; `components/_search-query.ts`). The server sends
+only those two, so the server render and the first client render both say
+"Searching…", and the element searches after mount. One request
+(`GET /api/v2/search`, no `type`) fills all three tabs. Typing waits 300 ms,
+then replaces the address; Enter, a tab and Back or Forward each make or
+use their own history entry. Every search takes a number, and only the
+newest one, under the same account (`ownerGeneration()`), may show its
+answer. A signed-in reader searches their own server with the token, and a
+pasted or deep-linked web address is asked with `resolve=true`: when the
+answer names one post or one account, the page replaces the search entry
+with that thread or profile. A reader who is not signed in searches the
+instance from the cookie with no token (`searchPublic`). Mastodon then
+answers people and hashtags, finds no posts, and refuses `resolve`
+(401), so the Posts tab says to sign in. With no instance known, or a
+server that refuses all tokenless search, the page shows the sign-in
+placeholder. The right rail has a search box (a plain GET form, so it works
+without JavaScript), and Search is in the nav rail, in More on a phone.
+
 **A content warning hides the post body.** When the shown post (the boosted
 one, for a boost) has a `spoilerText`, the card renders the warning and a
 Show more button, and `#status-body` stays empty until the reader opens it,

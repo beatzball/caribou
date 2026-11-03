@@ -51,11 +51,11 @@ describe('caribou-nav-rail', () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('nav')?.getAttribute('aria-label')).toBe('Primary')
     const hrefs = [...el.shadowRoot!.querySelectorAll('nav > a')].map((a) => a.getAttribute('href'))
-    expect(hrefs).toEqual(['/home', '/local', '/notifications', '/public', '/bookmarks', '/lists', '/settings', '/@me'])
+    expect(hrefs).toEqual(['/home', '/local', '/notifications', '/search', '/public', '/bookmarks', '/lists', '/settings', '/@me'])
     const labels = [...el.shadowRoot!.querySelectorAll('nav > a .label')].map((s) => s.textContent)
-    expect(labels).toEqual(['Home', 'Local', 'Notifications', 'Public', 'Bookmarks', 'Lists', 'Settings', 'Profile'])
+    expect(labels).toEqual(['Home', 'Local', 'Notifications', 'Search', 'Public', 'Bookmarks', 'Lists', 'Settings', 'Profile'])
     const icons = [...el.shadowRoot!.querySelectorAll('nav > a caribou-icon')].map((i) => i.getAttribute('name'))
-    expect(icons).toEqual(['home', 'users', 'bell', 'globe', 'bookmark', 'list', 'settings', 'user'])
+    expect(icons).toEqual(['home', 'users', 'bell', 'search', 'globe', 'bookmark', 'list', 'settings', 'user'])
   })
 
   // The changelog's unread dot sits on the Settings item, in the rail and
@@ -266,13 +266,13 @@ describe('caribou-nav-rail', () => {
       const el = await mount()
       const order = [...el.shadowRoot!.querySelector('nav')!.children].map((c) =>
         c.getAttribute('href') ?? c.className)
-      expect(order).toEqual(['/home', '/local', '/notifications', '/public', '/bookmarks', '/lists', '/settings', 'compose-btn', '/@me', 'more', 'account signed-in-only'])
+      expect(order).toEqual(['/home', '/local', '/notifications', '/search', '/public', '/bookmarks', '/lists', '/settings', 'compose-btn', '/@me', 'more', 'account signed-in-only'])
     })
 
     it('marks the bar items the phone moves into the menu', async () => {
       const el = await mount()
       const moved = [...el.shadowRoot!.querySelectorAll('nav > a.in-more')].map((a) => a.getAttribute('href'))
-      expect(moved).toEqual(['/public', '/bookmarks', '/lists', '/settings'])
+      expect(moved).toEqual(['/search', '/public', '/bookmarks', '/lists', '/settings'])
     })
 
     it('holds the moved links and a native sign-out form', async () => {
@@ -281,8 +281,8 @@ describe('caribou-nav-rail', () => {
       expect(menu.getAttribute('label')).toBe('More')
       expect(menu.getAttribute('icon')).toBe('ellipsis')
       const links = [...menu.querySelectorAll('a.menu-item')]
-      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/public', '/bookmarks', '/lists', '/settings', '/?add'])
-      expect(links[0]!.getAttribute('aria-current')).toBe('page')
+      expect(links.map((a) => a.getAttribute('href'))).toEqual(['/search', '/public', '/bookmarks', '/lists', '/settings', '/?add'])
+      expect(links[1]!.getAttribute('aria-current')).toBe('page')
       const submit = menu.querySelector('caribou-signout-form form[action="/api/signout"][method="post"] button[type="submit"]')
       expect(submit?.textContent?.trim()).toBe('Sign out')
     })
