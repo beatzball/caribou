@@ -1,5 +1,20 @@
 # @beatzball/caribou-state
 
+## 0.4.3
+
+### Patch Changes
+
+- [#152](https://github.com/beatzball/caribou/pull/152) [`33c430f`](https://github.com/beatzball/caribou/commit/33c430f33b6bc95e79ba80f69f5224033fdb80a8) Thanks [@beatzball](https://github.com/beatzball)! - New `editOwnStatus` and `deleteOwnStatus`. An edit updates the post and every boost of it in the cache. A delete removes them at once, marks the id in `deletedStatusIds`, and puts everything back if the server refuses. An account change drops the cached copies of deleted posts. Every cache write (`cacheStatus` and `mergeStatus`) keeps the newest edit of a post over an older copy. New `EDIT_FIELDS`, `olderEdit` and `newestKnownStatus`. Drafts can carry `sensitive` and `language`. A redraft that must not overwrite a stored draft is kept in its own `redraft:<key>` slot; `findRedraftSlot` finds it.
+
+- [#155](https://github.com/beatzball/caribou/pull/155) [`97df338`](https://github.com/beatzball/caribou/commit/97df33801f763ac23c5b7ad8d70ab2038289b5ff) Thanks [@beatzball](https://github.com/beatzball)! - The notifications store shows rows as groups (`groups`). It uses the grouped endpoint when the server has it, and groups single notifications itself when the server answers 404. Older and newer pages join their groups with no duplicates. `withoutSilencedAccounts` takes muted and blocked accounts out of a group.
+
+- [#153](https://github.com/beatzball/caribou/pull/153) [`58ef9e1`](https://github.com/beatzball/caribou/commit/58ef9e13b885ada30c4b4a8b94c9cadfe9ad71dc) Thanks [@beatzball](https://github.com/beatzball)! - Add the lists store: `loadLists`, `loadList`, `createList`, `updateList`, `deleteList`, `loadListMembers`, `loadAccountLists` and `setListMember`. Each entry is kept per account. Writes show at once and roll back with a toast on failure, and an answer for an earlier account is dropped. Writes to one list or one membership run in order, so the server ends with the last change. A read that crosses a write waits and asks again.
+
+- [#156](https://github.com/beatzball/caribou/pull/156) [`e551dda`](https://github.com/beatzball/caribou/commit/e551dda63b62327b9fb5ccdfd10901639d4941be) Thanks [@beatzball](https://github.com/beatzball)! - Add `loadRelationships`: reads the relationships of many accounts, 40 per request, and keeps any follow that started meanwhile.
+
+- Updated dependencies [[`33c430f`](https://github.com/beatzball/caribou/commit/33c430f33b6bc95e79ba80f69f5224033fdb80a8), [`97df338`](https://github.com/beatzball/caribou/commit/97df33801f763ac23c5b7ad8d70ab2038289b5ff), [`58ef9e1`](https://github.com/beatzball/caribou/commit/58ef9e13b885ada30c4b4a8b94c9cadfe9ad71dc), [`e551dda`](https://github.com/beatzball/caribou/commit/e551dda63b62327b9fb5ccdfd10901639d4941be)]:
+  - @beatzball/caribou-mastodon-client@0.4.2
+
 ## 0.4.2
 
 ### Patch Changes
