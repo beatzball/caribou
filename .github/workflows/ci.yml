@@ -13,6 +13,10 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Least privilege by default. A job that needs more asks for it.
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -51,6 +55,8 @@ jobs:
       - run: pnpm ${{ steps.affected.outputs.args }} typecheck
       - run: pnpm ${{ steps.affected.outputs.args }} lint
       - run: pnpm ${{ steps.affected.outputs.args }} test:coverage
+      - name: Test the Coolify deploy script
+        run: node --test scripts/ci/*.test.mjs
       - if: always()
         uses: actions/upload-artifact@v4
         with: { name: coverage, path: '**/coverage/**' }
@@ -102,13 +108,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm changeset status --since=origin/main
 
-  # Build the exact Docker image that Coolify will deploy, run it, and probe
-  # it with the same checks verify-prod runs against caribou.quest. Catches
-  # the "works in dev, 500s in prod" class of bug that slipped through
-  # checks+e2e (which run with hoisted node_modules) — e.g. a server module
-  # that does `readFileSync(require.resolve('@workspace/pkg/file'))` at init
-  # works locally but throws MODULE_NOT_FOUND in the runtime image, which
-  # ships only `dist/`.
+  # Build the Docker image, run it, and probe it with the same checks
+  # verify-prod runs against caribou.quest. Catches the "works in dev, 500s in
+  # prod" class of bug that slipped through checks+e2e (which run with hoisted
+  # node_modules) — e.g. a server module that does
+  # `readFileSync(require.resolve('@workspace/pkg/file'))` at init works
+  # locally but throws MODULE_NOT_FOUND in the runtime image, which ships only
+  # `dist/`.
+  #
+  # On a push to main, the image that passed the probe is saved as a run
+  # artifact. publish-image pushes those same bytes to GHCR. This job keeps
+  # read-only permissions, so a PR run can never write to the registry.
   #
   # Skipped on the release PR for the same reason as e2e: main runs it again
   # before deploy, and deploy needs it.
@@ -148,43 +158,215 @@ jobs:
       - name: Stop container
         if: always()
         run: docker stop caribou-smoke || true
+      - name: Save tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save caribou-app:ci | gzip > "$RUNNER_TEMP/caribou-image.tar.gz"
+      - name: Upload tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: caribou-image
+          path: ${{ runner.temp }}/caribou-image.tar.gz
+          retention-days: 1
+          compression-level: 0
 
-  # Coolify builds whatever main points at, not github.sha. So deploy only
-  # when this run's commit is still main's head; a newer push has its own run,
-  # which deploys once that commit is tested. The group keeps two deploys
-  # from overlapping.
-  deploy:
+  # Push the image smoke-image tested to GHCR as ghcr.io/<repo>:<sha>. This is
+  # the only job with packages: write, and it runs only on a push to main.
+  #
+  # A SHA tag is never overwritten. If it already exists (a re-run of an old
+  # main run), the job keeps the image that is there: it passed the smoke
+  # probe the first time, and it may be what production runs now. A rebuild
+  # can differ, because the base image moves. Only a clear "manifest unknown"
+  # from GHCR counts as absent; any other answer fails the job, so a registry
+  # error can never lead to an overwrite.
+  #
+  # There is no moving tag such as :main or :latest. Coolify deploys by SHA.
+  publish-image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [checks, e2e, smoke-image]
+    needs: smoke-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: caribou-image
+          path: ${{ runner.temp }}
+      - name: Load tested image
+        run: gunzip -c "$RUNNER_TEMP/caribou-image.tar.gz" | docker load
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push tested image
+        id: push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          image="ghcr.io/${repo}:${GITHUB_SHA}"
+          # Ask GHCR for the manifest. First trade GITHUB_TOKEN for a registry
+          # token: that call rejects bad credentials, so a broken token cannot
+          # look like a missing image. Tokens go through files, never argv.
+          auth="$RUNNER_TEMP/ghcr-auth"
+          printf 'user = "x:%s"\n' "$GITHUB_TOKEN" > "$auth"
+          registry_token=$(curl -sS --fail --connect-timeout 10 --max-time 30 -K "$auth" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${repo}:pull" 2>/dev/null | jq -r '.token // empty' || true)
+          if [[ -z "$registry_token" ]]; then
+            rm -f "$auth"
+            echo "::error::Could not get a GHCR token. Not pushing."
+            exit 1
+          fi
+          echo "::add-mask::$registry_token"
+          printf 'Authorization: Bearer %s\n' "$registry_token" > "$auth"
+          code=$(curl -sS --connect-timeout 10 --max-time 30 -o "$RUNNER_TEMP/ghcr-body" -w '%{http_code}' \
+            -H @"$auth" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+            "https://ghcr.io/v2/${repo}/manifests/${GITHUB_SHA}" || true)
+          rm -f "$auth"
+          if [[ "$code" == 200 ]]; then
+            echo "::notice::$image already exists. Keeping it; a SHA tag is never overwritten."
+          elif [[ "$code" == 404 ]] && jq -e '.errors[]? | select(.code == "MANIFEST_UNKNOWN")' "$RUNNER_TEMP/ghcr-body" > /dev/null 2>&1; then
+            docker tag caribou-app:ci "$image"
+            docker push "$image"
+          else
+            echo "::error::Could not tell whether $image exists (GHCR answered HTTP $code). Not pushing, so an existing image cannot be overwritten. Re-run the job."
+            exit 1
+          fi
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+  # Is this run's commit still main's head? Checked here, before the deploy
+  # job joins the deploy-prod group. GitHub keeps only one pending job per
+  # group and drops the older pending one. Without this gate, a stale run (an
+  # old run that finished late, or a re-run) could join the group, push out
+  # the pending deploy of the real head, and then skip itself. deploy checks
+  # the head again once it holds the lock.
+  deploy-gate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, e2e, publish-image]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    concurrency: { group: deploy-prod, cancel-in-progress: false }
     outputs:
-      deployed: ${{ steps.head.outputs.current }}
+      current: ${{ steps.head.outputs.current }}
     steps:
       - name: Check main has not moved on
         id: head
         run: |
           # An unknown head is not "moved on": fail loudly instead of skipping green.
-          if ! head=$(git ls-remote "https://github.com/${{ github.repository }}" refs/heads/main | cut -f1) || [[ -z "$head" ]]; then
+          if ! head=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/heads/main | cut -f1) || [[ -z "$head" ]]; then
             echo "::error::Could not read the head of main from GitHub; not deploying."
             exit 1
           fi
-          if [[ "$head" == "${{ github.sha }}" ]]; then
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
             echo "current=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::main is at $head, not ${{ github.sha }}. Skipping the deploy; the run for the newer commit deploys it."
+            echo "::notice::main is at $head, not ${GITHUB_SHA}. Skipping the deploy; the run for the newer commit deploys it."
             echo "current=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Trigger Coolify deploy
-        if: steps.head.outputs.current == 'true'
-        run: |
-          curl -fSsL -X POST \
-            -H "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}" \
-            "${{ secrets.COOLIFY_WEBHOOK_URL }}"
 
+  # Two paths. docs/deploy.md has the setup and the migration.
+  #
+  # Pinned (COOLIFY_API_URL and COOLIFY_APP_UUID set): Coolify runs a Docker
+  # Image app. This job sets its tag to github.sha, starts a deploy and waits
+  # until it finishes. Coolify never builds, so it runs the image tested above.
+  #
+  # Webhook (only COOLIFY_WEBHOOK_URL set): the old path, kept until the
+  # Coolify migration is done. Coolify builds whatever main points at, so the
+  # deploy is not pinned to this SHA. The job warns about that.
+  #
+  # Neither path set, or only half of the pinned one: the job fails.
+  #
+  # Deploy only when this run's commit is still main's head, so an older run
+  # cannot roll production back. The group keeps two deploys from overlapping.
+  deploy:
+    if: needs.deploy-gate.outputs.current == 'true'
+    needs: [deploy-gate, publish-image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency: { group: deploy-prod, cancel-in-progress: false }
+    outputs:
+      deployed: ${{ steps.head.outputs.current }}
+    env:
+      COOLIFY_API_URL: ${{ secrets.COOLIFY_API_URL }}
+      COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+      COOLIFY_APP_UUID: ${{ secrets.COOLIFY_APP_UUID }}
+      COOLIFY_WEBHOOK_URL: ${{ secrets.COOLIFY_WEBHOOK_URL }}
+      IMAGE: ${{ needs.publish-image.outputs.image }}
+    steps:
+      - name: Choose deploy path
+        id: mode
+        run: |
+          if [[ -n "$COOLIFY_API_URL" && -n "$COOLIFY_APP_UUID" ]]; then
+            if [[ -z "$COOLIFY_API_TOKEN" ]]; then
+              echo "::error::Missing repository secret COOLIFY_API_TOKEN. Not deploying. See docs/deploy.md."
+              exit 1
+            fi
+            if [[ "$IMAGE" != *":${GITHUB_SHA}" ]]; then
+              echo "::error::publish-image did not push an image for ${GITHUB_SHA} (got '${IMAGE}'). Not deploying."
+              exit 1
+            fi
+            echo "mode=pinned" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$COOLIFY_API_URL" || -n "$COOLIFY_APP_UUID" ]]; then
+            echo "::error::Only one of COOLIFY_API_URL and COOLIFY_APP_UUID is set. Set both for the pinned deploy, or neither for the webhook. Not deploying. See docs/deploy.md."
+            exit 1
+          elif [[ -n "$COOLIFY_WEBHOOK_URL" ]]; then
+            echo "::warning::Deploying through the Coolify webhook. Coolify builds main as it is now, so this deploy is NOT pinned to ${GITHUB_SHA}. Finish the migration in docs/deploy.md to pin it."
+            echo "mode=webhook" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::No deploy target. Set COOLIFY_API_URL and COOLIFY_APP_UUID (pinned) or COOLIFY_WEBHOOK_URL (webhook). Not deploying. See docs/deploy.md."
+            exit 1
+          fi
+      - name: Check main has not moved on
+        id: head
+        run: |
+          if ! head=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/heads/main | cut -f1) || [[ -z "$head" ]]; then
+            echo "::error::Could not read the head of main from GitHub; not deploying."
+            exit 1
+          fi
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is at $head, not ${GITHUB_SHA}. Skipping the deploy; the run for the newer commit deploys it."
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      # The token goes to curl through a header file, never argv. curl's
+      # stderr is dropped, so a connection error cannot print the Coolify host;
+      # the job prints its own error instead.
+      - name: Deploy through the webhook (not pinned)
+        if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'webhook'
+        run: |
+          auth="$RUNNER_TEMP/coolify-auth"
+          printf 'Authorization: Bearer %s\n' "$COOLIFY_API_TOKEN" > "$auth"
+          code=$(curl -sS -L --connect-timeout 10 --max-time 60 -o /dev/null -w '%{http_code}' \
+            -X POST -H @"$auth" "$COOLIFY_WEBHOOK_URL" 2>/dev/null || true)
+          if [[ "$code" != 2?? ]]; then
+            echo "::error::The Coolify webhook answered HTTP $code."
+            exit 1
+          fi
+      - name: Check out the deploy script
+        if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'pinned'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci
+      - name: Deploy the tested image (pinned)
+        if: steps.head.outputs.current == 'true' && steps.mode.outputs.mode == 'pinned'
+        run: bash scripts/ci/coolify-deploy.sh
+      - name: Remove credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/coolify-auth" "$RUNNER_TEMP/coolify-body"
+
+  # Probes production for this run's SHA. It runs outside the deploy-prod
+  # lock: if a newer deploy replaces this one before the probe, this run goes
+  # red although production is right. Re-running it then fails the same way;
+  # check the newer run instead.
   verify-prod:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.deploy.outputs.deployed == 'true'
+    if: needs.deploy.outputs.deployed == 'true'
     needs: [deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 10

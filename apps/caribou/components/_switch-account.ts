@@ -6,7 +6,7 @@ import type { ShellInfo } from '../server/lib/page-data-types.js'
 // the active account (or none) when they load. Any other path names a post or
 // a person on the old account's server, which the new server may not know.
 // `/@me` is "my profile", whoever "me" is.
-const NEUTRAL = new Set(['/home', '/notifications', '/bookmarks', '/local', '/public', '/about', '/privacy', '/settings', '/@me'])
+const NEUTRAL = new Set(['/home', '/notifications', '/bookmarks', '/local', '/public', '/about', '/privacy', '/settings', '/lists', '/@me'])
 
 // Query parameters that hold a post id as a page cursor. Ids are per server,
 // so they mean nothing on another one.

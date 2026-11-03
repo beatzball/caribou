@@ -11,6 +11,7 @@ import {
 } from '@beatzball/caribou-state'
 import { mastodonLinkText } from './_shared-styles.js'
 import { confirmBlock } from './caribou-confirm-dialog.js'
+import { openListPicker } from './caribou-list-picker.js'
 import './caribou-button.js'
 import './caribou-menu.js'
 
@@ -196,9 +197,18 @@ export class CaribouProfileHeader extends LitElement {
     if (ok && activeUserKey.peek() === userKey && this.target === target) void setBlock(target, true, opts)
   }
 
+  // The item that opened the picker sits in the closed menu, so focus goes
+  // back to the menu's button.
+  private onLists = async () => {
+    if (!this.target) return
+    await openListPicker(this.target, this.relationship?.following === true)
+    this.renderRoot.querySelector<HTMLElement>('caribou-menu.more')?.focus()
+  }
+
   private renderMenu(rel: Relationship) {
     const acct = this.target!.acct
     return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for @${acct}`}>
+      <button type="button" class="menu-item" data-action="lists" @click=${this.onLists}>Add to lists</button>
       <button type="button" class="menu-item" data-action="mute"
         @click=${this.onMute}>${rel.muting ? 'Unmute' : 'Mute'} @${acct}</button>
       <button type="button" class=${rel.blocking ? 'menu-item' : 'menu-item danger'} data-action="block"
