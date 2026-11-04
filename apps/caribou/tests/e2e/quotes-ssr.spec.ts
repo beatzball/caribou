@@ -92,6 +92,12 @@ test('the server-painted quote hydrates in place', async ({ page, context }) => 
   await settled(page)
   expect(await serverPageReport(page)).toEqual({ sent: 1, atSwap: 1, sameNodes: true, deferred: [] })
   await expect(quote(page).locator('.quote-content')).toContainText('the quoted words')
+  // Mastodon's "RE: <link>" fallback for older apps, in the post and in the
+  // quoted post (which quotes another one), is hidden; the quote and the
+  // nested link stand for it.
+  await expect(livePage(page).locator('caribou-status-card .status-content .quote-inline')).toBeHidden()
+  await expect(quote(page).locator('.quote-content .quote-inline')).toBeHidden()
+  await expect(quote(page).locator('a.nested')).toBeVisible()
   expect(errors).toEqual([])
 })
 
@@ -112,6 +118,7 @@ for (const state of ['muted_account', 'blocked_account'] as const) {
       localStorage.setItem('caribou.activeUserKey', JSON.stringify(session.userKey))
     })
     const asked: string[][] = []
+    let failReader = false
     await page.route('https://example.social/api/v1/statuses?*', async (route) => {
       const ids = new URL(route.request().url()).searchParams.getAll('id[]')
       asked.push(ids)
@@ -125,13 +132,36 @@ for (const state of ['muted_account', 'blocked_account'] as const) {
         visibility: 'public', sensitive: false, spoiler_text: '', media_attachments: [], emojis: [],
         mentions: [], tags: [], reblogs_count: 0, favourites_count: 0, replies_count: 0, language: 'en',
         quote: { state, quoted_status: null },
+        // Mastodon sends `filtered` on every copy fetched with a token.
+        filtered: [],
       }
+      if (failReader) return route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"down"}' })
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ids.map(() => reader)) })
     })
     await page.goto(`${base}/@alice/quoting-1`)
     await settled(page)
     await expect.poll(() => asked.flat()).toContain('quoting-1')
     const verb = state === 'muted_account' ? 'muted' : 'blocked'
+    await expect(quote(page).locator('.quote-note')).toContainText(`you ${verb} its author`)
+    await expect(quote(page).locator('.quote-content')).toHaveCount(0)
+    await expect(quote(page).locator('img')).toHaveCount(0)
+    await expect(livePage(page)).not.toContainText('the quoted words')
+
+    // A revisit paints from the kept thread, then offers the server's copy
+    // (no token, quote accepted) and asks for the reader's again, which
+    // fails here. The quoted post must stay hidden all along.
+    const go = (path: string) => page.evaluate((p) => {
+      history.pushState(null, '', p)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }, path)
+    await go('/@alice/quoting-cw')
+    await expect(quote(page).locator('.spoiler')).toHaveText('Spoilers ahead')
+    failReader = true
+    const before = asked.length
+    await page.goBack()
+    await expect(page).toHaveURL(/\/@alice\/quoting-1$/)
+    await expect.poll(() => asked.slice(before).flat()).toContain('quoting-1')
+    await page.waitForLoadState('networkidle')
     await expect(quote(page).locator('.quote-note')).toContainText(`you ${verb} its author`)
     await expect(quote(page).locator('.quote-content')).toHaveCount(0)
     await expect(quote(page).locator('img')).toHaveCount(0)

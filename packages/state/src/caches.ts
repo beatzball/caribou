@@ -82,9 +82,36 @@ export function cacheStatus(status: mastodon.v1.Status): void {
   batch(() => cacheOne(status))
 }
 
+// Which quote to keep when a copy of a post arrives over a cached one. Two
+// copies say less than the cached one, and keep its quote:
+// - A copy without a token (no `filtered`; Mastodon sends it on every copy
+//   fetched with one since 4.0, and quotes came in 4.5) over the reader's
+//   copy: the quote state is the reader's (muted, blocked, unauthorized …),
+//   and the server's page data must not show what the reader's server hid.
+//   An account change drops `filtered`, so the next copy is taken again.
+// - A shallow quote (an id only, as Mastodon embeds a quoted post's own
+//   quote) of the same accepted post the cached copy carries in full.
+// Any other copy's quote is taken as it comes.
+function keepQuote(fresh: mastodon.v1.Status, current: mastodon.v1.Status | undefined): mastodon.v1.Status {
+  if (!current || !('quote' in current)) return fresh
+  const tokenless = !Array.isArray(fresh.filtered) && Array.isArray(current.filtered)
+  const now = fresh.quote
+  const full = quotedIn(current)
+  const shallowSame = !!now && now.state === 'accepted' && !quotedIn(fresh) && !!full
+    && 'quotedStatusId' in now && now.quotedStatusId === full.id
+  // A kept reader quote keeps the reader's `filtered` with it, so the next
+  // copy without a token is still known as one (`cacheStatus` keeps no
+  // other reader field).
+  if (tokenless) return { ...fresh, quote: current.quote, filtered: current.filtered }
+  return shallowSame ? { ...fresh, quote: current.quote } : fresh
+}
+
 function cacheOne(status: mastodon.v1.Status): mastodon.v1.Status {
   noteFiltered(status)
-  const out = cacheQuotes(protectEdits(status), cacheOne)
+  const cache = statusCache.peek()
+  let kept = keepQuote(protectEdits(status), cache.get(status.id))
+  if (kept.reblog) kept = { ...kept, reblog: keepQuote(kept.reblog, cache.get(kept.reblog.id)) }
+  const out = cacheQuotes(kept, cacheOne)
   store(out)
   return out
 }
@@ -190,10 +217,11 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   if (current === fresh) return current
   noteFiltered(fresh)
   fresh = protectEdits(fresh)
-  let next = current ? keepReaderFields(fresh, current) : fresh
+  // `keepQuote` first: it reads the fresh copy's own `filtered`.
+  let next = current ? keepReaderFields(keepQuote(fresh, current), current) : fresh
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
-    let reblog = inner ? keepReaderFields(fresh.reblog, inner) : fresh.reblog
+    let reblog = inner ? keepReaderFields(keepQuote(fresh.reblog, inner), inner) : fresh.reblog
     reblog = cacheQuotes(reblog, merge)
     next = { ...next, reblog }
     if (cache.has(fresh.reblog.id)) store(reblog)

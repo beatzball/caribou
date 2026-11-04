@@ -129,6 +129,55 @@ describe('quoted posts', () => {
     expect(statusCache.value.get('b')?.reblog?.quote).toEqual({ state: 'deleted', quotedStatus: null })
   })
 
+  // Mastodon embeds a quoted post's own quote shallow (an id only).
+  const shallowOf = (s: mastodon.v1.Status, quotedId: string) =>
+    ({ ...s, quote: { state: 'accepted', quotedStatusId: quotedId } }) as unknown as mastodon.v1.Status
+
+  it('a shallow copy of a quote never replaces the full one of the same post', () => {
+    const b = quoting('b', makeStatus('a'))
+    mergeStatus(b)
+    mergeStatus(quoting('c', shallowOf(b, 'a')))
+    expect(quotedIn(statusCache.value.get('b'))?.id).toBe('a')
+    cacheStatus(quoting('c2', shallowOf(b, 'a')))
+    expect(quotedIn(statusCache.value.get('b'))?.id).toBe('a')
+    // Inside a boost too.
+    mergeStatus({ ...makeStatus('boost'), reblog: shallowOf(b, 'a') } as mastodon.v1.Status)
+    expect(quotedIn(statusCache.value.get('b'))?.id).toBe('a')
+    expect(quotedIn(statusCache.value.get('boost')?.reblog ?? undefined)?.id).toBe('a')
+  })
+
+  it('a shallow copy that says something else about the quote is taken', () => {
+    const b = quoting('b', makeStatus('a'))
+    mergeStatus(b)
+    mergeStatus({ ...b, filtered: [], quote: { state: 'revoked', quotedStatusId: null } } as unknown as mastodon.v1.Status)
+    expect(statusCache.value.get('b')?.quote).toEqual({ state: 'revoked', quotedStatusId: null })
+  })
+
+  // The reader's copy (it has `filtered`, as every copy fetched with a
+  // token from Mastodon 4.0 on does) says what this reader may see.
+  it('a copy without a token never undoes the reader\'s quote state', () => {
+    const reader = { ...makeStatus('p'), filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as mastodon.v1.Status
+    mergeStatus(reader)
+    mergeStatus(quoting('p', makeStatus('q')))
+    expect(statusCache.value.get('p')?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
+    cacheStatus(quoting('p', makeStatus('q')))
+    expect(statusCache.value.get('p')?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
+    // Inside a boost too.
+    mergeStatus({ ...makeStatus('boost'), reblog: quoting('p', makeStatus('q')) } as mastodon.v1.Status)
+    expect(statusCache.value.get('p')?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
+    expect(statusCache.value.get('boost')?.reblog?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
+    // A newer reader copy wins.
+    mergeStatus({ ...quoting('p', makeStatus('q')), filtered: [] } as unknown as mastodon.v1.Status)
+    expect(quotedIn(statusCache.value.get('p'))?.id).toBe('q')
+  })
+
+  it('after an account change, a copy without a token is taken again', () => {
+    mergeStatus({ ...makeStatus('p'), filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as mastodon.v1.Status)
+    forgetReaderFields()
+    mergeStatus(quoting('p', makeStatus('q')))
+    expect(quotedIn(statusCache.value.get('p'))?.id).toBe('q')
+  })
+
   it('a shallow quote changes nothing', () => {
     const s = { ...makeStatus('p'), quote: { state: 'accepted', quotedStatusId: 'q' } } as unknown as mastodon.v1.Status
     mergeStatus(s)

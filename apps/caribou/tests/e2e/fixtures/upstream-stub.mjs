@@ -44,7 +44,10 @@ function post(id, author, over = {}) {
 const STATUSES = {
   'quoting-1': post('quoting-1', account, {
     content: '<p>look at this</p><p class="quote-inline">RE: <a href="https://example.social/@bob/quoted-1">link</a></p>',
-    quote: { state: 'accepted', quoted_status: post('quoted-1', bob, { content: '<p onclick="bad()">the quoted words</p>' }) },
+    quote: { state: 'accepted', quoted_status: post('quoted-1', bob, {
+      content: '<p onclick="bad()">the quoted words</p><p class="quote-inline">RE: <a href="https://example.social/@carol/quoted-0">inner</a></p>',
+      quote: { state: 'accepted', quoted_status_id: 'quoted-0' },
+    }) },
   }),
   'quoting-cw': post('quoting-cw', account, {
     quote: { state: 'accepted', quoted_status: post('quoted-cw', bob, { spoiler_text: 'Spoilers ahead', sensitive: true, content: '<p>hidden words</p>' }) },

@@ -197,6 +197,17 @@ describe('<caribou-status-quote>', () => {
     expect($(el, '.quote-content')).toBeNull()
   })
 
+  it('a filter Show stays open when a new copy of the same quote arrives', async () => {
+    signIn()
+    const filtered = [{ filter: { id: 'f', title: 'Sports', context: ['home'], filterAction: 'warn' }, keywordMatches: [] }]
+    const el = await mount(accepted(post('9', { filtered })))
+    $(el, 'button.filter-toggle')!.click()
+    await settle(el)
+    el.quote = accepted(post('9', { filtered }))
+    await settle(el)
+    expect($(el, '.quote-content')).not.toBeNull()
+  })
+
   it('names the quote\'s Show more apart from the post\'s', async () => {
     const el = await mount(accepted(post('9', { spoilerText: 'Spoilers' })))
     expect($(el, 'button.cw-toggle')?.getAttribute('aria-label')).toBe('Show more of the quoted post')
@@ -304,6 +315,34 @@ describe('<caribou-status-card> with a quote', () => {
     const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
     await settle(quote)
     expect($(quote, '.quote-content')?.innerHTML).toContain('quoted 9')
+  })
+
+  // The thread's background refresh offers the server's copy (no token)
+  // before it asks for the reader's again, and that ask may fail.
+  it('a later copy without a token does not bring back a quote the reader may not see', async () => {
+    signIn()
+    const own = post('1', { quote: accepted(post('9')) })
+    const el = await card(own)
+    mergeStatus({ ...own, filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as Status)
+    mergeStatus(own)
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-note')?.textContent).toContain('you muted its author')
+    expect($(quote, '.quote-content')).toBeNull()
+    expect(quote.shadowRoot!.querySelector('img')).toBeNull()
+  })
+
+  it('a post that quotes this one does not cut this one\'s quote short', async () => {
+    signIn()
+    const b = post('b', { quote: accepted(post('a')) })
+    mergeStatus(b)
+    const el = await card(b)
+    mergeStatus(post('c', { quote: accepted({ ...b, quote: { state: 'accepted', quotedStatusId: 'a' } } as unknown as Status) }))
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-content')?.innerHTML).toContain('quoted a')
   })
 
   it('a content warning on the quoting post hides the quote too', async () => {
