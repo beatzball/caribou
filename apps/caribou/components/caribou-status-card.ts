@@ -28,6 +28,7 @@ import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
 import './caribou-status-quote.js'
+import './caribou-status-poll.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -1098,6 +1099,7 @@ export class CaribouStatusCard extends LitElement {
               : nothing}
             <div class="status-body" id="status-body" ?hidden=${!bodyShown}>
               ${bodyShown ? html`<div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
+              ${bodyShown && display.poll ? html`<caribou-status-poll .status=${display} ?interactive=${this.canAct}></caribou-status-poll>` : nothing}
               ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
               ${bodyShown && display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
               ${bodyShown && quote ? html`<caribou-status-quote .quote=${quote} instance=${this.instance} filter-context=${this.filterContext}></caribou-status-quote>` : nothing}

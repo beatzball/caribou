@@ -295,6 +295,25 @@ for a reader on the same server. It opens `<caribou-status-history>`
 with every version, newest first, each sanitized like a post. A result
 that lands after an account change is dropped.
 
+**A poll is `<caribou-status-poll>`**, mounted by the card inside the
+body region, so a content warning hides it too. The server and the first
+client render show the results: shares, bars, the voters, and the end time
+as a date. Option titles are plain text. After mount the end time counts
+down, and for a reader who can act on the post (signed in, on its server)
+an open poll they have not voted on shows radio buttons, or checkboxes for
+several choices, and Vote. `votePoll` (`@beatzball/caribou-state`) writes
+the vote at once to the post and to every boost of it, then the server's
+poll; a failure puts the poll back, toasts, and reads the poll again. A
+result from an earlier account writes nothing. The poll is read from the
+status cache, so every card of the post agrees. `voted` and `ownVotes` are
+the reader's: `mergeStatus` keeps them over a copy without a token, and an
+account change drops them. Hidden totals show no shares until the end. The
+compose dialog has a poll builder (not in an edit): options up to the
+server's `configuration.polls` limit, a duration inside its range, several
+choices, hidden totals. A poll and media exclude each other, as on
+Mastodon, and a poll needs text. `tests/e2e/polls-ssr.spec.ts` paints polls
+from the stub upstream and hydrates them in CI.
+
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
 header. The client returns it as the page's `nextMaxId`, and the timeline

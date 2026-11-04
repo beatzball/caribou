@@ -1,6 +1,6 @@
 import { batch, signal } from '@preact/signals-core'
 import type { mastodon } from 'masto'
-import { isMutating } from './inflight.js'
+import { inflight, isMutating } from './inflight.js'
 
 // Treat these signals as read-only. Mutating the Map in place
 // (`statusCache.value.set(...)`) skips the signal-write and consumers
@@ -109,10 +109,38 @@ function keepQuote(fresh: mastodon.v1.Status, current: mastodon.v1.Status | unde
 function cacheOne(status: mastodon.v1.Status): mastodon.v1.Status {
   noteFiltered(status)
   const cache = statusCache.peek()
-  let kept = keepQuote(protectEdits(status), cache.get(status.id))
+  let kept = keepQuote(protectVotes(protectEdits(status)), cache.get(status.id))
   if (kept.reblog) kept = { ...kept, reblog: keepQuote(kept.reblog, cache.get(kept.reblog.id)) }
   const out = cacheQuotes(kept, cacheOne)
   store(out)
+  return out
+}
+
+/** True while the reader's vote on the poll of post `id` is out. */
+function voting(id: string): boolean {
+  return inflight.has(`vote:${id}`)
+}
+
+// The cached copy of post `id`: alone, or else inside a boost.
+function knownCopy(id: string, cache: Map<string, mastodon.v1.Status>): mastodon.v1.Status | undefined {
+  const own = cache.get(id)
+  if (own) return own
+  for (const s of cache.values()) if (s.reblog?.id === id) return s.reblog
+  return undefined
+}
+
+// While the reader's vote is out, the cache shows it (the vote's own
+// optimistic write). A copy fetched before the vote must not take it back.
+function keepVoteInFlight(fresh: mastodon.v1.Status, cache: Map<string, mastodon.v1.Status>): mastodon.v1.Status {
+  if (!fresh.poll || !voting(fresh.id)) return fresh
+  const had = knownCopy(fresh.id, cache)?.poll
+  return had && had.id === fresh.poll.id ? { ...fresh, poll: had } : fresh
+}
+
+function protectVotes(fresh: mastodon.v1.Status): mastodon.v1.Status {
+  const cache = statusCache.peek()
+  let out = keepVoteInFlight(fresh, cache)
+  if (fresh.reblog) out = { ...out, reblog: keepVoteInFlight(fresh.reblog, cache) }
   return out
 }
 
@@ -180,6 +208,21 @@ function protectEdits(fresh: mastodon.v1.Status): mastodon.v1.Status {
   return out
 }
 
+// A poll's `voted` and `ownVotes` are the reader's: a copy from the public
+// API leaves them out. Such a copy keeps them from the cached one, and while
+// the reader's vote is out the cached poll (the vote shown at once) stays.
+// A public copy with fewer votes than the one the reader voted on is older
+// (the server's upstream cache); its counts do not undo the vote.
+function keepPollVote(
+  fresh: mastodon.v1.Poll | null | undefined, had: mastodon.v1.Poll | null | undefined, voting: boolean,
+): mastodon.v1.Poll | null | undefined {
+  if (!fresh || !had || fresh.id !== had.id) return fresh
+  if (voting) return had
+  if (fresh.voted !== undefined || had.voted === undefined) return fresh
+  if (had.voted && fresh.votesCount < had.votesCount) return { ...had, expired: fresh.expired || had.expired }
+  return { ...fresh, voted: had.voted, ownVotes: had.ownVotes ?? null }
+}
+
 function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status): mastodon.v1.Status {
   const out = { ...fresh } as Record<string, unknown>
   const had = current as unknown as Record<string, unknown>
@@ -189,6 +232,7 @@ function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status
     if (key === 'filtered' && Array.isArray(out.filtered)) continue
     if (key in had) out[key] = had[key]
   }
+  out.poll = keepPollVote(fresh.poll, current.poll, voting(current.id))
   for (const [flag, count] of PAIRED_COUNTS) {
     const was = (had[count] as number | undefined) ?? 0
     const now = (out[count] as number | undefined) ?? 0
@@ -212,7 +256,9 @@ export function mergeStatus(fresh: mastodon.v1.Status): mastodon.v1.Status {
 
 function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   const cache = statusCache.peek()
-  const current = cache.get(fresh.id)
+  // A post cached only inside a boost is known too: its reader fields
+  // (a vote cast through the boost) carry over to the post's own entry.
+  const current = knownCopy(fresh.id, cache)
   // The same object again (a store seeded twice from one page): nothing new.
   if (current === fresh) return current
   noteFiltered(fresh)
@@ -235,6 +281,10 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
 function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
   const out = { ...status } as Record<string, unknown>
   for (const key of READER_FIELDS) delete out[key]
+  if (status.poll) {
+    const { voted: _voted, ownVotes: _own, ...poll } = status.poll
+    out.poll = poll
+  }
   if (status.reblog) out.reblog = withoutReaderFields(status.reblog)
   const quoted = quotedIn(status)
   if (quoted) out.quote = { ...status.quote!, quotedStatus: withoutReaderFields(quoted) }

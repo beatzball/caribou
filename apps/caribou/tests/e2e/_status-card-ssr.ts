@@ -51,6 +51,7 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
             <!--lit-node 16--><div class="status-body" id="status-body" >
               <!--lit-part jR7FnxKaQOE=--><!--lit-node 0--><div class="status-content" ><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
+              <!--lit-part--><!--/lit-part-->
               <!--lit-part g9S4Cqs5ZuI=--><!--lit-node 0--><caribou-status-link-card  defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part uT7q81/2cXo=-->
       <!--lit-node 0--><a href="https://news.example/story" target="_blank" rel="noopener noreferrer" data-layout="large"
         aria-labelledby="title" aria-describedby="details">
