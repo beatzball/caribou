@@ -81,6 +81,52 @@ describe('mergeStatus', () => {
   })
 })
 
+describe('quoted posts', () => {
+  const quoting = (id: string, quoted: mastodon.v1.Status) =>
+    ({ ...makeStatus(id), quote: { state: 'accepted', quotedStatus: quoted } }) as unknown as mastodon.v1.Status
+  const quotedIn = (s: mastodon.v1.Status | undefined) =>
+    (s?.quote as { quotedStatus?: mastodon.v1.Status } | undefined)?.quotedStatus
+
+  it('mergeStatus and cacheStatus cache the quoted post under its own id', () => {
+    mergeStatus(quoting('p', makeStatus('q')))
+    expect(statusCache.value.get('q')?.content).toBe('<p>q</p>')
+    cacheStatus(quoting('p2', makeStatus('q2')))
+    expect(statusCache.value.get('q2')?.id).toBe('q2')
+  })
+
+  it('caches the post quoted inside a boost', () => {
+    const boost = { ...makeStatus('b'), reblog: quoting('p', makeStatus('q')) } as mastodon.v1.Status
+    mergeStatus(boost)
+    expect(statusCache.value.get('q')?.id).toBe('q')
+  })
+
+  it('an older copy of a quote does not undo a newer edit of the quoted post', () => {
+    const edited = { ...makeStatus('q'), content: '<p>new</p>', editedAt: '2026-05-02T00:00:00Z' } as mastodon.v1.Status
+    cacheStatus(edited)
+    const out = mergeStatus(quoting('p', makeStatus('q')))
+    expect(statusCache.value.get('q')?.content).toBe('<p>new</p>')
+    expect(quotedIn(out)?.content).toBe('<p>new</p>')
+  })
+
+  it('keeps the reader filters of a quoted post', () => {
+    const hide = [{ filter: { id: 'f', title: 'x', context: ['home'], filterAction: 'hide' }, keywordMatches: [] }]
+    cacheStatus(quoting('p', { ...makeStatus('q'), filtered: hide } as unknown as mastodon.v1.Status))
+    expect(readerFiltered('q')).toEqual(hide)
+  })
+
+  it('forgetReaderFields drops the reader flags of a quoted post too', () => {
+    cacheStatus(quoting('p', makeStatus('q', true)))
+    forgetReaderFields()
+    expect('favourited' in (quotedIn(statusCache.value.get('p')) ?? {})).toBe(false)
+  })
+
+  it('a shallow quote changes nothing', () => {
+    const s = { ...makeStatus('p'), quote: { state: 'accepted', quotedStatusId: 'q' } } as unknown as mastodon.v1.Status
+    mergeStatus(s)
+    expect(statusCache.value.has('q')).toBe(false)
+  })
+})
+
 describe('readerFiltered', () => {
   const hide = [{ filter: { id: 'f', title: 'Spoilers', context: ['home'], filterAction: 'hide' } }]
   const boost = (inner: unknown) => ({ ...makeStatus('w'), reblog: inner }) as unknown as mastodon.v1.Status

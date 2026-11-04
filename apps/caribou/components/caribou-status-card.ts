@@ -26,6 +26,7 @@ import './caribou-button.js'
 import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
+import './caribou-status-quote.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -259,6 +260,8 @@ export class CaribouStatusCard extends LitElement {
       --caribou-icon-fill: none;
     }
     .warning { margin-top: var(--space-2); }
+    /* Mastodon's "RE: <link>" fallback for older apps; the quote shows it. */
+    .status-body:has(caribou-status-quote) .quote-inline { display: none; }
     .spoiler {
       margin: 0; color: var(--fg-0); white-space: pre-wrap; overflow-wrap: anywhere;
     }
@@ -1109,6 +1112,7 @@ export class CaribouStatusCard extends LitElement {
               ${bodyShown ? html`<div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
               ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
               ${bodyShown && display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
+              ${bodyShown && display.quote ? html`<caribou-status-quote .quote=${display.quote} instance=${this.instance} filter-context=${this.filterContext}></caribou-status-quote>` : nothing}
             </div>
             ${this.renderActions(display)}
           </div>

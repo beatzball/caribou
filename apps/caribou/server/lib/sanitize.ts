@@ -16,18 +16,32 @@ export function sanitize(html: string): string {
 // Load this module with a dynamic `import()` inside `pageData` — a static
 // import would pull jsdom into the client bundle.
 
-interface StatusLike {
+interface PostLike {
   content?: string | null
-  reblog?: { content?: string | null } | null
+  // A quote (Mastodon 4.5) carries the quoted post, which the server
+  // renders too. A shallow quote has only an id, and no content to clean.
+  quote?: { state: string; quotedStatus?: { content?: string | null } | null } | null
+}
+
+interface StatusLike extends PostLike {
+  reblog?: PostLike | null
+}
+
+function cleanPost<T extends PostLike>(post: T): T {
+  const quoted = post.quote && 'quotedStatus' in post.quote ? post.quote.quotedStatus : null
+  return {
+    ...post,
+    content: sanitize(post.content ?? ''),
+    ...(quoted
+      ? { quote: { ...post.quote, quotedStatus: { ...quoted, content: sanitize(quoted.content ?? '') } } }
+      : {}),
+  }
 }
 
 export function sanitizeStatus<T extends StatusLike>(status: T): T {
   return {
-    ...status,
-    content: sanitize(status.content ?? ''),
-    ...(status.reblog
-      ? { reblog: { ...status.reblog, content: sanitize(status.reblog.content ?? '') } }
-      : {}),
+    ...cleanPost(status),
+    ...(status.reblog ? { reblog: cleanPost(status.reblog) } : {}),
   }
 }
 

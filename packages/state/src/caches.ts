@@ -42,6 +42,31 @@ export function readerFiltered(id: string): readonly mastodon.v1.FilterResult[] 
   return filteredById.value.get(id)
 }
 
+// The post a quote shows (Mastodon 4.5), when the copy carries it. The
+// quote inside a quoted post is shallow (an id only), so this goes one
+// level deep.
+function quotedIn(status: mastodon.v1.Status): mastodon.v1.Status | null {
+  const q = status.quote
+  return q && 'quotedStatus' in q && q.quotedStatus ? q.quotedStatus : null
+}
+
+function withQuoted(status: mastodon.v1.Status, quoted: mastodon.v1.Status): mastodon.v1.Status {
+  return { ...status, quote: { ...status.quote!, quotedStatus: quoted } }
+}
+
+// A quoted post is cached under its own id too, so an edit or a delete of
+// it reaches every quote of it. `put` caches it and returns the copy kept.
+function cacheQuotes(
+  status: mastodon.v1.Status, put: (s: mastodon.v1.Status) => mastodon.v1.Status,
+): mastodon.v1.Status {
+  let out = status
+  const quoted = quotedIn(out)
+  if (quoted) out = withQuoted(out, put(quoted))
+  const inner = out.reblog ? quotedIn(out.reblog) : null
+  if (out.reblog && inner) out = { ...out, reblog: withQuoted(out.reblog, put(inner)) }
+  return out
+}
+
 function store(status: mastodon.v1.Status): void {
   const next = new Map(statusCache.value)
   next.set(status.id, status)
@@ -54,10 +79,14 @@ function store(status: mastodon.v1.Status): void {
  * never undoes a newer edit of the post (`protectEdits`).
  */
 export function cacheStatus(status: mastodon.v1.Status): void {
-  batch(() => {
-    noteFiltered(status)
-    store(protectEdits(status))
-  })
+  batch(() => cacheOne(status))
+}
+
+function cacheOne(status: mastodon.v1.Status): mastodon.v1.Status {
+  noteFiltered(status)
+  const out = cacheQuotes(protectEdits(status), cacheOne)
+  store(out)
+  return out
 }
 
 export function updateStatus(id: string, patch: Partial<mastodon.v1.Status>): void {
@@ -164,10 +193,13 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   let next = current ? keepReaderFields(fresh, current) : fresh
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
-    const reblog = inner ? keepReaderFields(fresh.reblog, inner) : fresh.reblog
+    let reblog = inner ? keepReaderFields(fresh.reblog, inner) : fresh.reblog
+    reblog = cacheQuotes(reblog, merge)
     next = { ...next, reblog }
     if (cache.has(fresh.reblog.id)) store(reblog)
   }
+  const quoted = quotedIn(next)
+  if (quoted) next = withQuoted(next, merge(quoted))
   store(next)
   return next
 }
@@ -176,6 +208,8 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
   const out = { ...status } as Record<string, unknown>
   for (const key of READER_FIELDS) delete out[key]
   if (status.reblog) out.reblog = withoutReaderFields(status.reblog)
+  const quoted = quotedIn(status)
+  if (quoted) out.quote = { ...status.quote!, quotedStatus: withoutReaderFields(quoted) }
   return out as unknown as mastodon.v1.Status
 }
 

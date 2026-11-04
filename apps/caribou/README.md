@@ -162,6 +162,23 @@ memory empties on an account change. Without JavaScript a post with a
 content warning cannot be opened: the server sends the collapsed card and
 no fallback. Read such a post on its home instance.
 
+**A quoted post shows inside the post that quotes it.** Mastodon 4.5
+puts it in `status.quote`; `<caribou-status-card>` mounts
+`<caribou-status-quote>` in the post body, so the post's own content
+warning hides the quote too. An accepted quote shows the quoted post's
+author, text, a media summary (no media loads) and a link to its thread; a
+plain click on the card opens the thread too. Every other state (pending,
+rejected, revoked, deleted, unauthorized, blocked or muted author) and an
+unknown one show a short note. The quoted post's own content warning,
+the reader's filters, mutes and blocks, and a newer edit or a delete from
+the status cache apply as on a card. A quote inside a quoted post (a
+shallow quote, an id only) is a link to the quoted post, never a second
+card. The status cache keeps the quoted post under its own id, and the
+server sanitizes it with the post (`sanitizeStatus`). A post that only
+links to another post, as on an older server, stays a link: making an
+embed would mean a fetch per link and a guess at which links are posts.
+Creating a quote is not built yet.
+
 **The reader's server filters hide or warn.** A status fetched with a
 token carries `filtered`: every filter that matches it, whatever the
 context. The card picks the ones for its `filter-context` attribute (home,
