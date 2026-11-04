@@ -63,7 +63,7 @@ async function mount(
 const listItems = (tl: CaribouTimeline) =>
   Array.from(tl.shadowRoot!.querySelector('ul')!.children) as HTMLLIElement[]
 const banner = (tl: CaribouTimeline) => tl.shadowRoot!.querySelector('caribou-new-posts-banner')!
-const bannerButton = (tl: CaribouTimeline) => banner(tl).shadowRoot!.querySelector('button')
+const bannerButton = (tl: CaribouTimeline) => banner(tl).shadowRoot!.querySelector<HTMLElement>('[data-action="apply-new-posts"]')
 const sentinel = (tl: CaribouTimeline) => tl.shadowRoot!.querySelector<HTMLAnchorElement>('a[data-sentinel]')
 
 // Stand-in observer: records what is observed and lets a test fire an entry.

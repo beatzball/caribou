@@ -228,8 +228,11 @@ describe('caribou-settings', () => {
 
     it('switches to another stored account', async () => {
       const root = inner(await mount(), 'account')
-      const button = [...root.querySelectorAll('button')].find((b) => b.textContent!.includes('@bob@other.example'))!
+      const button = [...root.querySelectorAll<HTMLElement>('caribou-button.switch')]
+        .find((b) => b.textContent!.includes('@bob@other.example'))!
       expect(button.textContent!.trim()).toBe('Switch to @bob@other.example')
+      // The one native button left is sign-out's, for the no-JS form.
+      expect([...root.querySelectorAll('button')].map((b) => b.className)).toEqual(['signout'])
       button.click()
       expect(switchToAccount).toHaveBeenCalledWith(bob)
     })

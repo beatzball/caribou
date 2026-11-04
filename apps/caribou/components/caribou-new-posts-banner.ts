@@ -1,14 +1,23 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
+import './caribou-button.js'
 
+// A full-width accent bar at the top of a timeline: "3 new posts". The
+// button is the shared primary <caribou-button>, reshaped into a bar.
 @customElement('caribou-new-posts-banner')
 export class CaribouNewPostsBanner extends LitElement {
   static override styles = css`
     :host { display: block; }
-    button {
+    /* The bar keeps the size it had as a native button: small text (the
+       browser's button size) and no minimum height. */
+    caribou-button {
+      display: flex; width: 100%;
       position: sticky; top: 0; z-index: 2;
-      width: 100%; padding: var(--space-2) var(--space-3);
-      border: 0; background: var(--accent); color: var(--accent-fg); cursor: pointer;
+      --caribou-button-size: auto;
+    }
+    caribou-button::part(button) {
+      font-size: 0.8333rem;
+      border: 0; padding: var(--space-2) var(--space-3);
       border-radius: 0 0 var(--radius-md) var(--radius-md);
     }
   `
@@ -22,9 +31,9 @@ export class CaribouNewPostsBanner extends LitElement {
   override render() {
     if (!this.count || this.count < 1) return nothing
     return html`
-      <button type="button" data-action="apply-new-posts" @click=${this.onClick}>
+      <caribou-button variant="primary" data-action="apply-new-posts" @click=${this.onClick}>
         ${this.count} new ${this.count === 1 ? 'post' : 'posts'}
-      </button>
+      </caribou-button>
     `
   }
 }

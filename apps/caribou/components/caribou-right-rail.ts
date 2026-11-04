@@ -88,6 +88,7 @@ export class CaribouRightRail extends LitElement {
           <li><litro-link href="/changelog">Changelog</litro-link></li>
         </ul>
         ${inst
+          // Native sign-out button: the form must work with JavaScript off.
           ? html`<div class="session signed-in">Signed in to <strong>${inst}</strong> ·
                    <caribou-signout-form>
                      <form action="/api/signout" method="post" style="display:inline;">

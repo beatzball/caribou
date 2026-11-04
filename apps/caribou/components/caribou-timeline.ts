@@ -274,7 +274,7 @@ export class CaribouTimeline extends LitElement {
     if (!older && this.newPostsCount > 0) {
       const banner = this.renderRoot.querySelector<LitElement>('caribou-new-posts-banner')
       await banner?.updateComplete
-      const show = banner?.shadowRoot?.querySelector('button')
+      const show = banner?.shadowRoot?.querySelector<HTMLElement>('[data-action="apply-new-posts"]')
       if (show) {
         show.focus()
         return
