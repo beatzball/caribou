@@ -103,11 +103,6 @@ function toast(kind: 'error' | 'info', message: string): void {
   window.dispatchEvent(new CustomEvent('caribou:toast', { detail: { kind, message } }))
 }
 
-function isTextField(el: EventTarget | undefined): boolean {
-  if (!(el instanceof HTMLElement)) return false
-  return el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)
-}
-
 // Every page renders its own app shell, so during a page swap two dialogs
 // are mounted at once. Only the newest one answers, or both would open.
 const mounted: CaribouComposeDialog[] = []
@@ -199,7 +194,6 @@ export class CaribouComposeDialog extends LitElement {
     super.connectedCallback()
     mounted.push(this)
     window.addEventListener('caribou:compose', this.onCompose)
-    window.addEventListener('keydown', this.onKeydown)
     this.unwatchUser = effect(() => {
       const key = activeUserKey.value
       if (this.open && this.client && key !== this.client.userKey) {
@@ -219,7 +213,6 @@ export class CaribouComposeDialog extends LitElement {
     const i = mounted.indexOf(this)
     if (i >= 0) mounted.splice(i, 1)
     window.removeEventListener('caribou:compose', this.onCompose)
-    window.removeEventListener('keydown', this.onKeydown)
     this.unwatchUser?.()
     this.unwatchUser = undefined
     for (const p of this.pending) URL.revokeObjectURL(p.previewUrl)
@@ -255,15 +248,6 @@ export class CaribouComposeDialog extends LitElement {
     if (detail?.edit) this.showEdit(detail.edit.status, detail.edit.source)
     else if (detail?.redraft) this.showRedraft(detail.redraft, detail.inReplyTo ?? null)
     else this.show(detail?.inReplyTo ?? null)
-  }
-
-  private onKeydown = (e: KeyboardEvent) => {
-    if (!this.isActive() || this.open) return
-    if (e.key !== 'n' || e.ctrlKey || e.metaKey || e.altKey || e.defaultPrevented) return
-    if (isTextField(e.composedPath()[0])) return
-    if (!activeClient.value) return
-    e.preventDefault()
-    this.show(null)
   }
 
   // Everything every kind of opening shares. False when the dialog cannot

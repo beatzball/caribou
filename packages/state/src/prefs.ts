@@ -53,6 +53,11 @@ export function defaultTimelineOf(prefs: Record<string, unknown>): DefaultTimeli
   return t === 'local' || t === 'public' ? t : 'home'
 }
 
+/** Whether the keyboard shortcuts are on. On is the default. */
+export function shortcutsOf(prefs: Record<string, unknown>): boolean {
+  return prefs.shortcuts !== false
+}
+
 /**
  * Whether this browser lets the app write to localStorage. False when
  * storage is blocked (a setting, some private windows) or full: then no

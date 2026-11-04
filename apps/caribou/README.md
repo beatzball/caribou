@@ -365,6 +365,30 @@ of `/settings` (`caribou-settings-about.ts`) and the right rail link to
 `lastSeenChangelogVersion` in `caribou.prefs.<userKey>`
 (`components/_changelog-seen.ts`); `app-main.ts` starts it once.
 
+**Keyboard shortcuts** live in `components/_shortcuts.ts`: one `keydown`
+listener on the window, started from `app-main.ts`. A post is a
+`<caribou-status-card>` in the page; `j` and `k` focus its `<li>` (or the
+card where there is none), so any list of cards gets them with no code of
+its own. The item gets `tabindex="-1"`, `data-caribou-post` and an
+`aria-label` (the notification line without its buttons or list of who,
+the author, the warning or the start of the text, the time) when it takes
+focus. The name goes when focus leaves the post and is made again when it
+comes back; `tabindex` stays, so a dialog can give focus back. That is after hydration,
+so the server render does not change. Its focus ring is a sheet adopted into the
+list's shadow root. `f`, `b`, `r` and `o` click the card's own controls and
+permalink, so signed-out and soft-disabled rules hold. No key fires while
+the reader types (an input, a textarea, a select, contenteditable, IME
+composition), with Ctrl, Meta or Alt, while any dialog or popover is open
+(a menu, its `data-open` fallback, an ALT description; focus need not be
+in it),
+after an earlier listener used it (`defaultPrevented`: Vimium's own keys
+win), or with `shortcuts: false` in the account's prefs (`shortcutsOf`).
+Letters are the letter the layout types, so Caps Lock and Dvorak work; a
+layout with no Latin letters uses the key's place (`event.code`).
+`?` opens `<caribou-shortcuts-help>`, whose list is `SHORTCUT_GROUPS`; add a
+shortcut there and in `onKey` together. `n` belongs here too: it sends
+`caribou:compose`, which the compose dialog answers.
+
 ## Accounts
 
 A reader can be signed in to several accounts, on several servers, with one
@@ -376,7 +400,7 @@ active. Accounts live in the browser; the server keeps no session.
 |---|---|
 | `caribou.users` | every account: `[userKey, session]` pairs, in sign-in order |
 | `caribou.activeUserKey` | the active account's `userKey` (`name@server`), or `null` |
-| `caribou.prefs.<userKey>` | that account's settings: `theme`, `defaultTimeline`, `lastSeenNotificationId` (removed on its sign-out) |
+| `caribou.prefs.<userKey>` | that account's settings: `theme`, `defaultTimeline`, `shortcuts`, `lastSeenNotificationId` (removed on its sign-out) |
 | `caribou.drafts.<userKey>` | that account's compose drafts (removed on its sign-out) |
 
 **Switching reloads the page.** A switch from the account menu, a sign-out
@@ -493,6 +517,9 @@ the first frame.
 
 **Default timeline**: Home, Local or Public. `/` forwards there (above), and
 the sign-in completion page goes there for an account that chose one.
+
+**Keyboard**: the shortcuts are on by default; the box turns them off, at
+once. Show keyboard shortcuts opens the help sheet.
 
 ## Shared controls
 

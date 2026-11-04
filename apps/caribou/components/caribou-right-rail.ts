@@ -18,7 +18,7 @@ export class CaribouRightRail extends LitElement {
     .card a, .card litro-link { color: var(--fg-1); text-decoration: none; }
     .card a:hover, .card litro-link:hover { color: var(--accent); }
     .links { list-style: none; margin: 0; padding: 0; }
-    .links litro-link { display: block; padding: var(--space-2) 0; }
+    .links litro-link, litro-link.shortcuts { display: block; padding: var(--space-2) 0; }
     .brand { display: flex; align-items: center; gap: var(--space-2); }
     .brand img { flex: none; }
     .session { color: var(--fg-1); margin-top: var(--space-2); }
@@ -102,7 +102,7 @@ export class CaribouRightRail extends LitElement {
       <div class="card">
         <div aria-disabled="true" title="Coming soon">Theme toggle</div>
         <div aria-disabled="true" title="Coming soon">Zen mode</div>
-        <div aria-disabled="true" title="Coming soon">Keyboard shortcuts</div>
+        <litro-link class="shortcuts" href="/settings#keyboard">Keyboard shortcuts</litro-link>
       </div>
     `
   }

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  defaultTimelineOf, readPrefs, storageWorks, themeOf, updatePrefs,
+  defaultTimelineOf, readPrefs, shortcutsOf, storageWorks, themeOf, updatePrefs,
 } from '../prefs.js'
 
 const key = toUserKey('alice', 'example.social')
@@ -61,6 +61,15 @@ describe('defaultTimelineOf', () => {
 
   it('is home for a value that is not a string', () => {
     expect(defaultTimelineOf({ defaultTimeline: ['local'] })).toBe('home')
+  })
+})
+
+describe('shortcutsOf', () => {
+  it('is on unless false is stored', () => {
+    expect(shortcutsOf({})).toBe(true)
+    expect(shortcutsOf({ shortcuts: true })).toBe(true)
+    expect(shortcutsOf({ shortcuts: false })).toBe(false)
+    expect(shortcutsOf({ shortcuts: 'false' })).toBe(true)
   })
 })
 
