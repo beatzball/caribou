@@ -350,7 +350,8 @@ card where there is none), so any list of cards gets them with no code of
 its own. The item gets `tabindex="-1"`, `data-caribou-post` and an
 `aria-label` (the notification line without its buttons or list of who,
 the author, the warning or the start of the text, the time) when it takes
-focus, and loses them when focus leaves the post; that is after hydration,
+focus. The name goes when focus leaves the post and is made again when it
+comes back; `tabindex` stays, so a dialog can give focus back. That is after hydration,
 so the server render does not change. Its focus ring is a sheet adopted into the
 list's shadow root. `f`, `b`, `r` and `o` click the card's own controls and
 permalink, so signed-out and soft-disabled rules hold. No key fires while

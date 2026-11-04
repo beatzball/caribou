@@ -390,8 +390,11 @@ describe('the focused item', () => {
     outside.focus()
     await new Promise((r) => setTimeout(r, 0))
     expect(li.hasAttribute('aria-label')).toBe(false)
-    expect(li.hasAttribute('data-caribou-post')).toBe(false)
-    expect(li.hasAttribute('tabindex')).toBe(false)
+    // Focus can come back (a dialog gives it back on close), with a fresh name.
+    expect(li.getAttribute('tabindex')).toBe('-1')
+    cards()[0]!.shadowRoot!.querySelector('time')!.textContent = '3h'
+    li.focus()
+    expect(li.getAttribute('aria-label')).toMatch(/3h$/)
   })
 
   it('keeps a tabindex the list set itself', async () => {

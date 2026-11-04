@@ -189,6 +189,7 @@ test('? opens the help sheet; Esc and ? close it, and focus goes back', async ({
   await page.keyboard.press('Escape')
   await expect(help).toHaveCount(0)
   await expect(items(page).nth(0)).toBeFocused()
+  await expect(items(page).nth(0)).toHaveAttribute('aria-label', /Post by Bob Example/)
 
   await page.keyboard.press('?')
   await expect(help).toBeVisible()

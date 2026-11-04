@@ -296,23 +296,19 @@ export function focusPost(card: HTMLElement): HTMLElement {
   addRing(item.getRootNode())
   if (!item.hasAttribute('data-caribou-post')) {
     item.setAttribute('data-caribou-post', '')
-    const ownTabindex = item.hasAttribute('tabindex')
-    if (!ownTabindex) item.setAttribute('tabindex', '-1')
-    // Once focus leaves the post, it is a plain list item again: no name
-    // that could go stale or be read twice in browse mode. Focus moving
-    // to a control inside the post keeps it.
-    const onOut = () => {
+    if (!item.hasAttribute('tabindex')) item.setAttribute('tabindex', '-1')
+    // The name is there only while focus is in the post: it cannot go
+    // stale, and browse mode does not read it on top of the content. It
+    // is made again each time focus comes back (a dialog gives focus back
+    // on close). `tabindex` stays so that focus can come back.
+    item.addEventListener('focusin', () => item.setAttribute('aria-label', postLabel(card)))
+    item.addEventListener('focusout', () => {
       setTimeout(() => {
-        const root = item.getRootNode() as Document | ShadowRoot
-        const active = root.activeElement
+        const active = (item.getRootNode() as Document | ShadowRoot).activeElement
         if (active && (active === item || item.contains(active))) return
-        item.removeEventListener('focusout', onOut)
         item.removeAttribute('aria-label')
-        item.removeAttribute('data-caribou-post')
-        if (!ownTabindex) item.removeAttribute('tabindex')
       }, 0)
-    }
-    item.addEventListener('focusout', onOut)
+    })
   }
   item.setAttribute('aria-label', postLabel(card))
   item.focus({ preventScroll: true })
