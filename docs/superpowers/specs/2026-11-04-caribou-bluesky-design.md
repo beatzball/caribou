@@ -1,7 +1,7 @@
 ---
 title: Caribou Bluesky support — Design Spec
 date: 2026-11-04
-status: draft, round 2, for owner review
+status: draft, round 3, for owner review
 ---
 
 # Caribou Bluesky support — Design Spec
@@ -36,7 +36,7 @@ The recommended shape, in one line each:
 Round 2 of this spec fixes the review findings on PR #165. The main changes:
 day one now includes notifications and SSR, the session expiry keeps drafts,
 moderation is kept per surface with label definitions, and the phase sizes are
-about twice what round 1 said (section 13). No code ships with this spec.
+about twice what round 1 said (section 13). Round 3 makes moderation results plain data for SSR, makes the veil wait for the reader's labels, adds freshness rules to viewer state, and fixes the compose retry. No code ships with this spec.
 
 ---
 
@@ -308,10 +308,16 @@ confidential.
 - Credentials: as A.
 - SDK: **no hook** in `oauth-client-browser` (`keyset: undefined`). We would
   wrap or patch the SDK, or wait for upstream.
-- Abuse: anyone can ask our endpoint for an assertion for their own DPoP key.
-  That only gives them a long session on their own account through Caribou's
-  client id. The endpoint needs CORS to our origin, `no-store`, a nonce and a
-  rate limit.
+- Abuse: anyone can ask our endpoint for an assertion for a DPoP key they
+  hold. A DPoP proof shows that they hold the key. It does not show which
+  account will approve the sign-in later. So the endpoint must not be read as
+  an identity check. It needs CORS to our origin, `no-store`, a nonce and a
+  rate limit, and it limits harm only through the DPoP binding.
+- **Release gate for D.** The proposal requires the authorization server to
+  compare the assertion's `cnf.jkt` with the request's DPoP key. D ships only
+  when a test shows `bsky.social` **rejects** an assertion bound to a
+  different key, on PAR, the code swap and refresh. A provider that accepts
+  the mismatch counts as "not supported", even if it grants long sessions.
 
 | | A public | B BFF | D client-assertion |
 |---|---|---|---|
@@ -506,8 +512,31 @@ under (a) or (b):
    flags when a token-less copy arrives. Bluesky viewer fields (`likeUri`,
    `repostUri`, `bookmarked`, `replyDisabled`, `embeddingDisabled`) join that
    protected set, and each cached entry records `viewerOf: UserKey | null`. A
-   public copy never overwrites viewer fields. A copy fetched by the owner
-   always does, also over an SSR copy whose flags are `false`.
+   public copy never overwrites viewer fields.
+
+   **Owner copies win only when they are fresh.** Being the owner does not make
+   a copy new: a refetch can start before a like and land after it, and the
+   AppView can lag behind a write. So each action keeps its flag and its record
+   ref together as one **viewer slot** (`like`: `favourited` + `likeUri`;
+   `repost`: `reblogged` + `repostUri`; `bookmark`: `bookmarked`), and each
+   slot has a local write sequence number. Every owner fetch records the
+   sequence number at the time it **started**. The merge rule for each slot:
+
+   - A slot with a write in flight is never overwritten. Rollback or commit
+     decides it.
+   - A fetch that started before the slot's last write finished does not
+     overwrite that slot.
+   - For 60 seconds after a write, a fetch that disagrees with it does not
+     overwrite the slot (AppView lag). After that, the fresh fetch wins.
+   - Otherwise the owner's copy wins, also over an SSR copy whose flags are
+     `false`. That is how an SSR entry gets its viewer state.
+
+   Slots are separate, so a like in flight does not block a repost result.
+   Tests: refetch starts → like succeeds → old refetch lands → the like and
+   its `likeUri` stay → undo deletes the right record; the same for unlike and
+   for repost and un-repost; a like and a repost at the same time; a fetch
+   that lags the AppView inside and after the 60 s window; signed-out SSR →
+   owner refetch fills the slots.
 5. **Paging carries an opaque cursor everywhere.** `fetchAccountStatuses`
    returns `Status[]`, and `createProfileStore.loadMore()` sends the last
    status id. Bluesky's `getAuthorFeed` takes an opaque `cursor` that is not a
@@ -518,7 +547,9 @@ under (a) or (b):
    buffer with `newerFirst`, which compares Mastodon numeric ids. AT URIs sort
    by DID, so the buffer would come out by author. The store gets its order
    from the client: Mastodon keeps `newerFirst`; Bluesky keeps the order the
-   feed returned.
+   feed returned. Tests: many authors, a repost of an old post, and two polls
+   whose results overlap; the merged buffer keeps feed order with no
+   duplicates.
 7. **Polling catch-up without `since_id`.** Bluesky's `getTimeline` has no
    `since_id`. The adapter pages from the top until it meets the known top
    entry, at most 3 pages (about 150 entries). If it does not meet it (more
@@ -527,7 +558,8 @@ under (a) or (b):
 8. **Feed-entry identity.** A repost wrapper's id is `reason.uri` when present.
    The lexicon makes it optional, so the fallback is
    `repost:<by.did>:<post.uri>:<reason.indexedAt>`. It never equals the
-   subject post's id or the reader's own repost record URI.
+   subject post's id or the reader's own repost record URI. A test fixture has
+   a valid `reasonRepost` with no `uri`.
 
 Two more seams belong to features, not types:
 
@@ -573,7 +605,7 @@ one; the seams are what make Bluesky correct. Section 12.3, question 2.
 | `card` | `embed` external |
 | `quote` | `embed` record / recordWithMedia, in the shape PR #167 defines |
 | `poll`, `editedAt`, `emojis` | `null`, `null`, `[]` |
-| `bluesky` | `{ uri, cid, likeUri, repostUri, replyRef, replyDisabled, embeddingDisabled, moderation, viewerOf }` |
+| `bluesky` | `{ uri, cid, likeUri, repostUri, replyRef, replyDisabled, embeddingDisabled, labels, moderation: ModerationResult (plain data, 7.4), viewerOf }` |
 
 Account: `id` = DID, `acct` = handle, `displayName`, `note` = description
 with detected links, `avatar`, `header` = banner, counts. Relationship from
@@ -619,10 +651,10 @@ are on the post.
 | `packages/state/src/prefs.ts` | `DefaultTimeline` gains `following`; `local`/`public` invalid for Bluesky. |
 | `components/_switch-account.ts` | Rules in 5.6; route shapes in 8.4 for `readsCookieServer`. |
 | `components/_profile-path.ts` | Never add `@<host>` to a Bluesky handle; never emit a bare dotted name for a Mastodon account (8.4). |
-| `components/caribou-status-card.ts` | `canAct` from the resource's network and the active account (section 11); post path from the rkey, not the encoded id; Reply/Quote off by `replyDisabled`/`embeddingDisabled` with a reason; Edit and History hidden for Bluesky. |
+| `components/caribou-status-card.ts` | `canAct` from the resource's network and the active account (section 11); post path from the rkey, not the encoded id; Reply/Quote off by `replyDisabled`/`embeddingDisabled` with a reason (test: a restricted post cannot open a composer that can submit); Edit and History hidden for Bluesky. |
 | `components/caribou-status-media.ts` | A no-override mode: covered with the label's reason and no Show button (7.4). |
 | `components/caribou-profile.ts`, `caribou-profile-header.ts`, `_shell.ts` | Read client and relationships by the profile's network; no Mastodon `server` match for a Bluesky profile. |
-| `components/caribou-nav-rail.ts` | Hide Local, Public, and (until phase 5) Search, Lists, Feeds for Bluesky. |
+| `components/caribou-nav-rail.ts` | Hide Local and Public for Bluesky, and Search and Lists until phase 5. Feeds is a new item, added in phase 5. |
 | `components/caribou-compose-dialog.ts` | Hide visibility, CW text and poll by capability; byte limit; image resize; alt text stays in the draft. |
 | `server/lib/bluesky-public.ts` (new), `upstream-cache.ts` | SSR fetches; Bluesky TTL constants (8.1). |
 | `server/routes/` | `oauth/client-metadata.json`, `xrpc/com.atproto.identity.resolveHandle`. |
@@ -702,9 +734,28 @@ its text and says "The post you replied to was deleted."
 
 **No duplicate posts.** The Mastodon draft has an idempotency key. For Bluesky
 the draft's `rkey` plays that part: compose writes with
-`com.atproto.repo.createRecord` and that `rkey`. A retry after a lost response
-fails with "record already exists", which compose treats as success and then
-loads the post.
+`com.atproto.repo.createRecord` and that `rkey`.
+
+A retry cannot rely on the error. A second `createRecord` with a used `rkey`
+gives no "already exists" code: the PDS does not check first, and the repo
+layer throws a plain error (`There is already a value at key`, in
+`packages/repo/src/mst/mst.ts`), which reaches the client as a 500. So:
+
+1. On submit, the draft **freezes** the exact record it sends (text, facets,
+   embed, labels, `createdAt`) and stores it with the `rkey` before the
+   request.
+2. If the response is lost or is a 5xx, compose calls
+   `com.atproto.repo.getRecord(repo, app.bsky.feed.post, rkey)` on the PDS
+   (not the AppView, which can lag).
+3. Record found, and equal to the frozen record: the post went through. Clear
+   the draft and load the post.
+4. Record found, but the reader edited the draft since: keep the edits, make
+   a new `rkey` for them, and say "Your earlier version was posted." with a
+   link.
+5. Record not found: retry the same frozen record with the same `rkey`.
+
+Tests: lost response → reload → retry finds the record; lost response → edit
+→ retry keeps the edits; record not found → retry posts once.
 
 **Link cards** are phase 6. Phase 4 posts links without a card.
 
@@ -741,9 +792,32 @@ returns those labels.
 cannot load, a label from that labeler covers the post with "Content warning
 (labeler unavailable)" and a Retry. It does not show the post as clean.
 
-**Keep the decision, per surface.** The SDK returns one decision with a `ui()`
-for each context. Caribou keeps the decision on the post and reads the context
-it renders:
+**Keep the result, per surface, as plain data.** The SDK returns a
+`ModerationDecision`, a class instance with a `ui(context)` method. It must not
+go into page data: Litro hands `serverData` to the client as JSON, and JSON
+drops the method, so the client would get a decision that cannot answer
+`ui()`. Instead the mapper turns the decision into plain data right away:
+
+```ts
+interface ModerationResult {
+  // One entry per context below; each is the SDK's ui(context), flattened.
+  contexts: Record<ModerationContext, {
+    filter: boolean; blur: boolean; alert: boolean; inform: boolean
+    noOverride: boolean
+    reasons: { label: string; source: string; name: string }[]
+  }>
+  // The labelers whose labels this post's data includes (see the veil).
+  labelersCovered: string[]
+}
+```
+
+The post also keeps its raw `labels`, so the client can run moderation again
+when prefs or subscriptions change. The class instance never leaves the
+mapper. Test: serialized page data → first client render, for a labeled post,
+a labeled profile and a labeled quote, with one `noOverride` label. A test
+that renders straight from the SDK instance would miss the bug.
+
+The contexts:
 
 | context | where | what it can do |
 |---|---|---|
@@ -755,8 +829,9 @@ it renders:
 
 Each `ui()` has `noOverride`. When it is set, the cover has **no Show
 button**. Today `caribou-status-media` always offers "Show sensitive media"; it
-gets a no-override mode. Only the author sees their own post without the
-cover, as the SDK decides.
+gets a no-override mode. The author's own post is still covered, but it is
+never filtered out and always has a Show button: the SDK skips `filters` and
+`noOverride` for the author, not the blur.
 
 **Hydration and the veil.** The server does not know the reader. SSR runs
 moderation with the **logged-out defaults** (adult content off, Bluesky's
@@ -766,19 +841,41 @@ on a label), so the SSR paint could show what they chose to hide. Caribou
 already solves this for Mastodon filters with the reader veil
 (`server/lib/reader-veil-head.ts`, `readerChecks` in `reader-view.ts`): cards
 stay hidden from first paint until the reader's check settles. Bluesky cards
-join it. A Bluesky card's check settles when the active Bluesky account's prefs
-and label definitions are loaded and its decision is made. With a Mastodon
-account active, a Bluesky post's check is the logged-out default, and it
-settles at once.
+join it.
+
+Loading the reader's prefs and label definitions is **not enough** to settle.
+The SSR data was fetched with Bluesky's labeler only, so a label from a
+labeler the reader subscribes to is simply not on that post. The SDK judges
+only the labels it is given. So a Bluesky card's check settles only when all
+of these hold:
+
+1. The reader's prefs and label definitions are loaded.
+2. The post came from a **reader fetch** sent with `atproto-accept-labelers`
+   set to the reader's subscribed labelers.
+3. The post's `labelersCovered` includes every labeler the reader subscribes
+   to.
+4. Moderation ran on that data.
+
+This is the same rule as the Mastodon veil: it waits for the post as the
+reader's server returns it. If the reader fetch fails, or comes back without
+a subscribed labeler, the card stays covered with Retry. If the reader
+subscribes to a new labeler later, `labelersCovered` no longer matches, and
+the card is covered again until a refetch.
+
+With a Mastodon account active, a Bluesky post's check is the logged-out
+default, and it settles at once.
 
 **Compose.** The CW toggle becomes a "Label this media" menu (Adult, Nudity,
 Graphic) for Bluesky. It uses the shared button and menu and their focus rules.
 Free-text CW is hidden.
 
 **Tests:** a custom label absent from the SDK's built-in table, with and
-without its definition loading; a `noOverride` label; a "hide" pref that the
-SSR defaults do not have, checked through the veil; list versus focused-thread
-behavior; a labeled avatar.
+without its definition loading; a `noOverride` label; the author's own
+labeled post (covered, with Show); a "hide" pref that the SSR defaults do not
+have, checked through the veil; the veil gap: SSR data with no custom label,
+prefs and definitions load first, the reader fetch arrives late with a custom
+"hide" label, and the post is never visible in between or when that fetch
+fails; list versus focused-thread behavior; a labeled avatar.
 
 ---
 
@@ -977,7 +1074,7 @@ first render uses only route-derived data.
 
 | part | Mastodon active | Bluesky active |
 |---|---|---|
-| Nav rail | as today | Home (Following), Notifications, Bookmarks. Search, Lists, Feeds from phase 5. |
+| Nav rail | as today | Home (Following), Notifications, Bookmarks. Search and Lists from phase 5; Feeds, a new item, in phase 5. |
 | Home | Mastodon home | Following feed |
 | Compose | as today | 300 graphemes / 3000 bytes, 4 images, no visibility, no poll, label menu |
 | Account switcher | both kinds, network in each accessible name | same |
@@ -1023,7 +1120,7 @@ request's destination host and the links built, not only disabled buttons.
 - Whether the public AppView returns `!no-unauthenticated` accounts' posts.
 - Whether `litro dev` serves `/@alice.example.com` as a route.
 - The public AppView's rate limit per IP.
-- Whether `bsky.social` grants confidential lifetimes to an option-D client (a
+- Whether `bsky.social` grants confidential lifetimes to an option-D client, and whether it rejects an assertion bound to another DPoP key (the release gate in 5.3; a
   small manual test with a hand-made assertion).
 
 ### 12.3 Questions for the owner
@@ -1061,7 +1158,7 @@ review. Each phase ships on its own and leaves main working.
 | phase | what ships | issues | estimate | depends on |
 |---|---|---|---|---|
 | 0 | Spike and measurements | 1 S | 3 days | — |
-| 1a | Type and paging seams (no visible change) | 2 S, 2 M | 3–4 weeks | — |
+| 1a | Type and paging seams (no visible change) | 1 S, 3 M | 3–4 weeks | — |
 | 1b | Session and provenance seams (no visible change) | 2 M | 2 weeks | 1a |
 | 2a | Bluesky client, rendering, moderation (behind a flag) | 1 S, 1 M, 2 L | 5–6 weeks | 0, 1a |
 | 2b | Sign-in, switcher, Following, profile, thread (behind the flag) | 1 S, 3 M | 3–4 weeks | 1b, 2a |
@@ -1070,7 +1167,7 @@ review. Each phase ships on its own and leaves main working.
 | 5 | Search, hashtags, feeds, lists | 1 S, 3 M | 3–4 weeks | 4 |
 | 6 | Independent items | 1 S, 4 M | 4–5 weeks in total, any order | 4 |
 
-**Day one is about 20–26 weeks of work from phase 0.** Phase 0 can run beside
+**Day one is about 20–24 weeks of work from phase 0** (the sums of the low and the high ends in the table; overlap can shorten it). Phase 0 can run beside
 1a, and parts of 2a beside 1b. Round 1 said phase 2 was "L" and implied about
 10 weeks to day one. It counted a phase as its biggest issue, not the sum, and
 it missed the seams.
@@ -1137,13 +1234,13 @@ Muted words; #131 for Bluesky; video; gates in compose; link cards in compose.
 | 2 | `refactor: Caribou-owned Status/Account/Relationship/List/Notification types` | M | 1a |
 | 3 | `refactor: CaribouClient write methods take refs; mutations commit what the server returns` | M | 1a |
 | 4 | `refactor: opaque paging cursors for timelines and profiles, with the SSR handoff` | S | 1a |
-| 5 | `refactor: CaribouClient capabilities; nav, compose and card read them; timeline order from the client` | S | 1a |
+| 5 | `refactor: CaribouClient capabilities; nav, compose and card read them; timeline order from the client` | M | 1a |
 | 6 | `state: session generation and an expired state that keeps drafts` | M | 1b |
-| 7 | `state: resource network, viewer-state owner, network-aware actions and links` | M | 1b |
+| 7 | `state: resource network, viewer slots with freshness rules, network-aware actions and links` | M | 1b |
 | 8 | `bluesky: client package with read methods, mappers, catch-up and feed identity` | L | 2a |
 | 9 | `bluesky: facets to HTML renderer` | S | 2a |
 | 10 | `bluesky: embeds — images, external, record, recordWithMedia, video thumbnail` | M | 2a |
-| 11 | `bluesky: moderation with label definitions, per-surface decisions and the reader veil` | L | 2a |
+| 11 | `bluesky: moderation with label definitions, plain-data per-surface results and a label-aware reader veil` | L | 2a |
 | 12 | `server: atproto client metadata and handle resolver with a connection-bound SSRF guard` | M | 2b |
 | 13 | `bluesky: sign-in panels, callback, restore, expiry, sign-out` | M | 2b |
 | 14 | `bluesky: account switcher network names and switch rules` | S | 2b |
@@ -1164,4 +1261,4 @@ Muted words; #131 for Bluesky; video; gates in compose; link cards in compose.
 | 29 | `bluesky: video playback` | M | 6 |
 | 30 | `bluesky: thread gate and post gate in compose` | S | 6 |
 | 31 | `bluesky: link cards in compose` | M | 6 |
-| 32 | `auth: client-assertion backend (option D), when the SDK allows` | M | after 4 |
+| 32 | `auth: client-assertion backend (option D), when the SDK allows and the provider passes the key-binding gate` | M | after 4 |
