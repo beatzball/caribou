@@ -85,13 +85,26 @@ function newPoll(limits: PollLimits): DraftPoll {
   return { options: ['', ''], expiresIn, multiple: false, hideTotals: false }
 }
 
-/** Why a poll cannot be posted yet, or null. */
-function pollProblem(poll: DraftPoll): string | null {
+/**
+ * Why a poll cannot be posted yet, or null. Checked against the limits the
+ * dialog has now, which may have come in after the options were written, or
+ * be newer than a stored draft.
+ */
+function pollProblem(poll: DraftPoll, limits: PollLimits): string | null {
+  if (poll.options.length > limits.maxOptions) return `This server allows at most ${limits.maxOptions} options.`
   const filled = poll.options.map((o) => o.trim())
+  const long = filled.findIndex((o) => [...o].length > limits.maxChars)
+  if (long >= 0) return `Option ${long + 1} is longer than ${limits.maxChars} characters.`
   if (filled.some((o) => o === '')) return 'Every option needs text.'
   const seen = new Set(filled.map((o) => o.toLocaleLowerCase()))
   if (seen.size < filled.length) return 'Two options are the same.'
   return null
+}
+
+/** A limit problem shows at once; a blank or a repeat once the reader has started. */
+function limitProblem(poll: DraftPoll, limits: PollLimits): boolean {
+  return poll.options.length > limits.maxOptions
+    || poll.options.some((o) => [...o.trim()].length > limits.maxChars)
 }
 
 // One fetch per server for the page's lifetime; the limits rarely change.
@@ -494,7 +507,7 @@ export class CaribouComposeDialog extends LitElement {
   private get canPost(): boolean {
     const poll = this.activePoll
     const hasContent = this.draft.text.trim() !== '' || (this.draft.media.length > 0 && !poll)
-    if (poll && (pollProblem(poll) !== null || !inRange(this.limits.polls, poll.expiresIn))) return false
+    if (poll && (pollProblem(poll, this.limits.polls) !== null || !inRange(this.limits.polls, poll.expiresIn))) return false
     return hasContent && this.count <= this.limits.maxChars
       && this.pending.length === 0 && !this.posting
   }
@@ -703,9 +716,10 @@ export class CaribouComposeDialog extends LitElement {
 
   private renderPoll(poll: DraftPoll, busy: boolean) {
     const limits = this.limits.polls
-    const problem = pollProblem(poll)
-    // Say what is wrong only once the reader has started on the options.
-    const showProblem = problem !== null && pollOptions(poll).length > 0
+    const problem = pollProblem(poll, limits)
+    // Say what is wrong only once the reader has started on the options,
+    // or at once when the server's limits rule the poll out.
+    const showProblem = problem !== null && (pollOptions(poll).length > 0 || limitProblem(poll, limits))
     const many = poll.options.length > 2
     return html`<fieldset class="poll" data-poll>
       <legend>Poll</legend>

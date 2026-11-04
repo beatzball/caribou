@@ -259,4 +259,52 @@ describe('<caribou-compose-dialog> poll builder', () => {
     expect($<HTMLSelectElement>(el, '#compose-poll-duration')!.value).toBe('300')
     expect(postButton(el).disabled).toBe(false)
   })
+
+  it('options made before the limits came in are checked against them at Post', async () => {
+    addUserSession({
+      userKey: 'alice@late2.example', server: 'late2.example', token: 'TOKEN', vapidKey: '', account: ME, createdAt: 1,
+    } as unknown as UserSession)
+    const client = activeClient.value!
+    let resolve!: (i: mastodon.v2.Instance) => void
+    vi.spyOn(client, 'fetchInstance').mockImplementation(() => new Promise((r) => { resolve = r }))
+    const create = vi.spyOn(client, 'createStatus')
+    const el = await mount()
+    await compose(el)
+    await type(el, 'which?')
+    await openPoll(el)
+    inner($(el, 'caribou-button[data-action="add-option"]')!).click()
+    await settle(el)
+    inner($(el, 'caribou-button[data-action="add-option"]')!).click()
+    await settle(el)
+    await fill(el, 0, 'a')
+    await fill(el, 1, 'b')
+    await fill(el, 2, 'c')
+    await fill(el, 3, 'x'.repeat(40))
+    expect(postButton(el).disabled).toBe(false)
+    resolve({ configuration: { statuses: { maxCharacters: 100, maxMediaAttachments: 2 }, mediaAttachments: {},
+      polls: { maxOptions: 3, maxCharactersPerOption: 25, minExpiration: 300, maxExpiration: 86400 } } } as unknown as mastodon.v2.Instance)
+    await settle(el)
+    expect(postButton(el).disabled).toBe(true)
+    expect($(el, '[data-poll-problem]')?.textContent).toBe('This server allows at most 3 options.')
+    postButton(el).click()
+    await settle(el)
+    expect(create).not.toHaveBeenCalled()
+    // Remove one: now the long option is the problem.
+    inner(el.shadowRoot!.querySelectorAll('caribou-icon-button[data-action="remove-option"]')[2]!).click()
+    await settle(el)
+    expect($(el, '[data-poll-problem]')?.textContent).toBe('Option 3 is longer than 25 characters.')
+    expect(postButton(el).disabled).toBe(true)
+    await fill(el, 2, 'short')
+    expect($(el, '[data-poll-problem]')?.textContent).toBe('')
+    expect(postButton(el).disabled).toBe(false)
+  })
+
+  it('a stored draft with too long an option cannot be posted until fixed', async () => {
+    signIn()
+    saveDraft(KEY as never, 'new', emptyDraft({ text: 'q', poll: { options: ['a', 'y'.repeat(30)], expiresIn: 3600, multiple: false, hideTotals: false } }))
+    const el = await mount()
+    await compose(el)
+    expect(postButton(el).disabled).toBe(true)
+    expect($(el, '[data-poll-problem]')?.textContent).toBe('Option 2 is longer than 25 characters.')
+  })
 })

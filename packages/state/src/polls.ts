@@ -58,10 +58,12 @@ function writePoll(id: string, next: (poll: Poll) => Poll): void {
 
 const voteKey = (id: string) => `vote:${id}`
 
-// How many votes each post has started in this page session. A refresh that
-// left before a vote answers with the poll as it was before it, so it is
-// dropped when this moved meanwhile.
-const voteSeq = new Map<string, number>()
+// A revision per post, moved by every write a vote makes: its start, its
+// result and its rollback. A refresh notes it when it leaves and drops its
+// answer when it moved meanwhile, so a read that started before or during a
+// vote never overwrites what the vote wrote.
+const pollRev = new Map<string, number>()
+const bump = (id: string) => { pollRev.set(id, (pollRev.get(id) ?? 0) + 1) }
 
 /**
  * Votes on the poll of `status` (or of the post it boosts) with the indexes
@@ -89,18 +91,20 @@ export async function votePoll(status: Status, choices: readonly number[], opts:
 
   const generation = ownerGeneration()
   const optimistic = optimisticVote(before, choices)
-  voteSeq.set(id, (voteSeq.get(id) ?? 0) + 1)
+  bump(id)
   inflight.add(key)
   writePoll(id, (p) => p.id === before.id ? optimistic : p)
   try {
     const fresh = await client.votePoll(before.id, choices)
     if (generation !== ownerGeneration()) return false
+    bump(id)
     writePoll(id, (p) => p.id === fresh.id ? fresh : p)
     return true
   } catch {
     if (generation !== ownerGeneration()) return false
     // Undo only this vote: a copy that no longer holds it was written since
     // from the server.
+    bump(id)
     writePoll(id, (p) => p === optimistic ? before : p)
   } finally {
     inflight.delete(key)
@@ -123,11 +127,11 @@ export async function refreshPoll(status: Status, opts: MutationOpts = {}): Prom
   const client = (opts.clientSource ?? (() => activeClient.value))()
   if (!poll || !client) return null
   const generation = ownerGeneration()
-  const seq = voteSeq.get(target.id) ?? 0
+  const rev = pollRev.get(target.id) ?? 0
   try {
     const fresh = await client.fetchPoll(poll.id)
     if (generation !== ownerGeneration() || inflight.has(voteKey(target.id))) return null
-    if ((voteSeq.get(target.id) ?? 0) !== seq) return null
+    if ((pollRev.get(target.id) ?? 0) !== rev) return null
     batch(() => {
       if (!cachedPoll(target.id)) mergeStatus(status)
       writePoll(target.id, (p) => p.id === fresh.id ? fresh : p)

@@ -275,4 +275,19 @@ describe('review round 2', () => {
     expect(get('1')?.poll?.ownVotes).toEqual([1])
     expect(toasts).toEqual([])
   })
+
+  it('a refresh that started while a vote was out never overwrites the vote\'s result', async () => {
+    cacheStatus(makeStatus('1'))
+    const post = deferred<Poll>()
+    const get = deferred<Poll>()
+    const opts = { clientSource: () => client({ votePoll: () => post.promise, fetchPoll: () => get.promise }) }
+    const v = votePoll(statusCache.value.get('1')!, [0], opts)
+    const r = refreshPoll(statusCache.value.get('1')!, opts)
+    post.resolve(makePoll({ voted: true, ownVotes: [0], votesCount: 5 }))
+    expect(await v).toBe(true)
+    get.resolve(makePoll())
+    expect(await r).toBeNull()
+    expect(statusCache.value.get('1')?.poll?.voted).toBe(true)
+    expect(statusCache.value.get('1')?.poll?.votesCount).toBe(5)
+  })
 })
