@@ -1,5 +1,27 @@
 # caribou-app
 
+## 0.10.5
+
+### Patch Changes
+
+- [#162](https://github.com/beatzball/caribou/pull/162) [`4a5d118`](https://github.com/beatzball/caribou/commit/4a5d118c2c482450d4dc20d806159df6f0a16441) Thanks [@beatzball](https://github.com/beatzball)! - `<caribou-button>` takes `pressed`, `label` and `hint`. `pressed` makes a text button a toggle, with the same three states as on `<caribou-icon-button>`. `label` and `hint` name the inner button and give it a tooltip. A post's "edited" mark and the media Show sensitive media, Hide and lightbox Close buttons now use `<caribou-button>`.
+
+- [#161](https://github.com/beatzball/caribou/pull/161) [`7b12e8c`](https://github.com/beatzball/caribou/commit/7b12e8c6978e61d811ee2fe72b78cc16ee53e3de) Thanks [@beatzball](https://github.com/beatzball)! - Add `<caribou-tabs>`, a shared row of link tabs. The profile tabs and the search tabs use it. When the row is too wide for the screen it scrolls, and a shadow at the edge shows more tabs. The search Retry is now a `<caribou-button>`.
+
+- [#166](https://github.com/beatzball/caribou/pull/166) [`3cf8c08`](https://github.com/beatzball/caribou/commit/3cf8c08713c8d4473769c94f5af04f9586a095f6) Thanks [@beatzball](https://github.com/beatzball)! - Add keyboard shortcuts. `j` and `k` move focus to the next and previous post, in every list of posts. `o` or Enter opens the post. `f`, `b` and `r` favourite, boost and reply to it. `n` writes a new post, `/` focuses the search box, and `g` then `h`, `n`, `l` or `s` goes to Home, Notifications, Lists or Search. `?` shows the list of shortcuts. No shortcut fires while you type, while a dialog is open, or with Ctrl, Meta or Alt. A new Keyboard section in Settings turns them off. The right rail's Keyboard shortcuts item now links there.
+
+- [#164](https://github.com/beatzball/caribou/pull/164) [`d8f44c7`](https://github.com/beatzball/caribou/commit/d8f44c7cbbe4e6acd1e4fa29786ebaacaa729ac0) Thanks [@beatzball](https://github.com/beatzball)! - The notification filters (All, Mentions) use the shared `<caribou-button pressed>`. They look and work as before.
+
+- [#168](https://github.com/beatzball/caribou/pull/168) [`729db16`](https://github.com/beatzball/caribou/commit/729db164e22d5c7061a0bf31e3ce919382c8d9d9) Thanks [@beatzball](https://github.com/beatzball)! - Polls. A post shows its poll: options, bars, shares, voters, the end time, the reader's choices, and "Ended". The server renders the results. A signed-in reader on the post's server votes with radio buttons or checkboxes, and can refresh the poll. The compose dialog has a poll builder: options up to the server's limit, a duration, several choices, and hidden totals. A poll and media exclude each other.
+
+- [#167](https://github.com/beatzball/caribou/pull/167) [`6af44c7`](https://github.com/beatzball/caribou/commit/6af44c76bf72cbac4b6905d4546218110e7bc512) Thanks [@beatzball](https://github.com/beatzball)! - Show quote posts (Mastodon 4.5). A quoted post shows as a small card inside the post that quotes it: the author, the text, a media summary and a link to its thread. A quote that shows no post (pending, declined, removed, deleted, not allowed, or by an account the reader blocked or muted) shows a short note. The quoted post's content warning, the reader's filters, mutes and blocks, and the reader's edits and deletes all apply. A quote inside a quoted post is a link, not another card. A signed-in reader gets their own server's quote state, also on a thread page. The server renders the quote, so it works without JavaScript.
+
+- [#160](https://github.com/beatzball/caribou/pull/160) [`7678e84`](https://github.com/beatzball/caribou/commit/7678e8457f17b4a85292c5ba130dcecdb43645d3) Thanks [@beatzball](https://github.com/beatzball)! - The "new posts" banner and the "Switch to" account button in Settings now use the shared `<caribou-button>`. Two small visible changes: both now show the shared keyboard focus ring, and the banner's text uses the app font, so the bar is about 1px taller and gets the shared hover tint.
+
+- Updated dependencies [[`3cf8c08`](https://github.com/beatzball/caribou/commit/3cf8c08713c8d4473769c94f5af04f9586a095f6), [`729db16`](https://github.com/beatzball/caribou/commit/729db164e22d5c7061a0bf31e3ce919382c8d9d9), [`729db16`](https://github.com/beatzball/caribou/commit/729db164e22d5c7061a0bf31e3ce919382c8d9d9), [`6af44c7`](https://github.com/beatzball/caribou/commit/6af44c76bf72cbac4b6905d4546218110e7bc512)]:
+  - @beatzball/caribou-state@0.4.4
+  - @beatzball/caribou-mastodon-client@0.4.3
+
 ## 0.10.4
 
 ### Patch Changes

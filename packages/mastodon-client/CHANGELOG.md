@@ -1,5 +1,11 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.3
+
+### Patch Changes
+
+- [#168](https://github.com/beatzball/caribou/pull/168) [`729db16`](https://github.com/beatzball/caribou/commit/729db164e22d5c7061a0bf31e3ce919382c8d9d9) Thanks [@beatzball](https://github.com/beatzball)! - New poll calls: `votePoll` (`POST /api/v1/polls/:id/votes`) and `fetchPoll` (`GET /api/v1/polls/:id`). `createStatus` takes a `poll` (options, duration, several choices, hidden totals). It never sends a poll beside media.
+
 ## 0.4.2
 
 ### Patch Changes
