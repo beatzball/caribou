@@ -154,8 +154,9 @@ for (const state of ['muted_account', 'blocked_account'] as const) {
       history.pushState(null, '', p)
       window.dispatchEvent(new PopStateEvent('popstate'))
     }, path)
-    await go('/@alice/quoting-cw')
-    await expect(quote(page).locator('.spoiler')).toHaveText('Spoilers ahead')
+    await go('/settings')
+    await expect(page.locator('page-settings')).toHaveCount(1)
+    await expect(page.locator('litro-outlet > *')).toHaveCount(1)
     failReader = true
     const before = asked.length
     await page.goBack()

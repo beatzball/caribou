@@ -172,7 +172,10 @@ rejected, revoked, deleted, unauthorized, blocked or muted author) and an
 unknown one show a short note. After mount, a card on the reader's server
 takes the quote from the cached copy of the post: the reader's copy
 (`loadReaderView`) says whether they may see the quoted post, and a list
-that keeps its own copy (a thread) never gets it. Hashtags and mentions in
+that keeps its own copy (a thread) never gets it. The cache keeps the reader's
+quote over a copy without a token (no `filtered`), such as a page's
+background refresh, and keeps a full quote over a shallow copy of the same
+quoted post (`keepQuote` in `@beatzball/caribou-state`). Hashtags and mentions in
 the quoted text open in Caribou, as in a post (`components/_post-links.ts`).
 The quoted post's own content warning,
 the reader's filters, mutes and blocks, and a newer edit or a delete from
