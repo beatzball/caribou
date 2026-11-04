@@ -1,6 +1,7 @@
 import { html, type TemplateResult } from 'lit'
 import './caribou-settings-appearance.js'
 import './caribou-settings-timeline.js'
+import './caribou-settings-keyboard.js'
 import './caribou-settings-moderation.js'
 import './caribou-settings-account.js'
 import './caribou-settings-about.js'
@@ -38,6 +39,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     id: 'timeline',
     heading: 'Timeline',
     render: () => html`<caribou-settings-timeline></caribou-settings-timeline>`,
+  },
+  {
+    id: 'keyboard',
+    heading: 'Keyboard',
+    render: () => html`<caribou-settings-keyboard></caribou-settings-keyboard>`,
   },
   {
     id: 'moderation',

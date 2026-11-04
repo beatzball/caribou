@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import {
   activeClient, activeUserKey, addUserSession, emptyDraft, loadDraft, saveDraft, statusCache, users,
   type UserSession,
 } from '@beatzball/caribou-state'
 import '../caribou-compose-dialog.js'
+import { startShortcuts } from '../_shortcuts.js'
 import type { CaribouComposeDialog } from '../caribou-compose-dialog.js'
 import { MediaProcessingTimeout } from '@beatzball/caribou-mastodon-client'
 
@@ -111,6 +112,8 @@ describe('caribou-compose-dialog', () => {
 
   it('opens on the n key, but not while typing in a text field', async () => {
     signIn()
+    const stop = startShortcuts(window, document)
+    onTestFinished(stop)
     const el = await mount()
     const input = document.createElement('input')
     document.body.appendChild(input)
