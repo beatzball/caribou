@@ -1,7 +1,7 @@
 ---
 title: Caribou Bluesky support — Design Spec
 date: 2026-11-04
-status: draft, for owner review
+status: draft, round 2, for owner review
 ---
 
 # Caribou Bluesky support — Design Spec
@@ -12,26 +12,31 @@ Caribou is a Mastodon client. This spec adds Bluesky as a second network.
 Bluesky runs on the AT Protocol ("atproto").
 
 A reader signs in with a Bluesky account next to their Mastodon accounts. They
-read their Following feed, open profiles and threads, and like, repost, reply,
-quote, follow and post. Screens stay the same where the two networks match.
-A feature that one network lacks is hidden for that network, not shown broken.
+read their Following feed and notifications, open profiles and threads, and
+like, repost, reply, quote, bookmark, follow and post. A feature that one
+network lacks is hidden for that network, not shown broken.
 
 The recommended shape, in one line each:
 
-- **Sign-in:** atproto OAuth as a **public browser client**. Tokens and the
-  DPoP key stay in the browser, like the Mastodon token does today. Caribou's
-  server serves the client metadata and resolves handles. It does not proxy
-  data.
-- **Model:** a second `CaribouClient` that returns **Mastodon-shaped objects**
-  plus a small `bluesky` extension field. Each client declares what it can do
-  (`capabilities`). The neutral model can grow out of this later.
-- **Routes:** `/@alice.example.com` is a Bluesky profile. A Mastodon username
-  never has a dot, so the dot tells the two apart.
+- **Sign-in:** atproto OAuth as a **public browser client** for the first
+  release. Tokens and the DPoP key stay in the browser. Caribou's server serves
+  the client metadata and resolves handles. It does not proxy data. A
+  **client-assertion backend** (5.3, option D) is the planned upgrade if the
+  two-week session cap hurts.
+- **Model:** a second `CaribouClient` behind **Caribou-owned types** that keep
+  Mastodon's field names, plus a `bluesky` field and per-network
+  `capabilities`. This is not "only an adapter": section 6.3 lists the seams
+  the state layer needs first.
+- **Routes:** `/@alice.example.com` is a Bluesky profile. A *local* Mastodon
+  username never has a dot. Section 8.4 states the one edge case.
 - **SSR:** profiles, threads and feeds come from the public AppView without a
-  token. The Following feed, notifications, bookmarks and search need a token
-  and render on the client, as they do for Mastodon.
+  token. Following, notifications, bookmarks and post search need a token and
+  render on the client, as Mastodon `/home` does today.
 
-No code ships with this spec. Section 13 lists the phases and issues.
+Round 2 of this spec fixes the review findings on PR #165. The main changes:
+day one now includes notifications and SSR, the session expiry keeps drafts,
+moderation is kept per surface with label definitions, and the phase sizes are
+about twice what round 1 said (section 13). No code ships with this spec.
 
 ---
 
@@ -39,35 +44,41 @@ No code ships with this spec. Section 13 lists the phases and issues.
 
 ### 2.1 Goal: day one
 
-A reader can do these things on the first Bluesky release (end of phase 4 in
-section 13):
+Day one is the end of phase 4 (section 13). It needs phases 0–4 and the quoted
+posts work (PR #167). On day one a reader can:
 
 - Sign in with a Bluesky handle (`alice.bsky.social`, `alice.example.com`), a
-  DID, or a PDS host. Keep a Mastodon account signed in at the same time.
+  DID, or a PDS host, on its own sign-in panel. Keep a Mastodon account signed
+  in at the same time.
 - Switch between Bluesky and Mastodon accounts with the account switcher.
 - Read the **Following** feed with the "N new posts" banner.
-- Open a **profile** (posts, replies, media) and a **thread**.
+- Open a **profile** (posts, replies, media) and a **thread**. A shared link
+  works signed out (SSR).
 - See text with links, mentions and tags; images with alt text; link cards;
   quoted posts; quoted posts with media.
-- See labels and moderation the way the Bluesky app shows them: blur, warn or
-  hide.
+- See labels and moderation the way the reader set them: blur, warn or hide,
+  including labels from labelers they subscribe to.
 - **Like, repost, quote, reply, bookmark, follow, mute, block.** Each one is
-  optimistic with rollback, like today.
-- **Compose** a post (300 characters, counted as graphemes), with up to four
-  images and alt text, as a reply or a quote.
-- **Delete** an own post.
+  optimistic with rollback. Reply and Quote are off on a post whose author
+  turned them off.
+- **Compose** a post (300 graphemes and 3000 bytes), with up to four images and
+  alt text, as a reply or a quote.
+- **Delete** an own post, and delete and redraft.
 - Read **notifications** with the unread badge.
+
+Not on day one, and **hidden** in the nav for a Bluesky account until built:
+Search, Lists, Feeds.
 
 ### 2.2 Later (planned)
 
+- **Search** for people and posts; hashtag pages (phase 5).
 - Pinned and saved **custom feeds** (phase 5).
 - **Lists** (curate lists) and list feeds (phase 5).
-- **Search** for posts and people; hashtag pages through search (phase 5).
 - **Muted words**, mapped to the filters screen (phase 6).
 - "Act as another account" (#131) between Bluesky accounts (phase 6).
-- **Video** playback (HLS) (phase 6).
-- **Thread gates** (who can reply) and **post gates** (quotes off) in compose
-  (phase 6).
+- **Video** playback (phase 6).
+- Creating **thread gates** and **post gates** in compose (phase 6).
+- **Link cards** made by compose (phase 6).
 
 ### 2.3 Non-goals
 
@@ -75,25 +86,29 @@ section 13):
 - **Moderation lists**, **starter packs**, running a **labeler**.
 - A **merged home** with both networks in one feed.
 - **Cross-posting** one draft to both networks.
-- **Account management**: handle change, email, migration, deletion. The
-  reader uses the Bluesky app or their PDS for that.
+- **Account management**: handle change, email, migration, deletion.
 - Our own **AppView**, relay or PDS.
-- **Bridged accounts** (Bridgy Fed). A bridged account is just an account on
-  the other network. Caribou does nothing special.
+- **Bridged accounts** (Bridgy Fed). A bridged account is an account on the
+  other network. Caribou does nothing special.
 
 ---
 
 ## 3. Context and references
 
 - AT Protocol OAuth: <https://atproto.com/specs/oauth>
+- OAuth app architectures: <https://atproto.com/guides/about-oauth>
+- Client-assertion backend proposal:
+  <https://github.com/bluesky-social/proposals/tree/main/0010-client-assertion-backend>
 - Permission scopes: <https://atproto.com/specs/permission>
 - Handles: <https://atproto.com/specs/handle>
 - Rich text facets: <https://docs.bsky.app/docs/advanced-guides/post-richtext>
-- Browser OAuth client: `@atproto/oauth-client-browser` (in the
-  `bluesky-social/atproto` repo)
+- SDK and lexicons: `bluesky-social/atproto` on GitHub —
+  `packages/oauth/oauth-client-browser`, `packages/oauth/oauth-provider`,
+  `packages/api/src/moderation`, `packages/bsky/lexicons/app/bsky/`
 - Caribou v1 spec: `docs/superpowers/specs/2026-04-21-caribou-v1-design.md`
   (sections 5, 7 and 8 are the parts this spec changes)
-- Multi-account switcher: #58. Act as another account: #131.
+- Multi-account switcher: #58. Act as another account: #131. Quoted posts:
+  #56, PR #167.
 
 ### 3.1 Words used here
 
@@ -105,7 +120,7 @@ section 13):
 | **AppView** | The service that builds feeds, threads, counts and notifications from all records. Bluesky runs `api.bsky.app` and the token-free `public.api.bsky.app`. |
 | **Record** | One item in an account's repo: a post, a like, a follow. A like is a record, not a flag. |
 | **AT URI** | The address of a record: `at://did:plc:abc/app.bsky.feed.post/3mzh...`. The last part is the **rkey**. |
-| **CID** | A hash of one version of a record. A reply or a like names both the URI and the CID. |
+| **CID** | A hash of one version of a record. A reply or a like names both the URI and the CID (a "strong ref"). |
 | **Facet** | A range in a post's plain text that is a link, a mention or a tag. |
 | **Label** | A tag on a post or an account from a moderation service (a **labeler**) or from the author. |
 | **DPoP** | A rule that binds a token to a key. Each request carries a fresh proof signed by that key. A stolen token alone is useless. |
@@ -118,38 +133,70 @@ From `https://public.api.bsky.app/xrpc/`, with no token:
 | endpoint | answer |
 |---|---|
 | `app.bsky.actor.getProfile` | 200 |
+| `app.bsky.actor.searchActors` | 200 |
+| `app.bsky.actor.searchActorsTypeahead` | 200 |
 | `app.bsky.feed.getAuthorFeed` | 200 |
 | `app.bsky.feed.getPostThread` | 200 |
 | `app.bsky.feed.getFeed` (a feed generator) | 200 |
 | `app.bsky.graph.getLists` | 200 |
+| `app.bsky.labeler.getServices?detailed=true` | 200 |
 | `app.bsky.feed.searchPosts` | **403** |
-| `app.bsky.feed.getTimeline` | **401** |
+| `app.bsky.feed.getTimeline` | **401** (`AuthMissing`) |
 
 The public AppView sends `access-control-allow-origin: *` and
-`cache-control: public, max-age=30`. A post view now has `bookmarkCount` and
+`cache-control: public, max-age=30`. A post view has `bookmarkCount` and
 `quoteCount`. `bsky.social` advertises the scopes `atproto`,
 `transition:generic`, `transition:email` and `transition:chat.bsky`, and the
-client auth methods `none` and `private_key_jwt`.
+client auth methods `none` and `private_key_jwt`. It advertises no granular
+scopes yet.
+
+From the lexicons on `main` (`packages/bsky/lexicons/app/bsky/`):
+
+- `feed.post` `text`: `maxGraphemes: 300`, `maxLength: 3000` (bytes).
+- `embed.images` `image`: `maxSize: 2000000` ("up to 2 MB, formerly 1 MB").
+- `feed.defs#reasonRepost`: requires only `by` and `indexedAt`. `uri` and
+  `cid` are optional.
+- `feed.defs#viewerState`: `repost`, `like`, `bookmarked`, `threadMuted`,
+  `replyDisabled`, `embeddingDisabled`, `pinned`.
+
+From `oauth-provider/src/oauth-constants.ts` on `main` (the provider that
+`bsky.social` runs): `TOKEN_MAX_AGE` 60 minutes; `SESSION_LIFETIME` and
+`REFRESH_LIFETIME` 2 weeks; `SESSION_LIFETIME_EXTENDED` 2 years and
+`REFRESH_LIFETIME_EXTENDED` 3 months (confidential clients).
+
+From `oauth-client-browser/src/browser-oauth-client.ts` on `main`:
+`responseMode` defaults to `'fragment'` ("the query params will not be sent to
+the server"). `initRestore` restores a stored session or throws. There is no
+client-assertion hook (`keyset: undefined`).
+
+From Mastodon's `app/models/account.rb`: local usernames must match
+`/\A[a-z0-9_]+\z/i`; remote usernames match `USERNAME_RE`, which allows `.` and
+`-` inside.
+
+Not checked, left to phase 0: whether the public AppView still returns the
+posts of an account with `!no-unauthenticated` (we had no such account to
+probe).
 
 ---
 
 ## 4. Key decisions — at a glance
 
-| # | decision | recommended | other way |
+| # | decision | recommended | other ways |
 |---|---|---|---|
-| 1 | OAuth client type | Public browser client | Confidential client with a server session (BFF) |
-| 2 | Where tokens live | Browser IndexedDB, keyed by DID | Caribou server, behind a cookie |
-| 3 | Model between screens and clients | Mastodon-shaped objects + `bluesky` field + `capabilities` | New neutral model with two adapters |
+| 1 | OAuth client | Public browser client now; client-assertion backend later | BFF; token-mediating backend (5.3) |
+| 2 | Where tokens live | Browser IndexedDB, keyed by DID | Caribou server |
+| 3 | Model between screens and clients | Caribou-owned types with Mastodon field names + `bluesky` field + `capabilities` | A neutral model with new field names |
 | 4 | Client library | `@atproto/api` + `@atproto/oauth-client-browser` | Hand-written XRPC calls |
 | 5 | UserKey for Bluesky | `<did>@bsky` | `<handle>@<pds host>` |
-| 6 | Profile route | `/@alice.example.com` (a dot means Bluesky) | A prefix, like `/bsky/@alice.example.com` |
-| 7 | Post route | `/@alice.example.com/<rkey>` | The full AT URI in the path |
-| 8 | Home for Bluesky | Following feed | A merged feed (non-goal) |
-| 9 | `/local` and `/public` for Bluesky | Not shown | Map to "Discover" |
-| 10 | Scopes | `atproto transition:generic` | Granular scopes now |
+| 6 | Profile route | `/@alice.example.com` (a dot and no second `@` means Bluesky) | A prefix, like `/bsky/@alice.example.com` |
+| 7 | Post route | `/@<handle or did>/<rkey>` | The full AT URI in the path |
+| 8 | Sign-in form | Two panels, Mastodon and Bluesky | One box that guesses |
+| 9 | Home for Bluesky | Following feed | A merged feed (non-goal) |
+| 10 | `/local` and `/public` for Bluesky | Not shown | Map to "Discover" |
+| 11 | Scopes | `atproto transition:generic` | Granular scopes when the PDS has them |
+| 12 | Moderation | The SDK's `moderatePost` / `moderateProfile` with label definitions, kept per surface | Map labels onto Mastodon's CW fields |
 
-Each one is argued in the sections below. Section 12.3 asks the owner to confirm
-the ones that cost the most to change later.
+Section 12.3 asks the owner about the ones that stay open.
 
 ---
 
@@ -160,179 +207,247 @@ the ones that cost the most to change later.
 | | Mastodon today | atproto |
 |---|---|---|
 | App registration | `POST /api/v1/apps` per server, cached 7 days | None. The `client_id` **is** a URL to a JSON metadata file that Caribou serves. |
-| Client secret | Yes, kept on the Caribou server | None. A confidential client signs a JWT with its own key instead. |
+| Client secret | Yes, kept on the Caribou server | None. A confidential client signs a JWT with its own key. |
 | Where to send the user | The server the user typed | Resolve handle → DID → DID document → PDS → `/.well-known/oauth-protected-resource` → authorization server → its metadata |
 | Request | Plain redirect | PAR first, then redirect with `request_uri` |
 | PKCE | No | Required, `S256` |
-| Token | Bearer, long-lived | DPoP-bound. Access token under 30 minutes. Refresh token single-use. |
-| Session cap | None | Public client: 2 weeks. Confidential client: no cap, each refresh token up to 180 days. |
+| Token | Bearer, long-lived | DPoP-bound. Refresh token single-use. |
+| Callback | `/api/signin/callback` checks the browser's `caribou.signin` cookie, swaps the code on the server, and returns the session in the response body. The token is never in a URL. | The browser swaps the code itself. The SDK reads the callback from the URL fragment by default. |
 | After the token | Use it | Check that `sub` (the DID) resolves to a PDS whose authorization server issued the token |
 
-### 5.2 Option A — public browser client (recommended)
+Token lifetimes. The atproto spec gives guidance; each authorization server
+sets its own policy. What the spec says, and what `bsky.social` runs (3.2):
 
-`@atproto/oauth-client-browser` runs the whole flow in the browser. It makes a
-non-extractable DPoP key (the page can use it but cannot read it out), stores
-the session in IndexedDB, refreshes on its own, and restores a session by DID.
+| | spec guidance | `bsky.social` today |
+|---|---|---|
+| Access token | under 30 minutes recommended | 60 minutes |
+| Public client session | 2 weeks recommended for untrusted clients | 2 weeks |
+| Public client refresh token | same | 2 weeks |
+| Confidential client session | may be unlimited | 2 years |
+| Confidential refresh token | up to 180 days | 3 months |
+| Silent sign-in (no approval screen) | the server *may* allow it for a **confidential** client the user already approved | not measured |
 
-What Caribou's server does:
+So a public client means **a real re-approval at least every two weeks**. The
+browser SDK does not do silent re-auth: `initRestore` restores or throws.
 
-1. **Serves the client metadata** at
-   `https://<host>/oauth/client-metadata.json`. The `client_id` field must equal
-   that exact URL. Fields: `client_name: "Caribou"`, `client_uri`,
-   `redirect_uris: ["https://<host>/signin/bluesky"]`,
-   `scope: "atproto transition:generic"`,
-   `grant_types: ["authorization_code", "refresh_token"]`,
-   `response_types: ["code"]`, `token_endpoint_auth_method: "none"`,
-   `application_type: "web"`, `dpop_bound_access_tokens: true`. The host comes
-   from `PUBLIC_BASE_URL`, like the Mastodon redirect URI does.
-2. **Resolves handles.** A browser cannot read DNS TXT records. The server
-   answers `GET /api/atproto/resolve-handle?handle=` with the DID. It tries DNS
-   `_atproto.<handle>` and `https://<handle>/.well-known/atproto-did`, and DNS
-   wins if they differ. This keeps the reader's handle and IP away from a third
-   party resolver. See section 10 for the SSRF guard.
+### 5.2 The parts every option shares
 
-What it does not do: hold tokens, proxy data, or keep sessions. The v1 rule
-"server responsibilities — exactly three" (v1 spec 5.2) stays true, with two
-small static-ish endpoints added to the OAuth part.
+1. **Client metadata** at `https://<host>/oauth/client-metadata.json`. The
+   `client_id` field must equal that exact URL. Fields: `client_name:
+   "Caribou"`, `client_uri`, `redirect_uris: ["https://<host>/signin/bluesky"]`,
+   `scope: "atproto transition:generic"`, `grant_types: ["authorization_code",
+   "refresh_token"]`, `response_types: ["code"]`, `application_type: "web"`,
+   `dpop_bound_access_tokens: true`, and the auth method of the option chosen.
+   The host comes from `PUBLIC_BASE_URL`. The health check fails if the served
+   `client_id` does not equal the URL it is served from.
+2. **A handle resolver** on Caribou's host. A browser cannot read DNS TXT
+   records. The SDK's `handleResolver` option takes the URL of a service that
+   answers `com.atproto.identity.resolveHandle`. So Caribou serves
+   `GET /xrpc/com.atproto.identity.resolveHandle?handle=` and passes its own
+   origin as `handleResolver`. The server tries DNS `_atproto.<handle>` and
+   `https://<handle>/.well-known/atproto-did`; DNS wins if they differ. This
+   keeps the *handle lookup* off a third-party resolver. The next step,
+   DID → DID document, still goes from the browser to `plc.directory` (for
+   `did:plc`) and then to the PDS. Section 10 has the SSRF guard.
 
-Cost:
+### 5.3 The options
 
-- **The reader signs in again every two weeks.** The browser client cannot
-  extend this. The library does silent re-auth where the authorization server
-  allows it, which helps when the reader is still signed in at their PDS.
-- An XSS bug can use the DPoP key while the page is open. It cannot copy the
-  key out. This is the same class of risk as the Mastodon token in
-  localStorage today, and a bit better.
-- Local dev needs the loopback client (`client_id` `http://localhost`,
-  redirect on `http://127.0.0.1:<port>`). Its refresh tokens are short.
+The atproto OAuth guide ("Types of App") names a browser app and three backend
+patterns. We compare them on what Caribou cares about.
 
-### 5.3 Option B — confidential client with a server session
+**A. Public browser client.** `@atproto/oauth-client-browser` runs the flow in
+the browser. It makes a non-extractable DPoP key, keeps the session in
+IndexedDB, refreshes on its own, and restores a session by DID.
 
-`@atproto/oauth-client-node` runs on Caribou's server. The server holds an
-ES256 key, publishes its public half in `jwks`, and signs a client assertion
-on each token request. Tokens and the DPoP key stay on the server. The browser
-gets a session cookie.
+- Session: 2 weeks on `bsky.social`, then a full re-approval.
+- Server work: the shared parts in 5.2 only.
+- Credentials: in the browser. A script running in the page (XSS) can make
+  requests with them while the page is open. It cannot copy the DPoP key out,
+  so it cannot use the tokens elsewhere. (Today's Mastodon token in
+  localStorage *can* be copied out.)
+- SDK: supported. Local dev uses the loopback client (`client_id`
+  `http://localhost`): refresh is short (about a day) and silent sign-in is not
+  allowed.
 
-Good: sessions do not expire every two weeks. Credentials can be revoked
-server-side.
+**B. Backend-for-frontend (BFF), confidential.** `@atproto/oauth-client-node`
+on Caribou's server is the OAuth client. Tokens and DPoP keys stay on the
+server; the browser gets a session cookie. The atproto guide calls this the
+recommended confidential pattern.
 
-Cost:
+- Session: 2 years on `bsky.social`; refresh tokens 3 months.
+- Server work: large. Every Bluesky call goes through Caribou's server, because
+  the DPoP key the tokens are bound to lives there. The server stores every
+  reader's session and the client signing key; `/data` becomes sensitive; key
+  rotation is our job.
+- Credentials: never in browser JavaScript. XSS can still act through the
+  cookie while the page is open, but nothing can be carried away.
+- SDK: supported.
 
-- **Every Bluesky call goes through Caribou's server.** A DPoP key must not
-  leave the device it was made for. So the browser cannot call the PDS itself.
-  This turns the server into a data proxy, which the v1 spec rules out.
-- The server now stores secrets and sessions for every reader. The `/data`
-  volume becomes sensitive. Key rotation becomes our job: if a key leaves
-  `jwks`, every session on it dies.
-- Polling, timelines and compose all go through our server. That is load and
-  latency we do not have today.
-- Two code paths: Mastodon direct from the browser, Bluesky through the server.
+**C. Token-mediating backend (TMB), confidential.** The backend is the OAuth
+client and hands access tokens to the browser, which calls the PDS directly.
 
-A middle way exists in theory. The browser keeps the DPoP key and signs the
-proof. The server only adds the client assertion to the token request. No
-library does this, and it is not a pattern the spec describes. We do not
-plan on it.
+- With DPoP, the browser needs the session's DPoP private key to use those
+  tokens. So the key must be extractable and sent to the browser. That gives up
+  the "cannot copy the key out" property of A.
+- No SDK support. We drop this option.
+
+**D. Client-assertion backend, confidential.** A Bluesky proposal (0010). The
+browser holds the DPoP key and the tokens, as in A. When the browser needs a
+token (PAR, code swap, refresh), it asks Caribou's server for a client
+assertion: a short JWT signed with Caribou's client key and bound to the
+browser's DPoP key thumbprint. The PDS then treats the session as
+confidential.
+
+- Session: confidential lifetimes on `bsky.social`, if the provider accepts it
+  as such. The provider verifies `private_key_jwt` assertions today
+  (`oauth-provider/src/client/client.ts`). We found no check of the proposal's
+  DPoP binding there, so the binding is not enforced yet.
+- Server work: small. One POST endpoint that checks a DPoP proof and returns
+  an assertion, plus the public key in `jwks`. No data proxying, no token
+  storage.
+- Credentials: as A.
+- SDK: **no hook** in `oauth-client-browser` (`keyset: undefined`). We would
+  wrap or patch the SDK, or wait for upstream.
+- Abuse: anyone can ask our endpoint for an assertion for their own DPoP key.
+  That only gives them a long session on their own account through Caribou's
+  client id. The endpoint needs CORS to our origin, `no-store`, a nonce and a
+  rate limit.
+
+| | A public | B BFF | D client-assertion |
+|---|---|---|---|
+| Re-approval | every 2 weeks | rare | rare (if accepted) |
+| Caribou proxies data | no | **yes, all of it** | no |
+| Server stores sessions | no | yes | no |
+| Upstream credentials in browser JS | yes (non-extractable key) | no | yes (non-extractable key) |
+| SDK support today | yes | yes | no |
+| Fits v1 "server does exactly three things" | yes | no | yes, with one more small endpoint |
+| Work | 5.2 only | L+ (proxy for ~60 client methods, session store, key ops) | M (endpoint, SDK wrap, tests) |
 
 ### 5.4 Recommendation
 
-**Option A for the first release.** It fits Caribou's shape: the browser
-talks to the network, and the server only helps with sign-in. Revisit Option B
-if the two-week sign-in turns out to annoy readers. Section 12.3, question 1.
+**A for the first release. D as the upgrade.** B is the most secure. But it
+puts Caribou's server in the path of every Bluesky request, and it makes a
+second architecture next to Mastodon's browser-direct one. D gives most of B's
+lifetime gain without that, once the SDK supports it or we accept a small wrap.
+
+What changed from round 1: round 1 said silent re-auth would soften the
+two-week cap. It will not. The browser SDK has no silent re-auth, and the spec
+allows silent sign-in only for confidential clients. So the expiry flow (5.6)
+must be good on its own, and D is now a named plan (issue 32). Round 1 also
+said a browser-plus-server client is not a pattern the spec describes; the
+guide does describe TMB and the client-assertion backend.
 
 ### 5.5 Flow (option A)
 
-1. On the landing or `/?add` form, the reader types a handle, a DID or a PDS
-   host. The form already takes a Mastodon server. A value that looks like a
-   handle with no Mastodon instance behind it, or that starts with `did:`, goes
-   the Bluesky way. See section 12.3, question 2, for whether to show two tabs
-   instead.
-2. The browser calls `client.signIn(input)`. The library resolves the
-   identity (through our resolver), finds the authorization server, sends PAR
-   with PKCE and DPoP, and redirects.
+1. The landing page and the `/?add` form get two panels: **Mastodon** (a
+   server) and **Bluesky** (a handle, a DID or a PDS host). We do not guess:
+   `alice.example.com` can be a Mastodon server or a Bluesky handle. The panels
+   are a real tablist with arrow-key selection, not the link-based
+   `caribou-tabs` (which navigates).
+2. The browser loads the Bluesky client chunk and calls `client.signIn(input)`.
+   The SDK resolves the identity (through our resolver), finds the
+   authorization server, sends PAR with PKCE and DPoP, and redirects.
 3. The PDS's authorization page asks the reader to approve.
-4. The PDS redirects to `/signin/bluesky?code=...&state=...&iss=...`. This page
-   renders only a shell. The browser calls `client.init()`, which swaps the code
-   for tokens, checks `sub`, and stores the session in IndexedDB.
+4. The PDS redirects to `/signin/bluesky#code=...&state=...&iss=...`. The code
+   is in the **fragment** (the SDK default), so it never reaches our server or
+   its logs. The page renders a shell only. The response has `Cache-Control:
+   no-store` and `Referrer-Policy: no-referrer`, like today's sign-in complete
+   page. `client.init()` swaps the code, checks `sub`, and stores the session.
+   The page then removes the fragment with `history.replaceState`.
 5. Caribou adds a `UserSession` (5.6) and calls `getProfile` for the account.
-6. The page goes to `/home`, as Mastodon's `/signin/done` does.
+6. The page goes to `/home`.
 
-The code and state are in the query string, not the fragment. That differs
-from Caribou's Mastodon rule (v1 spec 5.5). It is safe here because the code
-needs the PKCE verifier and the DPoP key, which only this browser has. The
-page still clears the query with `history.replaceState` at once.
+Tests drive the SDK through a real callback against a fixture authorization
+server. A test that only inserts a session would pass with the code swap or the
+`sub` check broken.
 
 ### 5.6 Session shape and the multi-account model (#58)
 
-Today (`packages/state/src/users.ts`):
-
-```ts
-interface UserSession {
-  userKey: UserKey        // `${handle}@${server}`
-  server: string
-  token: string
-  vapidKey: string
-  account: mastodon.v1.Account | null
-  createdAt: number
-}
-```
+Today (`packages/state/src/users.ts`) a session has `userKey`, `server`,
+`token`, `vapidKey`, `account` and `createdAt`. The token doubles as the
+session's identity: `removeSession(userKey, token)` refuses when the stored
+token differs, so a 401 from an older token cannot remove the session that
+replaced it.
 
 Proposed:
 
 ```ts
 type UserSession = MastodonSession | BlueskySession
 
-interface MastodonSession {
-  network?: 'mastodon'    // absent on stored entries from before this change
+interface SessionBase {
   userKey: UserKey
+  // A random id made at each sign-in. It names this sign-in, not a token.
+  // The stale-failure guard compares it, for both networks.
+  generation: string
+  account: Account | null
+  createdAt: number
+  // Set when the network says the credentials are gone. The session stays,
+  // with its prefs and drafts, until the reader signs in again or removes it.
+  expired?: true
+}
+
+interface MastodonSession extends SessionBase {
+  network?: 'mastodon'    // absent on entries stored before this change
   server: string
   token: string
   vapidKey: string
-  account: Account | null
-  createdAt: number
 }
 
-interface BlueskySession {
+interface BlueskySession extends SessionBase {
   network: 'bluesky'
-  userKey: UserKey        // `${did}@bsky`
   did: string
-  handle: string          // for display; re-checked on load
+  handle: string          // for display; refreshed from getProfile
   pds: string             // from the DID document; can change
-  account: Account | null // Mastodon-shaped, see section 6
-  createdAt: number
-  // No token here. The OAuth library keeps it in IndexedDB under the DID.
+  // No token here. The SDK keeps it in IndexedDB under the DID.
 }
 ```
 
-The **UserKey** for Bluesky is `<did>@bsky`, for example
-`did:plc:abc123@bsky`. Reasons:
+`loadFromStorage` fills a missing `generation` from the token (Mastodon), so
+stored sessions keep their guard.
 
-- The DID never changes. A handle and a PDS host can.
-- `isUserKey` splits on `@` and wants two parts. A DID has no `@`, so this
-  passes unchanged.
-- Prefs (`caribou.prefs.<userKey>`) and every other per-user key keep working.
+**UserKey** for Bluesky is `<did>@bsky`, for example `did:plc:abc123@bsky`.
+The DID never changes. `isUserKey` splits on `@` and wants two parts; a DID
+has no `@`, so this passes unchanged. Prefs and drafts keyed by `userKey` keep
+working.
 
-`activeClient` picks the client by `network`. For Bluesky it calls
-`client.restore(did)` once and wraps the session in the Bluesky
-`CaribouClient`. If restore throws (expired or revoked), it fires the same
-`caribou:unauthorized` event as a Mastodon 401, so the existing "sign in
-again" path runs.
+**`activeClient` stays synchronous.** It is a `computed` that every consumer
+reads at once. For Bluesky it returns a client object at once. The client
+holds one promise for `oauthClient.restore(did)`, and every method awaits it. A
+`sessionReady` signal lets screens show the splash until it settles. The
+Bluesky client chunk is loaded with a dynamic `import()` the first time a
+Bluesky session is active.
 
-**Sign-out** of a Bluesky account calls `session.signOut()` (which revokes the
-token at the PDS) and then `removeSession`. The Mastodon sign-out route
-(`/api/signout`) is not used.
+**Errors are sorted, not lumped.**
 
-**The account switcher** lists both kinds. Each row gets a small network mark
-(a Mastodon or Bluesky glyph) next to the handle, because `alice@example.social`
-and `alice.example.social` look alike. A switch still reloads the page, as
-decided for #58. `pathAfterSwitch` (`components/_switch-account.ts`) changes:
+| what happened | what Caribou does |
+|---|---|
+| The SDK says the session is gone (refresh refused, token revoked, `deleted` event) | Mark the session `expired`. Keep prefs, drafts and the page. Show a banner: "Your Bluesky session ended. Sign in again." Signing in with the same DID clears `expired` and makes a new `generation`. |
+| Network error, timeout, 5xx | No session change. The request fails like any other, with retry. |
+| IndexedDB unavailable (some private windows) | The sign-in panel says Bluesky sign-in needs site storage. No session is added. |
 
-- `/local` and `/public` are not "neutral" when the new account is Bluesky.
-  They go to `/home`.
-- A Bluesky profile `/@alice.example.com` is kept, like `/@name@host` is
-  today. A handle is global.
-- A Bluesky post `/@alice.example.com/<rkey>` is **also kept**. An AT URI is
-  global, unlike a Mastodon status id. A Mastodon account cannot act on it,
-  but it can still read it (section 8).
+The existing `caribou:unauthorized` path (`components/_unauthorized.ts`) drops
+the session, its prefs and **its drafts**, then switches account. That fits a
+Mastodon token the reader revoked. It is wrong for an expiry that comes every
+two weeks. So Bluesky never sends that event. It sends
+`caribou:session-expired { userKey, generation }`. Whether Mastodon should move
+to the expired state too is a separate issue.
+
+**Sign-out** of a Bluesky account calls `session.signOut()` (which revokes at
+the PDS) and then removes the session, comparing `generation`. The Mastodon
+`/api/signout` route is not used.
+
+**The account switcher** lists both kinds. Each row has the network in its
+accessible name ("alice.example.social, Bluesky"), not only an icon: the shared
+`caribou-icon` is hidden from assistive technology on purpose, and
+`alice@example.social` and `alice.example.social` look alike. A switch still
+reloads the page (#58). `pathAfterSwitch` changes:
+
+- `/local` and `/public` go to `/home` when the new account is Bluesky.
+- A Bluesky profile or post path is kept. A DID and an AT URI are global.
+
+Tests: expiry keeps drafts and location; an old expiry event after re-sign-in
+is ignored (`generation`); a network error changes nothing; with a Mastodon
+account also signed in, the Mastodon session survives all of these.
 
 ---
 
@@ -342,63 +457,130 @@ decided for #58. `pathAfterSwitch` (`components/_switch-account.ts`) changes:
 
 Every network call goes through one interface, `CaribouClient`
 (`packages/mastodon-client/src/create-client.ts`): about 60 methods. Stores in
-`packages/state` call only that interface. That is the seam.
+`packages/state` call only that interface.
 
-The types are another matter. The app and packages name `mastodon.v1.Status`
-about 190 times, `Account` 85, `Relationship` 62, `List` 40, `Notification` 34.
-About 44 files import from `masto` or the client package. The state package is
-about 3,200 lines. `packages/mastodon-client/src/index.ts` already exports
-aliases (`Status`, `Account`, `Relationship`, `List`), but most code names
-`mastodon.v1.*` directly.
+The types are another matter. The code names `mastodon.v1.Status` about 190
+times, `Account` 85, `Relationship` about 60, `List` about 40, `Notification`
+about 30. About 46 non-test files (85 with tests) import from `masto` or the
+client package. The state package is about 3,200 lines. The client package
+exports aliases (`Status`, `Account`, …), but most code names `mastodon.v1.*`.
 
-### 6.2 Option (a) — Bluesky in Mastodon shapes (recommended)
+Store mutations already take the whole status or account
+(`toggleFavourite(status)`, `toggleFollow(account)`). The id-only boundary is
+the **client interface**: `favourite(statusId: string)`,
+`follow(accountId: string)`.
 
-A new package, `@beatzball/caribou-bluesky-client`, implements `CaribouClient`.
-It turns each Bluesky view into the Mastodon shape the stores already use.
+### 6.2 The two options
 
-```ts
-// A Mastodon-shaped status that came from Bluesky.
-interface BlueskyExtra {
-  uri: string                 // at://did/app.bsky.feed.post/rkey
-  cid: string
-  likeUri: string | null      // viewer.like: needed to unlike
-  repostUri: string | null    // viewer.repost: needed to un-repost
-  bookmarked: boolean
-  labels: Label[]             // raw labels, for the moderation decision
-  moderation: ModerationUi    // blur / warn / hide, computed once
-  replyRef: { root: StrongRef; parent: StrongRef } | null
-}
-type Status = mastodon.v1.Status & { bluesky?: BlueskyExtra }
-```
+**(a) Caribou-owned types with Mastodon's field names (recommended).** The
+client package defines `Status`, `Account`, `Relationship`, `Notification`,
+`List`, page results and write inputs as Caribou types. They keep Mastodon's
+field names, so a screen that reads `status.favouritesCount` keeps working.
+Each type gets an optional `bluesky` field for what Mastodon has no place for.
+The types are recursive: `Status.account` is a Caribou `Account`,
+`Status.reblog` a Caribou `Status`. A new package,
+`@beatzball/caribou-bluesky-client`, maps Bluesky views into them.
 
-Mapping, field by field:
+**(b) A neutral model with new field names.** `Post`, `Profile`, `Relation`,
+`Notice`, `Feed`, named for both networks. Every screen, store, fixture and
+SSR serializer moves to the new names.
 
-| Mastodon field | from Bluesky |
+### 6.3 The seams both options need
+
+Round 1 said option (a) was "mostly adapter work". It is not. The review found
+places where the state layer itself assumes Mastodon. These need the same work
+under (a) or (b):
+
+1. **Owned recursive types** (above), and client method signatures that name
+   them instead of `mastodon.v1.*`.
+2. **Client write methods take a ref, not an id.**
+   `favourite(ref: StatusRef)` where `StatusRef = { id, bluesky? }`. Bluesky
+   needs the post's URI and CID to like it, and the like record's URI to undo.
+   Blast radius: the interface, the Mastodon client, and every client mock in
+   tests.
+3. **Mutation results commit record refs.** Today `toggle` copies back only
+   the flag and the count (`mutations.ts`). For Bluesky it must also copy
+   `bluesky.likeUri` / `repostUri` from the result, or the next undo has
+   nothing to delete. Rollback restores them too.
+4. **Viewer state has an owner.** `mergeStatus` (`caches.ts`) keeps old reader
+   flags when a token-less copy arrives. Bluesky viewer fields (`likeUri`,
+   `repostUri`, `bookmarked`, `replyDisabled`, `embeddingDisabled`) join that
+   protected set, and each cached entry records `viewerOf: UserKey | null`. A
+   public copy never overwrites viewer fields. A copy fetched by the owner
+   always does, also over an SSR copy whose flags are `false`.
+5. **Paging carries an opaque cursor everywhere.** `fetchAccountStatuses`
+   returns `Status[]`, and `createProfileStore.loadMore()` sends the last
+   status id. Bluesky's `getAuthorFeed` takes an opaque `cursor` that is not a
+   post id. So profile pages return a page with `nextCursor`, the store keeps
+   it, and SSR hands the first cursor to the client. Timelines already carry
+   `nextMaxId`; it is renamed `nextCursor` and treated as opaque.
+6. **Feed order is not id order.** `timeline-store.ts` sorts the new-posts
+   buffer with `newerFirst`, which compares Mastodon numeric ids. AT URIs sort
+   by DID, so the buffer would come out by author. The store gets its order
+   from the client: Mastodon keeps `newerFirst`; Bluesky keeps the order the
+   feed returned.
+7. **Polling catch-up without `since_id`.** Bluesky's `getTimeline` has no
+   `since_id`. The adapter pages from the top until it meets the known top
+   entry, at most 3 pages (about 150 entries). If it does not meet it (more
+   posts than that, or the entry left the feed), the banner says "Many new
+   posts" and applying it replaces the list instead of merging.
+8. **Feed-entry identity.** A repost wrapper's id is `reason.uri` when present.
+   The lexicon makes it optional, so the fallback is
+   `repost:<by.did>:<post.uri>:<reason.indexedAt>`. It never equals the
+   subject post's id or the reader's own repost record URI.
+
+Two more seams belong to features, not types:
+
+9. **Resource provenance.** Each cached post and account records its
+   `network`. Components ask "can the active account act on *this*
+   resource?", not "is there an active client?" (section 11).
+10. **Moderation is kept per surface** (section 7.4), not flattened.
+
+### 6.4 Cost, compared again
+
+| | (a) owned types, Mastodon names | (b) neutral model |
+|---|---|---|
+| Seams 1–10 | needed | needed |
+| Renaming fields in ~46 files, fixtures and SSR serializers | no | yes |
+| New risk for Mastodon | from the seams | from the seams and every rename |
+| Can be staged | yes | yes (alias first, one type at a time) |
+| Honest fit for Bluesky | some fields always empty (`editedAt`, `poll`); the `bluesky` field carries the rest | good |
+| Size of phase 1 | about 5–6 weeks (section 13) | about 8–10 weeks |
+
+What changed from round 1: round 1 said (b) must land in one go and (a) needs
+almost nothing. Both were wrong. (b) can be staged, and (a) needs real state
+work. The gap is the renaming, about 3–4 weeks. Moving from (a) to (b) later is
+also not "a change to the aliases": every consumer that reads a renamed field
+changes then. We still recommend (a). The renames buy Bluesky nothing on day
+one; the seams are what make Bluesky correct. Section 12.3, question 2.
+
+### 6.5 Mapping (option a)
+
+| Caribou `Status` field | from Bluesky |
 |---|---|
-| `id` | the AT URI. Unique across all accounts. |
-| `uri`, `url` | AT URI; `https://bsky.app/profile/<handle>/post/<rkey>` |
-| `content` | HTML built from `record.text` + `record.facets` (section 7) |
-| `createdAt` | `record.createdAt` (the author's claim); `indexedAt` as a fallback |
-| `account` | `author` → Account (below) |
-| `reblog` | a feed item with `reason: reasonRepost` becomes a wrapper status whose `id` is the repost's URI, `account` the reposter, `reblog` the post |
+| `id` | the AT URI (opaque outside the route adapter) |
+| `uri`, `url` | AT URI; `https://bsky.app/profile/<did>/post/<rkey>` |
+| `content` | HTML from `record.text` + `record.facets` (7.1) |
+| `createdAt` | `record.createdAt`; `indexedAt` as a fallback |
+| `account` | `author` → Account |
+| `reblog` | a feed entry with `reasonRepost` becomes a wrapper (id per seam 8) |
 | `inReplyToId` | `record.reply.parent.uri` |
-| `favouritesCount`, `reblogsCount`, `repliesCount` | `likeCount`, `repostCount`, `replyCount` |
+| counts | `likeCount`, `repostCount`, `replyCount`; `quoteCount` for quotes |
 | `favourited`, `reblogged`, `bookmarked` | `viewer.like != null`, `viewer.repost != null`, `viewer.bookmarked` |
 | `visibility` | always `public` |
-| `spoilerText`, `sensitive` | from the moderation decision on labels (section 7.4) |
+| `sensitive`, `spoilerText` | not used; moderation is separate (7.4) |
 | `mediaAttachments` | `embed` images (and video, later) |
 | `card` | `embed` external |
-| `quote` | `embed` record / recordWithMedia (shape from the quotes work in `feat-quotes`) |
-| `poll`, `editedAt`, `emojis`, `tags` | `null`, `null`, `[]`, from tag facets |
+| `quote` | `embed` record / recordWithMedia, in the shape PR #167 defines |
+| `poll`, `editedAt`, `emojis` | `null`, `null`, `[]` |
+| `bluesky` | `{ uri, cid, likeUri, repostUri, replyRef, replyDisabled, embeddingDisabled, moderation, viewerOf }` |
 
-Account: `id` = DID, `acct` = handle, `username` = first label of the
-handle, `displayName`, `note` = description as plain text with links,
-`avatar`, `header` = banner, counts from `followersCount`, `followsCount`,
-`postsCount`. Relationship: from `viewer.following`, `viewer.followedBy`,
-`viewer.muted`, `viewer.blocking`, `viewer.blockedBy`; the follow and block
-record URIs go in a `bluesky` field for undo.
+Account: `id` = DID, `acct` = handle, `displayName`, `note` = description
+with detected links, `avatar`, `header` = banner, counts. Relationship from
+`viewer.following`, `followedBy`, `muted`, `blocking`, `blockedBy`; the follow
+and block record URIs go in its `bluesky` field for undo.
 
-**`capabilities`.** Each client says what it supports:
+**`capabilities`** on each client:
 
 ```ts
 interface Capabilities {
@@ -406,179 +588,197 @@ interface Capabilities {
   localTimeline: boolean; publicTimeline: boolean
   visibility: boolean; contentWarningText: boolean
   polls: boolean; edit: boolean; customEmoji: boolean
-  followTags: boolean; tagTimeline: boolean
-  privateLists: boolean; serverFilters: boolean
-  maxChars: number; charCount: 'chars' | 'graphemes'
+  followTags: boolean; privateLists: boolean; serverFilters: boolean
+  maxChars: number             // graphemes; Mastodon reads it from the server
+  maxBytes: number | null      // 3000 for Bluesky
   maxImages: number
+  maxImageBytes: number | null // 2_000_000 for Bluesky
 }
 ```
 
-Screens read `activeClient.capabilities` to hide a button or a nav item. A
-client method a network lacks throws `CaribouError` with code `unsupported`.
-That is a bug signal: the UI should have hidden it.
+Grapheme counting already exists (`components/_compose-text.ts`, with
+`Intl.Segmenter`), so no "count by" switch is needed. Capabilities describe a
+**network**. A post's own restrictions (`replyDisabled`, `embeddingDisabled`)
+are on the post.
 
-Cost of (a):
-
-- **Small to start.** No screen or store changes their types. Most work is
-  the adapter and the `capabilities` checks.
-- **The shape lies a little.** `visibility: 'public'` is true. `editedAt: null`
-  is true. But a Bluesky like needs the like record's URI to undo it, and the
-  Mastodon shape has no place for that. The `bluesky` field holds it, and the
-  mutations in `packages/state/src/mutations.ts` must pass the whole status
-  down, not only the id. That is a real change to five or six functions.
-- **Two kinds of id in one cache.** A Mastodon id and an AT URI never collide.
-  Fine.
-- **Risk of drift.** A screen can forget a capability check. The test matrix
-  (section 13, phase 1) runs key component tests against both a Mastodon and a
-  Bluesky fixture.
-
-### 6.3 Option (b) — a neutral model with two adapters
-
-Define Caribou's own `Post`, `Profile`, `Relation`, `Notice`, `Feed` types.
-Both clients map into them. Screens and stores use only these.
-
-Cost of (b):
-
-- **Large.** Every one of the ~190 `Status` references and the rest change.
-  Every store, every component, every fixture and every SSR serializer. A
-  rough size: 3–5 weeks before the first Bluesky post shows. It must land in
-  one go or behind a long-lived branch, while other work keeps changing the
-  same files.
-- **Mastodon gets no new feature from it.** It is pure risk for the Mastodon
-  side.
-- Good: the model fits both networks honestly. Network-only data has a proper
-  home. It is the right end state if a third network ever comes.
-
-### 6.4 Recommendation
-
-**Option (a) now, with a path to (b).** Do this in phase 1:
-
-1. Make every file import `Status`, `Account`, `Relationship`, `List`,
-   `Notification` from `@beatzball/caribou-mastodon-client`, not
-   `mastodon.v1.*` from `masto`. This is mechanical and safe.
-2. Make those aliases Caribou-owned types (`mastodon.v1.Status & { bluesky?: ... }`).
-
-After that, moving to a neutral model is a change to the aliases, one type at
-a time, not a change to 44 files at once.
-
-### 6.5 What changes in existing code
+### 6.6 What changes in existing code
 
 | place | change |
 |---|---|
-| `packages/mastodon-client/src/index.ts` | Aliases become Caribou types with the optional `bluesky` field. Export `Capabilities`. |
-| `packages/mastodon-client/src/create-client.ts` | `CaribouClient` gains `capabilities`. Mastodon client fills it from the instance (char limit, etc.). |
-| new `packages/bluesky-client` | The Bluesky `CaribouClient`, facet renderer, embed mapper, moderation wrapper. |
-| `packages/auth/src/user-key.ts` | Helpers `toBlueskyUserKey(did)`, `networkOf(userKey)`. Format unchanged. |
-| `packages/state/src/users.ts` | `UserSession` union; `activeClient` picks by network; restore Bluesky session; `loadFromStorage` defaults `network` to `mastodon`. |
-| `packages/state/src/mutations.ts` | Like, repost, bookmark, follow, mute, block take the status or account, not only its id, so the adapter can find the record URI. |
-| `packages/state/src/timeline-store.ts` | Polling: Bluesky has no `since_id`. The adapter fetches the first page and returns only items newer than the known top item. The store's contract (`sinceId` in, newer items out) stays. `nextMaxId` carries Bluesky's opaque `cursor`. |
-| `packages/state/src/notification-groups.ts` | Bluesky has no server-side grouping. The adapter groups likes, reposts and follows on the client into the same `GroupedNotificationsPage` shape. `compareNotificationIds` cannot compare Bluesky ids; compare by `indexedAt` for Bluesky. |
-| `packages/state/src/compose.ts` | Character count by graphemes when `charCount` is `graphemes`. No visibility, no CW text, no poll for Bluesky. |
-| `packages/state/src/prefs.ts` | `DefaultTimeline` gains `following` for Bluesky; `local` and `public` are invalid there. Feed prefs come from the PDS, not localStorage. |
-| `packages/state/src/caches.ts` | `olderEdit` and edit fields do nothing for Bluesky. `readerFiltered` gets Bluesky muted words later (phase 6). |
-| `components/_switch-account.ts` | Rules in 5.6. |
-| `components/caribou-nav-rail.ts` | Hide Local and Public for Bluesky. Show Feeds (phase 5). |
-| `components/caribou-compose-dialog.ts` | Hide visibility, CW text and poll by capability. |
-| `components/caribou-status-card.ts` | Moderation blur/warn from `bluesky.moderation`. Hide Edit and History. |
-| `server/lib/page-data-types.ts`, `mastodon-public.ts` | A `bluesky-public.ts` next to it for SSR (section 8). |
-| `server/routes/` | `oauth/client-metadata.json`, `api/atproto/resolve-handle`. |
-| `pages/@[handle].ts`, `pages/@[handle]/[statusId].ts` | Pick the network from the handle shape (section 8.4). |
+| `packages/mastodon-client/src/index.ts`, `create-client.ts` | Owned types; `capabilities`; write methods take refs; page results with `nextCursor`. |
+| new `packages/bluesky-client` | Bluesky `CaribouClient`, mappers, facet renderer, embeds, moderation wrapper. Server-safe modules (mappers, renderer) import nothing browser-only. |
+| `packages/auth/src/user-key.ts` | `toBlueskyUserKey(did)`, `networkOf(userKey)`. Format unchanged. |
+| `packages/state/src/users.ts` | Session union, `generation`, `expired`; `removeSession` compares `generation`; `dropSession` not called on expiry; sync `activeClient` with a restore promise. |
+| `components/_unauthorized.ts` | Compares `generation`. New `caribou:session-expired` handler. |
+| `packages/state/src/mutations.ts`, `relationships.ts` | Commit record refs from results (seam 3). |
+| `packages/state/src/caches.ts` | `viewerOf` and protected Bluesky viewer fields in `mergeStatus` (seam 4). `olderEdit` does nothing for Bluesky. |
+| `packages/state/src/profile-store.ts` | Keeps an opaque cursor; SSR handoff (seam 5). |
+| `packages/state/src/timeline-store.ts` | Order from the client; catch-up rule (seams 6, 7). |
+| `packages/state/src/notification-groups.ts` | Client-side grouping for Bluesky; order by `indexedAt`, not `compareNotificationIds`. |
+| `packages/state/src/compose.ts` | Draft contract (7.2). |
+| `packages/state/src/prefs.ts` | `DefaultTimeline` gains `following`; `local`/`public` invalid for Bluesky. |
+| `components/_switch-account.ts` | Rules in 5.6; route shapes in 8.4 for `readsCookieServer`. |
+| `components/_profile-path.ts` | Never add `@<host>` to a Bluesky handle; never emit a bare dotted name for a Mastodon account (8.4). |
+| `components/caribou-status-card.ts` | `canAct` from the resource's network and the active account (section 11); post path from the rkey, not the encoded id; Reply/Quote off by `replyDisabled`/`embeddingDisabled` with a reason; Edit and History hidden for Bluesky. |
+| `components/caribou-status-media.ts` | A no-override mode: covered with the label's reason and no Show button (7.4). |
+| `components/caribou-profile.ts`, `caribou-profile-header.ts`, `_shell.ts` | Read client and relationships by the profile's network; no Mastodon `server` match for a Bluesky profile. |
+| `components/caribou-nav-rail.ts` | Hide Local, Public, and (until phase 5) Search, Lists, Feeds for Bluesky. |
+| `components/caribou-compose-dialog.ts` | Hide visibility, CW text and poll by capability; byte limit; image resize; alt text stays in the draft. |
+| `server/lib/bluesky-public.ts` (new), `upstream-cache.ts` | SSR fetches; Bluesky TTL constants (8.1). |
+| `server/routes/` | `oauth/client-metadata.json`, `xrpc/com.atproto.identity.resolveHandle`. |
+| `pages/@[handle].ts`, `pages/@[handle]/[statusId].ts` | Network from the route shape (8.4). |
 
 ---
 
-## 7. Rich text and embeds
+## 7. Rich text, compose, embeds and moderation
 
 ### 7.1 Facets to HTML
 
-A Bluesky post is plain text plus facets. There is no HTML. Facet ranges are
-**UTF-8 byte** offsets, `byteStart` inclusive, `byteEnd` exclusive. JavaScript
-strings are UTF-16, so `text.slice()` gives wrong ranges for any emoji or
-non-ASCII letter.
+A Bluesky post is plain text plus facets. Facet ranges are **UTF-8 byte**
+offsets, `byteStart` inclusive, `byteEnd` exclusive. JavaScript strings are
+UTF-16, so `text.slice()` gives wrong ranges for emoji and non-ASCII letters.
 
 The renderer:
 
-1. Encode the text to bytes with `TextEncoder`.
-2. Sort facets by `byteStart`. Drop any facet that overlaps the one before it,
-   or that falls outside the text.
-3. Walk the bytes. Decode each plain segment with `TextDecoder` and
-   HTML-escape it. Turn `\n` into `<br>`.
+1. Encode the text with `TextEncoder`.
+2. Sort facets by `byteStart`. Drop a facet that overlaps the one before it or
+   falls outside the text.
+3. Walk the bytes. Decode each plain segment, HTML-escape it, and turn `\n`
+   into `<br>`.
 4. Wrap each facet segment:
-   - `#link` → `<a href="<uri>" rel="nofollow noopener noreferrer" target="_blank">`.
-     Only `http:` and `https:` URIs. Any other scheme renders as plain text.
-   - `#mention` → `<a href="/@<handle>">` when the segment text is
-     `@<handle>`; else `<a href="/@<did>">`. The profile route accepts a DID
-     and shows the handle.
-   - `#tag` → `<a href="/tags/<tag>">`. On Bluesky this page is a search
-     (section 9).
-   - If one facet has more than one feature, use the first link-like one.
+   - `#link` → `<a href="<uri>" rel="nofollow noopener noreferrer"
+     target="_blank">`. Only `http:` and `https:`; any other scheme renders as
+     text. If the visible text looks like a URL with a **different host** than
+     `uri`, render the real `uri` as the text instead. A link must not pretend
+     to go somewhere else.
+   - `#mention` → `<a href="/@<did>">`, from the facet's **DID**. The visible
+     text is only presentation; it can be stale or misleading. The profile page
+     shows the current handle.
+   - `#tag` → `<a href="/tags/<tag>?net=bsky">`. The href is the same for every
+     reader, so SSR and hydration agree. The page decides what to show (8.2).
+   - One facet with several features: use the first link-like one.
 5. Wrap the whole thing in `<p>`.
 
-The output then goes through the **same DOMPurify config** (`PURIFY_OPTS`)
-as Mastodon content, on the server and in the browser. The renderer builds
-safe HTML on its own. The second pass is defense in depth, and it keeps one
-rule: everything in `content` has been through DOMPurify.
+The output then goes through the **same DOMPurify config** (`PURIFY_OPTS`) as
+Mastodon content, on both sides. `ALLOWED_ATTR` stays as it is (round 1's
+`title` attribute is dropped; DOMPurify would strip it).
 
-A link facet's text may differ from its URI (a shortened label). Show the
-text. Put the full URI in `title`.
+The renderer is a pure function in `packages/bluesky-client` with tests on
+emoji, combining marks, overlapping and out-of-range facets, `javascript:`
+links, a link whose text names another host, and a mention whose text differs
+from its DID (in SSR and in the browser).
 
-The renderer lives in `packages/bluesky-client`. It is a pure function with
-unit tests on emoji, combining marks, overlapping and out-of-range facets,
-and `javascript:` links.
+The profile description has no facets. Detect links in it with
+`RichText.detectFacets` and render the same way.
 
-The profile description has no facets. Detect links and mentions in it with
-`@atproto/api`'s `RichText.detectFacets` and render the same way.
+### 7.2 Compose
 
-### 7.2 Writing facets
+**Facets.** Before writing, run `RichText.detectFacets` from `@atproto/api`.
+It finds links, `@handle` mentions (resolved to DIDs) and `#tags`.
 
-Compose sends plain text. Before `createRecord`, run
-`RichText.detectFacets` (from `@atproto/api`). It finds links, `@handle`
-mentions (resolved to DIDs) and `#tags`, with the right byte ranges. Link
-cards: fetch the link's title and image (the Bluesky app uses its own card
-service; we could do it on our server) and attach an `external` embed. Phase
-4 ships without auto cards; phase 6 adds them.
+**Limits.** 300 graphemes **and** 3000 UTF-8 bytes (`feed.post` lexicon). The
+counter shows graphemes; the submit button is off when either limit is over.
+Tests use long combining sequences, not only plain emoji.
+
+**Images.** At most 4, each at most 2 MB (`embed.images`). Compose resizes and
+re-encodes an image that is too large, in the browser, before upload. Alt text
+lives in the post's embed, not on the server: there is no `updateMedia`. The
+draft keeps it.
+
+**Draft contract.** Today a draft keeps `inReplyToId` and media ids. A Bluesky
+draft keeps:
+
+- `reply: { root: StrongRef, parent: StrongRef } | null`
+- `quote: StrongRef | null`
+- `labels: string[]` (self-labels)
+- `media: { blob: BlobRef, mime, size, alt, aspectRatio }[]` — the blob ref
+  from `uploadBlob`, so a reload does not re-upload. A PDS may drop an
+  unreferenced blob after a while. On "blob not found", compose re-uploads from
+  the file if it still has it, or asks the reader to pick it again.
+- `rkey`: a TID made when the draft starts.
+
+On reload, compose refetches the reply parent. If it is gone, the draft keeps
+its text and says "The post you replied to was deleted."
+
+**No duplicate posts.** The Mastodon draft has an idempotency key. For Bluesky
+the draft's `rkey` plays that part: compose writes with
+`com.atproto.repo.createRecord` and that `rkey`. A retry after a lost response
+fails with "record already exists", which compose treats as success and then
+loads the post.
+
+**Link cards** are phase 6. Phase 4 posts links without a card.
 
 ### 7.3 Embeds
 
 | `embed.$type` (view) | renders as |
 |---|---|
-| `app.bsky.embed.images#view` | `mediaAttachments` of type `image`: `fullsize` as `url`, `thumb` as `previewUrl`, `alt` as `description`, `aspectRatio` as meta. Up to 4. |
-| `app.bsky.embed.video#view` | Phase 2–5: the thumbnail with a play mark that links out. Phase 6: HLS playback (`playlist` is an `.m3u8`; Safari plays it natively, others need `hls.js`). |
-| `app.bsky.embed.external#view` | `card`: title, description, thumb, uri. `caribou-status-link-card` renders it. A GIF from Tenor is an external embed; treat it as a card. |
-| `app.bsky.embed.record#view` | a quote. The inner record can be a post (`viewRecord`), or a not-found, blocked or detached stub. A stub renders as a small grey box: "Post not found", "Blocked", "Removed by author". The inner record can also be a feed, a list, a starter pack or a labeler: a small card with name and link to bsky.app. |
-| `app.bsky.embed.recordWithMedia#view` | a quote plus media, both of the above. |
+| `app.bsky.embed.images#view` | media of type `image`: `fullsize`, `thumb`, `alt`, `aspectRatio`. Up to 4. |
+| `app.bsky.embed.video#view` | phases 2–5: the thumbnail with a play mark that links to bsky.app. Phase 6: HLS playback (`playlist` is `.m3u8`; Safari plays it natively, others need `hls.js`). |
+| `app.bsky.embed.external#view` | `card`: title, description, thumb, uri, through `caribou-status-link-card`. A Tenor GIF is an external embed. |
+| `app.bsky.embed.record#view` | a quote, in PR #167's quote card. The inner record can be a post, or a not-found, blocked or detached stub ("Post not found", "Blocked", "Removed by author"). A feed, list, starter pack or labeler renders as a small card linking to bsky.app. |
+| `app.bsky.embed.recordWithMedia#view` | a quote plus media. |
 
-Image and avatar URLs point at Bluesky's CDN (`cdn.bsky.app`). The CSP
-`img-src` must allow it. A post from another AppView would use its own CDN,
-so keep `img-src https:`, as today.
+An unknown `$type` renders a small "Not supported here — open on bsky.app"
+card. It never throws.
 
-### 7.4 Labels, content warnings and moderation
+### 7.4 Labels and moderation
 
-Mastodon has a free-text content warning that the author writes. Bluesky has
-none. It has **labels**:
+Mastodon has a free-text content warning the author writes. Bluesky has none.
+It has **labels**: self-labels on media (`sexual`, `nudity`, `porn`,
+`graphic-media`), labels from labelers, and `!no-unauthenticated` (8.3).
 
-- **Self-labels** the author sets: `sexual`, `nudity`, `porn`,
-  `graphic-media`. They are about the media, not the text.
-- **Labels from labelers.** Bluesky's own moderation service, plus any the
-  reader subscribes to. A label can mean blur the media, blur the whole post,
-  warn, or hide.
-- **`!no-unauthenticated`**: the author asks that logged-out viewers not see
-  their content (section 8).
+**Inputs.** The SDK's `moderatePost` and `moderateProfile` take
+`ModerationOpts`: the reader's DID, their prefs (adult content, per-label
+choices, subscribed labelers, from `app.bsky.actor.getPreferences`), and
+`labelDefs`, the definitions of each labeler's custom labels. Without a
+definition the SDK skips the label. So Caribou also fetches
+`app.bsky.labeler.getServices?dids=<subscribed>&detailed=true`, interprets the
+definitions, and caches them per account (refresh every hour and on a prefs
+change). Every AppView call sends `atproto-accept-labelers` so the AppView
+returns those labels.
 
-Rules:
+**Failure policy: fail closed.** If the definitions for a subscribed labeler
+cannot load, a label from that labeler covers the post with "Content warning
+(labeler unavailable)" and a Retry. It does not show the post as clean.
 
-- Call `moderatePost` and `moderateProfile` from `@atproto/api` with the
-  reader's label prefs (`app.bsky.actor.getPreferences`: adult content on or
-  off, per-label choices, subscribed labelers). Do not write our own label
-  logic. Getting it wrong shows adult or harmful media to someone who opted
-  out.
-- Send the `atproto-accept-labelers` header with the reader's labelers on
-  each AppView call, so the AppView applies them.
-- Map the decision to Caribou's existing UI: "blur media" → `sensitive: true`;
-  "warn on post" → `spoilerText` set to the label's display name ("Graphic
-  media", "Adult content"); "hide" → drop from the list, like a filtered
-  status (`filteredById` with `hide`).
-- The compose dialog's CW toggle becomes a "label this media" picker for
-  Bluesky (adult, nudity, graphic). Free-text CW is hidden.
+**Keep the decision, per surface.** The SDK returns one decision with a `ui()`
+for each context. Caribou keeps the decision on the post and reads the context
+it renders:
+
+| context | where | what it can do |
+|---|---|---|
+| `contentList` | feeds, profile lists, notifications | filter out, or cover with a reason |
+| `contentView` | the focused post in a thread | cover with a reason; never silently drop the post the reader opened |
+| `contentMedia` | images, video, cards | blur media |
+| `avatar`, `banner` | avatars and headers | blur |
+| `profileList`, `profileView` | account rows, profile page | cover or warn |
+
+Each `ui()` has `noOverride`. When it is set, the cover has **no Show
+button**. Today `caribou-status-media` always offers "Show sensitive media"; it
+gets a no-override mode. Only the author sees their own post without the
+cover, as the SDK decides.
+
+**Hydration and the veil.** The server does not know the reader. SSR runs
+moderation with the **logged-out defaults** (adult content off, Bluesky's
+labeler only). For a signed-out reader that is final. For a signed-in reader,
+their settings can be **stricter** than the defaults (another labeler, "hide"
+on a label), so the SSR paint could show what they chose to hide. Caribou
+already solves this for Mastodon filters with the reader veil
+(`server/lib/reader-veil-head.ts`, `readerChecks` in `reader-view.ts`): cards
+stay hidden from first paint until the reader's check settles. Bluesky cards
+join it. A Bluesky card's check settles when the active Bluesky account's prefs
+and label definitions are loaded and its decision is made. With a Mastodon
+account active, a Bluesky post's check is the logged-out default, and it
+settles at once.
+
+**Compose.** The CW toggle becomes a "Label this media" menu (Adult, Nudity,
+Graphic) for Bluesky. It uses the shared button and menu and their focus rules.
+Free-text CW is hidden.
+
+**Tests:** a custom label absent from the SDK's built-in table, with and
+without its definition loading; a `noOverride` label; a "hide" pref that the
+SSR defaults do not have, checked through the veil; list versus focused-thread
+behavior; a labeled avatar.
 
 ---
 
@@ -587,78 +787,81 @@ Rules:
 ### 8.1 The rule
 
 The server render must equal the first client render (`apps/caribou/README.md`).
-Today SSR pages fetch public Mastodon data with no token
-(`server/lib/mastodon-public.ts`) and hand it to the page as `serverData`.
-Reader-only state (favourited, following) comes after hydration, in
-`firstUpdated` or a store effect.
+SSR pages fetch public data with no token and hand it to the page as
+`serverData`. Reader state comes after hydration.
 
-Bluesky follows the same rule with a new `server/lib/bluesky-public.ts`. It
-calls `https://public.api.bsky.app/xrpc/` through the existing
-`upstream-cache.ts` (the AppView already says `max-age=30`). It runs the same
-mappers and the same facet renderer as the browser, then `sanitize`. So the
-HTML is the same bytes on both sides.
+Bluesky follows the same rule with `server/lib/bluesky-public.ts`, calling
+`https://public.api.bsky.app/xrpc/` through `upstream-cache.ts`. That cache
+uses fixed TTLs per kind; it does not read `cache-control`. We add Bluesky
+constants of 30 seconds, matching the AppView's `max-age`. The server runs the
+same mappers, facet renderer and `sanitize` as the browser.
 
 ### 8.2 What renders on the server
 
-| page | SSR from the public AppView | why |
+| page | SSR without a token | note |
 |---|---|---|
-| Profile `/@alice.example.com` | yes: `getProfile` + `getAuthorFeed` | public |
-| Thread `/@alice.example.com/<rkey>` | yes: `getPostThread` | public |
-| A custom feed (phase 5) | yes: `getFeed` | public |
-| A list feed (phase 5) | yes: `getListFeed` | public |
-| Hashtag `/tags/<tag>` | **no** | it is `searchPosts`, which answers 403 without a token |
-| Search | no | 403 without a token |
-| Following (home) | no | needs a token (401) |
-| Notifications, bookmarks | no | need a token |
+| Profile `/@alice.example.com` | yes: `getProfile` + `getAuthorFeed` | first cursor handed to the client |
+| Thread `/@alice.example.com/<rkey>` | yes: `getPostThread` | |
+| A custom feed, a list feed (phase 5) | yes: `getFeed`, `getListFeed` | |
+| People search (phase 5) | could: `searchActors` is public | rendered on the client, with the rest of search |
+| Hashtag `/tags/<tag>?net=bsky` | **no**: it needs `searchPosts`, which answers 403 | Shell only. With a Bluesky account active, the client searches. Otherwise the page says "Sign in with Bluesky to see posts with this tag" and links to `bsky.app/hashtag/<tag>`. |
+| Post search | no | 403 |
+| Following, notifications, bookmarks | no | need a token |
 
-The "no" pages render the shell and a splash, and the client fills them. That
-is what Mastodon `/home` does today.
-
-Viewer fields (`viewer.like`, `viewer.following`) are empty in SSR data. The
-client fetches the same items with the reader's token after hydration and
-merges them into the cache (`mergeStatus`). The first client render uses the
-SSR data, so it matches.
-
-Moderation in SSR uses the **default** label prefs (adult content off,
-Bluesky's labeler only), because the server does not know the reader. After
-hydration the client re-runs moderation with the reader's prefs. A reader who
-turned adult content on sees the blur lift after load. That is a re-render
-after hydration, which the rule allows.
+Viewer fields are empty in SSR data. After hydration, the active Bluesky
+account refetches the same items and merges them with `viewerOf` set (seam 4).
 
 ### 8.3 `!no-unauthenticated`
 
-An account with the `!no-unauthenticated` self-label has asked that logged-out
-viewers not see it. The public AppView still returns its data. Caribou must
-honor the request:
+An account with this self-label asked that logged-out viewers not see it. If
+the public AppView still returns its data (phase 0 checks), Caribou must not
+show it signed out:
 
-- SSR never renders that account's profile or posts. It renders the shell
-  with "This account asked to be seen only by signed-in readers."
-- A thread with such a post renders the post as that notice; the rest of the
-  thread renders.
-- The client renders it normally once a Bluesky account is active.
+- SSR never renders that account's profile or posts. The profile renders the
+  shell with "This account asked to be seen only by signed-in readers."
+- In a thread, such a post renders as that notice; the rest renders.
+- With a Bluesky account active, the client renders it normally.
+- With only a Mastodon account active, it stays hidden: the reader is not
+  signed in to Bluesky.
 
-This needs an integration test (SSR output for a fixture account with the
-label).
+The SSR test asserts the notice **and** that the account's display name,
+handle text and post text appear nowhere in the HTML.
 
 ### 8.4 Telling the networks apart in a route
 
-The `caribou.instance` cookie picks the Mastodon server for SSR today. For
-Bluesky the route itself says which network:
+Mastodon's rule for **local** usernames is `[a-z0-9_]+`: no dot. Remote
+usernames may have dots and hyphens (3.2), for example accounts from Pleroma,
+Misskey or a Bluesky bridge.
 
-- `/@alice` (no dot, no `@`): Mastodon, local to the cookie's server. A
-  Mastodon username is letters, digits and `_` only.
-- `/@alice@example.social`: Mastodon, a remote account.
-- `/@alice.example.com` (a dot, no `@`): **Bluesky** handle.
-- `/@did:plc:abc123` (starts with `did:`): **Bluesky** DID. The client
-  replaces the URL with the handle once known.
-- `/@alice.example.com/<rkey>`: a Bluesky post. An rkey is 13 base32 letters,
-  a Mastodon id is digits. The handle already says Bluesky.
+Route rules, checked in this order:
 
-The hashtag page `/tags/<tag>` is the same route for both networks. It uses
-the active account's network, and a signed-out reader gets Mastodon (the
-cookie server), as now.
+1. `/@name@host` (a second `@`): Mastodon, remote account. Checked first.
+2. `/@did:...`: Bluesky, by DID.
+3. `/@name` with a dot: **Bluesky** handle.
+4. `/@name` with no dot: Mastodon, local to the cookie's server.
+5. `/@<handle or did>/<id>`: a Bluesky post when rule 2 or 3 matched. We do
+   not tell posts apart by the id's shape. Caribou already supports encoded
+   non-numeric ActivityPub ids, and a post rkey is normally a 13-character TID
+   but may be other characters.
 
-`pathAfterSwitch` and `readsCookieServer` learn these shapes.
+**The edge case.** `profilePath` (`components/_profile-path.ts`) builds a bare
+`/@name` when it knows no host. For a remote Mastodon account with a dot in its
+name, that path now means a Bluesky handle and lands on the wrong page. Caribou
+almost always knows the host, so this is rare. The fix is in `profilePath`:
+when there is no host, take it from the account's `url`, and never emit a bare
+dotted name for a Mastodon account. Tests cover the precedence and this case.
+
+**Links Caribou builds** for Bluesky use the author's handle when the AppView
+gives a valid one, and the DID when the handle is `handle.invalid`. Mentions
+use the DID (7.1). A handle link can break or point at someone else after a
+handle change; the DID link cannot. So "Copy link" copies the DID form
+(`https://bsky.app/profile/<did>/post/<rkey>`). A page opened by DID replaces
+the address bar with the handle form **after hydration**, in `firstUpdated`,
+never in `render`.
+
+**Dev server.** In `litro dev`, Vite's middleware may treat a last path segment
+with a dot as a file. Production is fine (Nitro serves only files that exist).
+Phase 0 checks dev.
 
 ---
 
@@ -668,114 +871,129 @@ cookie server), as now.
 |---|---|---|
 | Home timeline | Following feed, `app.bsky.feed.getTimeline` | yes |
 | Local timeline | not available | — hidden |
-| Public (federated) timeline | not available. Closest: a feed like "Discover" | — hidden (12.3, q. 4) |
+| Public (federated) timeline | not available. Closest: a feed like "Discover" | — hidden |
 | Custom feeds | `getFeed`; pinned feeds from prefs (`savedFeedsPrefV2`) | phase 5 |
-| Status / post view | `getPostThread` (or `getPosts`) | yes |
-| Thread (ancestors, descendants) | `getPostThread` with `depth` and `parentHeight` | yes |
-| Reply | `app.bsky.feed.post` with `reply: { root, parent }` (URI + CID each) | yes |
-| Who can reply | thread gate record (`app.bsky.feed.threadgate`) | phase 6 |
-| Favourite | like record (`app.bsky.feed.like`); undo deletes that record | yes |
-| Boost | repost record (`app.bsky.feed.repost`); undo deletes it | yes |
-| Quote | post with `embed.record` or `embed.recordWithMedia`; post gate can turn quotes off | yes |
+| Post view and thread | `getPostThread` | yes |
+| Reply | post with `reply: { root, parent }` (strong refs) | yes |
+| Reply turned off by the author | `viewer.replyDisabled`; Reply is off with "The author limited replies" | yes |
+| Create a reply limit | thread gate record | phase 6 |
+| Favourite | like record; undo deletes it | yes |
+| Boost | repost record; undo deletes it | yes |
+| Quote | post with `embed.record` / `recordWithMedia` | yes (needs PR #167) |
+| Quote turned off by the author | `viewer.embeddingDisabled`; Quote is off with a reason | yes |
+| Create a quote limit | post gate record | phase 6 |
 | Bookmark | `app.bsky.bookmark.createBookmark` / `deleteBookmark` / `getBookmarks`; private | yes |
-| Follow | follow record (`app.bsky.graph.follow`). Public. | yes |
-| Follow request (locked account) | not available. Every account is open. | — |
+| Follow | follow record. Public. | yes |
+| Follow request | not available; every account is open | — |
 | Follow a hashtag | not available | — hidden |
-| Hashtag timeline | `searchPosts` with `tag`, `sort=latest`. Needs a token. | phase 5 |
-| Lists | curate lists (`app.bsky.graph.list`, purpose `curatelist`) + list item records. **Lists are public.** Members need not be followed. List feed: `getListFeed`. | phase 5 |
-| List replies policy, exclusive lists | not available | — |
-| Moderation lists | `modlist` lists to mute or block many at once | non-goal |
-| Notifications | `listNotifications`; unread by `updateSeen` / `getUnreadCount`. Reasons: like, repost, follow, mention, reply, quote, and newer ones (like-via-repost, repost-via-repost, subscribed-post, verified, starterpack-joined). Unknown reasons are skipped. | yes |
-| Grouped notifications | not on the server; group on the client (6.5) | yes |
-| Search accounts | `searchActors` (token) | phase 5 |
-| Search posts | `searchPosts` (token) | phase 5 |
-| Search hashtags | not a separate thing; post search with `#` | phase 5 |
+| Hashtag timeline | `searchPosts` with `tag`, `sort=latest`; token needed | phase 5 |
+| Lists | curate lists + list item records. **Public.** Members need not be followed. `getListFeed`. | phase 5, hidden until then |
+| Moderation lists | `modlist` | non-goal |
+| Notifications | `listNotifications`; unknown reasons skipped | yes |
+| Unread badge | `getUnreadCount` and `updateSeen`, two new client methods | yes |
+| Grouped notifications | not on the server; grouped on the client | yes |
+| Search people | `searchActors`, public, no token | phase 5, hidden until then |
+| Search posts | `searchPosts`, token needed | phase 5 |
 | Polls | not available | — hidden |
-| Content warning (text) | not available; labels instead (7.4) | — label picker |
-| Sensitive media | self-labels `sexual`, `nudity`, `porn`, `graphic-media` | yes |
-| Visibility (unlisted, followers, direct) | not available; every post is public | — hidden |
-| Edit | not available (records can be rewritten, but the AppView and apps do not support edits) | — hidden |
-| Edit history | not available | — hidden |
-| Delete | `deleteRecord` on the post | yes |
-| Delete and redraft | delete + reopen compose with the text | yes |
-| Pin a post | profile record `pinnedPost` | later |
-| Media upload | `uploadBlob`, then reference in `embed.images`. Max 4 images. Alt text in the record. | yes |
-| Video upload | the video service (`app.bsky.video.uploadVideo`, service auth) | phase 6 |
-| Alt text edit after posting | not available (no edits) | — |
+| Content warning text | not available; labels (7.4) | — label menu |
+| Sensitive media | self-labels | yes |
+| Visibility | not available; every post is public | — hidden |
+| Edit, edit history | not available | — hidden |
+| Delete; delete and redraft | `deleteRecord`; then compose with the text | yes |
+| Pin a post | profile `pinnedPost` | later |
+| Image upload | `uploadBlob` (2 MB each), `embed.images`, alt in the record | yes |
+| Video upload | video service | phase 6 |
 | Custom emoji | not available | — |
-| DMs | `chat.bsky` through the PDS with `atproto-proxy`, needs `transition:chat.bsky` | non-goal |
-| Mute | `app.bsky.graph.muteActor`; private | yes |
-| Block | block record (`app.bsky.graph.block`); **public** | yes |
-| Mutes and blocks lists in settings | `getMutes`, `getBlocks` | yes |
-| Filters (keywords) | muted words (`mutedWordsPref`); applied by the client | phase 6 |
+| DMs | `chat.bsky` | non-goal |
+| Mute | `muteActor`; private | yes |
+| Block | block record; **public** | yes |
+| Mutes and blocks in settings | `getMutes`, `getBlocks` | yes |
+| Keyword filters | muted words (`mutedWordsPref`), applied by the client | phase 6 |
 | Report | `com.atproto.moderation.createReport` | later |
-| Push notifications | not part of atproto for third-party clients | — |
-| Streaming | not available for a client (the firehose is for services) | — polling, as now |
+| Push, streaming | not for third-party clients | — polling |
 
-Two privacy differences need a line of UI text:
-
-- **Lists are public on Bluesky.** The create-list dialog says so.
-- **Blocks are public on Bluesky.** The block confirm says so.
+Two privacy notes in the UI: the create-list dialog says lists are public; the
+block confirm says blocks are public.
 
 ---
 
 ## 10. Security
 
-- **Handle resolver (SSRF).** `GET /api/atproto/resolve-handle` makes our
-  server fetch `https://<handle>/.well-known/atproto-did`, where the reader
-  picks the host. Guard it: only valid handle syntax; HTTPS on port 443;
-  resolve the host first and refuse private, loopback and link-local
-  addresses; follow at most a few redirects and re-check each; 3-second
-  timeout; read at most 2 KB; answer only with a DID. Rate limit per IP. Cache
-  answers under 10 minutes (the spec's limit for auth flows).
-- **Client metadata.** A static JSON response. `client_id` must exactly equal
-  the URL. If `PUBLIC_BASE_URL` is wrong, sign-in fails with a clear error.
-  Add it to the health check.
-- **Token storage.** IndexedDB, keyed by DID. DPoP key non-extractable. Same
-  XSS exposure class as today's localStorage token; the CSP work in v1 spec
-  12.2 applies to both.
-- **`sub` check.** The library does it. A test must prove that a mismatch
-  fails sign-in (mock the resolver).
-- **Rendering.** Facet HTML is built by escaping, and then DOMPurify runs.
-  Only `http`/`https` links.
-- **Moderation.** Use `@atproto/api`'s moderation functions. Do not
-  hand-roll.
-- **CSP `connect-src`.** Today it allows any host. Bluesky adds the PDS (any
-  host), `public.api.bsky.app`, `api.bsky.app` and `video.bsky.app`. No
-  change needed while `connect-src` stays open.
+- **CSP.** Caribou's pages send **no** Content-Security-Policy today
+  (`theme-head.ts`, `root-forward-head.ts`, README). Only the Mastodon sign-in
+  complete page has one. The v1 spec's 12.2 CSP is still open work. When it
+  lands, it must allow the PDS hosts (any host), `public.api.bsky.app`,
+  `api.bsky.app`, `video.bsky.app` and `cdn.bsky.app`. Nothing in this spec
+  relies on a CSP until then.
+- **Handle resolver (SSRF).** Our server fetches
+  `https://<handle>/.well-known/atproto-did` on a host the reader picks.
+  - Valid handle syntax only; HTTPS on port 443 only.
+  - Bind the check to the connection: resolve the host, refuse private,
+    loopback, link-local and other special addresses (IPv4 and IPv6), and
+    connect to **that vetted address** with the original host name for TLS.
+    Do not resolve twice.
+  - Each redirect (at most 3) goes through the same check.
+  - 3 s total, 2 KB body, a cap on concurrent lookups and a rate limit per IP.
+  - Answer only a DID. Cache answers under 10 minutes.
+  - Test with a resolver whose answer changes between the check and the
+    connection, and with a redirect to a private address.
+- **Client metadata.** Static JSON; `client_id` must equal the URL; health
+  check (5.2).
+- **Tokens.** IndexedDB, keyed by DID; DPoP key non-extractable (5.3).
+- **`sub` check.** The SDK does it. The test uses a fixture whose DID resolves
+  to a PDS that is **not** the issuer, and asserts that sign-in fails and no
+  session is stored.
+- **Rendering.** Facet HTML is built by escaping, then DOMPurify runs. Only
+  `http`/`https` links; mentions by DID (7.1).
+- **Moderation.** The SDK's functions with label definitions; fail closed
+  (7.4).
+- **Callback.** Code in the fragment; `no-store`; `no-referrer` (5.5).
 
 ---
 
 ## 11. Mixed accounts
 
-Yes: a reader can have both kinds signed in, side by side. The `users` map
-holds both. One is active at a time.
+A reader can have both kinds signed in, side by side. One is active at a time.
 
-| part | with a Mastodon account active | with a Bluesky account active |
+**Every resource knows its network** (seam 9). A component decides "can I act
+here?" from the resource's network and the active account's network, not from
+"is there a client". Today `caribou-status-card` sets `canAct` when a client
+exists and the page names no other instance. A Bluesky card has no instance, so
+without this change a Mastodon reader would get live buttons on a Bluesky post
+that call the Mastodon client. The same goes for relationships in
+`caribou-profile-header`, paging in `caribou-profile`, and the server match in
+`_shell.ts`.
+
+| active account → resource | read | actions | client used for reads |
+|---|---|---|---|
+| Mastodon → Mastodon | yes | yes (same server, as today) | active client |
+| Bluesky → Bluesky | yes | yes | active client |
+| Mastodon → Bluesky | yes | none; "Sign in with a Bluesky account to reply" | a token-free Bluesky read client (public AppView) |
+| Bluesky → Mastodon | yes | none; "Sign in with a Mastodon account to reply" | token-free Mastodon reads from the post's server |
+| signed out → either | yes | none | token-free read client |
+
+`canAct` is reader state, so it is set after the first render, as today. The
+first render uses only route-derived data.
+
+| part | Mastodon active | Bluesky active |
 |---|---|---|
-| Nav rail | as today | Home (Following), Notifications, Search, Bookmarks, Lists, Feeds (phase 5). No Local, no Public. |
+| Nav rail | as today | Home (Following), Notifications, Bookmarks. Search, Lists, Feeds from phase 5. |
 | Home | Mastodon home | Following feed |
-| Compose | as today | 300 graphemes, 4 images, no visibility, no poll, label picker instead of CW text |
-| A Bluesky profile or post | readable (public AppView, no actions) | readable, all actions |
-| A Mastodon profile or post | all actions | readable through the cookie server, no actions |
-| Account switcher | both kinds, each with a network mark | same |
-| Settings → Account | Mastodon details | handle, DID, PDS host, "sign out" |
+| Compose | as today | 300 graphemes / 3000 bytes, 4 images, no visibility, no poll, label menu |
+| Account switcher | both kinds, network in each accessible name | same |
+| Settings → Account | Mastodon details | handle, DID, PDS host, sign out |
 
-**Reading the other network.** A Mastodon reader who opens a Bluesky link
-sees the post, read-only, with "Sign in with a Bluesky account to reply". The
-reverse is the same. This needs no new code beyond the SSR path, which is
-token-free.
+**"Act as another account" (#131).** The picker lists only accounts on the
+post's network. Between Bluesky accounts there is no "resolve the post on the
+other server" step: an AT URI is the same for every account. The #131 cache
+rule holds: the other account's like must not set `favourited` in the current
+account's view. `viewerOf` (seam 4) is how.
 
-**"Act as another account" (#131).** The account picker lists only accounts on
-the post's network. A Mastodon account cannot like a Bluesky post. Between
-Bluesky accounts it is simpler than Mastodon: an AT URI is the same for every
-account, so there is no "resolve the post on the other server" step. The
-cache rule from #131 still holds: the other account's like must not set
-`favourited` in the current account's view.
+**The status cache** holds both kinds. A Mastodon id and an AT URI never
+collide. A switch reloads the page (#58).
 
-**The status cache.** It is shared and holds both kinds. A Mastodon id is
-digits; a Bluesky id is an AT URI. They do not collide. A switch reloads the
-page today, so no cross-account viewer state stays behind.
+**Tests** cover all five rows above, signed out included. They assert the
+request's destination host and the links built, not only disabled buttons.
 
 ---
 
@@ -785,168 +1003,165 @@ page today, so no cross-account viewer state stays behind.
 
 | risk | how we handle it |
 |---|---|
-| `@atproto/api` and `@atproto/oauth-client-browser` are large. They could double the client bundle. | Phase 0 measures it. Load the Bluesky client with a dynamic `import()` only when a Bluesky account is active or a Bluesky page opens. Mastodon-only readers pay nothing. |
-| The two-week session cap annoys readers. | Silent re-auth where possible. A clear "sign in again" prompt that keeps the page. Option B (5.3) is the fallback. |
-| Moderation done wrong shows harmful media. | Use the library's `moderatePost`. Tests with labeled fixtures. Default to "warn" when unsure. |
-| `!no-unauthenticated` ignored in SSR. | Integration test (8.3). |
-| One AppView, run by one company. | The AppView URL is config (`BLUESKY_APPVIEW`, default `https://api.bsky.app`, public `https://public.api.bsky.app`). |
-| The public AppView rate-limits our server, since all logged-out SSR comes from one IP. | `upstream-cache.ts` with the AppView's `max-age`. Watch for 429 and fall back to client render. Rate limits are not documented; this is an unknown. |
-| Lexicons change. New notification reasons, new embed types. | Map known types; skip or show a "not supported here" card for unknown ones. Never crash on an unknown `$type`. |
-| Mastodon shapes hide a Bluesky difference and a screen does the wrong thing. | `capabilities` checks; component tests run with both fixtures. |
-| `transition:generic` goes away. | Move to granular scopes (`repo:app.bsky.feed.post`, `blob:image/*`, `rpc:...`) when Bluesky's PDS supports them. The scope lives in one place: the client metadata. |
-| Lit SSR and the atproto libraries in the server bundle. | The server needs only the mappers and the facet renderer, not the OAuth client. Keep those in a module with no browser-only imports. |
-| Handle resolution through our server adds a dependency at sign-in. | Fallback: try `com.atproto.identity.resolveHandle` on `bsky.social` if our resolver fails, and say so in the privacy page. |
+| The atproto libraries are large. | Phase 0 measures. A dynamic `import()` only when a Bluesky account is active or a Bluesky page opens. Mastodon-only readers pay nothing. |
+| The two-week re-approval annoys readers. | Expiry keeps drafts, prefs and the page (5.6). Option D (5.3) is the upgrade. |
+| Moderation done wrong shows harmful media. | SDK functions, label definitions, fail closed, the veil, `noOverride` (7.4). |
+| `!no-unauthenticated` ignored in SSR. | Test that the content is absent (8.3). |
+| A Mastodon-active reader gets live buttons on a Bluesky post. | Resource provenance (section 11) and the five-row test. |
+| Feed order or paging breaks only after page 2 or after a poll. | Seams 5–8; tests with three pages, cursors unrelated to ids, many authors, a repost of an old post, a gap larger than a page. |
+| One AppView, run by one company. | The AppView URLs are config (`BLUESKY_APPVIEW`, `BLUESKY_PUBLIC_APPVIEW`). |
+| The public AppView rate-limits our server (all signed-out SSR comes from one IP). | 30 s cache; on 429, fall back to client render. The limit is not documented. |
+| Lexicons change. | Unknown `$type`s and notification reasons render a fallback or are skipped. Never throw. |
+| `transition:generic` goes away. | Move to granular scopes when `bsky.social` advertises them. The scope lives in the client metadata only. |
+| The quote work (PR #167) slips. | Day one waits for it, or ships quotes as a link card. |
 
 ### 12.2 Unknowns to settle in phase 0
 
-- The real bundle cost of the two libraries, gzipped.
-- Whether `@atproto/oauth-client-browser` works with Vite and Lit SSR without
-  patches (it touches `indexedDB` and `crypto.subtle` at import or at use?).
-- Whether silent re-auth works with `bsky.social` from a third-party client.
+- The gzipped size of `@atproto/api` + `@atproto/oauth-client-browser` in a lazy
+  chunk.
+- Whether the browser SDK works with Vite and Lit SSR without patches.
+- Whether the public AppView returns `!no-unauthenticated` accounts' posts.
+- Whether `litro dev` serves `/@alice.example.com` as a route.
 - The public AppView's rate limit per IP.
+- Whether `bsky.social` grants confidential lifetimes to an option-D client (a
+  small manual test with a hand-made assertion).
 
 ### 12.3 Questions for the owner
 
-Each has a recommended answer. A "yes" to all of them means this spec stands
-as written.
+Only the ones still open. Each has a recommended answer.
 
-1. **Public browser client (tokens in the browser, re-sign-in every two weeks)
-   or confidential client (tokens on our server, every call proxied)?**
-   Recommended: public browser client. It keeps the server out of the data
-   path.
-2. **One sign-in box that guesses the network, or two tabs ("Mastodon",
-   "Bluesky")?** Recommended: two tabs. `alice.example.com` could be a Mastodon
-   server or a Bluesky handle; guessing is fragile.
-3. **Mastodon shapes plus `capabilities` (option a), or a new neutral model
-   (option b)?** Recommended: (a), with the alias clean-up in phase 1 so (b)
-   stays possible.
-4. **Hide Local and Public for Bluesky, or map Public to Bluesky's
-   "Discover" feed?** Recommended: hide. Feeds come in phase 5 and Discover is
-   one of them.
-5. **Profile route `/@alice.example.com`, or a prefix like `/bsky/...`?**
-   Recommended: `/@alice.example.com`. It reads the way people write handles,
-   and the dot rule is safe.
-6. **Use `@atproto/api` (rich text, moderation, types) or write the XRPC calls
-   by hand?** Recommended: `@atproto/api`, if phase 0 shows the cost is under
-   about 100 KB gzipped behind a dynamic import. Moderation is the reason.
-7. **Render signed-out Bluesky profiles and threads on our server at all?**
-   Recommended: yes, honoring `!no-unauthenticated`. It is what makes a shared
-   link work.
-8. **Ship day one without video playback (thumbnail and link only)?**
-   Recommended: yes. HLS is its own piece of work.
+1. **OAuth: public browser client now (re-approve every two weeks), with the
+   client-assertion backend later; or the BFF (2-year sessions, but every
+   Bluesky call goes through our server)?** Recommended: public now, D later.
+2. **Model: Caribou-owned types with Mastodon field names (a), or a neutral
+   model with new names (b, about 3–4 more weeks)?** Recommended: (a). The
+   seams in 6.3 are needed either way.
+3. **Profile route `/@alice.example.com`, accepting the rare wrong page for a
+   hostless remote Mastodon name with a dot (8.4)?** Recommended: yes, with
+   the `profilePath` fix.
+4. **Hide Local and Public for Bluesky?** Recommended: yes. Feeds come in
+   phase 5.
+5. **Use `@atproto/api`, if its lazy chunk is under about 100 KB gzipped?**
+   Recommended: yes. Moderation is the reason.
+6. **Render signed-out Bluesky profiles and threads on our server?**
+   Recommended: yes, honoring `!no-unauthenticated`.
+7. **Day one without video playback (thumbnail and link only)?**
+   Recommended: yes.
+
+Round 1's question on the sign-in form is now a decision (5.5, two panels).
 
 ---
 
 ## 13. Phased plan
 
-Each phase ships on its own and leaves main working. Sizes: **S** is a few
-days, **M** about a week, **L** two weeks or more.
+Sizes: **S** up to 3 days, **M** about a week, **L** about two weeks. A
+phase's estimate is the sum of its issues, as a range for integration and
+review. Each phase ships on its own and leaves main working.
 
-| phase | what ships | size | depends on |
-|---|---|---|---|
-| 0 | Spike and measure. No user-visible change. | S | — |
-| 1 | Neutral seams in the Mastodon code. No user-visible change. | M | — |
-| 2 | Bluesky sign-in and read-only Following, profile, thread. | L | 0, 1 |
-| 3 | Bluesky SSR for profiles and threads. | M | 2 |
-| 4 | Bluesky actions and compose. **Day one is here.** | L | 2 |
-| 5 | Notifications, search, hashtags, feeds, lists. | L | 4 |
-| 6 | Muted words, act as another account, video, gates, link cards. | M | 4 |
+| phase | what ships | issues | estimate | depends on |
+|---|---|---|---|---|
+| 0 | Spike and measurements | 1 S | 3 days | — |
+| 1a | Type and paging seams (no visible change) | 2 S, 2 M | 3–4 weeks | — |
+| 1b | Session and provenance seams (no visible change) | 2 M | 2 weeks | 1a |
+| 2a | Bluesky client, rendering, moderation (behind a flag) | 1 S, 1 M, 2 L | 5–6 weeks | 0, 1a |
+| 2b | Sign-in, switcher, Following, profile, thread (behind the flag) | 1 S, 3 M | 3–4 weeks | 1b, 2a |
+| 3 | SSR for profiles and threads | 2 S, 1 M | 2 weeks | 2b |
+| 4 | Actions, compose, notifications. **Flag off: day one.** | 1 S, 2 M, 1 L | 4–5 weeks | 2b, 3, PR #167 |
+| 5 | Search, hashtags, feeds, lists | 1 S, 3 M | 3–4 weeks | 4 |
+| 6 | Independent items | 1 S, 4 M | 4–5 weeks in total, any order | 4 |
+
+**Day one is about 20–26 weeks of work from phase 0.** Phase 0 can run beside
+1a, and parts of 2a beside 1b. Round 1 said phase 2 was "L" and implied about
+10 weeks to day one. It counted a phase as its biggest issue, not the sum, and
+it missed the seams.
 
 ### Phase 0 — spike (S)
 
-- Add `@atproto/api` and `@atproto/oauth-client-browser` on a branch. Build.
-  Record the gzipped size of the lazy chunk.
-- Sign in with a test account through the loopback client. Fetch the
-  Following feed. Check Lit SSR still builds.
-- Write the numbers into section 12.2 of this spec.
+Add the two libraries on a branch. Build and record the lazy chunk's size.
+Sign in through the loopback client; fetch Following; check Lit SSR still
+builds. Probe the other unknowns in 12.2. Write the numbers into 12.2.
 
-Ships: the measurements and a go/no-go on decision 6. No code merges unless
-it is the metadata route.
+### Phase 1a — type and paging seams
 
-### Phase 1 — seams (M)
+Owned recursive types and imports (seam 1); write methods take refs and
+mutations commit record refs (seams 2, 3); opaque cursors for timelines and
+profiles with the SSR handoff (seam 5); order from the client (seam 6);
+`capabilities`, with the nav, compose and card reading them. No behavior change
+for Mastodon; tests stay green.
 
-- Import the type aliases from the client package everywhere (6.4 step 1).
-- Caribou-owned aliases with the optional `bluesky` field (6.4 step 2).
-- `capabilities` on `CaribouClient`; the Mastodon client fills it.
-- Nav rail, compose and status card read capabilities instead of assuming
-  Mastodon.
-- Mutations take the status or account, not only the id.
-- `UserSession` gains `network` (defaults to `mastodon`).
+### Phase 1b — session and provenance seams
 
-Ships: a refactor with no behavior change. Tests stay green.
+`generation`, `expired`, the sorted error handling and the event split (5.6).
+Resource `network`, `viewerOf` merge rules (seam 4), network-aware `canAct`,
+links and reads (seam 9, section 11).
 
-### Phase 2 — sign-in and reading (L)
+### Phase 2a — client and rendering
 
-- `packages/bluesky-client`: identity, OAuth wrapper, `CaribouClient` with
-  read methods, mappers, facet renderer, embeds (images, external, record,
-  recordWithMedia; video as thumbnail), moderation.
-- Server: `oauth/client-metadata.json`, `api/atproto/resolve-handle` with the
-  SSRF guard.
-- Sign-in: the Bluesky tab, `/signin/bluesky`, session restore, sign-out.
-- Switcher network marks; `pathAfterSwitch` rules.
-- Following feed with polling; profile tabs; thread view. Client render only.
-- Behind a setting or a query flag until phase 4, so readers do not meet a
-  read-only network.
+`packages/bluesky-client` read methods and mappers, with catch-up and feed
+identity (seams 7, 8). Facet renderer. Embeds. Moderation with label
+definitions, per-surface decisions, `noOverride` and the veil.
 
-### Phase 3 — SSR (M)
+### Phase 2b — sign-in and reading
 
-- `server/lib/bluesky-public.ts`; route detection (8.4); profile and thread
-  SSR; `!no-unauthenticated` handling; default-prefs moderation in SSR.
-- Integration tests on SSR output; e2e hydration test for a Bluesky thread
-  (fixture server, not the live AppView, so CI does not hit Bluesky).
+Server metadata and resolver with the SSRF guard. Sign-in panels, callback,
+restore, expiry, sign-out. Switcher. Following with polling, profile tabs,
+thread. Client render only.
 
-### Phase 4 — actions and compose (L)
+### Phase 3 — SSR
 
-- Like, repost, bookmark, follow, mute, block, with rollback.
-- Compose: graphemes count, facets, images and alt text, reply, quote, label
-  picker, delete and redraft.
-- Remove the flag. **First Bluesky release.**
+`bluesky-public.ts`, route rules and the `profilePath` fix (8.4), profile and
+thread SSR, `!no-unauthenticated`, Bluesky TTLs. Integration tests on SSR
+output; a hydration e2e on a fixture server, not the live AppView.
 
-### Phase 5 — notifications and discovery (L)
+### Phase 4 — day one
 
-- Notifications with client grouping and the unread badge.
-- Search (people, posts) and hashtag pages through search.
-- Pinned feeds as tabs on Home, from the reader's prefs.
-- Lists: view, create, add and remove members, list feed, the "lists are
-  public" note.
+Like, repost, bookmark, follow, mute, block, with record refs and rollback;
+Reply and Quote off by the post's flags. Compose with the draft contract,
+limits, resize, labels, reply and quote. Delete and redraft. Notifications with
+client grouping, `getUnreadCount` and `updateSeen`. Turn the flag off.
 
-### Phase 6 — the rest (M)
+### Phase 5 — discovery
 
-- Muted words in the filters screen.
-- #131 between Bluesky accounts.
-- Video playback.
-- Thread gate and post gate in compose.
-- Link cards in compose.
+Search (people and posts); hashtag page; pinned feeds on Home; lists with the
+public note.
+
+### Phase 6 — independent items
+
+Muted words; #131 for Bluesky; video; gates in compose; link cards in compose.
 
 ### 13.1 Issues to file
 
-One issue each. Titles as they would be filed:
-
-1. `bluesky: spike — measure atproto client bundle and loopback sign-in` (S, phase 0)
-2. `refactor: import Status/Account/Relationship/List types from the client package` (S, phase 1)
-3. `refactor: Caribou-owned status and account types with a network extension` (S, phase 1)
-4. `refactor: CaribouClient capabilities; screens hide what a network lacks` (M, phase 1)
-5. `refactor: mutations take the status or account, not only its id` (S, phase 1)
-6. `state: UserSession carries a network` (S, phase 1)
-7. `bluesky: client package with read methods and mappers` (L, phase 2)
-8. `bluesky: facets to HTML renderer` (S, phase 2)
-9. `bluesky: embeds — images, external, record, recordWithMedia, video thumbnail` (M, phase 2)
-10. `bluesky: labels and moderation with the reader's prefs` (M, phase 2)
-11. `server: atproto client metadata and handle resolver with SSRF guard` (S, phase 2)
-12. `bluesky: sign-in, session restore and sign-out (public browser client)` (M, phase 2)
-13. `bluesky: account switcher network marks and switch rules` (S, phase 2)
-14. `bluesky: Following feed, profile and thread views` (M, phase 2)
-15. `bluesky: SSR for profiles and threads from the public AppView` (M, phase 3)
-16. `bluesky: honor !no-unauthenticated in SSR` (S, phase 3)
-17. `bluesky: like, repost, bookmark, follow, mute, block` (M, phase 4)
-18. `bluesky: compose — graphemes, facets, images, reply, quote, labels` (M, phase 4)
-19. `bluesky: delete and redraft` (S, phase 4)
-20. `bluesky: notifications with client-side grouping` (M, phase 5)
-21. `bluesky: search and hashtag pages` (M, phase 5)
-22. `bluesky: pinned feeds on Home` (M, phase 5)
-23. `bluesky: lists (curate lists) with the public-list note` (M, phase 5)
-24. `bluesky: muted words in the filters screen` (S, phase 6)
-25. `bluesky: act as another Bluesky account (#131)` (S, phase 6)
-26. `bluesky: video playback` (M, phase 6)
-27. `bluesky: thread gate and post gate in compose` (S, phase 6)
-28. `bluesky: link cards in compose` (S, phase 6)
+| # | title | size | phase |
+|---|---|---|---|
+| 1 | `bluesky: spike — bundle size, loopback sign-in, phase-0 unknowns` | S | 0 |
+| 2 | `refactor: Caribou-owned Status/Account/Relationship/List/Notification types` | M | 1a |
+| 3 | `refactor: CaribouClient write methods take refs; mutations commit what the server returns` | M | 1a |
+| 4 | `refactor: opaque paging cursors for timelines and profiles, with the SSR handoff` | S | 1a |
+| 5 | `refactor: CaribouClient capabilities; nav, compose and card read them; timeline order from the client` | S | 1a |
+| 6 | `state: session generation and an expired state that keeps drafts` | M | 1b |
+| 7 | `state: resource network, viewer-state owner, network-aware actions and links` | M | 1b |
+| 8 | `bluesky: client package with read methods, mappers, catch-up and feed identity` | L | 2a |
+| 9 | `bluesky: facets to HTML renderer` | S | 2a |
+| 10 | `bluesky: embeds — images, external, record, recordWithMedia, video thumbnail` | M | 2a |
+| 11 | `bluesky: moderation with label definitions, per-surface decisions and the reader veil` | L | 2a |
+| 12 | `server: atproto client metadata and handle resolver with a connection-bound SSRF guard` | M | 2b |
+| 13 | `bluesky: sign-in panels, callback, restore, expiry, sign-out` | M | 2b |
+| 14 | `bluesky: account switcher network names and switch rules` | S | 2b |
+| 15 | `bluesky: Following feed, profile and thread views` | M | 2b |
+| 16 | `bluesky: SSR for profiles and threads; route rules; profilePath fix` | M | 3 |
+| 17 | `bluesky: honor !no-unauthenticated in SSR` | S | 3 |
+| 18 | `bluesky: SSR cache TTLs and 429 fallback` | S | 3 |
+| 19 | `bluesky: like, repost, bookmark, follow, mute, block; reply and quote limits` | M | 4 |
+| 20 | `bluesky: compose — draft contract, limits, image resize, labels, reply, quote` | L | 4 |
+| 21 | `bluesky: delete and redraft` | S | 4 |
+| 22 | `bluesky: notifications with client grouping and the unread badge` | M | 4 |
+| 23 | `bluesky: search for people and posts` | M | 5 |
+| 24 | `bluesky: hashtag page` | S | 5 |
+| 25 | `bluesky: pinned feeds on Home` | M | 5 |
+| 26 | `bluesky: lists (curate lists) with the public-list note` | M | 5 |
+| 27 | `bluesky: muted words in the filters screen` | M | 6 |
+| 28 | `bluesky: act as another Bluesky account (#131)` | M | 6 |
+| 29 | `bluesky: video playback` | M | 6 |
+| 30 | `bluesky: thread gate and post gate in compose` | S | 6 |
+| 31 | `bluesky: link cards in compose` | M | 6 |
+| 32 | `auth: client-assertion backend (option D), when the SDK allows` | M | after 4 |
