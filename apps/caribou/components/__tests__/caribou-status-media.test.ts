@@ -173,16 +173,16 @@ describe('<caribou-status-media>', () => {
     const el = await mount([media('a'), media('b')], true)
     expect($$(el, '.item')).toHaveLength(2)
     expect($(el, 'img')).toBeNull()
-    const reveal = $(el, 'button.reveal') as HTMLButtonElement
+    const reveal = $(el, 'caribou-button.reveal') as HTMLElement
     expect(reveal.textContent).toBe('Show sensitive media')
     reveal.click()
     await el.updateComplete
     expect($$(el, 'img')).toHaveLength(2)
-    expect($(el, 'button.reveal')).toBeNull()
-    ;($(el, 'button.hide') as HTMLButtonElement).click()
+    expect($(el, 'caribou-button.reveal')).toBeNull()
+    ;($(el, 'caribou-button.hide') as HTMLElement).click()
     await el.updateComplete
     expect($(el, 'img')).toBeNull()
-    expect($(el, 'button.reveal')).not.toBeNull()
+    expect($(el, 'caribou-button.reveal')).not.toBeNull()
   })
 
   it('aspectOf falls back from small to original to 16:9', () => {

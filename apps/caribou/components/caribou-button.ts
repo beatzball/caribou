@@ -14,6 +14,9 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger'
 // marks it busy and swallows clicks. `disabled` takes it out of use entirely.
 // `pressed` makes it a toggle, with the three states of `_pressed.ts`: no
 // attribute is not a toggle, `pressed="false"` is off, `pressed` is on.
+// `label` names the button when the slotted text is too short to say what it
+// does ("edited"); `hint` is its tooltip. Both go on the inner button: an
+// `aria-label` or `title` on the host would not reach it.
 //
 // Parts: `button`, `spinner`.
 // Custom properties: `--caribou-button-size` (min height, default 2.25rem,
@@ -81,6 +84,8 @@ export class CaribouButton extends LitElement {
   @property({ type: Boolean, reflect: true }) disabled = false
   @property({ type: Boolean }) loading = false
   @property({ converter: pressedConverter }) pressed: boolean | undefined = undefined
+  @property() label = ''
+  @property() hint = ''
 
   // From formDisabledCallback: a disabled <fieldset> around the button, or
   // the host's own `disabled`. The server never has it, so render() must
@@ -140,6 +145,7 @@ export class CaribouButton extends LitElement {
     return html`<button type="button" part="button" data-variant=${this.variant}
       ?disabled=${this.disabled}
       aria-pressed=${this.pressed === undefined ? nothing : String(this.pressed)}
+      aria-label=${this.label || nothing} title=${this.hint || nothing}
       aria-disabled=${this.loading && !this.disabled ? 'true' : nothing}
       aria-busy=${this.loading ? 'true' : nothing}>${this.loading
         ? html`<span class="spinner" part="spinner" aria-hidden="true"></span>` : nothing}<slot></slot></button>`

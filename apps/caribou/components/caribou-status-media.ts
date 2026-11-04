@@ -4,6 +4,7 @@ import { ifDefined } from 'lit/directives/if-defined.js'
 import type { mastodon } from 'masto'
 import { boxReset } from './_shared-styles.js'
 import { httpUrl } from './_http-url.js'
+import './caribou-button.js'
 
 type Media = mastodon.v1.MediaAttachment
 
@@ -89,16 +90,25 @@ export class CaribouStatusMedia extends LitElement {
       white-space: pre-wrap; overflow-wrap: anywhere;
     }
     /* Sensitive media: empty boxes of the right size under one button. */
-    .reveal {
-      position: absolute; inset: 0; width: 100%;
-      color: var(--fg-0); background: var(--bg-2);
+    caribou-button.reveal {
+      position: absolute; inset: 0;
       font-weight: 600;
+      --caribou-button-bg: var(--bg-2); --caribou-button-fg: var(--fg-0);
     }
-    .hide {
+    /* Hide is a chip on the media, like ALT. */
+    caribou-button.hide {
       position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2);
-      padding: var(--space-1) var(--space-2); font-size: 0.75rem;
-      color: #fff; background: rgb(0 0 0 / 0.7);
+      font-size: 0.75rem;
+      --caribou-button-size: 0;
+      --caribou-button-bg: rgb(0 0 0 / 0.7); --caribou-button-fg: #fff;
     }
+    caribou-button:is(.reveal, .hide)::part(button) {
+      border: 0; border-radius: var(--radius-sm);
+    }
+    caribou-button.reveal::part(button) { block-size: 100%; }
+    caribou-button.hide::part(button) { padding: var(--space-1) var(--space-2); }
+    /* Drawn over the media, so the ring goes inside the box. */
+    caribou-button:is(.reveal, .hide)::part(button):focus-visible { outline-offset: -2px; }
     dialog {
       max-width: 95vw; max-height: 95vh; padding: var(--space-3);
       color: var(--fg-0); background: var(--bg-1);
@@ -107,8 +117,7 @@ export class CaribouStatusMedia extends LitElement {
     dialog::backdrop { background: rgb(0 0 0 / 0.85); }
     dialog img { width: auto; height: auto; max-width: 100%; max-height: 80vh; margin: 0 auto; object-fit: contain; }
     dialog p { margin: var(--space-2) 0 0; max-width: 60ch; white-space: pre-wrap; }
-    dialog form { display: flex; justify-content: flex-end; margin-bottom: var(--space-2); }
-    dialog form button { padding: var(--space-1) var(--space-3); color: var(--fg-0); background: var(--bg-2); }
+    dialog .bar { display: flex; justify-content: flex-end; margin-bottom: var(--space-2); }
   `]
 
   @property({ attribute: false }) media: Media[] = []
@@ -224,6 +233,8 @@ export class CaribouStatusMedia extends LitElement {
 
   private renderAlt(m: Media, index: number) {
     if (!m.description) return nothing
+    // Native: `popovertarget` is an id in this root, which cannot reach
+    // into a shared control's own root (README, "Shared controls").
     return html`
       <button type="button" class="alt" popovertarget="alt-${index}"
         aria-label="ALT, show the description">ALT</button>
@@ -247,6 +258,9 @@ export class CaribouStatusMedia extends LitElement {
       case 'gifv': {
         // The whole gif is a toggle button, as on Mastodon. A video with no
         // `controls` is not interactive, so it may sit inside a button.
+        // Native: the button is the media itself. A shared control draws a
+        // control box (border, fill, accent when pressed) the gif would
+        // have to undo (README, "Shared controls").
         const playing = this.gifPlaying(index)
         return html`
           <button type="button" class="gifv-toggle" aria-pressed=${playing ? 'true' : 'false'}
@@ -286,7 +300,8 @@ export class CaribouStatusMedia extends LitElement {
       <dialog aria-label=${alt || 'Image'} @close=${this.onDialogClose} @click=${this.onDialogClick}>
         ${m
           ? html`
-              <form method="dialog"><button class="close">Close</button></form>
+              <div class="bar"><caribou-button class="close" variant="secondary"
+                @click=${() => this.dialog?.close()}>Close</caribou-button></div>
               <img src=${ifDefined(fullUrl(m) ?? httpUrl(m.previewUrl))} alt=${alt} />
               ${alt ? html`<p>${alt}</p>` : nothing}
             `
@@ -311,8 +326,8 @@ export class CaribouStatusMedia extends LitElement {
         ${!this.sensitive
           ? nothing
           : hidden
-            ? html`<button type="button" class="reveal" @click=${() => this.setShown(true)}>Show sensitive media</button>`
-            : html`<button type="button" class="hide" @click=${() => this.setShown(false)}>Hide</button>`}
+            ? html`<caribou-button class="reveal" @click=${() => this.setShown(true)}>Show sensitive media</caribou-button>`
+            : html`<caribou-button class="hide" @click=${() => this.setShown(false)}>Hide</caribou-button>`}
         ${hidden ? nothing : this.renderLightbox(items)}
       </div>
     `

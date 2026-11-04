@@ -275,11 +275,19 @@ export class CaribouStatusCard extends LitElement {
       color: var(--fg-muted); font: inherit; font-size: 0.875rem;
       background: none; border: 0; padding: 0;
     }
-    button.edited { cursor: pointer; text-decoration: underline dotted; }
-    button.edited:hover { color: var(--fg-1); }
-    button.edited:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+    /* A word in the meta line, not a boxed button. The control keeps its
+       44px height on a coarse pointer. */
+    caribou-button.edited { --caribou-button-size: 0; }
+    caribou-button.edited::part(button) {
+      padding: 0; border: 0; border-radius: var(--radius-sm);
+      color: inherit; background: none;
+      text-decoration: underline dotted;
+    }
+    caribou-button.edited:hover::part(button) { color: var(--fg-1); background: none; }
+    caribou-button.edited::part(button):focus-visible { outline-offset: 2px; }
     @media (pointer: coarse) {
-      button.edited { min-block-size: 44px; padding-inline: var(--space-2); }
+      caribou-button.edited { --caribou-button-size: 44px; }
+      caribou-button.edited::part(button) { padding-inline: var(--space-2); }
     }
     .actions caribou-menu.more { margin-inline-start: auto; }
     .actions caribou-menu.more::part(trigger) { color: var(--fg-muted); }
@@ -837,6 +845,7 @@ export class CaribouStatusCard extends LitElement {
   private renderMenu(post: Status) {
     const acct = post.account.acct
     const { muting, blocking } = this.authorRel
+    // Native: items in a <caribou-menu> (README, "Shared controls").
     return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for post by @${acct}`}>
       <button type="button" class="menu-item" data-action="mute"
         @click=${this.onMute}>${muting ? 'Unmute' : 'Mute'} @${acct}</button>
@@ -850,12 +859,13 @@ export class CaribouStatusCard extends LitElement {
   private renderEdited(editedAt: string) {
     const when = this.relativeTime ? formatRelativeTime(editedAt) : absoluteLabel(editedAt)
     return this.canAct
-      ? html`<button type="button" class="edited" data-action="history" title=${`Edited ${when}`}
-          aria-label=${`Edited ${when}. Show edit history`} @click=${this.onHistory}>edited</button>`
+      ? html`<caribou-button class="edited" data-action="history" hint=${`Edited ${when}`}
+          label=${`Edited ${when}. Show edit history`} @click=${this.onHistory}>edited</caribou-button>`
       : html`<span class="edited" title=${`Edited ${when}`}>edited</span>`
   }
 
   private renderOwnMenu() {
+    // Native: items in a <caribou-menu> (README, "Shared controls").
     return html`<caribou-menu class="more" anchored icon="ellipsis" label="More actions for your post">
       <button type="button" class="menu-item" data-action="edit" @click=${this.onEdit}>Edit</button>
       <button type="button" class="menu-item danger" data-action="delete" @click=${this.onDelete}>Delete</button>
@@ -1003,6 +1013,8 @@ export class CaribouStatusCard extends LitElement {
         ? html`<span>Checking this post against your filters…</span>`
         : html`<span>Could not check this post against your filters.</span>`
       // The visible word starts the name, so a voice command still finds it.
+      // The Show/Hide toggle stays a native button: its aria-controls names
+      // a region in this root (README, "Shared controls").
       const name = verdict
         ? `${shown ? 'Hide' : 'Show'} post hidden by filter: ${titles}`
         : why
@@ -1058,6 +1070,8 @@ export class CaribouStatusCard extends LitElement {
     // reader hears the name once (the avatar's `alt` is empty).
     // One element around it all: happy-dom drops a child binding at the
     // top level of a template (README, Tests).
+    // Show more / Show less stays a native button: its aria-controls names
+    // the body in this root (README, "Shared controls").
     return html`<div class="post">
         ${boostName
           ? html`<div class="boost-attribution">

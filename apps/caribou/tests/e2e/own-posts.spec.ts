@@ -62,7 +62,8 @@ test('the edited mark opens the history, newest first', async ({ page }) => {
     own('1', 'first'), own('1', 'second'), own('1', 'third', { spoiler_text: 'a warning' }),
   ].map((p, i) => ({ ...p, created_at: `2026-11-01T0${i}:00:00.000Z` })))
   await gotoSettled(page, '/home')
-  await card(page, '1').getByRole('button', { name: /Show edit history/ }).click()
+  const mark = card(page, '1').getByRole('button', { name: /Show edit history/ })
+  await mark.click()
   const dialog = page.getByRole('dialog', { name: 'Edit history' })
   await expect(dialog).toBeVisible()
   const versions = dialog.getByRole('listitem')
@@ -74,6 +75,7 @@ test('the edited mark opens the history, newest first', async ({ page }) => {
   await expect(versions.nth(2)).toContainText('first')
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
+  await expect(mark).toBeFocused()
 })
 
 test('a failed edit keeps the dialog and the text, and the post as it was', async ({ page }) => {

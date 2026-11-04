@@ -106,6 +106,7 @@ test('a post with four images shows a grid, an ALT popover, and a lightbox that 
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Close' }).click()
   await expect(dialog).toBeHidden()
+  await expect(media.getByRole('link', { name: 'Open image' }).nth(1)).toBeFocused()
 
   // A click on the backdrop closes it.
   await media.getByRole('link', { name: 'Open image' }).nth(1).click()

@@ -316,7 +316,12 @@ describe('<caribou-status-card> edits', () => {
     await el.updateComplete
     expect($(el, 'span.edited')!.textContent).toBe('edited')
     await settle(el)
-    expect($(el, 'button.edited')!.textContent).toBe('edited')
+    const mark = $(el, 'caribou-button.edited')!
+    expect(mark.textContent).toBe('edited')
+    // The visible word is short; the name says what the button does.
+    const inner = mark.shadowRoot!.querySelector('button')!
+    expect(inner.getAttribute('aria-label')).toMatch(/^Edited .+\. Show edit history$/)
+    expect(inner.getAttribute('title')).toMatch(/^Edited /)
   })
 
   it('no mark on a post never edited', async () => {
@@ -330,7 +335,7 @@ describe('<caribou-status-card> edits', () => {
     statusCache.value = new Map([['1', post('1', { content: '<p>the fix</p>', editedAt: '2026-04-28T13:00:00Z' })]])
     await settle(el)
     expect($(el, '.status-content')!.textContent).toBe('the fix')
-    expect($(el, 'button.edited')).not.toBeNull()
+    expect($(el, 'caribou-button.edited')).not.toBeNull()
   })
 
   it('a hashtag the edit added opens Caribou\'s tag page, from the edited copy\'s tags', async () => {
@@ -362,7 +367,7 @@ describe('<caribou-status-card> edits', () => {
       { content: '<p>the fix<img src=x onerror="alert(1)"></p>', spoilerText: 'cw', createdAt: '2026-04-28T13:00:00Z', mediaAttachments: [] },
     ] as unknown as mastodon.v1.StatusEdit[])
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
-    $(el, 'button.edited')!.click()
+    $(el, 'caribou-button.edited')!.click()
     await settle(el)
     expect(history).toHaveBeenCalledWith('1')
     const dlg = document.querySelector<CaribouStatusHistory>('caribou-status-history')!
@@ -381,7 +386,7 @@ describe('<caribou-status-card> edits', () => {
     signIn()
     vi.spyOn(activeClient.value!, 'fetchStatusHistory').mockRejectedValue(new Error('x'))
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
-    $(el, 'button.edited')!.click()
+    $(el, 'caribou-button.edited')!.click()
     await settle(el)
     const dlg = document.querySelector<CaribouStatusHistory>('caribou-status-history')!
     await dlg.updateComplete
@@ -393,7 +398,7 @@ describe('<caribou-status-card> edits', () => {
     let resolve!: (v: mastodon.v1.StatusEdit[]) => void
     vi.spyOn(activeClient.value!, 'fetchStatusHistory').mockReturnValue(new Promise((r) => { resolve = r }))
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
-    $(el, 'button.edited')!.click()
+    $(el, 'caribou-button.edited')!.click()
     await settle(el)
     expect(document.querySelector('caribou-status-history')).not.toBeNull()
     const dlg = document.querySelector<CaribouStatusHistory>('caribou-status-history')!
@@ -411,8 +416,10 @@ describe('<caribou-status-card> edits', () => {
       { content: '<p>a</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z', mediaAttachments: [] },
     ] as unknown as mastodon.v1.StatusEdit[])
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
-    const mark = $(el, 'button.edited')!
-    mark.focus()
+    const mark = $(el, 'caribou-button.edited')!
+    // happy-dom ignores delegatesFocus, so focus the inner button as a
+    // browser would; own-posts.spec.ts checks it for real.
+    mark.shadowRoot!.querySelector('button')!.focus()
     mark.click()
     await settle(el)
     const dlg = document.querySelector<CaribouStatusHistory>('caribou-status-history')!
