@@ -34,6 +34,18 @@ export class CaribouTabs extends LitElement {
     nav {
       display: flex; overflow-x: auto; overscroll-behavior-x: contain;
       scrollbar-width: none;
+      /* The cue that more tabs are off screen, with no scrollbar and no
+         JavaScript: a shadow at each edge that stays put, under a cover in
+         the page colour that scrolls with the tabs. At the start of the row
+         the left cover hides the left shadow; at the end, the right one.
+         A row that fits shows neither. */
+      --_shade: color-mix(in srgb, var(--fg-0) 35%, transparent);
+      background:
+        linear-gradient(to right, var(--bg-0) 40%, transparent) left / 2rem 100% no-repeat local,
+        linear-gradient(to left, var(--bg-0) 40%, transparent) right / 2rem 100% no-repeat local,
+        linear-gradient(to right, var(--_shade), transparent) left / 1rem 100% no-repeat scroll,
+        linear-gradient(to left, var(--_shade), transparent) right / 1rem 100% no-repeat scroll;
+      background-color: var(--bg-0);
     }
     nav::-webkit-scrollbar { display: none; }
     ::slotted(a) {

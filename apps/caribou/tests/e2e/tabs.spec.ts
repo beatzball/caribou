@@ -8,7 +8,14 @@ test.describe('search tabs without JavaScript', () => {
 
   test('are links in a navigation named "Result type"', async ({ page }) => {
     await page.goto('/search?q=cats&type=hashtags')
-    await expect(page.getByRole('navigation', { name: 'Result type' })).toBeVisible()
+    // The links sit inside the landmark in the accessibility tree, though
+    // the DOM has them outside the shadow <nav>.
+    await expect(page.getByRole('navigation', { name: 'Result type' })).toMatchAriaSnapshot(`
+      - navigation "Result type":
+        - link "People"
+        - link "Hashtags"
+        - link "Posts"
+    `)
     // The links are slotted: in the accessibility tree they sit inside the
     // shadow <nav>, but in the DOM they are the host's children.
     const nav = page.locator('caribou-search caribou-tabs')
@@ -23,13 +30,15 @@ test.describe('search tabs without JavaScript', () => {
   })
 })
 
-test('a tab takes keyboard focus and shows a ring', async ({ page }) => {
+test('a tab takes keyboard focus and shows a ring', async ({ page, browserName }) => {
   await page.goto('/search?q=cats')
   await page.waitForSelector('litro-outlet[data-litro-settled]', { state: 'attached' })
   await expect(page.locator('litro-outlet > *')).toHaveCount(1)
   const nav = page.locator('litro-outlet > :not([hidden]) caribou-search caribou-tabs')
   await nav.getByRole('link', { name: 'People' }).focus()
-  await page.keyboard.press('Tab')
+  // WebKit, like Safari by default, skips links on plain Tab; Option+Tab
+  // reaches them.
+  await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab')
   const hashtags = nav.getByRole('link', { name: 'Hashtags' })
   await expect(hashtags).toBeFocused()
   expect(await hashtags.evaluate((a) => getComputedStyle(a).outlineStyle)).toBe('solid')

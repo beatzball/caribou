@@ -477,7 +477,8 @@ the sign-in completion page goes there for an account that chose one.
 Use these instead of a hand-styled `<button>`. Each one wraps a real
 `<button>` in its shadow root, so keyboard use and accessibility come from
 the browser. Focus is delegated to that button, so the control is one tab
-stop. Import the module from the component that renders it; the import
+stop. `<caribou-tabs>` is the exception: it holds no button, and each of
+its links is its own tab stop (see below). Import the module from the component that renders it; the import
 registers the element on the server and the client alike.
 
 | element | attributes | parts | custom properties |
@@ -545,7 +546,11 @@ elements. The profile tabs and the search tabs use it.
   and binds its click handler (`spaClick`, or its own).
 - `fill` gives every tab the same width. Without it a tab is as wide as
   its text. On a narrow screen the row scrolls sideways; the page does
-  not get wider. Each tab is at least 44px tall.
+  not get wider. There is no scrollbar: a shadow at an edge shows that
+  more tabs are that way, with JavaScript off too. Each tab is at least
+  44px tall.
+- WebKit (Safari's default) skips links on plain Tab; Option+Tab reaches
+  them. An e2e test that tabs onto a tab presses `Alt+Tab` on WebKit.
 - In Playwright, `getByRole('navigation').getByRole('link')` finds
   nothing: the links are the host's children in the DOM, not the shadow
   `<nav>`'s. Scope by the `caribou-tabs` element instead.

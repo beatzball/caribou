@@ -29,3 +29,30 @@ test('the profile tabs fit the phone and are 44px tall', async ({ page }) => {
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
 })
+
+// A screen too narrow for the three search tabs: the row scrolls, the page
+// does not, and a shadow at the edge says more tabs are there.
+test('on a narrow screen the tab row scrolls, not the page, and shows a cue', async ({ page }) => {
+  await page.setViewportSize({ width: 200, height: 700 })
+  await page.goto('/search?q=cats')
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  await expect(page.locator('litro-outlet > *')).toHaveCount(1)
+  const tabs = page.locator('litro-outlet > :not([hidden]) caribou-search caribou-tabs')
+  const row = await tabs.evaluate((el) => {
+    const nav = el.shadowRoot!.querySelector('nav')!
+    const s = getComputedStyle(nav)
+    return {
+      scroll: nav.scrollWidth, client: nav.clientWidth,
+      image: s.backgroundImage, attachment: s.backgroundAttachment,
+    }
+  })
+  expect(row.scroll).toBeGreaterThan(row.client)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  // The cue: covers that scroll with the tabs over shadows that stay put.
+  expect(row.image.match(/gradient/g)?.length).toBe(4)
+  expect(row.attachment).toBe('local, local, scroll, scroll')
+  for (const name of ['People', 'Hashtags', 'Posts']) {
+    const box = await tabs.getByRole('link', { name }).boundingBox()
+    expect(box!.height).toBeGreaterThanOrEqual(44)
+  }
+})
