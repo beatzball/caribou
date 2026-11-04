@@ -162,6 +162,61 @@ memory empties on an account change. Without JavaScript a post with a
 content warning cannot be opened: the server sends the collapsed card and
 no fallback. Read such a post on its home instance.
 
+**A quoted post shows inside the post that quotes it.** Mastodon 4.5
+puts it in `status.quote`; `<caribou-status-card>` mounts
+`<caribou-status-quote>` in the post body, so the post's own content
+warning hides the quote too. An accepted quote shows the quoted post's
+author, text, a media summary (no media loads) and a link to its thread; a
+plain click on the card opens the thread too. Every other state (pending,
+rejected, revoked, deleted, unauthorized, blocked or muted author) and an
+unknown one show a short note. After mount, a card on the reader's server
+takes the quote from the cached copy of the post: the reader's copy
+(`loadReaderView`) says whether they may see the quoted post, and a list
+that keeps its own copy (a thread) never gets it. The cache decides which quote
+to keep (below, "Which copy wins"). Hashtags and mentions in
+the quoted text open in Caribou, as in a post (`components/_post-links.ts`).
+The quoted post's own content warning,
+the reader's filters, mutes and blocks, and a newer edit or a delete from
+the status cache apply as on a card. A quote inside a quoted post (a
+shallow quote, an id only) is a link to the quoted post, never a second
+card. The status cache keeps the quoted post under its own id, and the
+server sanitizes it with the post (`sanitizeStatus`). A post that only
+links to another post, as on an older server, stays a link: making an
+embed would mean a fetch per link and a guess at which links are posts.
+Creating a quote is not built yet.
+
+**Which copy wins.** A post can reach the status cache many times: the
+server's page data (no token), the reader's own copy, an action's answer,
+a boost of it, a quote of it. `mergeStatus` and `cacheStatus` in
+`@beatzball/caribou-state` decide each field by one rule. Two places
+hold what they decide:
+
+- **The post's record** (`postRecords`, one per post id). Every copy of
+  the post writes to it, wherever it came: alone, inside a boost, inside
+  a quote. It holds what the reader's server says: `filtered`, the quote,
+  and when a copy with a token last arrived (`tokenAt`, in arrival order).
+  A copy with a token is one that has `filtered`; Mastodon sends it on
+  every copy fetched with a token since 4.0, and quotes came in 4.5.
+  Cards read it through `readerFiltered` and `readerQuote`, never by
+  searching cached copies.
+- **The cached copy** (`statusCache`), for everything else. "Known" below
+  is the cached copy of the same post, alone or else inside a boost.
+
+| field | kept in | the new copy wins unless |
+|---|---|---|
+| `filtered` | record | it has none (no token) |
+| `quote` | record | a copy with a token has arrived and this one has none, or this quote is shallow (an id only) and names the accepted post the record carries in full |
+| the quoted post | cache, under its own id | — it is cached only when the copy's own quote wins; a quote kept from the record is not cached again |
+| edit fields (`EDIT_FIELDS`) | cache | the known copy has a newer `editedAt` |
+| reader flags (`favourited`, `reblogged`, `bookmarked`, `muted`, `pinned`) | cache | on a merge, always (the known copy's stay) |
+| counts beside a flag | cache | an action is out, or the flag is set and the new count is lower |
+| `poll` | cache | the reader's vote is out; on a merge, the new copy has no `voted` (it keeps the known `voted`, `ownVotes`, and counts when they are higher) |
+
+The reader flags stay in the cached copy: the reader's own actions write
+them there (`updateStatus`), and no reader-side decision reads them from
+a boost. An account change empties the records and drops every reader
+flag (`forgetReaderFields`), so the next copy is taken.
+
 **The reader's server filters hide or warn.** A status fetched with a
 token carries `filtered`: every filter that matches it, whatever the
 context. The card picks the ones for its `filter-context` attribute (home,

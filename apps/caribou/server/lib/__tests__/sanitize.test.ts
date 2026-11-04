@@ -31,6 +31,20 @@ describe('sanitizeStatus', () => {
     expect(out.reblog).toEqual({ id: '1', content: '<p>boosted</p>' })
   })
 
+  it('cleans a quoted post, alone and inside a boost', () => {
+    const quote = { state: 'accepted', quotedStatus: { id: 'q', content: '<p onclick="x()">quoted</p>' } }
+    expect(sanitizeStatus({ id: '1', content: '', quote }).quote)
+      .toEqual({ state: 'accepted', quotedStatus: { id: 'q', content: '<p>quoted</p>' } })
+    const boost = sanitizeStatus({ id: '2', content: '', reblog: { id: '1', content: '', quote } })
+    expect(boost.reblog?.quote).toEqual({ state: 'accepted', quotedStatus: { id: 'q', content: '<p>quoted</p>' } })
+  })
+
+  it('leaves a quote without a post as it is', () => {
+    const quote = { state: 'pending', quotedStatus: null }
+    expect(sanitizeStatus({ id: '1', content: '', quote }).quote).toEqual(quote)
+    expect('quote' in sanitizeStatus({ id: '1', content: '' })).toBe(false)
+  })
+
   it('leaves a missing reblog missing', () => {
     expect('reblog' in sanitizeStatus({ id: '1', content: '<p>a</p>' })).toBe(false)
     expect(sanitizeStatus({ id: '1', content: '<p>a</p>', reblog: null }).reblog).toBeNull()

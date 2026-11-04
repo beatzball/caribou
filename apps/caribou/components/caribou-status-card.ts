@@ -8,7 +8,7 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  isOwnAccount, mergeStatus, normalizeTagName, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
+  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
@@ -19,6 +19,7 @@ import { POLL_EDIT_REFUSED, redraftOf } from './_redraft.js'
 import { showStatusHistory } from './caribou-status-history.js'
 import { spaClick } from './_spa-link.js'
 import { tagPath } from './_tag-path.js'
+import { hashtagOf, sameUrl } from './_post-links.js'
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
@@ -26,6 +27,7 @@ import './caribou-button.js'
 import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
+import './caribou-status-quote.js'
 import './caribou-status-poll.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
@@ -93,27 +95,6 @@ function sameFields(a: ActionFields, b: ActionFields): boolean {
 
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
-}
-
-// Compare as parsed URLs: `a.href` is the browser's normalized form of the
-// attribute, and `mentions[].url` is the server's raw string.
-function sameUrl(raw: string, href: string): boolean {
-  try { return new URL(raw).href === href } catch { return false }
-}
-
-// The hashtag a body link stands for, as the post wrote it, or null. Mastodon
-// marks one `class="mention hashtag" rel="tag"`; other servers may set only
-// `rel="tag"`. The link text is `#name`. It counts only when the post lists
-// the tag, compared as Mastodon does (case and Unicode form ignored), so a
-// look-alike link in the text cannot open a tag page.
-function hashtagOf(a: HTMLAnchorElement, tags: readonly { name: string }[] | undefined): string | null {
-  if (!a.matches('.hashtag') && !a.relList.contains('tag')) return null
-  const text = (a.textContent ?? '').trim()
-  if (!text.startsWith('#')) return null
-  const name = text.slice(1)
-  const wanted = normalizeTagName(name)
-  if (!name || !tags?.some((t) => normalizeTagName(t.name) === wanted)) return null
-  return name
 }
 
 function hostOf(url: string): string {
@@ -260,6 +241,8 @@ export class CaribouStatusCard extends LitElement {
       --caribou-icon-fill: none;
     }
     .warning { margin-top: var(--space-2); }
+    /* Mastodon's "RE: <link>" fallback for older apps; the quote shows it. */
+    .status-body:has(caribou-status-quote) .quote-inline { display: none; }
     .spoiler {
       margin: 0; color: var(--fg-0); white-space: pre-wrap; overflow-wrap: anywhere;
     }
@@ -346,6 +329,12 @@ export class CaribouStatusCard extends LitElement {
   @state() private liveEdit: Status | null = null
   // The reader deleted this post (or the post this boosts).
   @state() private deleted = false
+  // The quote the post's record says (`readerQuote`), for a reader on the
+  // same server: the reader's copy says whether they may see the quoted
+  // post (muted, blocked, revoked …), whichever copy brought it, and a list
+  // that keeps its own copy (a thread) never gets it. Undefined until
+  // mount, and while no copy of the post said.
+  @state() private liveQuote: Status['quote'] | undefined = undefined
   @state() private liveFields: ActionFields | null = null
   // The filter verdict from the newest copy; undefined until mount, when
   // render() reads `status` itself, as the server did.
@@ -457,6 +446,8 @@ export class CaribouStatusCard extends LitElement {
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
       const edit = post && this.canAct ? newerEdit(cached ?? undefined, post) : null
       if (edit !== this.liveEdit) this.liveEdit = edit
+      const quote = this.canAct && post ? readerQuote(post.id) : undefined
+      if (quote !== this.liveQuote) this.liveQuote = quote
       const gone = deletedStatusIds.value
       const deleted = this.canAct && !!s && (gone.has(s.id) || (!!post && gone.has(post.id)))
       if (deleted !== this.deleted) this.deleted = deleted
@@ -1050,6 +1041,7 @@ export class CaribouStatusCard extends LitElement {
     // timeline". Render the inner content as the body, prepend a small
     // attribution row that names the booster.
     const display = withEdit(s.reblog ?? s, this.liveEdit)
+    const quote = this.liveQuote !== undefined ? this.liveQuote : display.quote
     const dt = display.createdAt
     const timeLabel = this.relativeTime ? formatRelativeTime(dt) : absoluteLabel(dt)
     const boostName = s.reblog ? (s.account.displayName || s.account.username) : null
@@ -1111,6 +1103,7 @@ export class CaribouStatusCard extends LitElement {
               ${bodyShown && display.poll ? html`<caribou-status-poll .status=${display} ?interactive=${this.canAct}></caribou-status-poll>` : nothing}
               ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
               ${bodyShown && display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card}></caribou-status-link-card>` : nothing}
+              ${bodyShown && quote ? html`<caribou-status-quote .quote=${quote} instance=${this.instance} filter-context=${this.filterContext}></caribou-status-quote>` : nothing}
             </div>
             ${this.renderActions(display)}
           </div>

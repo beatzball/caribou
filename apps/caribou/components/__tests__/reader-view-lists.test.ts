@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  activeClient, activeUserKey, addUserSession, clearKeptAlive, filteredById, readerChecks, statusCache, users,
+  activeClient, activeUserKey, addUserSession, clearKeptAlive, postRecords, readerChecks, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-app-shell.js'
 import '../caribou-timeline.js'
@@ -54,7 +54,7 @@ function cards(root: HTMLElement): CaribouStatusCard[] {
 beforeEach(() => {
   document.body.replaceChildren()
   statusCache.value = new Map()
-  filteredById.value = new Map()
+  postRecords.value = new Map()
   readerChecks.value = new Map()
   users.value = new Map()
   activeUserKey.value = null

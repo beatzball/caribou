@@ -19,27 +19,82 @@ export function cacheAccount(acct: mastodon.v1.Account): void {
   accountCache.value = next
 }
 
-// The newest `filtered` the reader's server sent for each post, by id,
-// whichever copy it came in: the post alone, or inside a boost. A boost and
-// the post it boosts are cached in two places, and either can be the newer
-// one, so neither copy's own `filtered` decides; the last to arrive does.
-// Only copies off the network write here: a merge that keeps an older
-// cached value does not make it new again. Read it with `readerFiltered`.
-export const filteredById = signal<ReadonlyMap<string, readonly mastodon.v1.FilterResult[]>>(new Map())
+/**
+ * What the copies of one post said, by post id: one record, whichever copy
+ * brought it (the post alone, inside a boost, inside a quote). Reader-side
+ * decisions read this record, never a search through cached copies. The
+ * rules are the README's "Which copy wins" table.
+ */
+export interface PostRecord {
+  /** Write order of the last copy fetched with a token; 0 when none was. */
+  tokenAt: number
+  /** That copy's `filtered`. Undefined until a copy with a token arrives. */
+  filtered?: readonly mastodon.v1.FilterResult[]
+  /** True once a copy carried `quote` (a Mastodon 4.5 server). */
+  hasQuote: boolean
+  /** The quote the post shows. */
+  quote?: mastodon.v1.Status['quote']
+}
 
-function noteFiltered(status: mastodon.v1.Status): void {
-  const own = Array.isArray(status.filtered) ? status.filtered : null
-  const inner = status.reblog && Array.isArray(status.reblog.filtered) ? status.reblog : null
-  if (!own && !inner) return
-  const next = new Map(filteredById.peek())
-  if (own) next.set(status.id, own)
-  if (inner) next.set(inner.id, inner.filtered!)
-  filteredById.value = next
+export const postRecords = signal<ReadonlyMap<string, PostRecord>>(new Map())
+
+// The order copies arrive in. A copy with a token is the reader's server's
+// answer at that moment, so the last one to arrive is the newest.
+let arrivals = 0
+
+// A shallow quote (an id only: Mastodon embeds a quoted post's own quote so)
+// that names the accepted post `had` carries in full says less than `had`.
+function shallowOf(now: mastodon.v1.Status['quote'], had: mastodon.v1.Status['quote']): boolean {
+  if (!now || now.state !== 'accepted' || 'quotedStatus' in now && now.quotedStatus) return false
+  const full = had && had.state === 'accepted' && 'quotedStatus' in had ? had.quotedStatus : null
+  return !!full && 'quotedStatusId' in now && now.quotedStatusId === full.id
+}
+
+function writeRecord(id: string, rec: PostRecord): void {
+  const next = new Map(postRecords.peek())
+  next.set(id, rec)
+  postRecords.value = next
+}
+
+// Writes what one copy says into its post's record, and returns the record.
+// A copy with a token (it has `filtered`: Mastodon sends one on every copy
+// fetched with a token since 4.0, and quotes came in 4.5) always counts.
+// A copy without one counts for the quote only while no copy with a token
+// has arrived for this account: the quote state is the reader's (muted,
+// blocked, unauthorized …), and page data must not undo it.
+function noteCopy(copy: mastodon.v1.Status): PostRecord {
+  const had = postRecords.peek().get(copy.id) ?? { tokenAt: 0, hasQuote: false }
+  const withToken = Array.isArray(copy.filtered)
+  let rec = had
+  if (withToken) rec = { ...rec, tokenAt: ++arrivals, filtered: copy.filtered }
+  if ('quote' in copy && (withToken || had.tokenAt === 0) && !shallowOf(copy.quote, had.quote)) {
+    rec = { ...rec, hasQuote: true, quote: copy.quote }
+  }
+  if (rec !== had) writeRecord(copy.id, rec)
+  return rec
 }
 
 /** The newest `filtered` known for a post, or undefined when none is known. */
 export function readerFiltered(id: string): readonly mastodon.v1.FilterResult[] | undefined {
-  return filteredById.value.get(id)
+  return postRecords.value.get(id)?.filtered
+}
+
+/** The quote a post shows by the rules, null for none, undefined when no copy said. */
+export function readerQuote(id: string): mastodon.v1.Status['quote'] | undefined {
+  const rec = postRecords.value.get(id)
+  return rec?.hasQuote ? rec.quote ?? null : undefined
+}
+
+// The post a quote shows (Mastodon 4.5), when the copy carries it. The
+// quote inside a quoted post is shallow (an id only), so this goes one
+// level deep.
+function quotedIn(status: mastodon.v1.Status): mastodon.v1.Status | null {
+  const q = status.quote
+  return q && 'quotedStatus' in q && q.quotedStatus ? q.quotedStatus : null
+}
+
+function withQuoted(status: mastodon.v1.Status, quoted: mastodon.v1.Status): mastodon.v1.Status {
+  return { ...status, quote: { ...status.quote!, quotedStatus: quoted } }
 }
 
 function store(status: mastodon.v1.Status): void {
@@ -54,10 +109,33 @@ function store(status: mastodon.v1.Status): void {
  * never undoes a newer edit of the post (`protectEdits`).
  */
 export function cacheStatus(status: mastodon.v1.Status): void {
-  batch(() => {
-    noteFiltered(status)
-    store(protectVotes(protectEdits(status)))
-  })
+  batch(() => cacheOne(status))
+}
+
+// Gives a copy the quote its record says (`noteCopy`). When that is the
+// copy's own quote, its quoted post is cached under its own id by the same
+// rules (`put`), so an edit or a delete of it reaches every quote of it,
+// and the record keeps the cached copy. A quote kept from the record is not
+// cached again: its quoted post is an old copy, and its reader fields would
+// undo newer ones.
+function settleQuote(
+  fresh: mastodon.v1.Status, put: (s: mastodon.v1.Status) => mastodon.v1.Status,
+): mastodon.v1.Status {
+  const rec = noteCopy(fresh)
+  if (!rec.hasQuote) return fresh
+  if (rec.quote !== fresh.quote) return { ...fresh, quote: rec.quote }
+  const quoted = quotedIn(fresh)
+  if (!quoted) return fresh
+  const out = withQuoted(fresh, put(quoted))
+  writeRecord(fresh.id, { ...postRecords.peek().get(fresh.id)!, quote: out.quote })
+  return out
+}
+
+function cacheOne(status: mastodon.v1.Status): mastodon.v1.Status {
+  let out = settleQuote(protectVotes(protectEdits(status)), cacheOne)
+  if (out.reblog) out = { ...out, reblog: settleQuote(out.reblog, cacheOne) }
+  store(out)
+  return out
 }
 
 /** True while the reader's vote on the poll of post `id` is out. */
@@ -205,12 +283,14 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   const current = knownCopy(fresh.id, cache)
   // The same object again (a store seeded twice from one page): nothing new.
   if (current === fresh) return current
-  noteFiltered(fresh)
   fresh = protectEdits(fresh)
-  let next = current ? keepReaderFields(fresh, current) : fresh
+  // The quote first: its record reads the fresh copy's own `filtered`.
+  let next = settleQuote(fresh, merge)
+  if (current) next = keepReaderFields(next, current)
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
-    const reblog = inner ? keepReaderFields(fresh.reblog, inner) : fresh.reblog
+    let reblog = settleQuote(fresh.reblog, merge)
+    if (inner) reblog = keepReaderFields(reblog, inner)
     next = { ...next, reblog }
     if (cache.has(fresh.reblog.id)) store(reblog)
   }
@@ -226,6 +306,8 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
     out.poll = poll
   }
   if (status.reblog) out.reblog = withoutReaderFields(status.reblog)
+  const quoted = quotedIn(status)
+  if (quoted) out.quote = { ...status.quote!, quotedStatus: withoutReaderFields(quoted) }
   return out as unknown as mastodon.v1.Status
 }
 
@@ -236,6 +318,17 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
  * list still on screen keeps its posts; the flags come back with the next
  * copy the new account fetches.
  */
+// A quote of a deleted post says so, since the mark that hid it is about
+// to go.
+function withoutDeletedQuotes(s: mastodon.v1.Status, gone: ReadonlySet<string>): mastodon.v1.Status {
+  const dead = (p: mastodon.v1.Status) => {
+    const q = quotedIn(p)
+    return q && gone.has(q.id) ? { ...p, quote: { state: 'deleted' as const, quotedStatus: null } } : p
+  }
+  const out = dead(s)
+  return out.reblog ? { ...out, reblog: dead(out.reblog) } : out
+}
+
 export function forgetReaderFields(): void {
   const next = new Map<string, mastodon.v1.Status>()
   // The deleted marks go with the account; a copy of a deleted post that a
@@ -243,11 +336,11 @@ export function forgetReaderFields(): void {
   const gone = deletedStatusIds.peek()
   for (const [id, s] of statusCache.peek()) {
     if (gone.has(id) || (s.reblog && gone.has(s.reblog.id))) continue
-    next.set(id, withoutReaderFields(s))
+    next.set(id, withoutReaderFields(withoutDeletedQuotes(s, gone)))
   }
   batch(() => {
     statusCache.value = next
-    filteredById.value = new Map()
+    postRecords.value = new Map()
     deletedStatusIds.value = new Set()
   })
 }

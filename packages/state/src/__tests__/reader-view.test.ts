@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { mastodon } from 'masto'
 import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, filteredById, statusCache } from '../caches.js'
+import { cacheStatus, postRecords, statusCache } from '../caches.js'
 import { loadReaderView, readerCheckFor, readerChecks } from '../reader-view.js'
 import { createThreadStore } from '../thread-store.js'
 import { createProfileStore } from '../profile-store.js'
@@ -28,7 +28,7 @@ function client(over: Partial<CaribouClient> = {}): CaribouClient {
 
 beforeEach(() => {
   statusCache.value = new Map()
-  filteredById.value = new Map()
+  postRecords.value = new Map()
   readerChecks.value = new Map()
 })
 
