@@ -133,3 +133,31 @@ describe('findRedraftSlot', () => {
     expect(findRedraftSlot(alice)).toBe('redraft:b')
   })
 })
+
+describe('a draft with a poll', () => {
+  const poll = { options: [' Tea ', 'Coffee', ''], expiresIn: 3600, multiple: true, hideTotals: false }
+
+  it('a poll with text in an option is not an empty draft, and is stored', () => {
+    saveDraft(alice, 'new', emptyDraft({ poll: { ...poll, options: ['', 'x'] } }))
+    expect(loadDraft(alice, 'new')?.poll?.options).toEqual(['', 'x'])
+    saveDraft(alice, 'new', emptyDraft({ poll: { ...poll, options: ['', ' '] } }))
+    expect(loadDraft(alice, 'new')).toBeNull()
+  })
+
+  it('postDraft sends the trimmed, filled options and the settings', async () => {
+    const createStatus = vi.fn(async (_p: unknown, _o?: unknown) => posted('p1'))
+    await postDraft(fakeClient(alice, createStatus), 'new', emptyDraft({ text: 'which?', poll }))
+    expect(createStatus).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'which?',
+      poll: { options: ['Tea', 'Coffee'], expiresIn: 3600, multiple: true, hideTotals: false },
+    }), expect.anything())
+    expect(createStatus.mock.calls[0]![0]).not.toHaveProperty('mediaIds')
+  })
+
+  it('postDraft never sends a poll with media', async () => {
+    const createStatus = vi.fn(async (_p: unknown, _o?: unknown) => posted('p2'))
+    const media = [{ id: 'm1', type: 'image' as const, url: '', previewUrl: null, description: '' }]
+    await postDraft(fakeClient(alice, createStatus), 'new', emptyDraft({ text: 'x', poll, media }))
+    expect(createStatus.mock.calls[0]![0]).not.toHaveProperty('poll')
+  })
+})

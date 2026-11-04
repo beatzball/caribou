@@ -14,6 +14,18 @@ export interface DraftMedia {
   name?: string
 }
 
+/**
+ * A poll being written. Options keep the reader's blanks while they type;
+ * only the filled ones are sent, trimmed.
+ */
+export interface DraftPoll {
+  options: string[]
+  /** Seconds the poll stays open. */
+  expiresIn: number
+  multiple: boolean
+  hideTotals: boolean
+}
+
 export interface ComposeDraft {
   text: string
   spoilerText: string
@@ -28,6 +40,8 @@ export interface ComposeDraft {
   // post leaves them out and the server decides.
   sensitive?: boolean
   language?: string | null
+  /** A poll. Mastodon refuses a post with both a poll and media. */
+  poll?: DraftPoll | null
 }
 
 // A new post and each reply keep their own draft, so opening a reply does
@@ -60,6 +74,12 @@ export function emptyDraft(init: Partial<ComposeDraft> = {}): ComposeDraft {
 
 export function isDraftEmpty(d: ComposeDraft): boolean {
   return d.text.trim() === '' && d.spoilerText.trim() === '' && d.media.length === 0
+    && !(d.poll?.options.some((o) => o.trim() !== '') ?? false)
+}
+
+/** The options a poll sends: the filled ones, trimmed. */
+export function pollOptions(poll: DraftPoll): string[] {
+  return poll.options.map((o) => o.trim()).filter((o) => o !== '')
 }
 
 // Sign-out (`signOutActive`, `removeSession`) clears this key.
@@ -135,6 +155,12 @@ export async function postDraft(
     ...(draft.language ? { language: draft.language } : {}),
     ...(draft.inReplyToId ? { inReplyToId: draft.inReplyToId } : {}),
     ...(draft.media.length > 0 ? { mediaIds: draft.media.map((m) => m.id) } : {}),
+    ...(draft.poll && draft.media.length === 0 ? {
+      poll: {
+        options: pollOptions(draft.poll), expiresIn: draft.poll.expiresIn,
+        multiple: draft.poll.multiple, hideTotals: draft.poll.hideTotals,
+      },
+    } : {}),
   }, { idempotencyKey: draft.idempotencyKey })
   clearDraft(client.userKey, slot)
   cacheStatus(status)

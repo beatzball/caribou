@@ -5,7 +5,8 @@ import type { mastodon } from 'masto'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
-  type ComposeDraft, type DraftMedia, type DraftSlot, type UserSession,
+  pollOptions,
+  type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
 import { MediaProcessingTimeout, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
@@ -26,9 +27,85 @@ export interface ComposeDetail {
   redraft?: ComposeDraft
 }
 
-interface Limits { maxChars: number; maxMedia: number; accept: string }
+interface PollLimits { maxOptions: number; maxChars: number; minExpiration: number; maxExpiration: number }
 
-const DEFAULT_LIMITS: Limits = { maxChars: 500, maxMedia: 4, accept: 'image/*,video/*,audio/*' }
+interface Limits { maxChars: number; maxMedia: number; accept: string; polls: PollLimits }
+
+// Mastodon's own defaults, for a server that does not say.
+const DEFAULT_POLL_LIMITS: PollLimits = { maxOptions: 4, maxChars: 50, minExpiration: 300, maxExpiration: 2_629_746 }
+
+const DEFAULT_LIMITS: Limits = { maxChars: 500, maxMedia: 4, accept: 'image/*,video/*,audio/*', polls: DEFAULT_POLL_LIMITS }
+
+const HOUR = 3600
+const DAY = 24 * HOUR
+const POLL_DURATIONS: { seconds: number; label: string }[] = [
+  { seconds: 5 * 60, label: '5 minutes' },
+  { seconds: 30 * 60, label: '30 minutes' },
+  { seconds: HOUR, label: '1 hour' },
+  { seconds: 6 * HOUR, label: '6 hours' },
+  { seconds: 12 * HOUR, label: '12 hours' },
+  { seconds: DAY, label: '1 day' },
+  { seconds: 3 * DAY, label: '3 days' },
+  { seconds: 7 * DAY, label: '7 days' },
+]
+
+const inRange = (limits: PollLimits, seconds: number) =>
+  seconds >= limits.minExpiration && seconds <= limits.maxExpiration
+
+/** "2 days", "2 hours 30 minutes". */
+export function durationLabel(seconds: number): string {
+  const units: [number, string][] = [[DAY, 'day'], [HOUR, 'hour'], [60, 'minute']]
+  const parts: string[] = []
+  let rest = Math.round(seconds)
+  for (const [size, name] of units) {
+    const n = Math.floor(rest / size)
+    rest -= n * size
+    if (n > 0) parts.push(`${n} ${name}${n === 1 ? '' : 's'}`)
+  }
+  return parts.join(' ') || `${seconds} seconds`
+}
+
+/** The durations the server allows. A stored one in range but not listed is kept. */
+function pollDurations(limits: PollLimits, current: number | null): { seconds: number; label: string }[] {
+  const allowed = POLL_DURATIONS.filter((d) => inRange(limits, d.seconds))
+  if (current !== null && inRange(limits, current) && !allowed.some((d) => d.seconds === current)) {
+    allowed.push({ seconds: current, label: durationLabel(current) })
+    allowed.sort((a, b) => a.seconds - b.seconds)
+  }
+  return allowed
+}
+
+/** `seconds`, moved into the server's range. */
+function fitDuration(limits: PollLimits, seconds: number): number {
+  return Math.min(Math.max(seconds, limits.minExpiration), limits.maxExpiration)
+}
+
+function newPoll(limits: PollLimits): DraftPoll {
+  const expiresIn = Math.min(Math.max(DAY, limits.minExpiration), limits.maxExpiration)
+  return { options: ['', ''], expiresIn, multiple: false, hideTotals: false }
+}
+
+/**
+ * Why a poll cannot be posted yet, or null. Checked against the limits the
+ * dialog has now, which may have come in after the options were written, or
+ * be newer than a stored draft.
+ */
+function pollProblem(poll: DraftPoll, limits: PollLimits): string | null {
+  if (poll.options.length > limits.maxOptions) return `This server allows at most ${limits.maxOptions} options.`
+  const filled = poll.options.map((o) => o.trim())
+  const long = filled.findIndex((o) => [...o].length > limits.maxChars)
+  if (long >= 0) return `Option ${long + 1} is longer than ${limits.maxChars} characters.`
+  if (filled.some((o) => o === '')) return 'Every option needs text.'
+  const seen = new Set(filled.map((o) => o.toLocaleLowerCase()))
+  if (seen.size < filled.length) return 'Two options are the same.'
+  return null
+}
+
+/** A limit problem shows at once; a blank or a repeat once the reader has started. */
+function limitProblem(poll: DraftPoll, limits: PollLimits): boolean {
+  return poll.options.length > limits.maxOptions
+    || poll.options.some((o) => [...o.trim()].length > limits.maxChars)
+}
 
 // One fetch per server for the page's lifetime; the limits rarely change.
 const limitsByServer = new Map<string, Promise<Limits>>()
@@ -40,6 +117,12 @@ function fetchLimits(client: CaribouClient, server: string): Promise<Limits> {
       maxChars: i.configuration?.statuses?.maxCharacters ?? DEFAULT_LIMITS.maxChars,
       maxMedia: i.configuration?.statuses?.maxMediaAttachments ?? DEFAULT_LIMITS.maxMedia,
       accept: i.configuration?.mediaAttachments?.supportedMimeTypes?.join(',') || DEFAULT_LIMITS.accept,
+      polls: {
+        maxOptions: i.configuration?.polls?.maxOptions ?? DEFAULT_POLL_LIMITS.maxOptions,
+        maxChars: i.configuration?.polls?.maxCharactersPerOption ?? DEFAULT_POLL_LIMITS.maxChars,
+        minExpiration: i.configuration?.polls?.minExpiration ?? DEFAULT_POLL_LIMITS.minExpiration,
+        maxExpiration: i.configuration?.polls?.maxExpiration ?? DEFAULT_POLL_LIMITS.maxExpiration,
+      },
     })).catch(() => {
       limitsByServer.delete(server)
       return DEFAULT_LIMITS
@@ -153,6 +236,18 @@ export class CaribouComposeDialog extends LitElement {
     @media (pointer: coarse) {
       .toolbar select { min-block-size: 44px; }
     }
+    .poll { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
+    .poll legend { padding: 0 var(--space-1); font-weight: 600; }
+    .poll ol { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+    .poll li { display: flex; gap: var(--space-2); align-items: center; }
+    .poll li input { flex: 1; min-width: 0; }
+    .poll .settings { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); align-items: center; }
+    .poll .settings select { width: auto; min-block-size: 2.25rem; }
+    .poll .check { display: inline-flex; gap: var(--space-2); align-items: center; min-block-size: 2.25rem; }
+    @media (pointer: coarse) {
+      .poll .settings select, .poll .check { min-block-size: 44px; }
+    }
+    .poll .problem { color: var(--danger); }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
@@ -175,7 +270,8 @@ export class CaribouComposeDialog extends LitElement {
 
   @query('dialog') private dialogEl?: HTMLDialogElement
   @query('textarea') private textareaEl?: HTMLTextAreaElement
-  @query('select') private selectEl?: HTMLSelectElement
+  @query('#compose-visibility') private selectEl?: HTMLSelectElement
+  @query('#compose-poll-duration') private durationEl?: HTMLSelectElement
   @query('input[type="file"]') private fileEl?: HTMLInputElement
 
   private draftKey: DraftSlot = 'new'
@@ -224,6 +320,10 @@ export class CaribouComposeDialog extends LitElement {
     // <select> is not applied reliably in every DOM.
     if (this.selectEl && this.selectEl.value !== this.draft.visibility) {
       this.selectEl.value = this.draft.visibility
+    }
+    const poll = this.draft.poll
+    if (poll && this.durationEl && this.durationEl.value !== String(poll.expiresIn)) {
+      this.durationEl.value = String(poll.expiresIn)
     }
     // A one-shot flag, not `open`: the browser fires `close` a task after
     // close(), and an update in between must not open the dialog again.
@@ -275,7 +375,18 @@ export class CaribouComposeDialog extends LitElement {
     this.ready = true
     const client = this.client
     const user = activeUser.value
-    if (client && user) void fetchLimits(client, user.server).then((l) => { this.limits = l })
+    if (client && user) {
+      const session = this.session
+      void fetchLimits(client, user.server).then((l) => {
+        this.limits = l
+        // A poll made before the limits came in, or kept in a draft from
+        // before the server changed them, may be out of range.
+        const poll = this.draft.poll
+        if (session === this.session && poll && !inRange(l.polls, poll.expiresIn)) {
+          this.patchPoll({ expiresIn: fitDuration(l.polls, poll.expiresIn) })
+        }
+      })
+    }
   }
 
   /**
@@ -376,8 +487,11 @@ export class CaribouComposeDialog extends LitElement {
     return countChars(this.draft.text, this.draft.cw ? this.draft.spoilerText : '')
   }
 
+  // A poll needs text with it: Mastodon refuses a post with only a poll.
   private get canPost(): boolean {
-    const hasContent = this.draft.text.trim() !== '' || this.draft.media.length > 0
+    const poll = this.activePoll
+    const hasContent = this.draft.text.trim() !== '' || (this.draft.media.length > 0 && !poll)
+    if (poll && (pollProblem(poll, this.limits.polls) !== null || !inRange(this.limits.polls, poll.expiresIn))) return false
     return hasContent && this.count <= this.limits.maxChars
       && this.pending.length === 0 && !this.posting
   }
@@ -542,6 +656,85 @@ export class CaribouComposeDialog extends LitElement {
     })
   }
 
+  // The draft's poll, when this dialog may send one: not in an edit, and
+  // never beside media.
+  private get activePoll(): DraftPoll | null {
+    return !this.editing && this.draft.poll && this.draft.media.length === 0 ? this.draft.poll : null
+  }
+
+  private togglePoll = () => {
+    if (this.draft.media.length > 0 || this.pending.length > 0) return
+    this.patchDraft({ poll: this.draft.poll ? null : newPoll(this.limits.polls) })
+    if (this.draft.poll) void this.focusIn('[data-poll] input[data-option]')
+  }
+
+  private patchPoll(patch: Partial<DraftPoll>) {
+    const poll = this.draft.poll
+    if (poll) this.patchDraft({ poll: { ...poll, ...patch } })
+  }
+
+  private setOption(i: number, value: string) {
+    const poll = this.draft.poll
+    if (poll) this.patchPoll({ options: poll.options.map((o, j) => j === i ? value : o) })
+  }
+
+  private addOption = () => {
+    const poll = this.draft.poll
+    if (!poll || poll.options.length >= this.limits.polls.maxOptions) return
+    this.patchPoll({ options: [...poll.options, ''] })
+    void this.focusIn(`[data-poll] input[data-option="${poll.options.length}"]`)
+  }
+
+  private removeOption(i: number) {
+    const poll = this.draft.poll
+    if (!poll || poll.options.length <= 2) return
+    this.patchPoll({ options: poll.options.filter((_, j) => j !== i) })
+    // The option now in its place, or the last one.
+    void this.focusIn(`[data-poll] input[data-option="${Math.min(i, poll.options.length - 2)}"]`)
+  }
+
+  private async focusIn(selector: string) {
+    await this.updateComplete
+    this.renderRoot.querySelector<HTMLElement>(selector)?.focus()
+  }
+
+  private renderPoll(poll: DraftPoll, busy: boolean) {
+    const limits = this.limits.polls
+    const problem = pollProblem(poll, limits)
+    // Say what is wrong only once the reader has started on the options,
+    // or at once when the server's limits rule the poll out.
+    const showProblem = problem !== null && (pollOptions(poll).length > 0 || limitProblem(poll, limits))
+    const many = poll.options.length > 2
+    return html`<fieldset class="poll" data-poll>
+      <legend>Poll</legend>
+      <ol>
+        ${poll.options.map((o, i) => html`<li>
+          <input type="text" data-option=${String(i)} aria-label=${`Option ${i + 1}`}
+            placeholder=${`Option ${i + 1}`} maxlength=${limits.maxChars} ?readonly=${busy} .value=${o}
+            @input=${(e: Event) => this.setOption(i, (e.target as HTMLInputElement).value)}>
+          ${many ? html`<caribou-icon-button icon="x" label=${`Remove option ${i + 1}`} data-action="remove-option"
+            ?disabled=${busy} @click=${() => this.removeOption(i)}></caribou-icon-button>` : nothing}
+        </li>`)}
+      </ol>
+      ${poll.options.length < limits.maxOptions
+        ? html`<div><caribou-button data-action="add-option" ?disabled=${busy} @click=${this.addOption}>Add option</caribou-button></div>`
+        : nothing}
+      <div class="settings">
+        <label for="compose-poll-duration">Ends in</label>
+        <select id="compose-poll-duration" ?disabled=${busy}
+          @change=${(e: Event) => this.patchPoll({ expiresIn: Number((e.target as HTMLSelectElement).value) })}>
+          ${pollDurations(limits, poll.expiresIn).map((d) => html`<option value=${String(d.seconds)}>${d.label}</option>`)}
+        </select>
+        <label class="check"><input type="checkbox" data-poll-multiple .checked=${poll.multiple} ?disabled=${busy}
+          @change=${(e: Event) => this.patchPoll({ multiple: (e.target as HTMLInputElement).checked })}>Allow several choices</label>
+        <label class="check"><input type="checkbox" data-poll-hide-totals .checked=${poll.hideTotals} ?disabled=${busy}
+          @change=${(e: Event) => this.patchPoll({ hideTotals: (e.target as HTMLInputElement).checked })}>Hide vote counts until it ends</label>
+      </div>
+      <p class="note">A post with a poll cannot have media.</p>
+      <p class="note problem" data-poll-problem aria-live="polite">${showProblem ? problem : ''}</p>
+    </fieldset>`
+  }
+
   private removeMedia(id: string) {
     this.patchDraft({ media: this.draft.media.filter((m) => m.id !== id) })
   }
@@ -560,6 +753,7 @@ export class CaribouComposeDialog extends LitElement {
     const mediaCount = d.media.length + this.pending.length
     const full = mediaCount >= this.limits.maxMedia
     const editing = this.editing !== null
+    const hasPoll = this.activePoll !== null
     const title = editing ? 'Edit post' : this.replyTo || d.inReplyToId ? 'Reply' : 'New post'
     const busy = this.posting
     const submitLabel = editing ? (busy ? 'Saving…' : 'Save')
@@ -641,6 +835,7 @@ export class CaribouComposeDialog extends LitElement {
                 </li>`
               })}
             </ul>` : nothing}
+          ${this.activePoll ? this.renderPoll(this.activePoll, busy) : nothing}
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space
                  clicks it, and the click opens the hidden file input. -->
@@ -648,9 +843,15 @@ export class CaribouComposeDialog extends LitElement {
                  tooltip even though a reader then hears the name twice. -->
             ${editing ? nothing : html`
             <caribou-icon-button icon="image" label="Add images or video" hint="Add images or video" data-action="add-media"
-              ?disabled=${full || busy} @click=${() => this.fileEl?.click()}></caribou-icon-button>
+              ?disabled=${full || busy} ?soft-disabled=${hasPoll}
+              description=${hasPoll ? 'Remove the poll to add media.' : nothing}
+              @click=${() => { if (!hasPoll) this.fileEl?.click() }}></caribou-icon-button>
             <input type="file" hidden multiple accept=${this.limits.accept}
-              ?disabled=${full || busy} @change=${this.onFiles}>`}
+              ?disabled=${full || busy || hasPoll} @change=${this.onFiles}>
+            <caribou-icon-button icon="chartColumn" label="Poll" hint="Poll" data-action="toggle-poll"
+              pressed=${hasPoll ? 'true' : 'false'} ?disabled=${busy} ?soft-disabled=${mediaCount > 0}
+              description=${mediaCount > 0 ? 'Remove the media to add a poll.' : nothing}
+              @click=${this.togglePoll}></caribou-icon-button>`}
             <caribou-icon-button icon="triangleAlert" label="Content warning" hint="Content warning" data-action="toggle-cw"
               pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
               @click=${() => this.patchDraft({ cw: !d.cw })}></caribou-icon-button>
