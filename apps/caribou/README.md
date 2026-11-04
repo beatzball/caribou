@@ -172,10 +172,8 @@ rejected, revoked, deleted, unauthorized, blocked or muted author) and an
 unknown one show a short note. After mount, a card on the reader's server
 takes the quote from the cached copy of the post: the reader's copy
 (`loadReaderView`) says whether they may see the quoted post, and a list
-that keeps its own copy (a thread) never gets it. The cache keeps the reader's
-quote over a copy without a token (no `filtered`), such as a page's
-background refresh, and keeps a full quote over a shallow copy of the same
-quoted post (`keepQuote` in `@beatzball/caribou-state`). Hashtags and mentions in
+that keeps its own copy (a thread) never gets it. The cache decides which quote
+to keep (below, "Which copy wins"). Hashtags and mentions in
 the quoted text open in Caribou, as in a post (`components/_post-links.ts`).
 The quoted post's own content warning,
 the reader's filters, mutes and blocks, and a newer edit or a delete from
@@ -186,6 +184,26 @@ server sanitizes it with the post (`sanitizeStatus`). A post that only
 links to another post, as on an older server, stays a link: making an
 embed would mean a fetch per link and a guess at which links are posts.
 Creating a quote is not built yet.
+
+**Which copy wins.** A post can reach the status cache many times: the
+server's page data (no token), the reader's own copy, an action's answer,
+a boost of it, a quote of it. `mergeStatus` and `cacheStatus` in
+`@beatzball/caribou-state` decide each field by one rule. "Known" is the
+cached copy of the same post, alone or else inside a boost.
+
+| field | the known copy wins when | else |
+|---|---|---|
+| edit fields (`EDIT_FIELDS`) | it has a newer `editedAt` | new |
+| reader flags (`favourited`, `reblogged`, `bookmarked`, `muted`, `pinned`) | always, on a merge | — |
+| `filtered` | the new copy has none (no token) | new |
+| counts beside a flag | an action is out, or the flag is set and the new count is lower | new |
+| `poll` | the reader's vote on it is out; on a merge, the new copy has no `voted` (it keeps the known `voted`, `ownVotes`, and its counts when they are higher) | new |
+| `quote` | the new copy has no `filtered` and the known one has (the known one is the reader's: muted, blocked …), or the new quote is shallow and names the accepted post the known one carries in full | new |
+| the quoted post | — | cached under its own id by these same rules, only when the quote is the new one |
+
+A kept quote's quoted post is not cached again: it is an old copy, and its
+reader fields would undo newer ones. An account change drops every reader
+flag and `filtered` (`forgetReaderFields`), so the next copy is taken.
 
 **The reader's server filters hide or warn.** A status fetched with a
 token carries `filtered`: every filter that matches it, whatever the

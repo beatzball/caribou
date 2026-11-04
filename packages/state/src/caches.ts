@@ -54,19 +54,6 @@ function withQuoted(status: mastodon.v1.Status, quoted: mastodon.v1.Status): mas
   return { ...status, quote: { ...status.quote!, quotedStatus: quoted } }
 }
 
-// A quoted post is cached under its own id too, so an edit or a delete of
-// it reaches every quote of it. `put` caches it and returns the copy kept.
-function cacheQuotes(
-  status: mastodon.v1.Status, put: (s: mastodon.v1.Status) => mastodon.v1.Status,
-): mastodon.v1.Status {
-  let out = status
-  const quoted = quotedIn(out)
-  if (quoted) out = withQuoted(out, put(quoted))
-  const inner = out.reblog ? quotedIn(out.reblog) : null
-  if (out.reblog && inner) out = { ...out, reblog: withQuoted(out.reblog, put(inner)) }
-  return out
-}
-
 function store(status: mastodon.v1.Status): void {
   const next = new Map(statusCache.value)
   next.set(status.id, status)
@@ -82,36 +69,46 @@ export function cacheStatus(status: mastodon.v1.Status): void {
   batch(() => cacheOne(status))
 }
 
-// Which quote to keep when a copy of a post arrives over a cached one. Two
-// copies say less than the cached one, and keep its quote:
-// - A copy without a token (no `filtered`; Mastodon sends it on every copy
-//   fetched with one since 4.0, and quotes came in 4.5) over the reader's
-//   copy: the quote state is the reader's (muted, blocked, unauthorized …),
-//   and the server's page data must not show what the reader's server hid.
-//   An account change drops `filtered`, so the next copy is taken again.
-// - A shallow quote (an id only, as Mastodon embeds a quoted post's own
-//   quote) of the same accepted post the cached copy carries in full.
-// Any other copy's quote is taken as it comes.
-function keepQuote(fresh: mastodon.v1.Status, current: mastodon.v1.Status | undefined): mastodon.v1.Status {
-  if (!current || !('quote' in current)) return fresh
-  const tokenless = !Array.isArray(fresh.filtered) && Array.isArray(current.filtered)
-  const now = fresh.quote
-  const full = quotedIn(current)
-  const shallowSame = !!now && now.state === 'accepted' && !quotedIn(fresh) && !!full
-    && 'quotedStatusId' in now && now.quotedStatusId === full.id
-  // A kept reader quote keeps the reader's `filtered` with it, so the next
-  // copy without a token is still known as one (`cacheStatus` keeps no
-  // other reader field).
-  if (tokenless) return { ...fresh, quote: current.quote, filtered: current.filtered }
-  return shallowSame ? { ...fresh, quote: current.quote } : fresh
+// The quote rules (README, "Which copy wins"). A copy of a post arrives
+// over `known`, the cached copy of the same post, alone or inside a boost.
+// The cached quote stays when the new copy says less:
+// - reader: the new copy has no token (no `filtered`; Mastodon sends one
+//   on every copy fetched with a token since 4.0, and quotes came in 4.5)
+//   and the cached one has. The quote state is the reader's (muted,
+//   blocked, unauthorized …). The cached `filtered` goes with it, so the
+//   next copy without a token is caught too. An account change drops
+//   `filtered`, and the next copy is taken again.
+// - full: the new quote is shallow (an id only, as Mastodon embeds a quoted
+//   post's own quote) and names the accepted post the cached one carries.
+// Otherwise the new quote is taken, and its quoted post is cached under its
+// own id by the same rules (`put`), so an edit or a delete of it reaches
+// every quote of it. A kept quote's quoted post is old news: it is not
+// cached again, or its old reader fields would undo newer ones.
+function settleQuote(
+  fresh: mastodon.v1.Status, cache: Map<string, mastodon.v1.Status>,
+  put: (s: mastodon.v1.Status) => mastodon.v1.Status,
+): mastodon.v1.Status {
+  const known = knownCopy(fresh.id, cache)
+  if (known && 'quote' in known) {
+    if (!Array.isArray(fresh.filtered) && Array.isArray(known.filtered)) {
+      return { ...fresh, quote: known.quote, filtered: known.filtered }
+    }
+    const now = fresh.quote
+    const full = quotedIn(known)
+    if (now && now.state === 'accepted' && !quotedIn(fresh) && full
+      && 'quotedStatusId' in now && now.quotedStatusId === full.id) {
+      return { ...fresh, quote: known.quote }
+    }
+  }
+  const quoted = quotedIn(fresh)
+  return quoted ? withQuoted(fresh, put(quoted)) : fresh
 }
 
 function cacheOne(status: mastodon.v1.Status): mastodon.v1.Status {
   noteFiltered(status)
   const cache = statusCache.peek()
-  let kept = keepQuote(protectVotes(protectEdits(status)), cache.get(status.id))
-  if (kept.reblog) kept = { ...kept, reblog: keepQuote(kept.reblog, cache.get(kept.reblog.id)) }
-  const out = cacheQuotes(kept, cacheOne)
+  let out = settleQuote(protectVotes(protectEdits(status)), cache, cacheOne)
+  if (out.reblog) out = { ...out, reblog: settleQuote(out.reblog, cache, cacheOne) }
   store(out)
   return out
 }
@@ -263,17 +260,16 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   if (current === fresh) return current
   noteFiltered(fresh)
   fresh = protectEdits(fresh)
-  // `keepQuote` first: it reads the fresh copy's own `filtered`.
-  let next = current ? keepReaderFields(keepQuote(fresh, current), current) : fresh
+  // The quote first: its rules read the fresh copy's own `filtered`.
+  let next = settleQuote(fresh, cache, merge)
+  if (current) next = keepReaderFields(next, current)
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
-    let reblog = inner ? keepReaderFields(keepQuote(fresh.reblog, inner), inner) : fresh.reblog
-    reblog = cacheQuotes(reblog, merge)
+    let reblog = settleQuote(fresh.reblog, cache, merge)
+    if (inner) reblog = keepReaderFields(reblog, inner)
     next = { ...next, reblog }
     if (cache.has(fresh.reblog.id)) store(reblog)
   }
-  const quoted = quotedIn(next)
-  if (quoted) next = withQuoted(next, merge(quoted))
   store(next)
   return next
 }

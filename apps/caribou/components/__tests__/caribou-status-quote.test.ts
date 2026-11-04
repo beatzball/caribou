@@ -333,6 +333,37 @@ describe('<caribou-status-card> with a quote', () => {
     expect(quote.shadowRoot!.querySelector('img')).toBeNull()
   })
 
+  it('a later copy without a token does not undo a newer hide filter on the quoted post', async () => {
+    signIn()
+    const hide = [{ filter: { id: 'f', title: 'x', context: ['home'], filterAction: 'hide' }, keywordMatches: [] }]
+    const own = post('1', { quote: accepted(post('9')) })
+    mergeStatus({ ...own, filtered: [], quote: accepted(post('9', { filtered: [] })) } as unknown as Status)
+    mergeStatus(post('9', { filtered: hide }))
+    const el = await card(own)
+    el.setAttribute('filter-context', 'home')
+    mergeStatus(own)
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-note')?.textContent).toContain('hidden by a filter')
+    expect($(quote, '.quote-content')).toBeNull()
+    expect(quote.shadowRoot!.querySelector('img')).toBeNull()
+  })
+
+  it('a second boost of a post finds the reader\'s quote inside the first boost', async () => {
+    signIn()
+    const inner = post('1', { quote: accepted(post('9')) })
+    mergeStatus(post('b1', { reblog: { ...inner, filtered: [], quote: { state: 'muted_account', quotedStatus: null } } }))
+    const b2 = post('b2', { reblog: inner })
+    mergeStatus(b2)
+    const el = await card(b2)
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-note')?.textContent).toContain('you muted its author')
+    expect(quote.shadowRoot!.querySelector('img')).toBeNull()
+  })
+
   it('a post that quotes this one does not cut this one\'s quote short', async () => {
     signIn()
     const b = post('b', { quote: accepted(post('a')) })
