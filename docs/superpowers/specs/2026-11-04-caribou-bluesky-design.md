@@ -1,7 +1,7 @@
 ---
 title: Caribou Bluesky support — Design Spec
 date: 2026-11-04
-status: draft, round 3, for owner review
+status: Accepted (2026-11-04)
 ---
 
 # Caribou Bluesky support — Design Spec
@@ -16,7 +16,7 @@ read their Following feed and notifications, open profiles and threads, and
 like, repost, reply, quote, bookmark, follow and post. A feature that one
 network lacks is hidden for that network, not shown broken.
 
-The recommended shape, in one line each:
+The decided shape, in one line each (the owner accepted it on 2026-11-04):
 
 - **Sign-in:** atproto OAuth as a **public browser client** for the first
   release. Tokens and the DPoP key stay in the browser. Caribou's server serves
@@ -181,7 +181,7 @@ probe).
 
 ## 4. Key decisions — at a glance
 
-| # | decision | recommended | other ways |
+| # | decision | decided | other ways |
 |---|---|---|---|
 | 1 | OAuth client | Public browser client now; client-assertion backend later | BFF; token-mediating backend (5.3) |
 | 2 | Where tokens live | Browser IndexedDB, keyed by DID | Caribou server |
@@ -196,7 +196,7 @@ probe).
 | 11 | Scopes | `atproto transition:generic` | Granular scopes when the PDS has them |
 | 12 | Moderation | The SDK's `moderatePost` / `moderateProfile` with label definitions, kept per surface | Map labels onto Mastodon's CW fields |
 
-Section 12.3 asks the owner about the ones that stay open.
+The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions.
 
 ---
 
@@ -329,7 +329,7 @@ confidential.
 | Fits v1 "server does exactly three things" | yes | no | yes, with one more small endpoint |
 | Work | 5.2 only | L+ (proxy for ~60 client methods, session store, key ops) | M (endpoint, SDK wrap, tests) |
 
-### 5.4 Recommendation
+### 5.4 Decision
 
 **A for the first release. D as the upgrade.** B is the most secure. But it
 puts Caribou's server in the path of every Bluesky request, and it makes a
@@ -478,7 +478,7 @@ the **client interface**: `favourite(statusId: string)`,
 
 ### 6.2 The two options
 
-**(a) Caribou-owned types with Mastodon's field names (recommended).** The
+**(a) Caribou-owned types with Mastodon's field names (decided).** The
 client package defines `Status`, `Account`, `Relationship`, `Notification`,
 `List`, page results and write inputs as Caribou types. They keep Mastodon's
 field names, so a screen that reads `status.favouritesCount` keeps working.
@@ -583,8 +583,8 @@ What changed from round 1: round 1 said (b) must land in one go and (a) needs
 almost nothing. Both were wrong. (b) can be staged, and (a) needs real state
 work. The gap is the renaming, about 3–4 weeks. Moving from (a) to (b) later is
 also not "a change to the aliases": every consumer that reads a renamed field
-changes then. We still recommend (a). The renames buy Bluesky nothing on day
-one; the seams are what make Bluesky correct. Section 12.3, question 2.
+changes then. We chose (a). The renames buy Bluesky nothing on day
+one; the seams are what make Bluesky correct. Decision 2 in 12.3.
 
 ### 6.5 Mapping (option a)
 
@@ -1094,7 +1094,7 @@ request's destination host and the links built, not only disabled buttons.
 
 ---
 
-## 12. Risks, unknowns, open questions
+## 12. Risks, unknowns, decisions
 
 ### 12.1 Risks
 
@@ -1123,29 +1123,27 @@ request's destination host and the links built, not only disabled buttons.
 - Whether `bsky.social` grants confidential lifetimes to an option-D client, and whether it rejects an assertion bound to another DPoP key (the release gate in 5.3; a
   small manual test with a hand-made assertion).
 
-### 12.3 Questions for the owner
+### 12.3 Decisions (owner, 2026-11-04)
 
-Only the ones still open. Each has a recommended answer.
+The owner took the recommended answer to each open question.
 
-1. **OAuth: public browser client now (re-approve every two weeks), with the
-   client-assertion backend later; or the BFF (2-year sessions, but every
-   Bluesky call goes through our server)?** Recommended: public now, D later.
-2. **Model: Caribou-owned types with Mastodon field names (a), or a neutral
-   model with new names (b, about 3–4 more weeks)?** Recommended: (a). The
-   seams in 6.3 are needed either way.
-3. **Profile route `/@alice.example.com`, accepting the rare wrong page for a
-   hostless remote Mastodon name with a dot (8.4)?** Recommended: yes, with
-   the `profilePath` fix.
-4. **Hide Local and Public for Bluesky?** Recommended: yes. Feeds come in
-   phase 5.
-5. **Use `@atproto/api`, if its lazy chunk is under about 100 KB gzipped?**
-   Recommended: yes. Moderation is the reason.
-6. **Render signed-out Bluesky profiles and threads on our server?**
-   Recommended: yes, honoring `!no-unauthenticated`.
-7. **Day one without video playback (thumbnail and link only)?**
-   Recommended: yes.
+1. **OAuth:** a public browser client for the first release (re-approve every
+   two weeks). The client-assertion backend (option D) is the later upgrade,
+   behind its release gate (5.3). Not the BFF.
+2. **Model:** Caribou-owned types with Mastodon field names (option a). The
+   seams in 6.3 are done first.
+3. **Profile route:** `/@alice.example.com`, with the `profilePath` fix. The
+   rare wrong page for a hostless remote Mastodon name with a dot is accepted
+   (8.4).
+4. **Local and Public:** hidden for Bluesky. Feeds come in phase 5.
+5. **Client library:** `@atproto/api`, if its lazy chunk is under about 100 KB
+   gzipped (measured in phase 0). If it is larger, the owner decides again.
+6. **Signed-out SSR:** yes, for Bluesky profiles and threads, honoring
+   `!no-unauthenticated`.
+7. **Video:** day one ships without playback (thumbnail and link only).
+   Playback is phase 6.
 
-Round 1's question on the sign-in form is now a decision (5.5, two panels).
+The sign-in form was decided in round 2: two panels (5.5).
 
 ---
 
