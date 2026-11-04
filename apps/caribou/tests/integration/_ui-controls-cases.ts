@@ -2,6 +2,7 @@ import { html, type TemplateResult } from 'lit'
 import '../../components/caribou-button.js'
 import '../../components/caribou-icon.js'
 import '../../components/caribou-icon-button.js'
+import '../../components/caribou-tabs.js'
 
 // The shared controls, in the states that change their markup. The server
 // test renders each one with Lit SSR and pins its shadow markup in
@@ -41,6 +42,12 @@ export const UI_CASES: UiCase[] = [
   { name: 'button, danger, disabled',
     template: () => html`<caribou-button variant="danger" ?disabled=${true}>Delete</caribou-button>`,
     server: '<button type="button" part="button" data-variant="danger" disabled><slot></slot></button>' },
+  { name: 'tabs',
+    template: () => html`<caribou-tabs label="Profile"><a href="/@me?tab=posts" aria-current="page">posts</a></caribou-tabs>`,
+    server: '<nav part="nav" aria-label="Profile"><slot></slot></nav>' },
+  { name: 'tabs, fill',
+    template: () => html`<caribou-tabs label="Result type" fill><a href="/search">People</a></caribou-tabs>`,
+    server: '<nav part="nav" aria-label="Result type"><slot></slot></nav>' },
 ]
 
 // The host's own shadow markup in a server render, without Lit's comment

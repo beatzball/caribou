@@ -23,6 +23,13 @@ describe('<caribou-profile-tabs>', () => {
     expect(active[0]!.getAttribute('href')).toContain('tab=replies')
   })
 
+  it('draws the row with the shared <caribou-tabs>, as a named navigation', async () => {
+    const el = await mount('alice@example.social')
+    const row = el.shadowRoot!.querySelector('caribou-tabs')!
+    expect(row.getAttribute('label')).toBe('Profile')
+    expect([...row.children].filter((c) => c.localName === 'a').length).toBe(3)
+  })
+
   it('defaults to the posts tab', async () => {
     const el = await mount('alice@example.social')
     expect(el.shadowRoot!.querySelector('a[aria-current="page"]')?.textContent).toBe('posts')

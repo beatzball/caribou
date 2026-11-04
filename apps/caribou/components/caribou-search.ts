@@ -19,6 +19,7 @@ import './caribou-auth-required.js'
 import './caribou-button.js'
 import './caribou-icon.js'
 import './caribou-status-card.js'
+import './caribou-tabs.js'
 
 type Search = mastodon.v2.Search
 type Account = mastodon.v1.Account
@@ -80,6 +81,8 @@ export class CaribouSearch extends LitElement {
       padding: var(--space-2) var(--space-3); min-height: 44px;
     }
     input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    /* A native submit: the form works with JavaScript off, which
+       <caribou-button type="submit"> cannot do (README, Shared controls). */
     .submit {
       display: inline-flex; align-items: center; justify-content: center;
       min-width: 44px; min-height: 44px; font-size: 20px; color: var(--fg-1);
@@ -87,19 +90,9 @@ export class CaribouSearch extends LitElement {
     }
     .submit:hover { color: var(--fg-0); }
     .submit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-    .tabs { display: flex; border-bottom: 1px solid var(--border); }
-    .tabs a {
-      flex: 1; text-align: center; padding: var(--space-3) var(--space-2);
-      color: var(--fg-1); text-decoration: none; min-height: 44px;
-    }
-    .tabs a:hover { color: var(--fg-0); background: var(--bg-1); }
-    .tabs a[aria-current="page"] { color: var(--fg-0); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
     .view { display: contents; }
     .notice { padding: var(--space-4) var(--space-3); color: var(--fg-muted); margin: 0; }
-    .notice button {
-      font: inherit; color: var(--accent); background: none; border: 0; padding: 0;
-      text-decoration: underline; cursor: pointer;
-    }
+    .notice caribou-button { margin-inline-start: var(--space-2); }
     ul { list-style: none; margin: 0; padding: 0; }
     li { border-bottom: 1px solid var(--border); }
     .account { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3); }
@@ -317,11 +310,11 @@ export class CaribouSearch extends LitElement {
         ${tab === 'accounts' ? nothing : html`<input type="hidden" name="type" value=${tab} />`}
         <button class="submit" type="submit" aria-label="Search"><caribou-icon name="search"></caribou-icon></button>
       </form>
-      <nav class="tabs" aria-label="Result type">
+      <caribou-tabs class="tabs" label="Result type" fill>
         ${SEARCH_TABS.map((t) => html`<a href=${searchPath(q.trim(), t.type)}
           aria-current=${t.type === tab ? 'page' : nothing}
           @click=${(e: MouseEvent) => this.onTab(e, t.type)}>${t.label}</a>`)}
-      </nav>
+      </caribou-tabs>
       <div class="results">${this.renderResults(tab)}</div>
     `
   }
@@ -350,7 +343,7 @@ export class CaribouSearch extends LitElement {
         return { note: null, body: html`<caribou-auth-required
           label="This server searches only for signed-in readers."></caribou-auth-required>` }
       case 'error':
-        return { note: html`Search failed. <button type="button" @click=${this.retry}>Retry</button>`, role: 'alert' }
+        return { note: html`Search failed.<caribou-button @click=${this.retry}>Retry</caribou-button>`, role: 'alert' }
       case 'ok':
         return this.viewOk(r, tab)
     }

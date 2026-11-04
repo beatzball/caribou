@@ -45,7 +45,8 @@ export class CaribouNotifications extends LitElement {
     :host { display: block; }
     h1 { font-size: 1.25rem; font-weight: 600; margin: 0; padding: 0 var(--space-4) var(--space-3); }
     .filters { display: flex; border-bottom: 1px solid var(--border); }
-    /* Looks like the profile tabs; it is a toggle group, not navigation. */
+    /* Looks like the profile tabs; it is a toggle group, not navigation.
+       Native until <caribou-button> has a pressed state (#79); then it moves. */
     .filters button {
       padding: var(--space-3) var(--space-4); color: var(--fg-1);
       background: none; border: 0; border-bottom: 2px solid transparent;
@@ -357,9 +358,8 @@ export class CaribouNotifications extends LitElement {
   private renderLine(icon: IconName, g: NotificationGroup, text: string) {
     const many = this.expandable(g)
     const open = this.expanded.has(g.key)
-    // A plain button, not <caribou-button>: it carries aria-expanded,
-    // aria-controls and a label with the row's subject, which
-    // <caribou-button> does not pass to its inner button.
+    // Native (README exception): its aria-controls names the list of who in
+    // this root, which a shared control's inner button could not reach.
     return html`<div class="line">
       <caribou-icon name=${icon}></caribou-icon>
       <span>${this.renderWho(g)} <span class="what">${text}</span></span>
