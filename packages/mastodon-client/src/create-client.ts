@@ -89,6 +89,11 @@ export interface CaribouClient {
   updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
   fetchInstance(): Promise<mastodon.v2.Instance>
 
+  // Polls. A vote answers with the poll as the server now has it.
+  /** Votes on a poll with the indexes of the chosen options. */
+  votePoll(pollId: string, choices: readonly number[]): Promise<mastodon.v1.Poll>
+  fetchPoll(pollId: string): Promise<mastodon.v1.Poll>
+
   // Edit and delete the reader's own posts.
   /** The post's plain text and content warning, as the author wrote them. */
   fetchStatusSource(statusId: string): Promise<mastodon.v1.StatusSource>
@@ -249,6 +254,17 @@ export interface CreateStatusInput {
   mediaIds?: string[]
   sensitive?: boolean
   language?: string
+  /** A poll. Mastodon refuses a post with both a poll and media. */
+  poll?: CreatePollInput
+}
+
+export interface CreatePollInput {
+  options: readonly string[]
+  /** Seconds the poll stays open. */
+  expiresIn: number
+  multiple?: boolean
+  /** Hide the counts until the poll ends. */
+  hideTotals?: boolean
 }
 
 export interface EditStatusInput {
@@ -499,10 +515,12 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
 
     async createStatus(params, opts = {}) {
-      const { status, mediaIds, ...rest } = params
-      const body = mediaIds && mediaIds.length > 0
+      const { status, mediaIds, poll, ...rest } = params
+      // Media and a poll exclude each other; media wins, as Mastodon would
+      // refuse the pair.
+      const body: mastodon.rest.v1.CreateStatusParams = mediaIds && mediaIds.length > 0
         ? { ...rest, status, mediaIds }
-        : { ...rest, status }
+        : { ...rest, status, ...(poll ? { poll: { ...poll, options: [...poll.options] } } : {}) }
       // Mastodon remembers an Idempotency-Key for an hour and answers a
       // repeat with the first post, so a retry after a lost response never
       // posts twice. The caller keeps one key per draft.
@@ -531,6 +549,14 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchInstance() {
       return run('instance', (c) => c.v2.instance.fetch())
+    },
+
+    // --- polls ---
+    async votePoll(pollId, choices) {
+      return write((c) => c.v1.polls.$select(encodeURIComponent(pollId)).votes.create({ choices: [...choices] }))
+    },
+    async fetchPoll(pollId) {
+      return run(`poll:${pollId}`, (c) => c.v1.polls.$select(encodeURIComponent(pollId)).fetch())
     },
 
     // --- edit and delete ---

@@ -27,9 +27,35 @@ function tagTimeline(tag, maxId) {
   }))
 }
 
+// The local timeline: two posts with polls, as the API sends them without a
+// token (no `voted`, no `own_votes`). `polls-ssr.spec.ts` reads it.
+export function pollPosts() {
+  const base = {
+    created_at: '2024-01-01T00:00:00.000Z', account, visibility: 'public', sensitive: false,
+    spoiler_text: '', media_attachments: [], emojis: [], mentions: [], tags: [],
+    reblogs_count: 0, favourites_count: 0, replies_count: 0, language: 'en',
+  }
+  return [
+    { ...base, id: 'poll-open', uri: `https://${HOST}/@alice/poll-open`, url: `https://${HOST}/@alice/poll-open`,
+      content: '<p>Tea or coffee?</p>',
+      poll: { id: 'p-open', expires_at: '2099-01-01T00:00:00.000Z', expired: false, multiple: false,
+        votes_count: 4, voters_count: 4, emojis: [],
+        options: [{ title: 'Tea 🍵', votes_count: 3 }, { title: 'Coffee', votes_count: 1 }] } },
+    { ...base, id: 'poll-ended', uri: `https://${HOST}/@alice/poll-ended`, url: `https://${HOST}/@alice/poll-ended`,
+      content: '<p>Pick your days</p>',
+      poll: { id: 'p-ended', expires_at: '2024-01-02T00:00:00.000Z', expired: true, multiple: true,
+        votes_count: 6, voters_count: 4, emojis: [],
+        options: [{ title: 'Monday', votes_count: 4 }, { title: 'Friday', votes_count: 2 }] } },
+  ]
+}
+
 globalThis.fetch = async (input, init) => {
   const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url)
   if (url.host !== HOST) return realFetch(input, init)
+  if (url.pathname === '/api/v1/timelines/public' && url.searchParams.get('local') === 'true') {
+    const body = url.searchParams.get('max_id') ? [] : pollPosts()
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
   const m = /^\/api\/v1\/timelines\/tag\/([^/]+)$/.exec(url.pathname)
   if (!m) return new Response('{"error":"not stubbed"}', { status: 404 })
   const body = tagTimeline(decodeURIComponent(m[1]), url.searchParams.get('max_id'))

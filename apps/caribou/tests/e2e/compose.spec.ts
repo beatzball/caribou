@@ -372,7 +372,7 @@ test('Tab stops once on each toolbar control; Space on Post publishes', async ({
   const dialog = page.getByRole('dialog', { name: 'New post' })
   await dialog.getByRole('textbox', { name: 'Post text' }).fill('by keyboard')
   const order: string[] = []
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     await page.keyboard.press('Tab')
     order.push(await page.evaluate(() => {
       let el = document.activeElement
@@ -385,7 +385,7 @@ test('Tab stops once on each toolbar control; Space on Post publishes', async ({
       return (root instanceof ShadowRoot ? root.host : el).textContent!.trim()
     }))
   }
-  expect(order).toEqual(['Add images or video', 'Content warning', 'compose-visibility', 'Post'])
+  expect(order).toEqual(['Add images or video', 'Poll', 'Content warning', 'compose-visibility', 'Post'])
   await page.keyboard.press('Space')
   await expect(dialog).toBeHidden()
   expect(posted).toHaveLength(1)
