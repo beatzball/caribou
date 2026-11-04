@@ -226,17 +226,78 @@ describe('guards', () => {
     expect(deps.toggleHelp).not.toHaveBeenCalled()
   })
 
-  it('ignores Ctrl, Meta and Alt', () => {
-    press('j', { ctrlKey: true })
-    press('j', { metaKey: true })
-    press('j', { altKey: true })
-    expect(deepActive()).not.toBe(items()[0])
+  // One press each, from nothing focused: a press that slipped through
+  // would focus the first post.
+  for (const mod of ['ctrlKey', 'metaKey', 'altKey'] as const) {
+    it(`ignores ${mod}`, () => {
+      const e = press('j', { [mod]: true }, document.body)
+      expect(e.defaultPrevented).toBe(false)
+      expect(document.activeElement).toBe(document.body)
+    })
+  }
+
+  for (const [name, init] of [['isComposing', { isComposing: true }], ['keyCode 229', { keyCode: 229 }]] as const) {
+    it(`ignores IME composition (${name})`, () => {
+      const e = press('j', init, document.body)
+      expect(e.defaultPrevented).toBe(false)
+      expect(document.activeElement).toBe(document.body)
+    })
+  }
+
+  it('the same press with no guard does focus a post, so the tests above can fail', () => {
+    press('j', {}, document.body)
+    expect(deepActive()).toBe(items()[0])
   })
 
-  it('ignores IME composition', () => {
-    press('j', { isComposing: true })
-    press('j', { keyCode: 229 })
-    expect(deepActive()).not.toBe(items()[0])
+  // A popover can be open with focus outside it (the ALT description
+  // stays beside its trigger), in any shadow root.
+  function popoverIn(host: HTMLElement): HTMLElement {
+    const panel = document.createElement('div')
+    panel.setAttribute('popover', '')
+    host.attachShadow({ mode: 'open' }).append(panel)
+    document.body.append(host)
+    return panel
+  }
+
+  it('ignores keys while a native popover is open anywhere, even with focus outside it', () => {
+    const panel = popoverIn(document.createElement('div'))
+    const real = Element.prototype.matches
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, sel: string) {
+      if (sel === ':popover-open') return this === panel
+      return real.call(this, sel)
+    })
+    const heard = vi.fn()
+    window.addEventListener('caribou:compose', heard)
+    press('n', {}, document.body)
+    press('j', {}, document.body)
+    window.removeEventListener('caribou:compose', heard)
+    expect(heard).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it('ignores keys while a menu is open through its script fallback (data-open)', () => {
+    const panel = popoverIn(document.createElement('caribou-menu'))
+    panel.setAttribute('data-open', '')
+    const item = document.createElement('a')
+    item.href = '/x'
+    panel.append(item)
+    item.focus()
+    const e = press('j', {}, item)
+    expect(e.defaultPrevented).toBe(false)
+    expect(deepActive()).toBe(item)
+    // Closed again, the keys work.
+    panel.removeAttribute('data-open')
+    press('j', {}, document.body)
+    expect(deepActive()).toBe(items()[0])
+  })
+
+  it('walks the page once per shortcut press, and not at all for other keys', () => {
+    const walks = vi.spyOn(list.shadowRoot!, 'querySelectorAll')
+    press('x', {}, document.body)
+    press('J', { shiftKey: true }, document.body)
+    expect(walks.mock.calls.filter(([sel]) => sel === '*')).toHaveLength(0)
+    press('j', {}, document.body)
+    expect(walks.mock.calls.filter(([sel]) => sel === '*')).toHaveLength(1)
   })
 
   it('ignores a key an earlier listener used (Vimium, a dialog)', () => {
@@ -283,6 +344,82 @@ describe('guards', () => {
   })
 })
 
+describe('keyboard layouts', () => {
+  it('Caps Lock (J without Shift) still moves', () => {
+    press('J', { code: 'KeyJ' }, document.body)
+    expect(deepActive()).toBe(items()[0])
+  })
+
+  it('Shift+J does nothing', () => {
+    press('J', { code: 'KeyJ', shiftKey: true }, document.body)
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it('a non-Latin layout uses the key\'s place (code)', () => {
+    press('о', { code: 'KeyJ' }, document.body)
+    expect(deepActive()).toBe(items()[0])
+    press('g', { code: 'KeyG' }); press('р', { code: 'KeyH' })
+    expect(deps.navigate).toHaveBeenLastCalledWith('/home')
+  })
+
+  it('a Latin layout uses the letter it types, not its place (Dvorak j is on KeyC)', () => {
+    press('j', { code: 'KeyC' }, document.body)
+    expect(deepActive()).toBe(items()[0])
+  })
+
+  it('? and / come from the key; with a non-Latin layout, from Slash', () => {
+    press('.', { code: 'Slash', shiftKey: true }, document.body)
+    expect(deps.toggleHelp).not.toHaveBeenCalled()
+    press(',', { code: 'Slash', shiftKey: true }, document.body)
+    expect(deps.toggleHelp).not.toHaveBeenCalled()
+    press('?', { code: 'Digit7', shiftKey: true }, document.body)
+    expect(deps.toggleHelp).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the focused item', () => {
+  it('loses its name and marker when focus leaves it, not when focus moves inside it', async () => {
+    press('j')
+    const li = items()[0]!
+    const reply = cards()[0]!.shadowRoot!.querySelector('caribou-icon-button.reply')!.shadowRoot!.querySelector('button')!
+    reply.focus()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(li.hasAttribute('aria-label')).toBe(true)
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    outside.focus()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(li.hasAttribute('aria-label')).toBe(false)
+    expect(li.hasAttribute('data-caribou-post')).toBe(false)
+    expect(li.hasAttribute('tabindex')).toBe(false)
+  })
+
+  it('keeps a tabindex the list set itself', async () => {
+    items()[0]!.setAttribute('tabindex', '0')
+    press('j')
+    document.body.append(document.createElement('button'))
+    ;(document.body.lastElementChild as HTMLElement).focus()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(items()[0]!.getAttribute('tabindex')).toBe('0')
+  })
+})
+
+describe('the default help toggle', () => {
+  it('two quick ? presses before the sheet loads open it once and leave it open', async () => {
+    stop()
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    stop = startShortcuts(window, document, { navigate: (p) => deps.navigate(p) })
+    press('?', {}, document.body)
+    press('?', {}, document.body)
+    await vi.waitFor(() => expect(document.querySelector('caribou-shortcuts-help')).not.toBeNull())
+    await new Promise((r) => setTimeout(r, 50))
+    expect(document.querySelectorAll('caribou-shortcuts-help')).toHaveLength(1)
+    const sheet = document.querySelector('caribou-shortcuts-help')!
+    expect(sheet.shadowRoot!.querySelector('dialog')!.open).toBe(true)
+    sheet.close()
+  })
+})
+
 describe('helpers', () => {
   it('isTypingTarget knows text fields', () => {
     expect(isTypingTarget(document.createElement('input'))).toBe(true)
@@ -313,5 +450,16 @@ describe('helpers', () => {
     expect(postLabel(card)).toBe(
       'Carol favourited your post. Post by Bob @bob@example.net, boosted by Carol. Content warning: spoilers. 2h',
     )
+  })
+
+  it('postLabel leaves out a grouped notification\'s buttons, hidden faces and list of who', () => {
+    const li = items()[0]!
+    li.insertAdjacentHTML('afterbegin', `<div class="line"><span>Carol and 3 others <span class="what">favourited your post</span></span>
+      <button type="button">Show all</button></div>
+      <div class="group-body"><div class="avatars" aria-hidden="true">faces</div>
+      <ul class="who"><li>Dave</li><li>Erin</li><li class="rest">and 1 more</li></ul></div>`)
+    const card = cards()[0]!
+    card.status = { account: { displayName: 'Alice', acct: 'alice' } }
+    expect(postLabel(card)).toBe('Carol and 3 others favourited your post. Post by Alice @alice. hello world. 2h')
   })
 })

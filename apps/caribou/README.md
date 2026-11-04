@@ -348,15 +348,20 @@ listener on the window, started from `app-main.ts`. A post is a
 `<caribou-status-card>` in the page; `j` and `k` focus its `<li>` (or the
 card where there is none), so any list of cards gets them with no code of
 its own. The item gets `tabindex="-1"`, `data-caribou-post` and an
-`aria-label` (the notification line, the author, the warning or the start
-of the text, the time) when it takes focus; that is after hydration, so the
-server render does not change. Its focus ring is a sheet adopted into the
+`aria-label` (the notification line without its buttons or list of who,
+the author, the warning or the start of the text, the time) when it takes
+focus, and loses them when focus leaves the post; that is after hydration,
+so the server render does not change. Its focus ring is a sheet adopted into the
 list's shadow root. `f`, `b`, `r` and `o` click the card's own controls and
 permalink, so signed-out and soft-disabled rules hold. No key fires while
 the reader types (an input, a textarea, a select, contenteditable, IME
-composition), with Ctrl, Meta or Alt, while a dialog or a menu is open,
+composition), with Ctrl, Meta or Alt, while any dialog or popover is open
+(a menu, its `data-open` fallback, an ALT description; focus need not be
+in it),
 after an earlier listener used it (`defaultPrevented`: Vimium's own keys
 win), or with `shortcuts: false` in the account's prefs (`shortcutsOf`).
+Letters are the letter the layout types, so Caps Lock and Dvorak work; a
+layout with no Latin letters uses the key's place (`event.code`).
 `?` opens `<caribou-shortcuts-help>`, whose list is `SHORTCUT_GROUPS`; add a
 shortcut there and in `onKey` together. `n` belongs here too: it sends
 `caribou:compose`, which the compose dialog answers.

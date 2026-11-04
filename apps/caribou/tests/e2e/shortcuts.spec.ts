@@ -262,3 +262,40 @@ test('Show keyboard shortcuts on /settings opens the help sheet', async ({ page 
   await page.getByRole('button', { name: 'Show keyboard shortcuts' }).click()
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
 })
+
+test('no shortcut fires while an ALT description is open, though focus stays on ALT', async ({ page }) => {
+  await seed(page)
+  const media = {
+    id: 'm1', type: 'image', url: `https://${INSTANCE}/a.png`, preview_url: `https://${INSTANCE}/a.png`,
+    remote_url: null, description: 'A red fox in the snow', blurhash: null,
+    meta: { original: { width: 1, height: 1 }, small: { width: 1, height: 1 } },
+  }
+  await page.unroute('**/api/v1/timelines/home*')
+  await page.route('**/api/v1/timelines/home*', (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('since_id') || u.searchParams.get('max_id')) return route.fulfill({ json: [] })
+    return route.fulfill({ json: [makeStatus('1', { media_attachments: [media] }), makeStatus('2')] })
+  })
+  const faved: string[] = []
+  await page.route('**/api/v1/statuses/*/favourite', (route) => {
+    faved.push(route.request().url())
+    return route.fulfill({ json: makeStatus('1', { favourited: true }) })
+  })
+  await gotoSettled(page, '/home')
+  const alt = page.getByRole('button', { name: 'ALT, show the description' })
+  await alt.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByText('A red fox in the snow')).toBeVisible()
+  await expect(alt).toBeFocused()
+
+  for (const key of ['n', 'j', 'f', '?']) await page.keyboard.press(key)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(alt).toBeFocused()
+  expect(faved).toEqual([])
+
+  // Closed, the keys work again.
+  await page.keyboard.press('Escape')
+  await expect(page.getByText('A red fox in the snow')).toBeHidden()
+  await page.keyboard.press('j')
+  await expect(items(page).nth(1)).toBeFocused()
+})
