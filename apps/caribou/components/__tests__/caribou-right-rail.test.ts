@@ -19,8 +19,15 @@ describe('caribou-right-rail', () => {
 
   it('links to privacy, about and the changelog', async () => {
     const el = await mount()
-    const hrefs = [...el.shadowRoot!.querySelectorAll('litro-link')].map((l) => l.getAttribute('href'))
+    const hrefs = [...el.shadowRoot!.querySelectorAll('.links litro-link')].map((l) => l.getAttribute('href'))
     expect(hrefs).toEqual(['/privacy', '/about', '/changelog'])
+  })
+
+  it('links Keyboard shortcuts to its settings section', async () => {
+    const el = await mount()
+    const link = el.shadowRoot!.querySelector('litro-link.shortcuts')!
+    expect(link.getAttribute('href')).toBe('/settings#keyboard')
+    expect(link.textContent).toBe('Keyboard shortcuts')
   })
 
   it('renders no session block without an instance', async () => {
