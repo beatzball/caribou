@@ -239,4 +239,25 @@ describe('<caribou-status-poll> in a card', () => {
     const { card } = await mount(post({ spoilerText: 'cw' }))
     expect(card.shadowRoot!.querySelector('caribou-status-poll')).toBeNull()
   })
+
+  it('the first render prints the end in UTC, the same on any machine', async () => {
+    const el = document.createElement('caribou-status-poll') as CaribouStatusPoll
+    el.status = post({ poll: makePoll({ expiresAt: '2099-01-01T00:00:00.000Z' }) })
+    // Rendered once, before firstUpdated sets the clock.
+    const html = await import('lit').then(({ render }) => {
+      const box = document.createElement('div')
+      render(el.render(), box)
+      return box.textContent ?? ''
+    })
+    expect(html).toContain('Ends Jan 1, 2099, 00:00 UTC')
+  })
+
+  it('the leader is named in text, and the lists keep their role', async () => {
+    const { poll } = await mount(post({ poll: makePoll({ expired: true }) }))
+    expect(root(poll).querySelector('li.result[data-leading] .vh')?.textContent).toBe(', most votes')
+    expect(root(poll).querySelector('ul.results')?.getAttribute('role')).toBe('list')
+    signIn()
+    const open = await mount(post({ id: '8' }))
+    expect(root(open.poll).querySelector('ul.choices')?.getAttribute('role')).toBe('list')
+  })
 })

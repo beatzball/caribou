@@ -58,6 +58,11 @@ function writePoll(id: string, next: (poll: Poll) => Poll): void {
 
 const voteKey = (id: string) => `vote:${id}`
 
+// How many votes each post has started in this page session. A refresh that
+// left before a vote answers with the poll as it was before it, so it is
+// dropped when this moved meanwhile.
+const voteSeq = new Map<string, number>()
+
 /**
  * Votes on the poll of `status` (or of the post it boosts) with the indexes
  * of the chosen options. The vote shows at once in every cached copy of the
@@ -84,6 +89,7 @@ export async function votePoll(status: Status, choices: readonly number[], opts:
 
   const generation = ownerGeneration()
   const optimistic = optimisticVote(before, choices)
+  voteSeq.set(id, (voteSeq.get(id) ?? 0) + 1)
   inflight.add(key)
   writePoll(id, (p) => p.id === before.id ? optimistic : p)
   try {
@@ -96,13 +102,14 @@ export async function votePoll(status: Status, choices: readonly number[], opts:
     // Undo only this vote: a copy that no longer holds it was written since
     // from the server.
     writePoll(id, (p) => p === optimistic ? before : p)
-    toast('Could not send your vote. Try again.')
-    // Its check runs after the answer, by when `finally` has cleared the key.
-    void refreshPoll(target, opts)
-    return false
   } finally {
     inflight.delete(key)
   }
+  // The server may hold a vote this page did not know (it answers "already
+  // voted"). Read the poll again; only when it has no vote is this a failure.
+  const now = await refreshPoll(target, opts)
+  if (generation === ownerGeneration() && now?.voted !== true) toast('Could not send your vote. Try again.')
+  return false
 }
 
 /**
@@ -116,9 +123,11 @@ export async function refreshPoll(status: Status, opts: MutationOpts = {}): Prom
   const client = (opts.clientSource ?? (() => activeClient.value))()
   if (!poll || !client) return null
   const generation = ownerGeneration()
+  const seq = voteSeq.get(target.id) ?? 0
   try {
     const fresh = await client.fetchPoll(poll.id)
     if (generation !== ownerGeneration() || inflight.has(voteKey(target.id))) return null
+    if ((voteSeq.get(target.id) ?? 0) !== seq) return null
     batch(() => {
       if (!cachedPoll(target.id)) mergeStatus(status)
       writePoll(target.id, (p) => p.id === fresh.id ? fresh : p)

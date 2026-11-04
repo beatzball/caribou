@@ -6,6 +6,7 @@ import { cacheStatus, forgetReaderFields, mergeStatus, statusCache } from '../ca
 import { activeUserKey } from '../users.js'
 import { ownerGeneration } from '../keep-alive.js'
 import { _testOnlyResetMutations } from '../mutations.js'
+import { inflight } from '../inflight.js'
 import { optimisticVote, refreshPoll, votePoll } from '../polls.js'
 
 type Status = mastodon.v1.Status
@@ -208,5 +209,70 @@ describe('the cache keeps the reader\'s vote', () => {
     expect(get('1')?.poll?.voted).toBeUndefined()
     expect(get('1')?.poll?.ownVotes).toBeUndefined()
     expect(get('w1')?.reblog?.poll?.voted).toBeUndefined()
+  })
+})
+
+describe('review round 2', () => {
+  it('a refresh that left before a vote and answers after it changes nothing', async () => {
+    cacheStatus(makeStatus('1'))
+    const late = deferred<Poll>()
+    const r = refreshPoll(get('1')!, { clientSource: () => client({ fetchPoll: () => late.promise }) })
+    const vote = vi.fn(async () => makePoll({ voted: true, ownVotes: [1], votesCount: 5 }))
+    expect(await votePoll(get('1')!, [1], { clientSource: () => client({ votePoll: vote }) })).toBe(true)
+    late.resolve(makePoll())
+    expect(await r).toBeNull()
+    expect(get('1')?.poll?.voted).toBe(true)
+    expect(get('1')?.poll?.votesCount).toBe(5)
+  })
+
+  it('a vote through a boost survives a tokenless copy of the post arriving later', async () => {
+    cacheStatus(wrapper('w1', makeStatus('1')))
+    const vote = vi.fn(async () => makePoll({ voted: true, ownVotes: [0], votesCount: 5 }))
+    expect(await votePoll(get('w1')!, [0], { clientSource: () => client({ votePoll: vote }) })).toBe(true)
+    mergeStatus(makeStatus('1'))
+    expect(get('1')?.poll?.voted).toBe(true)
+    expect(get('1')?.poll?.ownVotes).toEqual([0])
+    expect(get('1')?.poll?.votesCount).toBe(5)
+  })
+
+  it('a network copy written while a vote is out keeps the vote on screen', async () => {
+    cacheStatus(makeStatus('1'))
+    cacheStatus(wrapper('w1', makeStatus('1')))
+    const d = deferred<Poll>()
+    const p = votePoll(get('1')!, [0], { clientSource: () => client({ votePoll: () => d.promise }) })
+    cacheStatus(makeStatus('1', { poll: makePoll({ voted: false, ownVotes: [] }) }))
+    cacheStatus(wrapper('w1', makeStatus('1', { poll: makePoll({ voted: false, ownVotes: [] }) })))
+    expect(get('1')?.poll?.ownVotes).toEqual([0])
+    expect(get('w1')?.reblog?.poll?.ownVotes).toEqual([0])
+    d.resolve(makePoll({ voted: true, ownVotes: [0] }))
+    await p
+  })
+
+  it('another action on the post does not freeze its poll', () => {
+    cacheStatus(makeStatus('1'))
+    inflight.add('favourite:1')
+    mergeStatus(makeStatus('1', { poll: makePoll({ votesCount: 9 }) }))
+    inflight.delete('favourite:1')
+    expect(get('1')?.poll?.votesCount).toBe(9)
+  })
+
+  it('a vote that succeeds after the account changed writes nothing', async () => {
+    cacheStatus(makeStatus('1'))
+    const d = deferred<Poll>()
+    const p = votePoll(get('1')!, [0], { clientSource: () => client({ votePoll: () => d.promise }) })
+    activeUserKey.value = toUserKey('bob', 'example.social')
+    ownerGeneration()
+    d.resolve(makePoll({ voted: true, ownVotes: [0], votesCount: 77 }))
+    expect(await p).toBe(false)
+    expect(get('1')?.poll?.votesCount).not.toBe(77)
+  })
+
+  it('a refused vote the server already holds (already voted) shows the vote, with no error toast', async () => {
+    cacheStatus(makeStatus('1'))
+    const vote = vi.fn(async () => { throw new Error('You have already voted on this poll') })
+    const fetchPoll = vi.fn(async () => makePoll({ voted: true, ownVotes: [1] }))
+    expect(await votePoll(get('1')!, [0], { clientSource: () => client({ votePoll: vote, fetchPoll }) })).toBe(false)
+    expect(get('1')?.poll?.ownVotes).toEqual([1])
+    expect(toasts).toEqual([])
   })
 })

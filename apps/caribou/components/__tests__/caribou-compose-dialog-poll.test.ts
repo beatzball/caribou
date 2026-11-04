@@ -214,4 +214,49 @@ describe('<caribou-compose-dialog> poll builder', () => {
     await settle(el)
     expect($(el, 'caribou-icon-button[data-action="toggle-poll"]')).toBeNull()
   })
+
+  it('limits that arrive after the poll was made bring its duration into range, and Post checks it', async () => {
+    // A server this file has not asked yet: limits are kept per server.
+    addUserSession({
+      userKey: 'alice@late.example', server: 'late.example', token: 'TOKEN', vapidKey: '', account: ME, createdAt: 1,
+    } as unknown as UserSession)
+    const client = activeClient.value!
+    let resolve!: (i: mastodon.v2.Instance) => void
+    vi.spyOn(client, 'fetchInstance').mockImplementation(() => new Promise((r) => { resolve = r }))
+    const el = await mount()
+    await compose(el)
+    await type(el, 'which?')
+    await openPoll(el)
+    await fill(el, 0, 'a')
+    await fill(el, 1, 'b')
+    expect($<HTMLSelectElement>(el, '#compose-poll-duration')!.value).toBe('86400')
+    resolve({ configuration: { statuses: { maxCharacters: 100, maxMediaAttachments: 2 }, mediaAttachments: {},
+      polls: { maxOptions: 4, maxCharactersPerOption: 50, minExpiration: 300, maxExpiration: 3600 } } } as unknown as mastodon.v2.Instance)
+    await settle(el)
+    const select = $<HTMLSelectElement>(el, '#compose-poll-duration')!
+    expect([...select.options].map((o) => Number(o.value)).every((v) => v <= 3600)).toBe(true)
+    expect(select.value).toBe('3600')
+    expect(loadDraft('alice@late.example' as never, 'new')?.poll?.expiresIn).toBe(3600)
+    expect(postButton(el).disabled).toBe(false)
+  })
+
+  it('a stored duration outside the list but in range is kept, with a readable label', async () => {
+    signIn()
+    saveDraft(KEY as never, 'new', emptyDraft({ text: 'q', poll: { options: ['a', 'b'], expiresIn: 2 * 3600 + 1800, multiple: false, hideTotals: false } }))
+    const el = await mount()
+    await compose(el)
+    const select = $<HTMLSelectElement>(el, '#compose-poll-duration')!
+    expect(select.value).toBe('9000')
+    expect(select.selectedOptions[0]!.textContent).toBe('2 hours 30 minutes')
+  })
+
+  it('a stored duration out of range is moved into range', async () => {
+    signIn()
+    saveDraft(KEY as never, 'new', emptyDraft({ text: 'q', poll: { options: ['a', 'b'], expiresIn: 60, multiple: false, hideTotals: false } }))
+    const el = await mount()
+    await compose(el)
+    // The limits are in: the duration was moved into range.
+    expect($<HTMLSelectElement>(el, '#compose-poll-duration')!.value).toBe('300')
+    expect(postButton(el).disabled).toBe(false)
+  })
 })

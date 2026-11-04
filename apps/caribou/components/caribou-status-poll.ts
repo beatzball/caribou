@@ -10,12 +10,16 @@ import './caribou-icon.js'
 type Status = mastodon.v1.Status
 type Poll = mastodon.v1.Poll
 
-function absoluteLabel(iso: string): string {
+// The end as the server prints it, and the first client render repeats:
+// one fixed locale and UTC, so it reads the same whatever machine renders
+// it. After mount the countdown replaces it.
+function endLabel(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
+  return `${d.toLocaleString('en-US', {
+    timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  })} UTC`
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -217,7 +221,7 @@ export class CaribouStatusPoll extends LitElement {
       : !poll.expiresAt
       ? nothing
       : this.now === null
-      ? html`<span>Ends <time datetime=${poll.expiresAt}>${absoluteLabel(poll.expiresAt)}</time></span>`
+      ? html`<span>Ends <time datetime=${poll.expiresAt}>${endLabel(poll.expiresAt)}</time></span>`
       : html`<span><time datetime=${poll.expiresAt}>${timeLeft(poll.expiresAt, this.now)}</time></span>`
     return html`<div class="poll" data-state=${ended ? 'ended' : canVote ? 'open' : 'results'}>
       ${canVote ? this.renderChoices(poll) : this.renderResults(poll, ended)}
@@ -237,7 +241,7 @@ export class CaribouStatusPoll extends LitElement {
     const type = poll.multiple ? 'checkbox' : 'radio'
     return html`<fieldset>
       <legend class="vh">Poll${poll.multiple ? ', choose one or more' : ', choose one'}</legend>
-      <ul class="choices">
+      <ul class="choices" role="list">
         ${poll.options.map((o, i) => html`<li class="choice">
           <label><input type=${type} name="choice" value=${String(i)}
             .checked=${this.chosen.includes(i)} @change=${this.onPick}><span>${o.title}</span></label>
@@ -255,7 +259,7 @@ export class CaribouStatusPoll extends LitElement {
     const own = new Set(poll.ownVotes ?? [])
     const most = pct ? Math.max(...poll.options.map((o) => o.votesCount ?? 0)) : 0
     return html`<div>
-      <ul class="results" tabindex="-1" aria-label="Poll results">
+      <ul class="results" role="list" tabindex="-1" aria-label="Poll results">
         ${poll.options.map((o, i) => {
           const share = pct?.[i]
           const leading = ended && pct !== null && most > 0 && (o.votesCount ?? 0) === most
@@ -264,6 +268,7 @@ export class CaribouStatusPoll extends LitElement {
             <span class="line">
               ${share === undefined ? nothing : html`<span class="share">${share}%</span>`}
               <span class="title">${o.title}</span>
+              ${leading ? html`<span class="vh">, most votes</span>` : nothing}
               ${own.has(i) ? html`<caribou-icon name="check"></caribou-icon><span class="vh">, your choice</span>` : nothing}
             </span>
           </li>`

@@ -49,14 +49,35 @@ const POLL_DURATIONS: { seconds: number; label: string }[] = [
   { seconds: 7 * DAY, label: '7 days' },
 ]
 
-/** The durations the server allows. A stored one outside the list is kept. */
+const inRange = (limits: PollLimits, seconds: number) =>
+  seconds >= limits.minExpiration && seconds <= limits.maxExpiration
+
+/** "2 days", "2 hours 30 minutes". */
+export function durationLabel(seconds: number): string {
+  const units: [number, string][] = [[DAY, 'day'], [HOUR, 'hour'], [60, 'minute']]
+  const parts: string[] = []
+  let rest = Math.round(seconds)
+  for (const [size, name] of units) {
+    const n = Math.floor(rest / size)
+    rest -= n * size
+    if (n > 0) parts.push(`${n} ${name}${n === 1 ? '' : 's'}`)
+  }
+  return parts.join(' ') || `${seconds} seconds`
+}
+
+/** The durations the server allows. A stored one in range but not listed is kept. */
 function pollDurations(limits: PollLimits, current: number | null): { seconds: number; label: string }[] {
-  const allowed = POLL_DURATIONS.filter((d) => d.seconds >= limits.minExpiration && d.seconds <= limits.maxExpiration)
-  if (current !== null && !allowed.some((d) => d.seconds === current)) {
-    allowed.push({ seconds: current, label: `${Math.round(current / 60)} minutes` })
+  const allowed = POLL_DURATIONS.filter((d) => inRange(limits, d.seconds))
+  if (current !== null && inRange(limits, current) && !allowed.some((d) => d.seconds === current)) {
+    allowed.push({ seconds: current, label: durationLabel(current) })
     allowed.sort((a, b) => a.seconds - b.seconds)
   }
   return allowed
+}
+
+/** `seconds`, moved into the server's range. */
+function fitDuration(limits: PollLimits, seconds: number): number {
+  return Math.min(Math.max(seconds, limits.minExpiration), limits.maxExpiration)
 }
 
 function newPoll(limits: PollLimits): DraftPoll {
@@ -357,7 +378,18 @@ export class CaribouComposeDialog extends LitElement {
     this.ready = true
     const client = this.client
     const user = activeUser.value
-    if (client && user) void fetchLimits(client, user.server).then((l) => { this.limits = l })
+    if (client && user) {
+      const session = this.session
+      void fetchLimits(client, user.server).then((l) => {
+        this.limits = l
+        // A poll made before the limits came in, or kept in a draft from
+        // before the server changed them, may be out of range.
+        const poll = this.draft.poll
+        if (session === this.session && poll && !inRange(l.polls, poll.expiresIn)) {
+          this.patchPoll({ expiresIn: fitDuration(l.polls, poll.expiresIn) })
+        }
+      })
+    }
   }
 
   /**
@@ -462,7 +494,7 @@ export class CaribouComposeDialog extends LitElement {
   private get canPost(): boolean {
     const poll = this.activePoll
     const hasContent = this.draft.text.trim() !== '' || (this.draft.media.length > 0 && !poll)
-    if (poll && pollProblem(poll) !== null) return false
+    if (poll && (pollProblem(poll) !== null || !inRange(this.limits.polls, poll.expiresIn))) return false
     return hasContent && this.count <= this.limits.maxChars
       && this.pending.length === 0 && !this.posting
   }
