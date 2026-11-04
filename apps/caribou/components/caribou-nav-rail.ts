@@ -384,6 +384,8 @@ export class CaribouNavRail extends LitElement {
   private renderAccountItems() {
     const current = this.activeAccount
     return [
+      // Native buttons below: "Switch to" is a <caribou-menu> item, and
+      // sign-out must work with JavaScript off.
       ...this.accounts.map((u) => u.userKey === this.activeKey
         ? html`<a href="/@me" class="menu-item account-item signed-in-only" aria-current="true"
             @click=${spaClick}>${this.renderWho(u, 'Signed in as')}<caribou-icon class="check"

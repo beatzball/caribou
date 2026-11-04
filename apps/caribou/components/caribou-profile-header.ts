@@ -207,6 +207,7 @@ export class CaribouProfileHeader extends LitElement {
 
   private renderMenu(rel: Relationship) {
     const acct = this.target!.acct
+    // Native buttons: items in a <caribou-menu>.
     return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for @${acct}`}>
       <button type="button" class="menu-item" data-action="lists" @click=${this.onLists}>Add to lists</button>
       <button type="button" class="menu-item" data-action="mute"
