@@ -339,7 +339,7 @@ lifetime gain without that, once the SDK supports it or we accept a small wrap.
 What changed from round 1: round 1 said silent re-auth would soften the
 two-week cap. It will not. The browser SDK has no silent re-auth, and the spec
 allows silent sign-in only for confidential clients. So the expiry flow (5.6)
-must be good on its own, and D is now a named plan (issue 32). Round 1 also
+must be good on its own, and D is now a named plan (#201). Round 1 also
 said a browser-plus-server client is not a pattern the spec describes; the
 guide does describe TMB and the client-assertion backend.
 
@@ -1226,37 +1226,39 @@ Muted words; #131 for Bluesky; video; gates in compose; link cards in compose.
 
 ### 13.1 Issues to file
 
+Filed on 2026-11-04. Tracking issue: #169.
+
 | # | title | size | phase |
 |---|---|---|---|
-| 1 | `bluesky: spike — bundle size, loopback sign-in, phase-0 unknowns` | S | 0 |
-| 2 | `refactor: Caribou-owned Status/Account/Relationship/List/Notification types` | M | 1a |
-| 3 | `refactor: CaribouClient write methods take refs; mutations commit what the server returns` | M | 1a |
-| 4 | `refactor: opaque paging cursors for timelines and profiles, with the SSR handoff` | S | 1a |
-| 5 | `refactor: CaribouClient capabilities; nav, compose and card read them; timeline order from the client` | M | 1a |
-| 6 | `state: session generation and an expired state that keeps drafts` | M | 1b |
-| 7 | `state: resource network, viewer slots with freshness rules, network-aware actions and links` | M | 1b |
-| 8 | `bluesky: client package with read methods, mappers, catch-up and feed identity` | L | 2a |
-| 9 | `bluesky: facets to HTML renderer` | S | 2a |
-| 10 | `bluesky: embeds — images, external, record, recordWithMedia, video thumbnail` | M | 2a |
-| 11 | `bluesky: moderation with label definitions, plain-data per-surface results and a label-aware reader veil` | L | 2a |
-| 12 | `server: atproto client metadata and handle resolver with a connection-bound SSRF guard` | M | 2b |
-| 13 | `bluesky: sign-in panels, callback, restore, expiry, sign-out` | M | 2b |
-| 14 | `bluesky: account switcher network names and switch rules` | S | 2b |
-| 15 | `bluesky: Following feed, profile and thread views` | M | 2b |
-| 16 | `bluesky: SSR for profiles and threads; route rules; profilePath fix` | M | 3 |
-| 17 | `bluesky: honor !no-unauthenticated in SSR` | S | 3 |
-| 18 | `bluesky: SSR cache TTLs and 429 fallback` | S | 3 |
-| 19 | `bluesky: like, repost, bookmark, follow, mute, block; reply and quote limits` | M | 4 |
-| 20 | `bluesky: compose — draft contract, limits, image resize, labels, reply, quote` | L | 4 |
-| 21 | `bluesky: delete and redraft` | S | 4 |
-| 22 | `bluesky: notifications with client grouping and the unread badge` | M | 4 |
-| 23 | `bluesky: search for people and posts` | M | 5 |
-| 24 | `bluesky: hashtag page` | S | 5 |
-| 25 | `bluesky: pinned feeds on Home` | M | 5 |
-| 26 | `bluesky: lists (curate lists) with the public-list note` | M | 5 |
-| 27 | `bluesky: muted words in the filters screen` | M | 6 |
-| 28 | `bluesky: act as another Bluesky account (#131)` | M | 6 |
-| 29 | `bluesky: video playback` | M | 6 |
-| 30 | `bluesky: thread gate and post gate in compose` | S | 6 |
-| 31 | `bluesky: link cards in compose` | M | 6 |
-| 32 | `auth: client-assertion backend (option D), when the SDK allows and the provider passes the key-binding gate` | M | after 4 |
+| #170 | `bluesky: spike — bundle size, loopback sign-in, phase-0 unknowns` | S | 0 |
+| #171 | `refactor: Caribou-owned Status/Account/Relationship/List/Notification types` | M | 1a |
+| #172 | `refactor: CaribouClient write methods take refs; mutations commit what the server returns` | M | 1a |
+| #173 | `refactor: opaque paging cursors for timelines and profiles, with the SSR handoff` | S | 1a |
+| #174 | `refactor: CaribouClient capabilities; nav, compose and card read them; timeline order from the client` | M | 1a |
+| #175 | `state: session generation and an expired state that keeps drafts` | M | 1b |
+| #176 | `state: resource network, viewer slots with freshness rules, network-aware actions and links` | M | 1b |
+| #177 | `bluesky: client package with read methods, mappers, catch-up and feed identity` | L | 2a |
+| #178 | `bluesky: facets to HTML renderer` | S | 2a |
+| #179 | `bluesky: embeds — images, external, record, recordWithMedia, video thumbnail` | M | 2a |
+| #180 | `bluesky: moderation with label definitions, plain-data per-surface results and a label-aware reader veil` | L | 2a |
+| #181 | `server: atproto client metadata and handle resolver with a connection-bound SSRF guard` | M | 2b |
+| #182 | `bluesky: sign-in panels, callback, restore, expiry, sign-out` | M | 2b |
+| #183 | `bluesky: account switcher network names and switch rules` | S | 2b |
+| #184 | `bluesky: Following feed, profile and thread views` | M | 2b |
+| #185 | `bluesky: SSR for profiles and threads; route rules; profilePath fix` | M | 3 |
+| #186 | `bluesky: honor !no-unauthenticated in SSR` | S | 3 |
+| #187 | `bluesky: SSR cache TTLs and 429 fallback` | S | 3 |
+| #188 | `bluesky: like, repost, bookmark, follow, mute, block; reply and quote limits` | M | 4 |
+| #189 | `bluesky: compose — draft contract, limits, image resize, labels, reply, quote` | L | 4 |
+| #190 | `bluesky: delete and redraft` | S | 4 |
+| #191 | `bluesky: notifications with client grouping and the unread badge` | M | 4 |
+| #192 | `bluesky: search for people and posts` | M | 5 |
+| #193 | `bluesky: hashtag page` | S | 5 |
+| #194 | `bluesky: pinned feeds on Home` | M | 5 |
+| #195 | `bluesky: lists (curate lists) with the public-list note` | M | 5 |
+| #196 | `bluesky: muted words in the filters screen` | M | 6 |
+| #197 | `bluesky: act as another Bluesky account (#131)` | M | 6 |
+| #198 | `bluesky: video playback` | M | 6 |
+| #199 | `bluesky: thread gate and post gate in compose` | S | 6 |
+| #200 | `bluesky: link cards in compose` | M | 6 |
+| #201 | `auth: client-assertion backend (option D), when the SDK allows and the provider passes the key-binding gate` | M | after 4 |
