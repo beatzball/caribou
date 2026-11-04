@@ -112,6 +112,24 @@ describe('<caribou-search>', () => {
     expect(tabs[1]!.getAttribute('aria-current')).toBe('page')
   })
 
+  it('draws the tabs with the shared <caribou-tabs>, as a named navigation', async () => {
+    searchPublic.mockResolvedValue(result())
+    const el = await mount({ q: 'cats', instance: 'pub.social' })
+    const row = el.shadowRoot!.querySelector('caribou-tabs.tabs')!
+    expect(row.getAttribute('label')).toBe('Result type')
+    expect(row.hasAttribute('fill')).toBe(true)
+    expect([...row.children].filter((c) => c.localName === 'a').length).toBe(3)
+  })
+
+  // The form submits with JavaScript off (action="/search", method="get"),
+  // so its button stays native: <caribou-button> cannot submit without it.
+  it('keeps a native submit button for the no-JS search form', async () => {
+    searchPublic.mockResolvedValue(result())
+    const el = await mount({ q: 'cats', instance: 'pub.social' })
+    const btn = el.shadowRoot!.querySelector('form[action="/search"][method="get"] > button[type="submit"]')!
+    expect(btn.getAttribute('aria-label')).toBe('Search')
+  })
+
   it('searches as the signed-in reader, with resolve for an address', async () => {
     const client = signIn()
     const search = vi.spyOn(client, 'search').mockResolvedValue(result({ accounts: [account('2', 'bob@other.social')] }))
@@ -222,7 +240,9 @@ describe('<caribou-search>', () => {
     const el = await mount({ q: 'bob', instance: 'pub.social' })
     expect(text(el)).toContain('Search failed.')
     searchPublic.mockResolvedValueOnce(result({ accounts: [account('2', 'bob')] }))
-    el.shadowRoot!.querySelector<HTMLButtonElement>('.notice button')!.click()
+    const retry = el.shadowRoot!.querySelector<HTMLElement>('.notice caribou-button')!
+    expect(retry.textContent).toBe('Retry')
+    retry.click()
     await flush()
     await el.updateComplete
     expect(accts(el)).toEqual(['@bob@pub.social'])

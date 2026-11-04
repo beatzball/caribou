@@ -477,7 +477,8 @@ the sign-in completion page goes there for an account that chose one.
 Use these instead of a hand-styled `<button>`. Each one wraps a real
 `<button>` in its shadow root, so keyboard use and accessibility come from
 the browser. Focus is delegated to that button, so the control is one tab
-stop. Import the module from the component that renders it; the import
+stop. `<caribou-tabs>` is the exception: it holds no button, and each of
+its links is its own tab stop (see below). Import the module from the component that renders it; the import
 registers the element on the server and the client alike.
 
 | element | attributes | parts | custom properties |
@@ -485,6 +486,7 @@ registers the element on the server and the client alike.
 | `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`), `filled` | — | `--caribou-icon-fill` |
 | `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `soft-disabled`, `count`, `hint`, `description`, `variant` (`default`, `ghost`) | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size`, `--caribou-icon-button-pressed-fg` |
 | `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
+| `<caribou-tabs>` | `label` (required), `fill` | `nav` | — |
 
 - `<caribou-icon>` is always hidden from assistive tech, and is sized by
   `font-size` and coloured by `color`. An unknown name renders nothing.
@@ -529,6 +531,29 @@ registers the element on the server and the client alike.
   has focus. To style keyboard focus from outside, check
   `composedPath()[0].matches(':focus-visible')` on `focusin` (see the
   Follow button in `caribou-profile-header.ts`).
+
+### `<caribou-tabs>`: tabs that are links
+
+`<caribou-tabs label="Result type" fill>` with the tabs as child `<a href>`
+elements. The profile tabs and the search tabs use it.
+
+- Links, not an ARIA tablist: each tab is its own address, so it opens in
+  a new tab, works with JavaScript off, and goes through Back and Forward.
+  A tablist means a panel in the same page and arrow-key focus, which a
+  link to another address does not have.
+- The links stay in the caller's own root, slotted into a `<nav>` named
+  by `label`. So the caller sets `aria-current="page"` on the active one
+  and binds its click handler (`spaClick`, or its own).
+- `fill` gives every tab the same width. Without it a tab is as wide as
+  its text. On a narrow screen the row scrolls sideways; the page does
+  not get wider. There is no scrollbar: a shadow at an edge shows that
+  more tabs are that way, with JavaScript off too. Each tab is at least
+  44px tall.
+- WebKit (Safari's default) skips links on plain Tab; Option+Tab reaches
+  them. An e2e test that tabs onto a tab presses `Alt+Tab` on WebKit.
+- In Playwright, `getByRole('navigation').getByRole('link')` finds
+  nothing: the links are the host's children in the DOM, not the shadow
+  `<nav>`'s. Scope by the `caribou-tabs` element instead.
 
 ### `<caribou-menu>`: a small menu behind a button
 
