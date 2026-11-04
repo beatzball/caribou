@@ -68,7 +68,8 @@ jobs:
     # a fork from skipping it by naming its branch the same.
     if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The suite takes about 13-15 min now (Nov 2026); 15 cut runs off.
+    timeout-minutes: 25
     needs: checks
     # The image ships the browsers and their system packages, so the job skips
     # `playwright install --with-deps`. Its apt step once stalled for 36 min
