@@ -4,7 +4,7 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import { LitroRouter } from '@beatzball/litro-router'
 import {
   _testOnlyResetRelationships, activeUserKey, addUserSession, deletedStatusIds, filteredById,
-  relationshipCache, relationshipKey, statusCache, users,
+  mergeStatus, relationshipCache, relationshipKey, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-status-quote.js'
 import type { CaribouStatusQuote } from '../caribou-status-quote.js'
@@ -185,6 +185,52 @@ describe('<caribou-status-quote>', () => {
     expect($(el, '.quote-note')?.textContent).toContain('was deleted')
   })
 
+  it('an opened content warning stays open when a new copy of the same quote arrives', async () => {
+    const el = await mount(accepted(post('9', { spoilerText: 'Spoilers' })))
+    $(el, 'button.cw-toggle')!.click()
+    await settle(el)
+    el.quote = accepted(post('9', { spoilerText: 'Spoilers' }))
+    await settle(el)
+    expect($(el, '.quote-content')).not.toBeNull()
+    el.quote = accepted(post('10', { spoilerText: 'Other' }))
+    await settle(el)
+    expect($(el, '.quote-content')).toBeNull()
+  })
+
+  it('names the quote\'s Show more apart from the post\'s', async () => {
+    const el = await mount(accepted(post('9', { spoilerText: 'Spoilers' })))
+    expect($(el, 'button.cw-toggle')?.getAttribute('aria-label')).toBe('Show more of the quoted post')
+  })
+
+  it('a shallow quote that is not accepted gets no nested link', async () => {
+    const el = await mount(accepted(post('9', { quote: { state: 'deleted', quotedStatusId: null } })))
+    expect($(el, 'a.nested')).toBeNull()
+  })
+
+  it('says the quoted post has a poll', async () => {
+    const el = await mount(accepted(post('9', { poll: { id: 'p', options: [] } })))
+    expect($(el, '.media-summary')?.textContent).toContain('a poll')
+  })
+
+  it('a hashtag or mention in the quoted text opens in Caribou', async () => {
+    const go = vi.spyOn(LitroRouter, 'go').mockImplementation(async () => {})
+    const el = await mount(accepted(post('9', {
+      content: '<p><a href="https://example.social/tags/cats" class="mention hashtag" rel="tag">#<span>cats</span></a> '
+        + '<span class="h-card"><a href="https://other.example/@carol" class="u-url mention">@<span>carol</span></a></span></p>',
+      tags: [{ name: 'cats' }],
+      mentions: [{ id: '7', acct: 'carol@other.example', username: 'carol', url: 'https://other.example/@carol' }],
+    })))
+    const click = (a: Element) => a.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, button: 0, cancelable: true }))
+    const [tag, mention] = [...el.shadowRoot!.querySelectorAll('.quote-content a')]
+    click(tag!)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(go).toHaveBeenLastCalledWith('/tags/cats')
+    click(mention!)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(go).toHaveBeenLastCalledWith('/@carol@other.example')
+    expect(go).toHaveBeenCalledTimes(2)
+  })
+
   it('a plain click on the card opens the thread; a click on a link in the text does not', async () => {
     const go = vi.spyOn(LitroRouter, 'go').mockImplementation(async () => {})
     const el = await mount(accepted(post('9', { content: '<p>see <a href="https://news.example/">this</a></p>' })))
@@ -220,6 +266,42 @@ describe('<caribou-status-card> with a quote', () => {
     const quote = el.shadowRoot!.querySelector('#status-body caribou-status-quote') as CaribouStatusQuote
     expect(quote).not.toBeNull()
     expect(quote.getAttribute('instance')).toBe('example.social')
+    await settle(quote)
+    expect($(quote, '.quote-content')?.innerHTML).toContain('quoted 9')
+  })
+
+  // A thread keeps its own copy of the post; the reader's copy, with the
+  // reader's quote state, reaches only the cache. No relationship is known.
+  it.each([
+    ['muted_account', 'you muted its author'],
+    ['blocked_account', 'you blocked its author'],
+    ['blocked_domain', 'you blocked its author\'s server'],
+    ['unauthorized', 'cannot see'],
+    ['revoked', 'removed this quote'],
+    ['deleted', 'was deleted'],
+  ])('takes the reader\'s quote state (%s) from the cache over its own copy', async (state, words) => {
+    signIn()
+    const own = post('1', { quote: accepted(post('9')) })
+    const el = await card(own)
+    let quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-content')?.innerHTML).toContain('quoted 9')
+    mergeStatus({ ...own, quote: { state, quotedStatus: null } } as unknown as Status)
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-note')?.textContent).toContain(words)
+    expect($(quote, '.quote-content')).toBeNull()
+  })
+
+  it('a reader copy without `quote` (an older server) leaves the quote as it is', async () => {
+    signIn()
+    const own = post('1', { quote: accepted(post('9')) })
+    const el = await card(own)
+    const { quote: _drop, ...plain } = own as unknown as Record<string, unknown>
+    mergeStatus(plain as unknown as Status)
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
     await settle(quote)
     expect($(quote, '.quote-content')?.innerHTML).toContain('quoted 9')
   })

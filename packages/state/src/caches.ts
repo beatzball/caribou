@@ -220,6 +220,17 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
  * list still on screen keeps its posts; the flags come back with the next
  * copy the new account fetches.
  */
+// A quote of a deleted post says so, since the mark that hid it is about
+// to go.
+function withoutDeletedQuotes(s: mastodon.v1.Status, gone: ReadonlySet<string>): mastodon.v1.Status {
+  const dead = (p: mastodon.v1.Status) => {
+    const q = quotedIn(p)
+    return q && gone.has(q.id) ? { ...p, quote: { state: 'deleted' as const, quotedStatus: null } } : p
+  }
+  const out = dead(s)
+  return out.reblog ? { ...out, reblog: dead(out.reblog) } : out
+}
+
 export function forgetReaderFields(): void {
   const next = new Map<string, mastodon.v1.Status>()
   // The deleted marks go with the account; a copy of a deleted post that a
@@ -227,7 +238,7 @@ export function forgetReaderFields(): void {
   const gone = deletedStatusIds.peek()
   for (const [id, s] of statusCache.peek()) {
     if (gone.has(id) || (s.reblog && gone.has(s.reblog.id))) continue
-    next.set(id, withoutReaderFields(s))
+    next.set(id, withoutReaderFields(withoutDeletedQuotes(s, gone)))
   }
   batch(() => {
     statusCache.value = next

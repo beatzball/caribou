@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { mastodon } from 'masto'
 import {
-  statusCache, accountCache, cacheStatus, cacheAccount, filteredById, forgetReaderFields, mergeStatus,
+  statusCache, accountCache, cacheStatus, cacheAccount, deletedStatusIds, filteredById, forgetReaderFields, mergeStatus,
   readerFiltered, updateStatus,
 } from '../caches.js'
 
@@ -118,6 +118,15 @@ describe('quoted posts', () => {
     cacheStatus(quoting('p', makeStatus('q', true)))
     forgetReaderFields()
     expect('favourited' in (quotedIn(statusCache.value.get('p')) ?? {})).toBe(false)
+  })
+
+  it('forgetReaderFields turns a quote of a deleted post into a deleted quote', () => {
+    cacheStatus(quoting('p', makeStatus('q')))
+    cacheStatus({ ...makeStatus('b'), reblog: quoting('p2', makeStatus('q')) } as mastodon.v1.Status)
+    deletedStatusIds.value = new Set(['q'])
+    forgetReaderFields()
+    expect(statusCache.value.get('p')?.quote).toEqual({ state: 'deleted', quotedStatus: null })
+    expect(statusCache.value.get('b')?.reblog?.quote).toEqual({ state: 'deleted', quotedStatus: null })
   })
 
   it('a shallow quote changes nothing', () => {

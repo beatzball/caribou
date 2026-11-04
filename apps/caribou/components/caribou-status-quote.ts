@@ -13,6 +13,8 @@ import {
 import { findShell } from './_shell.js'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
+import { hashtagOf, sameUrl } from './_post-links.js'
+import { tagPath } from './_tag-path.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import { mastodonLinkText } from './_shared-styles.js'
 
@@ -64,8 +66,9 @@ const MEDIA_WORDS: Record<string, [string, string]> = {
   image: ['image', 'images'], video: ['video', 'videos'], gifv: ['GIF', 'GIFs'], audio: ['audio', 'audio'],
 }
 
-// "2 images, 1 video". The quote shows no media itself, so nothing loads.
-function mediaSummary(media: readonly mastodon.v1.MediaAttachment[]): string {
+// "2 images, 1 video, a poll". The quote shows no media itself, so nothing
+// loads.
+function mediaSummary(media: readonly mastodon.v1.MediaAttachment[], poll: boolean): string {
   const counts = new Map<string, number>()
   for (const m of media) {
     const kind = MEDIA_WORDS[m.type] ? m.type : 'other'
@@ -74,7 +77,7 @@ function mediaSummary(media: readonly mastodon.v1.MediaAttachment[]): string {
   return [...counts].map(([kind, n]) => {
     const [one, many] = MEDIA_WORDS[kind] ?? ['attachment', 'attachments']
     return `${n} ${n === 1 ? one : many}`
-  }).join(', ')
+  }).concat(poll ? ['a poll'] : []).join(', ')
 }
 
 function withEdit(post: Status, edit: Status | null): Status {
@@ -124,6 +127,8 @@ export class CaribouStatusQuote extends LitElement {
     .quote-content p { margin: 0 0 var(--space-2); }
     .quote-content p:last-child { margin-bottom: 0; }
     .quote-content a + a { margin-inline-start: 0.25em; }
+    /* Mastodon's "RE: <link>" fallback; the nested link stands for it. */
+    .quote-content .quote-inline { display: none; }
     .media-summary, .nested { display: block; margin-top: var(--space-2); color: var(--fg-muted); font-size: 0.875rem; }
     .nested { color: var(--accent); }
     .spoiler { margin: var(--space-2) 0 0; color: var(--fg-0); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -181,7 +186,10 @@ export class CaribouStatusQuote extends LitElement {
   }
 
   protected override willUpdate(changed: Map<PropertyKey, unknown>) {
-    if (changed.has('quote') && changed.get('quote') !== undefined) {
+    // A new copy of the same quoted post (every merge of the quoting post
+    // makes one) keeps what the reader opened; another post starts closed.
+    const before = changed.get('quote') as Quote | null | undefined
+    if (changed.has('quote') && before !== undefined && quotedOf(before)?.id !== quotedOf(this.quote)?.id) {
       this.warningOpen = false
       this.filterShown = false
     }
@@ -249,6 +257,23 @@ export class CaribouStatusQuote extends LitElement {
     void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
   }
 
+  // As in the status card: a plain click on a hashtag the post lists, or a
+  // mention it names, opens Caribou's own page. The href stays the server's.
+  private onContentClick = (e: MouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0) return
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    const a = (e.target as Element).closest?.('a')
+    const q = quotedOf(this.quote)
+    if (!a || !q) return
+    const display = withEdit(q, this.liveEdit)
+    const tag = hashtagOf(a, display.tags)
+    const mention = tag || !a.matches('.mention') ? undefined : display.mentions?.find((m) => sameUrl(m.url, a.href))
+    const href = tag ? tagPath(tag) : mention ? this.profileHref(mention) : null
+    if (!href) return
+    e.preventDefault()
+    void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
+  }
+
   private onToggleWarning = () => { this.warningOpen = !this.warningOpen }
   private onToggleFiltered = () => { this.filterShown = !this.filterShown }
 
@@ -311,14 +336,15 @@ export class CaribouStatusQuote extends LitElement {
         ? html`<p class="spoiler">${warning}</p>
             <button type="button" class="cw-toggle" aria-controls="quote-body"
               aria-expanded=${this.warningOpen ? 'true' : 'false'}
+              aria-label=${this.warningOpen ? 'Show less of the quoted post' : 'Show more of the quoted post'}
               @click=${this.onToggleWarning}>${this.warningOpen ? 'Show less' : 'Show more'}</button>`
         : nothing}
       <div class="quote-body" id="quote-body" ?hidden=${!bodyShown}>
-        ${bodyShown ? html`<div class="quote-content">${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
-        ${bodyShown && media.length
-          ? html`<span class="media-summary">${mediaSummary(media)}${display.sensitive ? ' (marked sensitive)' : ''}</span>`
+        ${bodyShown ? html`<div class="quote-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
+        ${bodyShown && (media.length || display.poll)
+          ? html`<span class="media-summary">${mediaSummary(media, !!display.poll)}${media.length && display.sensitive ? ' (marked sensitive)' : ''}</span>`
           : nothing}
-        ${bodyShown && display.quote
+        ${bodyShown && display.quote?.state === 'accepted'
           ? html`<a class="nested" href=${thread} @click=${spaClick}>This post quotes another post. Open it to see the quote.</a>`
           : nothing}
       </div>

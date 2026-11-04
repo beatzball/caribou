@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from './_fixtures.js'
 import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 
 // A quote post (Mastodon 4.5) as the server paints it on its thread page.
@@ -94,6 +94,51 @@ test('the server-painted quote hydrates in place', async ({ page, context }) => 
   await expect(quote(page).locator('.quote-content')).toContainText('the quoted words')
   expect(errors).toEqual([])
 })
+
+// The server reads without a token, so its copy says the quote is
+// accepted. The reader's copy says the reader muted (or blocked) the
+// quoted author. Once the reader's check settles, the quoted post must not
+// show: the thread keeps its own copy, so the card takes the quote from
+// the reader's copy in the cache.
+for (const state of ['muted_account', 'blocked_account'] as const) {
+  test(`a signed-in reader's ${state} quote state hides the quoted post on a thread`, async ({ page, context }) => {
+    const errors: string[] = []
+    page.on('pageerror', (e) => errors.push(String(e)))
+    await withInstance(context)
+    await page.addInitScript(() => {
+      const account = { id: 'me', username: 'reader', acct: 'reader', display_name: 'Reader' }
+      const session = { userKey: 'reader@example.social', server: 'example.social', token: 'TOKEN', vapidKey: '', account, createdAt: 1 }
+      localStorage.setItem('caribou.users', JSON.stringify([[session.userKey, session]]))
+      localStorage.setItem('caribou.activeUserKey', JSON.stringify(session.userKey))
+    })
+    const asked: string[][] = []
+    await page.route('https://example.social/api/v1/statuses?*', async (route) => {
+      const ids = new URL(route.request().url()).searchParams.getAll('id[]')
+      asked.push(ids)
+      const alice = {
+        id: 'a1', username: 'alice', acct: 'alice', display_name: 'Alice Example', avatar: '', avatar_static: '',
+        url: 'https://example.social/@alice', note: '', fields: [], emojis: [],
+      }
+      const reader = {
+        id: 'quoting-1', uri: 'https://example.social/@alice/quoting-1', url: 'https://example.social/@alice/quoting-1',
+        created_at: '2024-01-01T00:00:00.000Z', account: alice, content: '<p>look at this</p>',
+        visibility: 'public', sensitive: false, spoiler_text: '', media_attachments: [], emojis: [],
+        mentions: [], tags: [], reblogs_count: 0, favourites_count: 0, replies_count: 0, language: 'en',
+        quote: { state, quoted_status: null },
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(ids.map(() => reader)) })
+    })
+    await page.goto(`${base}/@alice/quoting-1`)
+    await settled(page)
+    await expect.poll(() => asked.flat()).toContain('quoting-1')
+    const verb = state === 'muted_account' ? 'muted' : 'blocked'
+    await expect(quote(page).locator('.quote-note')).toContainText(`you ${verb} its author`)
+    await expect(quote(page).locator('.quote-content')).toHaveCount(0)
+    await expect(quote(page).locator('img')).toHaveCount(0)
+    await expect(livePage(page)).not.toContainText('the quoted words')
+    expect(errors).toEqual([])
+  })
+}
 
 test('the server paints a quoted post with a content warning collapsed; Show more opens it', async ({ page, context }) => {
   const errors: string[] = []
