@@ -184,6 +184,41 @@ test('/home keeps focus off the page after a keyboard Retry of older posts', asy
   await expect(page.locator('caribou-timeline li:focus')).toContainText('older one')
 })
 
+// A Retry at the top that brings new posts moves focus to the banner's
+// button. The banner is a <caribou-button>: its host takes the focus and
+// hands it to the native button inside, which must exist by then.
+test('/home moves focus to the new-posts button after a keyboard Retry at the top', async ({ page }) => {
+  let failPoll = true
+  await page.route('**/api/v1/timelines/home*', (route) => {
+    const u = new URL(route.request().url())
+    if (u.searchParams.get('max_id')) return route.fulfill({ json: [] })
+    if (u.searchParams.get('since_id')) {
+      if (failPoll) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+      return route.fulfill({ json: [makeStatus('d', '<p>newer post</p>')] })
+    }
+    return route.fulfill({ json: [makeStatus('c', '<p>newest</p>')] })
+  })
+  await gotoSettled(page, '/home')
+  await expect(page.getByText('newest')).toBeVisible()
+  // Force a poll: the poller runs when the tab becomes visible.
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  const retry = page.locator('caribou-timeline caribou-button[data-action="retry"]')
+  await expect(retry).toBeVisible()
+  failPoll = false
+  await retry.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('button', { name: /1 new post/i })).toBeVisible()
+  await expect(retry).toHaveCount(0)
+  // The deepest focused element, through the shadow roots, and its host.
+  const focused = await page.evaluate(() => {
+    let el: Element | null = document.activeElement
+    while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement
+    const host = (el?.getRootNode() as ShadowRoot | null)?.host
+    return el ? { tag: el.tagName, host: host?.getAttribute('data-action') ?? null } : null
+  })
+  expect(focused).toEqual({ tag: 'BUTTON', host: 'apply-new-posts' })
+})
+
 test('/home surfaces a "new posts" banner when polling finds newer statuses', async ({ page }) => {
   let sawInitial = false
   // The "Older posts →" anchor is initially in view (single short post),

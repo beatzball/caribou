@@ -26,6 +26,15 @@ describe('<caribou-new-posts-banner>', () => {
     expect(el.shadowRoot!.querySelector('button')).toBeNull()
   })
 
+  // An unregistered <caribou-button> would still match the selectors above
+  // and still pass a click on to the banner. The banner must register it.
+  it('registers <caribou-button> itself', async () => {
+    const el = await mount(1)
+    expect(customElements.get('caribou-button')).toBeDefined()
+    const button = el.shadowRoot!.querySelector('caribou-button')!
+    expect(button.shadowRoot?.querySelector('button')).not.toBeNull()
+  })
+
   it.each([[1, '1 new post'], [2, '2 new posts'], [40, '40 new posts']] as const)
     ('count=%i reads "%s"', async (count, label) => {
     const el = await mount(count)
