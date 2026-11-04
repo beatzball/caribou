@@ -188,22 +188,34 @@ Creating a quote is not built yet.
 **Which copy wins.** A post can reach the status cache many times: the
 server's page data (no token), the reader's own copy, an action's answer,
 a boost of it, a quote of it. `mergeStatus` and `cacheStatus` in
-`@beatzball/caribou-state` decide each field by one rule. "Known" is the
-cached copy of the same post, alone or else inside a boost.
+`@beatzball/caribou-state` decide each field by one rule. Two places
+hold what they decide:
 
-| field | the known copy wins when | else |
+- **The post's record** (`postRecords`, one per post id). Every copy of
+  the post writes to it, wherever it came: alone, inside a boost, inside
+  a quote. It holds what the reader's server says: `filtered`, the quote,
+  and when a copy with a token last arrived (`tokenAt`, in arrival order).
+  A copy with a token is one that has `filtered`; Mastodon sends it on
+  every copy fetched with a token since 4.0, and quotes came in 4.5.
+  Cards read it through `readerFiltered` and `readerQuote`, never by
+  searching cached copies.
+- **The cached copy** (`statusCache`), for everything else. "Known" below
+  is the cached copy of the same post, alone or else inside a boost.
+
+| field | kept in | the new copy wins unless |
 |---|---|---|
-| edit fields (`EDIT_FIELDS`) | it has a newer `editedAt` | new |
-| reader flags (`favourited`, `reblogged`, `bookmarked`, `muted`, `pinned`) | always, on a merge | — |
-| `filtered` | the new copy has none (no token) | new |
-| counts beside a flag | an action is out, or the flag is set and the new count is lower | new |
-| `poll` | the reader's vote on it is out; on a merge, the new copy has no `voted` (it keeps the known `voted`, `ownVotes`, and its counts when they are higher) | new |
-| `quote` | the new copy has no `filtered` and the known one has (the known one is the reader's: muted, blocked …), or the new quote is shallow and names the accepted post the known one carries in full | new |
-| the quoted post | — | cached under its own id by these same rules, only when the quote is the new one |
+| `filtered` | record | it has none (no token) |
+| `quote` | record | a copy with a token has arrived and this one has none, or this quote is shallow (an id only) and names the accepted post the record carries in full |
+| the quoted post | cache, under its own id | — it is cached only when the copy's own quote wins; a quote kept from the record is not cached again |
+| edit fields (`EDIT_FIELDS`) | cache | the known copy has a newer `editedAt` |
+| reader flags (`favourited`, `reblogged`, `bookmarked`, `muted`, `pinned`) | cache | on a merge, always (the known copy's stay) |
+| counts beside a flag | cache | an action is out, or the flag is set and the new count is lower |
+| `poll` | cache | the reader's vote is out; on a merge, the new copy has no `voted` (it keeps the known `voted`, `ownVotes`, and counts when they are higher) |
 
-A kept quote's quoted post is not cached again: it is an old copy, and its
-reader fields would undo newer ones. An account change drops every reader
-flag and `filtered` (`forgetReaderFields`), so the next copy is taken.
+The reader flags stay in the cached copy: the reader's own actions write
+them there (`updateStatus`), and no reader-side decision reads them from
+a boost. An account change empties the records and drops every reader
+flag (`forgetReaderFields`), so the next copy is taken.
 
 **The reader's server filters hide or warn.** A status fetched with a
 token carries `filtered`: every filter that matches it, whatever the

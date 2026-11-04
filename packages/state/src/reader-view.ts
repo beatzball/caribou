@@ -1,7 +1,7 @@
 import { batch, signal } from '@preact/signals-core'
 import type { mastodon } from 'masto'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
-import { filteredById, mergeStatus } from './caches.js'
+import { mergeStatus, postRecords } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
 type Status = mastodon.v1.Status
@@ -69,7 +69,7 @@ export async function loadReaderView(statuses: readonly Status[], client: Caribo
   const generation = ownerGeneration()
   // A post whose reader filters are known already stays as it is while it
   // is asked again: covering it would make a shown post blink.
-  const unknown = ids.filter((id) => !filteredById.peek().has(id))
+  const unknown = ids.filter((id) => postRecords.peek().get(id)?.filtered === undefined)
   const request = ++requests
   claim(userKey, unknown, request)
   let fresh: Status[] = []

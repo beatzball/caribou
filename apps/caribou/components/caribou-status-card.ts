@@ -8,7 +8,7 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, relationshipCache, relationshipKey, setBlock, setMute,
+  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { profilePath } from './_profile-path.js'
@@ -329,10 +329,11 @@ export class CaribouStatusCard extends LitElement {
   @state() private liveEdit: Status | null = null
   // The reader deleted this post (or the post this boosts).
   @state() private deleted = false
-  // The quote from the cached copy, for a reader on the same server: the
-  // reader's copy says whether they may see the quoted post (muted, blocked,
-  // revoked …), and a list that keeps its own copy (a thread) never gets
-  // it. Undefined until mount, and when the cached copy has no `quote`.
+  // The quote the post's record says (`readerQuote`), for a reader on the
+  // same server: the reader's copy says whether they may see the quoted
+  // post (muted, blocked, revoked …), whichever copy brought it, and a list
+  // that keeps its own copy (a thread) never gets it. Undefined until
+  // mount, and while no copy of the post said.
   @state() private liveQuote: Status['quote'] | undefined = undefined
   @state() private liveFields: ActionFields | null = null
   // The filter verdict from the newest copy; undefined until mount, when
@@ -445,7 +446,7 @@ export class CaribouStatusCard extends LitElement {
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
       const edit = post && this.canAct ? newerEdit(cached ?? undefined, post) : null
       if (edit !== this.liveEdit) this.liveEdit = edit
-      const quote = this.canAct && cached && 'quote' in cached ? cached.quote ?? null : undefined
+      const quote = this.canAct && post ? readerQuote(post.id) : undefined
       if (quote !== this.liveQuote) this.liveQuote = quote
       const gone = deletedStatusIds.value
       const deleted = this.canAct && !!s && (gone.has(s.id) || (!!post && gone.has(post.id)))

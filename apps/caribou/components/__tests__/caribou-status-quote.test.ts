@@ -3,7 +3,7 @@ import type { mastodon } from 'masto'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { LitroRouter } from '@beatzball/litro-router'
 import {
-  _testOnlyResetRelationships, activeUserKey, addUserSession, deletedStatusIds, filteredById,
+  _testOnlyResetRelationships, activeUserKey, addUserSession, deletedStatusIds, postRecords,
   mergeStatus, relationshipCache, relationshipKey, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-status-quote.js'
@@ -57,7 +57,7 @@ beforeEach(() => {
   statusCache.value = new Map()
   relationshipCache.value = new Map()
   deletedStatusIds.value = new Set()
-  filteredById.value = new Map()
+  postRecords.value = new Map()
   users.value = new Map()
   activeUserKey.value = null
   localStorage.clear()
@@ -361,6 +361,22 @@ describe('<caribou-status-card> with a quote', () => {
     const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
     await settle(quote)
     expect($(quote, '.quote-note')?.textContent).toContain('you muted its author')
+    expect(quote.shadowRoot!.querySelector('img')).toBeNull()
+  })
+
+  it('with an accepted then a muted reader copy in two boosts, a public third boost shows the note', async () => {
+    signIn()
+    const inner = post('1', { quote: accepted(post('9')) })
+    mergeStatus(post('b1', { reblog: { ...inner, filtered: [] } }))
+    mergeStatus(post('b2', { reblog: { ...inner, filtered: [], quote: { state: 'muted_account', quotedStatus: null } } }))
+    const b3 = post('b3', { reblog: inner })
+    mergeStatus(b3)
+    const el = await card(b3)
+    for (let i = 0; i < 5; i++) await el.updateComplete
+    const quote = el.shadowRoot!.querySelector('caribou-status-quote') as CaribouStatusQuote
+    await settle(quote)
+    expect($(quote, '.quote-note')?.textContent).toContain('you muted its author')
+    expect($(quote, '.quote-content')).toBeNull()
     expect(quote.shadowRoot!.querySelector('img')).toBeNull()
   })
 

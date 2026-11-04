@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { mastodon } from 'masto'
 import {
-  statusCache, accountCache, cacheStatus, cacheAccount, deletedStatusIds, filteredById, forgetReaderFields, mergeStatus,
+  statusCache, accountCache, cacheStatus, cacheAccount, deletedStatusIds, forgetReaderFields, mergeStatus, postRecords, readerQuote,
   readerFiltered, updateStatus,
 } from '../caches.js'
 
@@ -14,7 +14,7 @@ function makeStatus(id: string, fav = false): mastodon.v1.Status {
 
 beforeEach(() => {
   statusCache.value = new Map()
-  filteredById.value = new Map()
+  postRecords.value = new Map()
   accountCache.value = new Map()
 })
 
@@ -212,6 +212,63 @@ describe('quoted posts', () => {
     put(boostOf('b1', quoting('p', makeStatus('a'))))
     put(boostOf('b2', { ...quoting('p', makeStatus('a')), quote: { state: 'accepted', quotedStatusId: 'a' } } as unknown as mastodon.v1.Status))
     expect(quotedIn(statusCache.value.get('b2')?.reblog ?? undefined)?.id).toBe('a')
+  })
+
+  // One record per post id says what the reader's server last said about
+  // it, whichever copy brought that: alone, in a boost, in a quote.
+  const reader = (id: string, state: string) => ({
+    ...makeStatus(id), filtered: [],
+    quote: state === 'accepted' ? { state, quotedStatus: makeStatus('q') } : { state, quotedStatus: null },
+  }) as unknown as mastodon.v1.Status
+  const publicP = () => quoting('p', makeStatus('q'))
+  const stateIn = (s: mastodon.v1.Status | null | undefined) => s?.quote?.state
+
+  it.each(['mergeStatus', 'cacheStatus'] as const)(
+    'accepted in boost 1, then muted in boost 2: a public boost 3 stays muted (%s)', (entry) => {
+      const put = entry === 'mergeStatus' ? mergeStatus : cacheStatus
+      put(boostOf('b1', reader('p', 'accepted')))
+      put(boostOf('b2', reader('p', 'muted_account')))
+      put(boostOf('b3', publicP()))
+      expect(stateIn(statusCache.value.get('b3')?.reblog)).toBe('muted_account')
+      expect(readerQuote('p')?.state).toBe('muted_account')
+    })
+
+  it.each(['mergeStatus', 'cacheStatus'] as const)(
+    'an older copy alone does not beat a newer reader copy in a boost (%s)', (entry) => {
+      const put = entry === 'mergeStatus' ? mergeStatus : cacheStatus
+      put(publicP())
+      put(boostOf('b2', reader('p', 'muted_account')))
+      put(boostOf('b3', publicP()))
+      put(publicP())
+      expect(stateIn(statusCache.value.get('b3')?.reblog)).toBe('muted_account')
+      expect(stateIn(statusCache.value.get('p'))).toBe('muted_account')
+    })
+
+  // Three boosts, in other orders: the last reader copy wins; a public copy
+  // never wins over a reader copy; with no reader copy, the public one does.
+  it.each([
+    [['muted_account', 'accepted', 'public'], 'accepted'],
+    [['public', 'muted_account', 'accepted'], 'accepted'],
+    [['public', 'accepted', 'revoked'], 'revoked'],
+    [['revoked', 'public', 'public'], 'revoked'],
+    [['public', 'public', 'public'], 'accepted'],
+  ] as const)('boosts %j end with %s, through both entry points', (order, want) => {
+    for (const put of [mergeStatus, cacheStatus]) {
+      statusCache.value = new Map()
+      postRecords.value = new Map()
+      order.forEach((kind, i) => put(boostOf(`b${i}`, kind === 'public' ? publicP() : reader('p', kind))))
+      put(boostOf('last', publicP()))
+      expect(stateIn(statusCache.value.get('last')?.reblog)).toBe(want)
+      expect(readerQuote('p')?.state).toBe(want)
+    }
+  })
+
+  it('an account change forgets the reader\'s quote state', () => {
+    mergeStatus(boostOf('b1', reader('p', 'muted_account')))
+    forgetReaderFields()
+    expect(readerQuote('p')).toBeUndefined()
+    mergeStatus(boostOf('b3', publicP()))
+    expect(stateIn(statusCache.value.get('b3')?.reblog)).toBe('accepted')
   })
 
   it('a shallow quote changes nothing', () => {

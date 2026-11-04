@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { mastodon } from 'masto'
-import { activeUserKey, cacheStatus, filteredById, mergeStatus, statusCache, users } from '@beatzball/caribou-state'
+import { activeUserKey, cacheStatus, postRecords, mergeStatus, statusCache, users } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
@@ -35,7 +35,7 @@ describe('<caribou-status-card> server filters', () => {
   beforeEach(() => {
     document.body.replaceChildren()
     statusCache.value = new Map()
-    filteredById.value = new Map()
+    postRecords.value = new Map()
     users.value = new Map()
   })
   afterEach(() => { activeUserKey.value = null })
