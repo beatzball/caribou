@@ -148,16 +148,23 @@ describe('caribou-notifications', () => {
   it('the Mentions filter asks for types[]=mention and does not move the marker', async () => {
     const el = await mount()
     expect(fetchSpy).toHaveBeenLastCalledWith({ types: [] })
-    const [all, mentions] = [...el.shadowRoot!.querySelectorAll<HTMLButtonElement>('.filters button')]
-    expect(all!.getAttribute('aria-pressed')).toBe('true')
-    expect(mentions!.getAttribute('aria-pressed')).toBe('false')
+    // Shared toggles: the inner button carries aria-pressed.
+    const [all, mentions] = [...el.shadowRoot!.querySelectorAll<HTMLElement>('.filters caribou-button')]
+    const pressed = (b: HTMLElement) => b.shadowRoot!.querySelector('button')!.getAttribute('aria-pressed')
+    await (mentions as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete
+    expect(all!.textContent).toBe('All')
+    expect(mentions!.textContent).toBe('Mentions')
+    expect(pressed(all!)).toBe('true')
+    expect(pressed(mentions!)).toBe('false')
 
     fetchSpy.mockResolvedValueOnce([notif('20', 'mention')])
     mentions!.click()
     await flush()
     await el.updateComplete
     expect(fetchSpy).toHaveBeenLastCalledWith({ types: ['mention'] })
-    expect(mentions!.getAttribute('aria-pressed')).toBe('true')
+    await (mentions as HTMLElement & { updateComplete: Promise<unknown> }).updateComplete
+    expect(pressed(mentions!)).toBe('true')
+    expect(pressed(all!)).toBe('false')
     expect(items(el)).toHaveLength(1)
     expect(lastSeenNotificationId(userKey)).toBeNull()
   })
@@ -165,7 +172,7 @@ describe('caribou-notifications', () => {
   it('shows an empty state per filter', async () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('.notice')?.textContent).toBe('No notifications yet.')
-    el.shadowRoot!.querySelector<HTMLButtonElement>('[data-filter="mentions"]')!.click()
+    el.shadowRoot!.querySelector<HTMLElement>('caribou-button[data-filter="mentions"]')!.click()
     await flush()
     await el.updateComplete
     expect(el.shadowRoot!.querySelector('.notice')?.textContent).toBe('No mentions yet.')
