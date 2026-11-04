@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, query } from 'lit/decorators.js'
 import { boxReset } from './_shared-styles.js'
+import { pressedConverter } from './_pressed.js'
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger'
 
@@ -11,6 +12,8 @@ export type ButtonVariant = 'primary' | 'secondary' | 'danger'
 //
 // `loading` keeps the button focusable (so focus is not lost mid-action) but
 // marks it busy and swallows clicks. `disabled` takes it out of use entirely.
+// `pressed` makes it a toggle, with the three states of `_pressed.ts`: no
+// attribute is not a toggle, `pressed="false"` is off, `pressed` is on.
 //
 // Parts: `button`, `spinner`.
 // Custom properties: `--caribou-button-size` (min height, default 2.25rem,
@@ -51,6 +54,12 @@ export class CaribouButton extends LitElement {
     button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     /* An accent ring on an accent fill would not show. */
     button[data-variant="primary"]:focus-visible { outline-color: var(--fg-0); }
+    /* On, in any variant: the accent fill, as on <caribou-icon-button>. */
+    button[aria-pressed="true"] {
+      --_bg: var(--accent); --_fg: var(--accent-fg);
+      border-color: transparent;
+    }
+    button[aria-pressed="true"]:focus-visible { outline-color: var(--fg-0); }
     button:disabled, button[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
     button[aria-busy="true"] { cursor: progress; }
     .spinner {
@@ -71,6 +80,7 @@ export class CaribouButton extends LitElement {
   // `el.disabled = false` could never undo it.
   @property({ type: Boolean, reflect: true }) disabled = false
   @property({ type: Boolean }) loading = false
+  @property({ converter: pressedConverter }) pressed: boolean | undefined = undefined
 
   // From formDisabledCallback: a disabled <fieldset> around the button, or
   // the host's own `disabled`. The server never has it, so render() must
@@ -129,6 +139,7 @@ export class CaribouButton extends LitElement {
   override render() {
     return html`<button type="button" part="button" data-variant=${this.variant}
       ?disabled=${this.disabled}
+      aria-pressed=${this.pressed === undefined ? nothing : String(this.pressed)}
       aria-disabled=${this.loading && !this.disabled ? 'true' : nothing}
       aria-busy=${this.loading ? 'true' : nothing}>${this.loading
         ? html`<span class="spinner" part="spinner" aria-hidden="true"></span>` : nothing}<slot></slot></button>`

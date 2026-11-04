@@ -484,7 +484,7 @@ registers the element on the server and the client alike.
 |---|---|---|---|
 | `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`), `filled` | — | `--caribou-icon-fill` |
 | `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `soft-disabled`, `count`, `hint`, `description`, `variant` (`default`, `ghost`) | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size`, `--caribou-icon-button-pressed-fg` |
-| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
+| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled`, `pressed` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
 
 - `<caribou-icon>` is always hidden from assistive tech, and is sized by
   `font-size` and coloured by `color`. An unknown name renders nothing.
@@ -516,6 +516,9 @@ registers the element on the server and the client alike.
   `preventDefault()`. `loading` sets
   `aria-busy`, shows a spinner and swallows clicks, but keeps the button
   focusable; `disabled` takes it out of use.
+- `<caribou-button pressed>` is a text toggle (a filter such as All or
+  Mentions). `pressed` has the same three states as on
+  `<caribou-icon-button>`; on, it takes the accent fill in any variant.
 - A disabled or loading control's host does not fire `click`, so a
   `@click` on the host is safe.
 - `<caribou-button type="submit">` cannot submit a form without

@@ -53,6 +53,31 @@ describe('caribou-button', () => {
     expect((el.constructor as typeof CaribouButton).shadowRootOptions.delegatesFocus).toBe(true)
   })
 
+  it('has no aria-pressed unless it is a toggle', async () => {
+    const el = await mount({})
+    expect(el.pressed).toBeUndefined()
+    expect(inner(el).hasAttribute('aria-pressed')).toBe(false)
+  })
+
+  it('maps pressed to aria-pressed, off as well as on', async () => {
+    const el = await mount({ pressed: 'false' })
+    expect(el.pressed).toBe(false)
+    expect(inner(el).getAttribute('aria-pressed')).toBe('false')
+    el.setAttribute('pressed', '')
+    await el.updateComplete
+    expect(el.pressed).toBe(true)
+    expect(inner(el).getAttribute('aria-pressed')).toBe('true')
+    el.setAttribute('pressed', 'true')
+    await el.updateComplete
+    expect(inner(el).getAttribute('aria-pressed')).toBe('true')
+    el.pressed = false
+    await el.updateComplete
+    expect(inner(el).getAttribute('aria-pressed')).toBe('false')
+    el.removeAttribute('pressed')
+    await el.updateComplete
+    expect(inner(el).hasAttribute('aria-pressed')).toBe(false)
+  })
+
   it('defaults to the secondary variant and a plain button', async () => {
     const el = await mount({})
     expect(el.variant).toBe('secondary')

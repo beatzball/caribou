@@ -1,17 +1,12 @@
-import { LitElement, html, css, nothing, type PropertyDeclaration, type PropertyValues } from 'lit'
+import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { boxReset } from './_shared-styles.js'
 import { devWarn } from './_dev-warn.js'
+import { pressedConverter } from './_pressed.js'
 import './caribou-icon.js'
 
-// `pressed` has three states. No attribute: not a toggle, so no
-// `aria-pressed` at all. `pressed="false"`: a toggle that is off, which a
-// screen reader must hear as "not pressed". `pressed` or `pressed="true"`:
-// on. A plain boolean attribute cannot tell the first two apart.
-export const pressedConverter: PropertyDeclaration['converter'] = {
-  fromAttribute: (v: string | null) => v === null ? undefined : v !== 'false',
-  toAttribute: (v: boolean | undefined) => v === undefined ? null : String(v),
-}
+// The three-state `pressed` attribute; see `_pressed.ts`.
+export { pressedConverter } from './_pressed.js'
 
 export type IconButtonVariant = 'default' | 'ghost'
 
