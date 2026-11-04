@@ -92,6 +92,8 @@ test('a post with four images shows a grid, an ALT popover, and a lightbox that 
   await expect(dialog.locator('img')).toHaveAttribute('src', `${FILES}/m1.png`)
   await expect(dialog.locator('p')).toHaveText('A red fox in the snow')
   await expect(dialog).toHaveAccessibleName('A red fox in the snow')
+  // Focus starts on Close.
+  await expect(dialog.getByRole('button', { name: 'Close' })).toBeFocused()
   // A click on the dialog's padding, or on the description, leaves it open.
   const box = (await dialog.boundingBox())!
   await page.mouse.click(box.x + 3, box.y + box.height / 2)

@@ -205,7 +205,12 @@ export class CaribouStatusMedia extends LitElement {
     e.preventDefault()
     this.opener = e.currentTarget as HTMLElement
     this.viewing = index
-    void this.updateComplete.then(() => this.dialog?.showModal())
+    // Focus Close by hand, as the edit history dialog does, rather than
+    // trust the browser to find the button inside the shared control's root.
+    void this.updateComplete.then(() => {
+      this.dialog?.showModal()
+      this.renderRoot.querySelector<HTMLElement>('caribou-button.close')?.focus()
+    })
   }
 
   private onDialogClose = () => {

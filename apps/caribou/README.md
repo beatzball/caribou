@@ -506,7 +506,7 @@ registers the element on the server and the client alike.
   `--caribou-icon-fill: none` on boost. The status card's actions are the
   first server-rendered use; `tests/e2e/status-card-hydration.spec.ts`
   hydrates them in CI.
-- A native `<button>` is right in two places: an item in a
+- A native `<button>` is right in a few places: an item in a
   `<caribou-menu>` (the caller's light DOM, see below), and a toggle whose
   `aria-controls` names a region in the same root (the status card's Show
   more and Show), since an id cannot reach into a shared control's root.
