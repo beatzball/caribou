@@ -45,15 +45,14 @@ export class CaribouNotifications extends LitElement {
     :host { display: block; }
     h1 { font-size: 1.25rem; font-weight: 600; margin: 0; padding: 0 var(--space-4) var(--space-3); }
     .filters { display: flex; border-bottom: 1px solid var(--border); }
-    /* Looks like the profile tabs; it is a toggle group, not navigation.
-       Native until <caribou-button> has a pressed state (#79); then it moves. */
-    .filters button {
-      padding: var(--space-3) var(--space-4); color: var(--fg-1);
-      background: none; border: 0; border-bottom: 2px solid transparent;
-      font: inherit; cursor: pointer;
+    /* Shared toggles drawn like the profile tabs: a toggle group, not
+       navigation, so not <caribou-tabs>. */
+    .filters caribou-button::part(button) {
+      min-block-size: 0; padding: var(--space-3) var(--space-4); color: var(--fg-1);
+      background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
     }
-    .filters button[aria-pressed="true"] { color: var(--fg-0); border-bottom-color: var(--accent); }
-    .filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .filters caribou-button[pressed="true"]::part(button) { color: var(--fg-0); border-bottom-color: var(--accent); }
+    .filters caribou-button::part(button):focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     ul { list-style: none; margin: 0; padding: 0; }
     /* A post hidden by a filter, a mute or a block takes its notification with it. */
     .rows > li:has(caribou-status-card[hidden]) { display: none; }
@@ -454,8 +453,8 @@ export class CaribouNotifications extends LitElement {
     return html`<section aria-labelledby="notifications-h">
       <h1 id="notifications-h">Notifications</h1>
       <div class="filters" role="group" aria-label="Show">
-        ${FILTERS.map((f) => html`<button type="button" aria-pressed=${f.value === this.filter ? 'true' : 'false'}
-          data-filter=${f.value} @click=${() => this.onFilter(f.value)}>${f.label}</button>`)}
+        ${FILTERS.map((f) => html`<caribou-button pressed=${f.value === this.filter ? 'true' : 'false'}
+          data-filter=${f.value} @click=${() => this.onFilter(f.value)}>${f.label}</caribou-button>`)}
       </div>
       ${this.renderList()}
     </section>`
