@@ -485,7 +485,7 @@ registers the element on the server and the client alike.
 |---|---|---|---|
 | `<caribou-icon>` | `name` (a key of `ICONS` in `_icons.ts`), `filled` | — | `--caribou-icon-fill` |
 | `<caribou-icon-button>` | `icon`, `label` (required), `pressed`, `disabled`, `soft-disabled`, `count`, `hint`, `description`, `variant` (`default`, `ghost`) | `button`, `icon`, `count` | `--caribou-icon-button-size`, `--caribou-icon-button-icon-size`, `--caribou-icon-button-pressed-fg` |
-| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
+| `<caribou-button>` | `variant` (`primary`, `secondary`, `danger`), `type` (`button`, `submit`), `loading`, `disabled`, `pressed`, `label`, `hint` | `button`, `spinner` | `--caribou-button-size`, `--caribou-button-bg`, `--caribou-button-fg` |
 | `<caribou-tabs>` | `label` (required), `fill` | `nav` | — |
 
 - `<caribou-icon>` is always hidden from assistive tech, and is sized by
@@ -508,16 +508,27 @@ registers the element on the server and the client alike.
   `--caribou-icon-fill: none` on boost. The status card's actions are the
   first server-rendered use; `tests/e2e/status-card-hydration.spec.ts`
   hydrates them in CI.
-- A native `<button>` is right in two places: an item in a
+- A native `<button>` is right in a few places: an item in a
   `<caribou-menu>` (the caller's light DOM, see below), and a toggle whose
   `aria-controls` names a region in the same root (the status card's Show
   more and Show), since an id cannot reach into a shared control's root.
+  A media ALT badge (`popovertarget`) is the same case. The gif play
+  toggle in `<caribou-status-media>` stays native too: the button is the
+  video itself, and a shared control's box (border, fill, accent when
+  pressed) would have to be undone around it.
 - `<caribou-button>`: the label is the slotted text. `type="submit"` submits
   its form (through `ElementInternals`) the way a native submit button
   does: after every click listener has run, and not if one of them called
   `preventDefault()`. `loading` sets
   `aria-busy`, shows a spinner and swallows clicks, but keeps the button
   focusable; `disabled` takes it out of use.
+- `<caribou-button pressed>` is a text toggle (a filter such as All or
+  Mentions). `pressed` has the same three states as on
+  `<caribou-icon-button>`; on, it takes the accent fill in any variant.
+- `<caribou-button>`: `label` names the button when its text is too short
+  to say what it does (the status card's "edited" mark is named "Edited
+  2h ago. Show edit history"); `hint` is its tooltip. Both go on the inner
+  button, since an `aria-label` or `title` on the host does not reach it.
 - A disabled or loading control's host does not fire `click`, so a
   `@click` on the host is safe.
 - `<caribou-button type="submit">` cannot submit a form without

@@ -49,3 +49,28 @@ export const SSR_STATUS_MEDIA = String.raw`<caribou-status-media ><template shad
     <!--/lit-part-->
       </div>
     <!--/lit-part--></template></caribou-status-media>`
+
+// The same attachments on a sensitive post: empty boxes under a
+// server-rendered <caribou-button class="reveal">, and no files.
+export const SSR_STATUS_MEDIA_SENSITIVE = String.raw`<caribou-status-media   sensitive><template shadowroot="open" shadowrootmode="open"><!--lit-part C7z87hQe6Is=-->
+      <div class="media">
+        <!--lit-node 1--><div class="grid" data-count="2">
+          <!--lit-part--><!--lit-part h8bSd7XYJcM=-->
+            <!--lit-node 0--><div class="item" data-type="image" style="--ar: 1.3333333333333333">
+              <!--lit-part--><!--/lit-part--><!--lit-part--><!--/lit-part-->
+            </div>
+          <!--/lit-part--><!--lit-part h8bSd7XYJcM=-->
+            <!--lit-node 0--><div class="item" data-type="gifv" style="--ar: 1.7777777777777777">
+              <!--lit-part--><!--/lit-part--><!--lit-part--><!--/lit-part-->
+            </div>
+          <!--/lit-part--><!--/lit-part-->
+        </div>
+        <!--lit-part eeKODHSJUvo=--><!--lit-node 0--><caribou-button   class="reveal" variant="secondary" defer-hydration><template shadowroot="open" shadowrootmode="open" shadowrootdelegatesfocus><!--lit-part zErH4LwqhfU=--><!--lit-node 0--><button type="button" part="button" data-variant="secondary"
+      
+      
+       
+      
+      ><!--lit-part--><!--/lit-part--><slot></slot></button><!--/lit-part--></template>Show sensitive media</caribou-button><!--/lit-part-->
+        <!--lit-part--><!--/lit-part-->
+      </div>
+    <!--/lit-part--></template></caribou-status-media>`

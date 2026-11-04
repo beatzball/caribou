@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { html } from 'lit'
 import { ssr } from './_ssr.js'
 import '../../components/caribou-status-card.js'
-import { SSR_MEDIA, SSR_STATUS_MEDIA } from '../e2e/_status-media-ssr.js'
+import { SSR_MEDIA, SSR_STATUS_MEDIA, SSR_STATUS_MEDIA_SENSITIVE } from '../e2e/_status-media-ssr.js'
 
 const account = { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' }
 
@@ -29,5 +29,12 @@ describe('the server markup the e2e media hydration spec replays', () => {
     const out = await ssr(html`<caribou-status-media .media=${SSR_MEDIA}></caribou-status-media>`)
     const el = out.slice(out.indexOf('<caribou-status-media'), out.lastIndexOf('</caribou-status-media>') + '</caribou-status-media>'.length)
     expect(el.replace(/<style>[\s\S]*?<\/style>/g, '')).toBe(SSR_STATUS_MEDIA)
+  })
+
+  it('matches a fresh server render of sensitive media, Show button and all', async () => {
+    const out = await ssr(html`<caribou-status-media sensitive .media=${SSR_MEDIA}></caribou-status-media>`)
+    const el = out.slice(out.indexOf('<caribou-status-media'), out.lastIndexOf('</caribou-status-media>') + '</caribou-status-media>'.length)
+    expect(el).toContain('<caribou-button')
+    expect(el.replace(/<style>[\s\S]*?<\/style>/g, '')).toBe(SSR_STATUS_MEDIA_SENSITIVE)
   })
 })

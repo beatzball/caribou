@@ -76,7 +76,7 @@ describe('<caribou-status-card> content warning', () => {
     expect(media.sensitive).toBe(true)
     expect(media.revealed).toBe(true)
     expect(media.shadowRoot!.querySelector('img')).not.toBeNull()
-    ;(media.shadowRoot!.querySelector('button.hide') as HTMLButtonElement).click()
+    ;(media.shadowRoot!.querySelector('caribou-button.hide') as HTMLElement).click()
     await media.updateComplete
     expect(media.shadowRoot!.querySelector('img')).toBeNull()
 
