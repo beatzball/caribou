@@ -5,6 +5,7 @@ import { activeUserKey, userName, users, type UserSession } from '@beatzball/car
 import { spaClick } from './_spa-link.js'
 import { switchToAccount } from './_switch-account.js'
 import { fullHandle, orderAccounts } from './caribou-nav-rail.js'
+import './caribou-button.js'
 import './caribou-icon.js'
 import './caribou-signout-form.js'
 
@@ -36,6 +37,16 @@ export class CaribouSettingsAccount extends LitElement {
     }
     a:hover, button:hover { background: var(--bg-1); color: var(--fg-0); }
     .signout { color: var(--danger); }
+    /* "Switch to" is the shared button, shaped like the rows around it. */
+    caribou-button.switch {
+      display: flex; width: 100%;
+      --caribou-button-size: 44px; --caribou-button-bg: transparent; --caribou-button-fg: var(--fg-1);
+    }
+    caribou-button.switch::part(button) {
+      justify-content: flex-start; gap: var(--space-2);
+      padding: 0 var(--space-3); border: 0; text-align: left;
+    }
+    caribou-button.switch::part(button):hover { background: var(--bg-1); color: var(--fg-0); }
     form { display: contents; }
     caribou-icon { font-size: 20px; flex: none; }
   `
@@ -82,12 +93,13 @@ export class CaribouSettingsAccount extends LitElement {
         </p>
         <ul>
           <li><a href="/@me" @click=${spaClick}><caribou-icon name="user"></caribou-icon>Your profile</a></li>
-          ${others.map((u) => html`<li><button type="button" @click=${() => { void switchToAccount(u.userKey) }}
-            ><caribou-icon name="users"></caribou-icon>Switch to ${fullHandle(u)}</button></li>`)}
+          ${others.map((u) => html`<li><caribou-button class="switch" @click=${() => { void switchToAccount(u.userKey) }}
+            ><caribou-icon name="users"></caribou-icon>Switch to ${fullHandle(u)}</caribou-button></li>`)}
           <li><a href="/?add" @click=${spaClick}><caribou-icon name="userPlus"></caribou-icon>Add account</a></li>
           <li>
             <caribou-signout-form>
               <form action="/api/signout" method="post">
+                <!-- Native: sign-out must work with JavaScript off. -->
                 <button type="submit" class="signout"><caribou-icon name="logOut"></caribou-icon>Sign out of ${fullHandle(current)}</button>
               </form>
             </caribou-signout-form>

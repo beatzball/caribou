@@ -126,7 +126,7 @@ test('back to /home shows the cached posts before any request returns, at the ol
   // The newer post goes to the banner. The list under the reader stays put.
   gate.release()
   pageData.release()
-  const banner = shown(page).locator('caribou-new-posts-banner button')
+  const banner = shown(page).locator('caribou-new-posts-banner [data-action="apply-new-posts"]')
   await expect(banner).toHaveText('1 new post')
   await expect(cards(page)).toHaveCount(30)
   await expect(cards(page).first()).toContainText('post 1000')
@@ -218,7 +218,7 @@ test('back to /local shows the cached posts at once; fresh page data fills the b
   await expect(cards(page)).toHaveCount(5)
 
   gate.release()
-  const banner = shown(page).locator('caribou-new-posts-banner button')
+  const banner = shown(page).locator('caribou-new-posts-banner [data-action="apply-new-posts"]')
   await expect(banner).toHaveText('1 new post')
   await expect(cards(page)).toHaveCount(5)
   await expect(cards(page).first()).toContainText('post 1000')

@@ -223,6 +223,7 @@ export class CaribouMenu extends LitElement {
   }
 
   override render() {
+    // Native: `popovertarget` and `aria-controls` name the panel in this root.
     return html`<button type="button" class="trigger" part="trigger" popovertarget="panel"
       aria-controls="panel" @click=${this.onTriggerClick}><span class="label">${this.label}</span><slot
       name="trigger"><caribou-icon part="icon" name=${this.icon}></caribou-icon></slot></button><div
