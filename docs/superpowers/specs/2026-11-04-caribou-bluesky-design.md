@@ -186,7 +186,7 @@ probe). Phase 0 found that it does (12.2).
 | 1 | OAuth client | Public browser client now; client-assertion backend later | BFF; token-mediating backend (5.3) |
 | 2 | Where tokens live | Browser IndexedDB, keyed by DID | Caribou server |
 | 3 | Model between screens and clients | Caribou-owned types with Mastodon field names + `bluesky` field + `capabilities` | A neutral model with new field names |
-| 4 | Client library | `@atproto/api` + `@atproto/oauth-client-browser` | Hand-written XRPC calls |
+| 4 | Client library | **Open again** (12.3 item 5, 12.2): `@atproto/api` + `@atproto/oauth-client-browser` measured 181.6 KB gzipped | Hand-written XRPC calls with `@atproto/oauth-client-browser` |
 | 5 | UserKey for Bluesky | `<did>@bsky` | `<handle>@<pds host>` |
 | 6 | Profile route | `/@alice.example.com` (a dot and no second `@` means Bluesky) | A prefix, like `/bsky/@alice.example.com` |
 | 7 | Post route | `/@<handle or did>/<rkey>` | The full AT URI in the path |
@@ -196,7 +196,7 @@ probe). Phase 0 found that it does (12.2).
 | 11 | Scopes | `atproto transition:generic` | Granular scopes when the PDS has them |
 | 12 | Moderation | The SDK's `moderatePost` / `moderateProfile` with label definitions, kept per surface | Map labels onto Mastodon's CW fields |
 
-The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions.
+The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions. Row 4 is open again: phase 0 measured the chunk over the 100 KB line (12.2, 12.3 item 5).
 
 ---
 
@@ -910,10 +910,12 @@ account refetches the same items and merges them with `viewerOf` set (seam 4).
 
 ### 8.3 `!no-unauthenticated`
 
-An account with this self-label asked that logged-out viewers not see it. If
-the public AppView still returns its data (phase 0 checks), Caribou must not
+An account with this self-label asked that logged-out viewers not see it. Phase 0
+found that the public AppView still returns its data (12.2). So Caribou must not
 show it signed out:
 
+- The label sits on each post's `post.author.labels`, not on the feed. A
+  repost in an author feed has another author. So the check runs per post.
 - SSR never renders that account's profile or posts. The profile renders the
   shell with "This account asked to be seen only by signed-in readers."
 - In a thread, such a post renders as that notice; the rest renders.
@@ -1100,7 +1102,7 @@ request's destination host and the links built, not only disabled buttons.
 
 | risk | how we handle it |
 |---|---|
-| The atproto libraries are large. | Phase 0 measures. A dynamic `import()` only when a Bluesky account is active or a Bluesky page opens. Mastodon-only readers pay nothing. |
+| The atproto libraries are large. | Phase 0 measured 181.6 KB gzipped for both libraries (12.2). A dynamic `import()` only when a Bluesky account is active or a Bluesky page opens. Mastodon-only readers pay nothing. |
 | The two-week re-approval annoys readers. | Expiry keeps drafts, prefs and the page (5.6). Option D (5.3) is the upgrade. |
 | Moderation done wrong shows harmful media. | SDK functions, label definitions, fail closed, the veil, `noOverride` (7.4). |
 | `!no-unauthenticated` ignored in SSR. | Test that the content is absent (8.3). |
@@ -1128,22 +1130,24 @@ request's destination host and the links built, not only disabled buttons.
 
 | unknown | answer |
 |---|---|
-| Lazy chunk size | **181.6 KB gzipped** (942.9 KB minified, 145.8 KB brotli). This is over the 100 KB line in decision 5, so the owner decides again (12.3). |
-| SDK with Vite and Lit SSR | Works without patches. It needs one Vite setting (below). The build passes, SSR pages render, and the server bundle does not load the libraries. |
+| Lazy chunk size | **181.6 KB gzipped** (942.9 KB minified, 145.8 KB brotli). This is over the 100 KB line in 12.3 item 5, so the owner decides again. |
+| SDK with Vite and Lit SSR | Works without patches. It needs one Vite setting (below). The build passes and SSR pages render. The server does not import the libraries at render time (only a dynamic `import()` in `firstUpdated` reaches them). The build still copies them into `dist/server` (about 5 MB). |
 | `!no-unauthenticated` on the public AppView | **The AppView returns everything.** `getProfile`, `getAuthorFeed` and `getPostThread` all answer 200 with full text. So Caribou must hide it (8.3). |
 | `litro dev` and a dotted route | Works. `/@alice.example.com`, `/@alice.example.com/<rkey>`, `/@did:plc:...` and handles that end like a file (`.ts`, `.md`, `.js`, `.css`, `.json`, `.png`) all render the profile page. |
-| Public AppView rate limit | **Not advertised.** No `ratelimit-*` or `retry-after` headers, on 200 or 403. 15 requests in a row, past the CDN cache, all answered 200. |
+| Public AppView rate limit | **Not advertised.** No `ratelimit-*` or `retry-after` headers, on 200 or 403. 15 requests in a row to `app.bsky.actor.getProfile?actor=bsky.app`, each with a random extra query parameter so the CDN missed its cache (`cdn-cache: MISS`), all answered 200. A small sample. |
 | Option-D key binding | **Not run.** It needs a registered confidential client (below). |
-| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. The callback and the Following fetch need a person to approve; see the PR. |
+| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. The callback and the Following fetch: **pending** (they need a person to approve). |
 
 Versions measured: `@atproto/api` 0.30.3, `@atproto/oauth-client-browser`
 0.5.14, Vite 8.3.2.
 
-**The chunk, in parts.** Each library built alone, minified and gzipped:
-`@atproto/api` 157.2 KB, `@atproto/oauth-client-browser` 62.6 KB. They share
-about 15 KB. So `@atproto/api` is about three quarters of the chunk. The OAuth
-library alone is under the line. Hand-written XRPC calls (decision 4, other way)
-plus the OAuth library would come to about 63 KB plus our own code.
+**The chunk, in parts.** Measured in the app's own build (the same
+`vite.config.ts`), with the spike module cut down to one library at a time, as
+the Vite build report prints it (minified, gzipped): `@atproto/api` about
+139 KB, `@atproto/oauth-client-browser` about 56 KB, both 181 KB. So they share
+about 14 KB. `@atproto/api` is about three quarters of the chunk. The OAuth
+library alone is under the line. Hand-written XRPC calls (section 4, row 4,
+other way) plus the OAuth library would come to about 56 KB plus our own code.
 
 **The Vite setting.** Without it, rolldown (Vite's bundler) puts its own runtime
 helpers inside the atproto chunk. `app-main` uses one of those helpers, so it
@@ -1157,9 +1161,10 @@ Mastodon page does not request the Bluesky chunk.
 on the public Jetstream firehose
 (`wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.actor.profile`)
 and kept those whose `labels.values` held `!no-unauthenticated`. Two accounts
-showed up within 15 profile updates. The AppView puts the label on
-`author.labels` of each post and on the profile's `labels`, so the server can
-see it without a token. We do not name the accounts.
+showed up within 15 profile updates. The AppView puts the label on the profile's `labels`
+and on each post's `post.author.labels`, so the server can see it without a
+token. In an author feed, a repost has another author, so the label is not on
+every item; check each post (8.3). We do not name the accounts.
 
 **Rate limit.** The public AppView sits behind a CDN (BunnyCDN). It caches
 for 30 seconds, so repeated SSR of the same page does not reach the AppView.
@@ -1236,6 +1241,7 @@ it missed the seams.
 Add the two libraries on a branch. Build and record the lazy chunk's size.
 Sign in through the loopback client; fetch Following; check Lit SSR still
 builds. Probe the other unknowns in 12.2. Write the numbers into 12.2.
+The result (181.6 KB gzipped) reopened the client library choice (12.3 item 5).
 
 ### Phase 1a — type and paging seams
 
