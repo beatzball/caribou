@@ -57,6 +57,9 @@ Sources of truth — see file for full signatures.
   replaces the buffer. An answer that does not reach that post is a gap:
   `gap` turns true, and `applyNewPosts()` replaces the list with it. No
   view shows `gap` yet. One check runs at a time.
+  Bookmarks take the feed-order path too; the real client answers a
+  bookmarks check with an empty page, so bookmarks never fill the
+  new-posts banner.
 - `createThreadStore(client, statusId, opts)` — focused status + ancestors
   + descendants, fetched in parallel via `Promise.allSettled`.
 - `createProfileStore(accountId, tab, opts)` — `posts` / `replies` / `media`

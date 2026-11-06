@@ -230,6 +230,31 @@ describe('feed order', () => {
     expect(store.nextCursor.value).toBe('after-C')
   })
 
+  it('of two disconnected checks, applying uses the second answer and its cursor', async () => {
+    const { store, check, fetchTimeline } = await feedStore()
+    await check(['B'], 'after-B')
+    await check(['D', 'C'], 'after-C')
+    expect(store.gap.value).toBe(true)
+    store.applyNewPosts()
+    expect(store.statusIds.value).toEqual(['D', 'C'])
+    expect(store.nextCursor.value).toBe('after-C')
+    void store.loadMore()
+    expect(fetchTimeline).toHaveBeenLastCalledWith('home', { cursor: 'after-C' })
+  })
+
+  it('an older page that fails after a gap was applied leaves no error', async () => {
+    const { store, check, fetchTimeline } = await feedStore()
+    let reject!: (e: unknown) => void
+    fetchTimeline.mockImplementationOnce(() => new Promise((_r, rej) => { reject = rej }))
+    const more = store.loadMore()
+    await check(['D', 'C'], 'after-C')
+    store.applyNewPosts()
+    reject(new Error('network'))
+    await more
+    expect(store.error.value).toBeNull()
+    expect(store.failedOp.value).toBeNull()
+  })
+
   it('an empty answer, or one that is only the top post, empties the buffer', async () => {
     const { store, check } = await feedStore()
     await check(['B'])
