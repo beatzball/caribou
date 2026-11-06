@@ -132,7 +132,7 @@ describe('<caribou-status-card> action bar', () => {
     const el = await mount(s)
     button(el, 'favourite').click()
     await el.updateComplete
-    expect(favourite).toHaveBeenCalledWith('7')
+    expect(favourite).toHaveBeenCalledWith({ id: '7' })
     // Still pending: this is the optimistic state.
     expect(button(el, 'favourite').getAttribute('aria-pressed')).toBe('true')
     expect(button(el, 'favourite').getAttribute('aria-label')).toBe('Unfavourite')
@@ -202,8 +202,8 @@ describe('<caribou-status-card> action bar', () => {
     button(el, 'bookmark').click()
     button(el, 'boost').click()
     await el.updateComplete
-    expect(bookmark).toHaveBeenCalledWith('7')
-    expect(reblog).toHaveBeenCalledWith('7')
+    expect(bookmark).toHaveBeenCalledWith({ id: '7' })
+    expect(reblog).toHaveBeenCalledWith({ id: '7' })
     expect(button(el, 'boost').getAttribute('aria-label')).toBe('Undo boost')
   })
 
