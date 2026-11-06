@@ -1,13 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { html } from 'lit'
+import type { Poll } from '@beatzball/caribou-mastodon-client'
 import { ssr } from './_ssr.js'
 import '../../components/caribou-status-card.js'
 
 const account = { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' }
-const poll = {
+// Uncast: the emoji list is on the poll, and an option has none of its own.
+const poll: Poll = {
   id: 'p1', expiresAt: '2099-01-01T00:00:00.000Z', expired: false, multiple: false, votesCount: 4, votersCount: 4,
-  options: [{ title: 'Tea <3', votesCount: 3, emojis: [] }, { title: 'Coffee', votesCount: 1, emojis: [] }], emojis: [],
+  options: [{ title: 'Tea <3', votesCount: 3 }, { title: 'Coffee', votesCount: 1 }], emojis: [],
 }
 
 describe('caribou-status-poll SSR', () => {

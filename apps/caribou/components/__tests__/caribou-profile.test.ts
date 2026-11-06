@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { batch, type Signal } from '@preact/signals-core'
-import type { Account, Status } from '@beatzball/caribou-mastodon-client'
+import type { Account, Status, TimelinePage } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, cacheStatus, users,
   type ProfileStore, type UserSession,
@@ -23,8 +23,13 @@ function status(id: string): Status {
 }
 const STATUS = status('210')
 
-function initialOf(statuses: Status[], nextMaxId: string | null = null): ProfileInitial {
-  return { account: ACCOUNT, statuses, nextMaxId, tab: 'posts' }
+function initialOf(statuses: Status[], nextCursor: string | null = null): ProfileInitial {
+  return { account: ACCOUNT, statuses, nextCursor, tab: 'posts' }
+}
+
+// A page as the Mastodon client answers it: the cursor is the last id.
+function pageOf(statuses: Status[]): TimelinePage {
+  return Object.assign(statuses, { nextCursor: statuses[statuses.length - 1]?.id ?? null })
 }
 
 // One macrotask: lets the store's async work and the renders it causes finish.
@@ -120,12 +125,12 @@ describe('<caribou-profile> — without initial (own profile)', () => {
   it('looks the account up through the signed-in client and loads the first page', async () => {
     const client = signIn()
     const lookup = vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
-    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('5'), status('4')])
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([status('5'), status('4')]))
     const el = await mount({ handle: '@alice@example.social', tab: 'replies' })
     await flush()
     await el.updateComplete
     expect(lookup).toHaveBeenCalledWith('alice@example.social')
-    expect(list).toHaveBeenCalledWith('42', { tab: 'replies', maxId: undefined })
+    expect(list).toHaveBeenCalledWith('42', { tab: 'replies', cursor: undefined })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['5', '4'])
     expect(el.shadowRoot!.querySelector<CaribouProfileHeader>('caribou-profile-header')!.account).toBe(ACCOUNT)
   })
@@ -136,7 +141,7 @@ describe('<caribou-profile> — without initial (own profile)', () => {
   it('hands the header the server that looked the account up, and keeps it after a session switch', async () => {
     const client = signIn()
     vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
-    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([]))
     const el = await mount({ handle: '@alice@example.social' })
     await flush()
     await el.updateComplete
@@ -276,7 +281,7 @@ describe('<caribou-profile> — pagination', () => {
   it('signed in: loads the next page when the link scrolls into view, then moves the link on', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
-    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209'), status('208')])
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([status('209'), status('208')]))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     const observer = watching(observers, next)!
@@ -288,10 +293,42 @@ describe('<caribou-profile> — pagination', () => {
     await flush()
     await el.updateComplete
 
-    expect(list).toHaveBeenCalledWith('42', { tab: 'posts', maxId: '210' })
+    expect(list).toHaveBeenCalledWith('42', { tab: 'posts', cursor: '210' })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210', '209', '208'])
     expect(sentinelOf(el)).toBe(next)
     expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=208')
+  })
+
+  // Seam 5: three pages whose cursors are not post ids. The first comes from
+  // the server; the store asks for the next two by the cursor each page
+  // named, and the link follows the cursor, never the last post.
+  it('signed in: pages by the opaque cursor each page named', async () => {
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    const pages: Record<string, TimelinePage> = {
+      'tok:a': Object.assign([status('209'), status('208')], { nextCursor: 'tok:b' }),
+      'tok:b': Object.assign([status('207')], { nextCursor: null }),
+    }
+    const list = vi.spyOn(client, 'fetchAccountStatuses')
+      .mockImplementation(async (_id, params) => pages[params.cursor ?? '']!)
+    const el = await mount({ initial: initialOf([STATUS], 'tok:a') })
+    const next = sentinelOf(el)!
+    // The hydrating render writes the link the server wrote.
+    expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=tok%3Aa')
+    const observer = watching(observers, next)!
+
+    observer.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=tok%3Ab')
+
+    observer.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    await el.updateComplete
+    expect(list.mock.calls.map((c) => c[1].cursor)).toEqual(['tok:a', 'tok:b'])
+    expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210', '209', '208', '207'])
+    // The last page named no cursor: the profile ends.
+    expect(sentinelOf(el)).toBeNull()
   })
 
   // An observer reports a target only when its state changes. A short page
@@ -299,7 +336,7 @@ describe('<caribou-profile> — pagination', () => {
   it('signed in: observes the link again after each page', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
-    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209')])
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([status('209')]))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     const observer = watching(observers, next)!
@@ -331,7 +368,7 @@ describe('<caribou-profile> — pagination', () => {
   it('signed in: does not start a second load while one is running', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
-    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209')])
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([status('209')]))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     const observer = watching(observers, next)!
@@ -344,7 +381,7 @@ describe('<caribou-profile> — pagination', () => {
   it('signed in: removes the link when the next page is empty', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
-    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([]))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     watching(observers, next)!.callback([{ isIntersecting: true, target: next }])
@@ -419,7 +456,7 @@ describe('<caribou-profile> — pagination', () => {
   it('signed in on the same instance: pages in place, whatever the case of the host', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
-    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([status('209')])
+    const list = vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([status('209')]))
     const el = await mount({ instance: 'Example.Social', initial: initialOf([STATUS], '210') })
     const next = sentinelOf(el)!
     const observer = watching(observers, next)!
@@ -428,7 +465,7 @@ describe('<caribou-profile> — pagination', () => {
     observer.callback([{ isIntersecting: true, target: next }])
     await flush()
     await el.updateComplete
-    expect(list).toHaveBeenCalledWith('42', { tab: 'posts', maxId: '210' })
+    expect(list).toHaveBeenCalledWith('42', { tab: 'posts', cursor: '210' })
     expect(cards(el).map((c) => c.dataset.statusId)).toEqual(['210', '209'])
   })
 
@@ -437,7 +474,7 @@ describe('<caribou-profile> — pagination', () => {
   it('signed in, no instance given: pages in place', async () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
-    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([])
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([]))
     const el = await mount({ initial: initialOf([STATUS], '210') })
     expect(el.instance).toBe('')
     const next = sentinelOf(el)!
@@ -452,7 +489,7 @@ describe('<caribou-profile> — pagination', () => {
     const observers = stubIntersectionObserver()
     const client = signIn()
     vi.spyOn(client, 'lookupAccount').mockResolvedValue(ACCOUNT)
-    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue([STATUS])
+    vi.spyOn(client, 'fetchAccountStatuses').mockResolvedValue(pageOf([STATUS]))
     const el = await mount({ handle: '@alice@example.social' })
     await flush()
     await el.updateComplete
@@ -465,7 +502,7 @@ describe('<caribou-profile> — pagination', () => {
         vapidKey: '', account: { ...ACCOUNT, id: '77' }, createdAt: 2,
       } as unknown as UserSession)
       vi.spyOn(activeClient.value!, 'lookupAccount').mockRejectedValue(new Error('not found'))
-      return vi.spyOn(activeClient.value!, 'fetchAccountStatuses').mockResolvedValue([])
+      return vi.spyOn(activeClient.value!, 'fetchAccountStatuses').mockResolvedValue(pageOf([]))
     })
     await el.updateComplete
     for (const o of observers) o.callback([{ isIntersecting: true, target: next }])

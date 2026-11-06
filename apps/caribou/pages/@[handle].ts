@@ -49,9 +49,11 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
     // jsdom-backed sanitizer out of the client bundle.
     const { sanitizeAccount, sanitizeStatus } = await import('../server/lib/sanitize.js')
     const statuses = rawStatuses.map(sanitizeStatus)
-    const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
+    // The first cursor goes to the client with the page: the profile store
+    // asks for the next page by it. Mastodon pages a profile by status id.
+    const nextCursor = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
     return {
-      kind: 'ok', account: sanitizeAccount(account), statuses, nextMaxId, tab, shell, handle,
+      kind: 'ok', account: sanitizeAccount(account), statuses, nextCursor, tab, shell, handle,
     } as HandlePageData
   } catch (err) {
     return { kind: 'error', message: String(err), shell, handle } as HandlePageData

@@ -19,8 +19,8 @@ type Fixture = ReturnType<typeof mkStatus>
 
 // Fixtures leave out the long tail of Status fields the timeline never
 // reads; the casts stay at the two seams that take real statuses.
-const asInitial = (statuses: Fixture[], nextMaxId: string | null = null) =>
-  ({ statuses, nextMaxId }) as unknown as TimelineInitial
+const asInitial = (statuses: Fixture[], nextCursor: string | null = null) =>
+  ({ statuses, nextCursor }) as unknown as TimelineInitial
 const asStatuses = (xs: Fixture[]) => xs as unknown as Parameters<TimelineStore['_testOnlyPrepend']>[0]
 
 // A signal behind the store's read-only type is writable; tests drive the
@@ -460,6 +460,12 @@ describe('<caribou-timeline> — older posts', () => {
     expect(a.getAttribute('href')).toBe('?max_id=s1')
     expect(a.getAttribute('rel')).toBe('next')
     expect(a.textContent!.trim()).toBe('Older posts →')
+  })
+
+  // Seam 5: the cursor is opaque; the link carries it, not the last post id.
+  it('puts the page cursor in the link, not the last status id', async () => {
+    const tl = await mount('local', asInitial([mkStatus('s0'), mkStatus('s1')], 'tok:2026-11-05T10'))
+    expect(sentinel(tl)!.getAttribute('href')).toBe('?max_id=tok%3A2026-11-05T10')
   })
 
   it('renders no link when the server said there is no next page', async () => {

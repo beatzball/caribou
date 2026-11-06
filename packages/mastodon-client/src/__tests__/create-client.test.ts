@@ -111,7 +111,7 @@ describe('createCaribouClient', () => {
     expect(statuses.map((s) => s.id)).toEqual(['bm-1'])
   })
 
-  it('fetchTimeline("bookmarks") returns the Link header cursor as nextMaxId', async () => {
+  it('fetchTimeline("bookmarks") returns the Link header cursor as nextCursor', async () => {
     const sess = sessionSource()
     const client = createCaribouClient(userKey, sess)
     const seen: Array<string | null> = []
@@ -134,18 +134,27 @@ describe('createCaribouClient', () => {
     const first = await client.fetchTimeline('bookmarks')
     expect(first.map((s) => s.id)).toEqual(['s9', 's5'])
     // A bookmark id, unrelated to the status ids on the page.
-    expect(first.nextMaxId).toBe('700')
-    const second = await client.fetchTimeline('bookmarks', { maxId: '700' })
+    expect(first.nextCursor).toBe('700')
+    const second = await client.fetchTimeline('bookmarks', { cursor: '700' })
     expect(second.map((s) => s.id)).toEqual(['s1'])
     // No next link: the bookmarks end here.
-    expect(second.nextMaxId).toBeNull()
+    expect(second.nextCursor).toBeNull()
     expect(seen).toEqual([null, '700'])
   })
 
-  it('other timelines leave nextMaxId unset', async () => {
+  it('other timelines name the last status id as the cursor', async () => {
     const client = createCaribouClient(userKey, sessionSource())
+    server.use(
+      http.get('https://fosstodon.org/api/v1/timelines/home', ({ request }) =>
+        new URL(request.url).searchParams.get('max_id') === '5'
+          ? HttpResponse.json([])
+          : HttpResponse.json([makeStatus('9'), makeStatus('5')])),
+    )
     const page = await client.fetchTimeline('home')
-    expect(page.nextMaxId).toBeUndefined()
+    expect(page.nextCursor).toBe('5')
+    // An empty page ends the timeline.
+    const end = await client.fetchTimeline('home', { cursor: '5' })
+    expect(end.nextCursor).toBeNull()
   })
 
   it('fetchTimeline("bookmarks") does not poll with a status id', async () => {

@@ -32,8 +32,10 @@ export const pageData = definePageData<LocalPageData>(async (event) => {
     // client bundle — the fetcher never runs on the client.
     const { sanitizeStatus } = await import('../server/lib/sanitize.js')
     const statuses = raw.map((s) => sanitizeStatus(s))
-    const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', statuses, nextMaxId, shell }
+    // Mastodon pages a public timeline by status id: the next page starts
+    // below the last post. The client keeps the cursor as it is.
+    const nextCursor = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
+    return { kind: 'ok', statuses, nextCursor, shell }
   } catch (err) {
     return { kind: 'error', message: String(err), shell }
   }
@@ -84,7 +86,7 @@ export class LocalPage extends LitroPage {
         </caribou-app-shell>
       `
     }
-    // `data` carries `statuses` and `nextMaxId`. It changes only when a
+    // `data` carries `statuses` and `nextCursor`. It changes only when a
     // revisit's fresh page data replaces the cached copy; the timeline then
     // puts the new posts in its banner.
     return html`

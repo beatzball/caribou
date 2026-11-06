@@ -65,8 +65,9 @@ export const pageData = definePageData<TagPageData>(async (event) => {
     // Dynamic import keeps jsdom out of the client bundle (see local.ts).
     const { sanitizeStatus } = await import('../../server/lib/sanitize.js')
     const statuses = fetched.map((s) => sanitizeStatus(s))
-    const nextMaxId = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', statuses, nextMaxId, shell, tag, seoTitle }
+    // The next page starts below the last post (see local.ts).
+    const nextCursor = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
+    return { kind: 'ok', statuses, nextCursor, shell, tag, seoTitle }
   } catch (err) {
     return { kind: 'error', message: String(err), shell, tag, seoTitle }
   }

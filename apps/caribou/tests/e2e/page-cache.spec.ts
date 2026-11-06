@@ -196,7 +196,7 @@ async function spaGo(page: Page, path: string) {
 }
 
 const shell = { instance: INSTANCE }
-const localData = (statuses: unknown[]) => ({ kind: 'ok', statuses, nextMaxId: null, shell })
+const localData = (statuses: unknown[]) => ({ kind: 'ok', statuses, nextCursor: null, shell })
 
 test('back to /local shows the cached posts at once; fresh page data fills the banner', async ({ page }) => {
   await serveHome(page)

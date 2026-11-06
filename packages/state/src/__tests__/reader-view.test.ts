@@ -165,13 +165,13 @@ describe('stores seeded with server data keep the reader\'s cached copy', () => 
 
   it('profile', () => {
     cacheStatus(post('1', { filtered: HIDE }))
-    createProfileStore('a', 'posts', { clientSource: () => null, initial: { statuses: [post('1')], nextMaxId: null } })
+    createProfileStore('a', 'posts', { clientSource: () => null, initial: { statuses: [post('1')], nextCursor: null } })
     expect(statusCache.value.get('1')!.filtered).toEqual(HIDE)
   })
 
   it('timeline', () => {
     cacheStatus(post('1', { filtered: HIDE }))
-    createTimelineStore('local', { clientSource: () => null, initial: { statuses: [post('1')], nextMaxId: null } })
+    createTimelineStore('local', { clientSource: () => null, initial: { statuses: [post('1')], nextCursor: null } })
     expect(statusCache.value.get('1')!.filtered).toEqual(HIDE)
   })
 })

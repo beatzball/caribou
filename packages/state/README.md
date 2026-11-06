@@ -52,10 +52,11 @@ Sources of truth — see file for full signatures.
   SSR seeding (`opts.initial`) and visibility-aware polling.
   The new-posts buffer keeps the order the client gives
   (`client.timelineOrder(kind)`); with no client, Mastodon's.
-  In feed order (`timelineOrder` null) a page merges only by a post the
-  store knows. A page with none is a gap: `gap` turns true, and
-  `applyNewPosts()` replaces the list with the newest gap page. No view
-  shows `gap` yet. One check runs at a time.
+  In feed order (`timelineOrder` null) only checks fill the buffer, never
+  page data. Each check asks from the top shown post, and its answer
+  replaces the buffer. An answer that does not reach that post is a gap:
+  `gap` turns true, and `applyNewPosts()` replaces the list with it. No
+  view shows `gap` yet. One check runs at a time.
 - `createThreadStore(client, statusId, opts)` — focused status + ancestors
   + descendants, fetched in parallel via `Promise.allSettled`.
 - `createProfileStore(accountId, tab, opts)` — `posts` / `replies` / `media`
@@ -99,14 +100,13 @@ through it.
 shapes.** All three stores accept seed data and skip the redundant
 fetch on construction; the differences are in pagination handoff:
 
-- `timeline-store` — full handoff. Sets `firstLoadConsumed = true` so
-  `load()` no-ops once, *and* stashes `opts.initial.nextMaxId` for
-  `loadMore`'s first call. Subsequent `loadMore`s fall back to "last id."
-- `profile-store` — partial handoff. `firstLoadConsumed` short-circuits
-  `load()`; `loadMore` always uses the last-id-in-list as its cursor,
-  even on the first call. Works because the SSR-supplied page ends at
-  the same id the store knows about. (If the SSR fetcher ever paginates
-  with a non-id cursor, this breaks.)
+- `timeline-store` and `profile-store` — full handoff. Each sets
+  `firstLoadConsumed = true` so `load()` no-ops once, *and* keeps
+  `opts.initial.nextCursor` as its cursor for `loadMore`'s first call.
+  After that each page's `nextCursor` names the next one. The cursor is
+  opaque: a store never derives it from a status id, because another
+  network's cursor is not one. The Mastodon client sets it to the last
+  status id (or the Link header's id for bookmarks), and null at the end.
 - `thread-store` — direct seeding. The focused/context signals are
   flipped straight to `{ status: 'ready', data: ... }` from `opts.initial`;
   `load()` is a no-op when both signals are already `ready`. There's no
