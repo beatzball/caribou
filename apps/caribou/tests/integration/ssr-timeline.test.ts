@@ -38,6 +38,15 @@ describe('caribou-timeline SSR', () => {
     expect(out).toMatch(/<a href="\?max_id=5" rel="next" data-sentinel\s*>Older posts →<\/a>/)
   })
 
+  // Seam 5: the cursor is opaque. A server that wrote the last status id
+  // into the link instead of the page's cursor fails here.
+  it('puts the page cursor in the link, not the last status id', async () => {
+    const initial = { statuses: [mkStatus('7'), mkStatus('5')], nextCursor: 'tok:2026-11-05T10' }
+    const out = await ssr(html`<caribou-timeline kind="public" .initial=${initial}></caribou-timeline>`)
+    expect(out).toMatch(/<a href="\?max_id=tok%3A2026-11-05T10" rel="next" data-sentinel\s*>Older posts →<\/a>/)
+    expect(out).not.toContain('max_id=5')
+  })
+
   it('renders the empty notice for an empty first page', async () => {
     const out = await ssr(html`<caribou-timeline kind="local" .initial=${{ statuses: [], nextCursor: null }}></caribou-timeline>`)
     expect(out).toContain('No posts yet.')

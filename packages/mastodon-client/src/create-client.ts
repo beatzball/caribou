@@ -350,7 +350,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       ...(params.cursor ? { maxId: params.cursor } : {}),
       ...(params.limit ? { limit: params.limit } : {}),
     })
-    return Object.assign(res.data, { nextCursor: nextMaxIdFromLink(res.headers.get('link')) })
+    return Object.assign(res.data, { nextCursor: nextCursorFromLink(res.headers.get('link')) })
   }
 
   async function fetchAccountPage(
@@ -364,7 +364,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       const res = kind === 'mutes'
         ? await c.v1.mutes.list.$raw(query)
         : await c.v1.blocks.list.$raw(query)
-      return Object.assign(res.data, { nextCursor: nextMaxIdFromLink(res.headers.get('link')) })
+      return Object.assign(res.data, { nextCursor: nextCursorFromLink(res.headers.get('link')) })
     })
   }
 
@@ -518,7 +518,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
             limit: 80, ...(maxId ? { maxId } : {}),
           })
           all.push(...res.data)
-          maxId = nextMaxIdFromLink(res.headers.get('link'))
+          maxId = nextCursorFromLink(res.headers.get('link'))
           if (!maxId || res.data.length === 0) break
         }
         return all
@@ -655,7 +655,7 @@ function listBody(input: ListInput): { title: string; exclusive?: boolean } {
   }
 }
 
-function nextMaxIdFromLink(link: string | null): string | null {
+function nextCursorFromLink(link: string | null): string | null {
   if (!link) return null
   for (const part of link.split(',')) {
     const m = /<([^>]+)>\s*;\s*rel="?next"?/.exec(part)
