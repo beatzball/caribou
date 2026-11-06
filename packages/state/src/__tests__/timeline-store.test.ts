@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Status, TimelinePage } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { statusCache } from '../caches.js'
 import { createTimelineStore } from '../timeline-store.js'
@@ -10,16 +10,25 @@ function makeStatus(id: string): Status {
 }
 
 type FetchImpl = CaribouClient['fetchTimeline']
+type FetchParams = Parameters<FetchImpl>[1]
+// The fakes answer as a Mastodon timeline does: the cursor is the last
+// status id, and an empty page names none.
+type PlainImpl = (kind: Parameters<FetchImpl>[0], params: FetchParams) => Promise<Status[]>
 
 interface FakeClient extends CaribouClient {
   fetchTimeline: ReturnType<typeof vi.fn<FetchImpl>>
 }
 
-function fakeClient(impl?: FetchImpl): FakeClient {
+function asPage(statuses: Status[]): TimelinePage {
+  return Object.assign(statuses, { nextCursor: statuses[statuses.length - 1]?.id ?? null })
+}
+
+function fakeClient(impl?: PlainImpl): FakeClient {
   const unused = () => Promise.reject(new Error('not used in timeline-store tests'))
+  const plain: PlainImpl = impl ?? (async () => [])
   return {
     userKey: toUserKey('beatzball', 'fosstodon.org'),
-    fetchTimeline: vi.fn<FetchImpl>(impl ?? (async () => [])),
+    fetchTimeline: vi.fn<FetchImpl>(async (kind, params) => asPage(await plain(kind, params))),
     fetchStatus: unused as CaribouClient['fetchStatus'],
     fetchThread: unused as CaribouClient['fetchThread'],
     lookupAccount: unused as CaribouClient['lookupAccount'],
@@ -93,7 +102,7 @@ describe('createTimelineStore', () => {
 
   it('loadMore() appends older statuses using maxId', async () => {
     const client = fakeClient(async (_kind, params) =>
-      params?.maxId === 'b' ? [makeStatus('c'), makeStatus('d')] : [makeStatus('a'), makeStatus('b')],
+      params?.cursor === 'b' ? [makeStatus('c'), makeStatus('d')] : [makeStatus('a'), makeStatus('b')],
     )
     const store = createTimelineStore('home', { clientSource: () => client, pollIntervalMs: 0 })
     await store.load()
@@ -222,7 +231,7 @@ describe('createTimelineStore — revisit', () => {
   it('refresh() asks from the top of the buffer when it already holds posts', async () => {
     const client = fakeClient(async () => [])
     const store = createTimelineStore('home', {
-      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },
+      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextCursor: null },
     })
     store._testOnlyPrepend([makeStatus('b')])
     await store.refresh()
@@ -239,21 +248,21 @@ describe('createTimelineStore — revisit', () => {
   it('offer() buffers only the posts above the newest known one', () => {
     const store = createTimelineStore('local', {
       clientSource: () => null,
-      initial: { statuses: [makeStatus('b'), makeStatus('a')], nextMaxId: 'a' },
+      initial: { statuses: [makeStatus('b'), makeStatus('a')], nextCursor: 'a' },
     })
-    store.offer([makeStatus('d'), makeStatus('c'), makeStatus('b'), makeStatus('a')])
+    store.offer([makeStatus('d'), makeStatus('c'), makeStatus('b'), makeStatus('a')], null)
     expect(store.statusIds.value).toEqual(['b', 'a'])
     expect(store.newPosts.value.map((s) => s.id)).toEqual(['d', 'c'])
-    store.offer([makeStatus('d'), makeStatus('c')])
+    store.offer([makeStatus('d'), makeStatus('c')], null)
     expect(store.newPostsCount.value).toBe(2)
   })
 
   it('offer() takes edits and counts but keeps the reader flags', () => {
     const store = createTimelineStore('local', {
       clientSource: () => null,
-      initial: { statuses: [{ ...makeStatus('a'), favourited: true, favouritesCount: 1 }], nextMaxId: null },
+      initial: { statuses: [{ ...makeStatus('a'), favourited: true, favouritesCount: 1 }], nextCursor: null },
     })
-    store.offer([{ ...makeStatus('a'), content: '<p>edited</p>', favourited: false, favouritesCount: 4 }])
+    store.offer([{ ...makeStatus('a'), content: '<p>edited</p>', favourited: false, favouritesCount: 4 }], null)
     const a = statusCache.value.get('a')!
     expect([a.content, a.favouritesCount, a.favourited]).toEqual(['<p>edited</p>', 4, true])
   })
@@ -265,7 +274,7 @@ describe('createTimelineStore — revisit', () => {
       return []
     })
     const store = createTimelineStore('home', {
-      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },
+      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextCursor: null },
     })
     await store.refresh()
     expect(store.error.value?.message).toBe('offline')
@@ -279,7 +288,7 @@ describe('createTimelineStore — revisit', () => {
     let resolve!: (xs: Status[]) => void
     const client = fakeClient(() => new Promise((r) => { resolve = r }))
     const store = createTimelineStore('home', {
-      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },
+      clientSource: () => client, initial: { statuses: [makeStatus('a')], nextCursor: null },
     })
     const running = store.refresh()
     activeUserKey.value = toUserKey('bob', 'example.social')

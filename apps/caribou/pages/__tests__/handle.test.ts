@@ -57,7 +57,7 @@ describe('/@[handle] pageData', () => {
       kind: 'ok',
       account: { id: '42' },
       tab: 'posts',
-      nextMaxId: '99',
+      nextCursor: '99',
     })
   })
 
@@ -148,7 +148,7 @@ describe('/@[handle] pageData', () => {
       '42', expect.objectContaining({ tab: 'replies', maxId: '77' }),
     )
     // An empty page has no last status, so there is no next page to link to.
-    expect(result).toMatchObject({ kind: 'ok', tab: 'replies', nextMaxId: null })
+    expect(result).toMatchObject({ kind: 'ok', tab: 'replies', nextCursor: null })
   })
 
   it('returns error when the account lookup rejects', async () => {

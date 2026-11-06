@@ -122,7 +122,7 @@ test.describe('mute and block on a profile', () => {
     await page.route((url) => url.pathname === `/@bob@${INSTANCE}`, (route) => {
       if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
       return route.fulfill(json({
-        kind: 'ok', account: BOB_CAMEL, statuses: [], nextMaxId: null, tab: 'posts',
+        kind: 'ok', account: BOB_CAMEL, statuses: [], nextCursor: null, tab: 'posts',
         shell: { instance: INSTANCE }, handle: `bob@${INSTANCE}`,
       }))
     })
@@ -194,7 +194,7 @@ test('server-rendered posts get the reader\'s filters once the page runs', async
   await page.route((url) => url.pathname === '/local', (route) => {
     if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
     return route.fulfill(json({
-      kind: 'ok', statuses: [camel('1'), camel('2'), camel('3')], nextMaxId: null,
+      kind: 'ok', statuses: [camel('1'), camel('2'), camel('3')], nextCursor: null,
       shell: { instance: INSTANCE, source: 'cookie' },
     }))
   })
@@ -234,7 +234,7 @@ test('a failed check covers the post with Show and Retry', async ({ page }) => {
   await page.route((url) => url.pathname === '/local', (route) => {
     if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
     return route.fulfill(json({
-      kind: 'ok', nextMaxId: null, shell: { instance: INSTANCE, source: 'cookie' },
+      kind: 'ok', nextCursor: null, shell: { instance: INSTANCE, source: 'cookie' },
       statuses: [{
         id: '1', uri: `https://${INSTANCE}/@bob/1`, url: `https://${INSTANCE}/@bob/1`,
         createdAt: '2024-01-01T00:00:00.000Z', content: '<p>post 1</p>', visibility: 'public',

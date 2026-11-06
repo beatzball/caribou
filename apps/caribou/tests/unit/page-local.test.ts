@@ -39,7 +39,7 @@ const eventFor = (url: string) => ({ url }) as unknown as FetcherEvent
 describe('/local pageData', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('returns ok with statuses + nextMaxId', async () => {
+  it('returns ok with statuses + nextCursor', async () => {
     vi.mocked(resolveInstanceForRoute).mockResolvedValue({
       instance: 'example.social', source: 'cookie',
     })
@@ -53,7 +53,7 @@ describe('/local pageData', () => {
     expect(result).toEqual({
       kind: 'ok',
       statuses: fixture,
-      nextMaxId: '10',
+      nextCursor: '10',
       shell: { instance: 'example.social', source: 'cookie' },
     })
     expect(fetchPublicTimeline).toHaveBeenCalledWith(
@@ -69,7 +69,7 @@ describe('/local pageData', () => {
     const { pageData } = await import('../../pages/local.js')
     const result = await pageData.fetcher(eventFor('/local?max_id=10'))
     expect(fetchPublicTimeline).toHaveBeenCalledWith(expect.objectContaining({ maxId: '10' }))
-    expect(result).toMatchObject({ kind: 'ok', statuses: [], nextMaxId: null })
+    expect(result).toMatchObject({ kind: 'ok', statuses: [], nextCursor: null })
   })
 
   it('sanitizes status content, and the inner status of a boost', async () => {
@@ -147,11 +147,11 @@ describe('<page-local> render', () => {
       id: '5', content: '<p>five</p>', createdAt: '2026-05-08T12:00:00Z',
       account: { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' },
     }] as unknown as Fetched
-    const el = await mount({ kind: 'ok', statuses, nextMaxId: '5', shell: { instance: 'example.social' } })
+    const el = await mount({ kind: 'ok', statuses, nextCursor: '5', shell: { instance: 'example.social' } })
     const timeline = el.shadowRoot!.querySelector<CaribouTimeline>('caribou-timeline')!
     expect(timeline.getAttribute('kind')).toBe('local')
     expect(timeline.hasAttribute('initial')).toBe(false)
-    expect(timeline.initial).toMatchObject({ statuses, nextMaxId: '5' })
+    expect(timeline.initial).toMatchObject({ statuses, nextCursor: '5' })
     await timeline.updateComplete
     expect(timeline.shadowRoot!.querySelectorAll('caribou-status-card')).toHaveLength(1)
   })

@@ -93,14 +93,13 @@ through it.
 shapes.** All three stores accept seed data and skip the redundant
 fetch on construction; the differences are in pagination handoff:
 
-- `timeline-store` — full handoff. Sets `firstLoadConsumed = true` so
-  `load()` no-ops once, *and* stashes `opts.initial.nextMaxId` for
-  `loadMore`'s first call. Subsequent `loadMore`s fall back to "last id."
-- `profile-store` — partial handoff. `firstLoadConsumed` short-circuits
-  `load()`; `loadMore` always uses the last-id-in-list as its cursor,
-  even on the first call. Works because the SSR-supplied page ends at
-  the same id the store knows about. (If the SSR fetcher ever paginates
-  with a non-id cursor, this breaks.)
+- `timeline-store` and `profile-store` — full handoff. Each sets
+  `firstLoadConsumed = true` so `load()` no-ops once, *and* keeps
+  `opts.initial.nextCursor` as its cursor for `loadMore`'s first call.
+  After that each page's `nextCursor` names the next one. The cursor is
+  opaque: a store never derives it from a status id, because another
+  network's cursor is not one. The Mastodon client sets it to the last
+  status id (or the Link header's id for bookmarks), and null at the end.
 - `thread-store` — direct seeding. The focused/context signals are
   flipped straight to `{ status: 'ready', data: ... }` from `opts.initial`;
   `load()` is a no-op when both signals are already `ready`. There's no

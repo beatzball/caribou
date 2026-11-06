@@ -19,7 +19,7 @@ export type TimelinePageData =
   | {
       kind: 'ok'
       statuses: Status[]
-      nextMaxId: string | null
+      nextCursor: string | null
     }
 
 export type ProfilePageData =
@@ -29,7 +29,7 @@ export type ProfilePageData =
       kind: 'ok'
       account: Account
       statuses: Status[]
-      nextMaxId: string | null
+      nextCursor: string | null
       tab: 'posts' | 'replies' | 'media'
     }
 

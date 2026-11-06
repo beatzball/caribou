@@ -72,6 +72,16 @@ import type { Status, Account } from '@beatzball/caribou-mastodon-client'
   names `mastodon.v1.*`, `mastodon.v2.*` or `mastodon.rest.*`, or reaches
   `masto` or a `masto/...` subpath by any import, export, `import()` or
   `require`. It parses each file, so line breaks and aliases do not hide one.
+- **The corrections are locked in.** `owned-types-contract.test.ts` checks
+  in `tsc` that the nullable fields accept `null`, that `application` and
+  `quoteApproval` can be left out, and that `viewerOf` takes a UserKey, not
+  a bare DID. A shape that goes back fails `pnpm typecheck`.
+- **Pages carry an opaque cursor.** `fetchTimeline`, `fetchAccountStatuses`,
+  `fetchMutes` and `fetchBlocks` answer a `Page<T>`: the items and a
+  `nextCursor`, null on the last page. Pass it back as `cursor`. Never make
+  one from an item's id: a Mastodon timeline's cursor happens to be its last
+  status id, but bookmarks, mutes and blocks page by another id, and
+  Bluesky pages by a token of its own.
 - **masto's own declarations can be wrong.** masto puts poll `emojis` on
   each option; the API puts them on the poll. `src/masto-mapping.ts` fixes
   masto's declaration there, with a note. Fix the next one the same way,
@@ -83,7 +93,7 @@ import type { Status, Account } from '@beatzball/caribou-mastodon-client'
 
 **Dedup is keyed by request shape.** Every method computes a string key
 that uniquely identifies the request (`status:${id}`,
-`acct-statuses:${accountId}:${tab}:${maxId}:${limit}`) and runs through
+`acct-statuses:${accountId}:${tab}:${cursor}:${limit}`) and runs through
 `createDedup().run(key, fn)`. Two simultaneous calls with the same key
 share one in-flight promise; the entry clears on settlement, so the
 *next* call hits the network. This is per-client, not global — each
@@ -111,7 +121,7 @@ cache invalidation.
 - **Dedup keys collapse query identity by `JSON.stringify`.**
   `fetchTimeline` builds the key from `JSON.stringify(params)`. JS
   property iteration order is insertion-order, so callers that build
-  the params object differently (`{ maxId, limit }` vs `{ limit, maxId }`)
+  the params object differently (`{ cursor, limit }` vs `{ limit, cursor }`)
   get different keys for the same logical request. This is rare but
   real if a refactor reorders fields.
 - **`fetchAccountStatuses` for `tab: 'replies'` sends no params.** The

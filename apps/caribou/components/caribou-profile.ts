@@ -16,7 +16,8 @@ import './caribou-status-card.js'
 export interface ProfileInitial {
   account: Account
   statuses: Status[]
-  nextMaxId: string | null
+  /** Where the next page starts, as the server's page named it: opaque. */
+  nextCursor: string | null
   tab: ProfileTab
 }
 
@@ -61,6 +62,8 @@ export class CaribouProfile extends LitElement {
   @state() private account: Account | null = null
   @state() private statuses: Status[] = []
   @state() private hasMore = false
+  // The store's cursor for the next page, which the next-page link carries.
+  @state() private nextCursor: string | null = null
   // On /@me: the server of the session that looked the account up, which is
   // the host the account's ids belong to. Paging and the header's follow
   // button both need it after the reader switches to a session on another
@@ -111,7 +114,7 @@ export class CaribouProfile extends LitElement {
       account = this.initial.account
       store = createProfileStore(account.id, this.tab, {
         clientSource,
-        initial: { statuses: this.initial.statuses, nextMaxId: this.initial.nextMaxId },
+        initial: { statuses: this.initial.statuses, nextCursor: this.initial.nextCursor },
       })
       // The server fetched them without the reader's token: no filters.
       loadReaderViewFrom(this.instance, this.initial.statuses)
@@ -141,6 +144,7 @@ export class CaribouProfile extends LitElement {
       // list changes. Assigning it would re-render the whole profile.
       if (!sameItems(next, this.statuses)) this.statuses = next
       this.hasMore = store.hasMore.value
+      this.nextCursor = store.nextCursor.value
       this.syncCanFetch()
     })
     this.live = true
@@ -220,11 +224,14 @@ export class CaribouProfile extends LitElement {
     const account = this.live ? this.account : (this.initial?.account ?? null)
     if (!account) return html`<div class="loading">Loading…</div>`
     const statuses = this.live ? this.statuses : (this.initial?.statuses ?? [])
-    const hasMore = this.live ? this.hasMore : this.initial?.nextMaxId != null
-    const last = statuses[statuses.length - 1]
+    // The cursor is opaque: the link carries it as the page named it, never
+    // the last post's id. The hydrating render reads `initial`, as the
+    // server did, so both write the same link.
+    const nextCursor = this.live ? this.nextCursor : (this.initial?.nextCursor ?? null)
+    const hasMore = this.live ? this.hasMore : nextCursor != null
     const linkHandle = (this.linkHandle || this.handle).replace(/^@/, '')
-    const nextHref = last && hasMore
-      ? `/@${linkHandle}?tab=${this.tab}&max_id=${encodeURIComponent(last.id)}`
+    const nextHref = statuses.length > 0 && hasMore && nextCursor != null
+      ? `/@${linkHandle}?tab=${this.tab}&max_id=${encodeURIComponent(nextCursor)}`
       : null
     // `repeat` keys each row by status id, so a new page or a reordered list
     // moves the existing cards instead of rebuilding them — a card that is

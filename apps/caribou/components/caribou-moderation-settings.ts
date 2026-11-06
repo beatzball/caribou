@@ -15,7 +15,7 @@ import './caribou-button.js'
 
 interface AccountList {
   items: Account[]
-  nextMaxId: string | null
+  nextCursor: string | null
   loading: boolean
   error: boolean
 }
@@ -31,24 +31,24 @@ const CONTEXT_NAMES: Record<string, string> = {
   thread: 'Conversations', account: 'Profiles',
 }
 
-const emptyList = (): AccountList => ({ items: [], nextMaxId: null, loading: true, error: false })
+const emptyList = (): AccountList => ({ items: [], nextCursor: null, loading: true, error: false })
 
 type Kind = 'mutes' | 'blocks'
 
 const KINDS: Record<Kind, {
   heading: string; empty: string; on: string; off: string
   flag: 'muting' | 'blocking'
-  fetch: (c: CaribouClient, maxId?: string) => Promise<AccountPage>
+  fetch: (c: CaribouClient, cursor?: string) => Promise<AccountPage>
   write: (a: Account, on: boolean, client: CaribouClient) => Promise<boolean>
 }> = {
   mutes: {
     heading: 'Muted accounts', empty: 'You have not muted anyone.', on: 'Mute', off: 'Unmute', flag: 'muting',
-    fetch: (c, maxId) => c.fetchMutes(maxId ? { maxId } : {}),
+    fetch: (c, cursor) => c.fetchMutes(cursor ? { cursor } : {}),
     write: (a, on, client) => setMute(a, on, { clientSource: () => client }),
   },
   blocks: {
     heading: 'Blocked accounts', empty: 'You have not blocked anyone.', on: 'Block', off: 'Unblock', flag: 'blocking',
-    fetch: (c, maxId) => c.fetchBlocks(maxId ? { maxId } : {}),
+    fetch: (c, cursor) => c.fetchBlocks(cursor ? { cursor } : {}),
     write: (a, on, client) => setBlock(a, on, { clientSource: () => client }),
   },
 }
@@ -142,15 +142,15 @@ export class CaribouModerationSettings extends LitElement {
 
   private async loadPage(client: CaribouClient, kind: Kind) {
     const list = this.lists[kind]
-    const maxId = list.items.length > 0 ? list.nextMaxId ?? undefined : undefined
+    const cursor = list.items.length > 0 ? list.nextCursor ?? undefined : undefined
     this.setList(kind, { loading: true, error: false })
     try {
-      const page = await KINDS[kind].fetch(client, maxId)
+      const page = await KINDS[kind].fetch(client, cursor)
       if (client !== this.loadedFor) return
       const known = new Set(this.lists[kind].items.map((a) => a.id))
       this.setList(kind, {
         items: [...this.lists[kind].items, ...page.filter((a) => !known.has(a.id))],
-        nextMaxId: page.nextMaxId, loading: false,
+        nextCursor: page.nextCursor, loading: false,
       })
     } catch {
       if (client === this.loadedFor) this.setList(kind, { loading: false, error: true })
@@ -251,7 +251,7 @@ export class CaribouModerationSettings extends LitElement {
         </li>`
       })}</ul>
       ${failed}
-      ${list.nextMaxId && !list.error
+      ${list.nextCursor && !list.error
         ? html`<div class="more"><caribou-button variant="secondary" ?loading=${list.loading}
             @click=${() => this.onMore(kind)}>Load more</caribou-button></div>`
         : nothing}

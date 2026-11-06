@@ -1,4 +1,23 @@
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import ts from 'typescript'
+
+const SKIP_DIRS = new Set(['node_modules', 'dist', '.output', '.nitro', '.litro', 'coverage'])
+
+/**
+ * Every TypeScript source under `dir`, hand-written `.d.ts` files included.
+ * Skips dependencies, build output and dot directories.
+ */
+export function sourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) sourceFiles(join(dir, entry.name), out)
+    } else if (/\.(c|m)?tsx?$/.test(entry.name)) {
+      out.push(join(dir, entry.name))
+    }
+  }
+  return out
+}
 
 // Finds every place a source file reaches masto: by module specifier, not by
 // text, so aliases, line breaks and subpaths cannot hide it. A string or a

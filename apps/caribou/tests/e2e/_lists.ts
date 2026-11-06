@@ -68,7 +68,7 @@ export async function openBob(page: Page) {
   await page.route((url) => url.pathname === `/@bob@${INSTANCE}`, (route) => {
     if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
     return route.fulfill(json({
-      kind: 'ok', account: BOB_CAMEL, statuses: [], nextMaxId: null, tab: 'posts',
+      kind: 'ok', account: BOB_CAMEL, statuses: [], nextCursor: null, tab: 'posts',
       shell: { instance: INSTANCE }, handle: `bob@${INSTANCE}`,
     }))
   })
