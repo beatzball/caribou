@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 import { filterVerdict, timelineFilterContext } from '../_status-filter.js'
 
 type Action = 'warn' | 'hide' | 'blur'
@@ -12,7 +12,7 @@ function result(title: string, action: Action, context: string[]) {
 }
 
 const post = (filtered?: unknown[], reblog?: unknown) =>
-  ({ id: '1', filtered, reblog: reblog ?? null }) as unknown as mastodon.v1.Status
+  ({ id: '1', filtered, reblog: reblog ?? null }) as unknown as Status
 
 describe('filterVerdict', () => {
   it('is null for a status without `filtered` (an older server, or no token)', () => {

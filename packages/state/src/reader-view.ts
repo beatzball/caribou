@@ -1,10 +1,8 @@
 import { batch, signal } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { mergeStatus, postRecords } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
-type Status = mastodon.v1.Status
 
 // The server renders /local, /public, profiles and threads from a fetch with
 // no token, so those posts carry none of the reader's own state: no

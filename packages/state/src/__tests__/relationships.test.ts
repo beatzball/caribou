@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   _testOnlyResetRelationships, loadRelationship, relationshipCache, relationshipFor, relationshipKey, toggleFollow,
 } from '../relationships.js'
@@ -11,8 +10,8 @@ const ME = 'alice@example.social' as UserKey
 const BOB = { id: '7', acct: 'bob', locked: false }
 const LOCKED = { id: '8', acct: 'carol', locked: true }
 
-function rel(id: string, patch: Partial<mastodon.v1.Relationship> = {}): mastodon.v1.Relationship {
-  return { id, following: false, requested: false, followedBy: false, ...patch } as mastodon.v1.Relationship
+function rel(id: string, patch: Partial<Relationship> = {}): Relationship {
+  return { id, following: false, requested: false, followedBy: false, ...patch } as Relationship
 }
 
 function deferred<T>() {
@@ -76,8 +75,8 @@ describe('loadRelationship', () => {
   })
 
   it('does not overwrite a write that started while it was loading', async () => {
-    const read = deferred<mastodon.v1.Relationship[]>()
-    const write = deferred<mastodon.v1.Relationship>()
+    const read = deferred<Relationship[]>()
+    const write = deferred<Relationship>()
     const client = fakeClient({
       fetchRelationships: vi.fn(() => read.promise),
       follow: vi.fn(() => write.promise),
@@ -94,7 +93,7 @@ describe('loadRelationship', () => {
   // The read left before the click and lands after the write finished: what
   // it carries is older than the write's answer.
   it('does not overwrite a write that finished while it was loading', async () => {
-    const read = deferred<mastodon.v1.Relationship[]>()
+    const read = deferred<Relationship[]>()
     const client = fakeClient({ fetchRelationships: vi.fn(() => read.promise) })
     const loading = loadRelationship('7', { clientSource: () => client })
     await toggleFollow(BOB, { clientSource: () => client })
@@ -124,7 +123,7 @@ describe('relationshipFor', () => {
 
 describe('toggleFollow', () => {
   it('follows at once and keeps what the server returns', async () => {
-    const write = deferred<mastodon.v1.Relationship>()
+    const write = deferred<Relationship>()
     const client = fakeClient({ follow: vi.fn(() => write.promise) })
     const p = toggleFollow(BOB, { clientSource: () => client })
     expect(cached('7')?.following).toBe(true)
@@ -185,7 +184,7 @@ describe('toggleFollow', () => {
   })
 
   it('drops a second click while the first write is on its way', async () => {
-    const write = deferred<mastodon.v1.Relationship>()
+    const write = deferred<Relationship>()
     const client = fakeClient({ follow: vi.fn(() => write.promise) })
     const first = toggleFollow(BOB, { clientSource: () => client })
     await toggleFollow(BOB, { clientSource: () => client })

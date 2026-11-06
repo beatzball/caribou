@@ -1,10 +1,8 @@
 import { batch } from '@preact/signals-core'
-import type { CaribouClient, EditStatusInput } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import type { CaribouClient, EditStatusInput, Status } from '@beatzball/caribou-mastodon-client'
 import { deletedStatusIds, mergeStatus, olderEdit, statusCache } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
-type Status = mastodon.v1.Status
 
 /** True when the reader deleted this post in this page session. */
 export function isDeletedStatus(id: string): boolean {

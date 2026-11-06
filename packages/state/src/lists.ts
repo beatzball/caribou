@@ -1,7 +1,6 @@
 import { signal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type CaribouClient, type ListInput } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import { CaribouError, type CaribouClient, type ListInput, type Account, type List } from '@beatzball/caribou-mastodon-client'
 import { activeClient, activeUserKey } from './users.js'
 import { ownerGeneration } from './keep-alive.js'
 
@@ -10,23 +9,23 @@ import { ownerGeneration } from './keep-alive.js'
 // read-only — write through the functions here.
 
 /** Each account's lists, in the server's order. */
-export const listsCache = signal<Map<UserKey, mastodon.v1.List[]>>(new Map())
+export const listsCache = signal<Map<UserKey, List[]>>(new Map())
 /** The members of each list, keyed by `listKey`. */
-export const listMembersCache = signal<Map<string, mastodon.v1.Account[]>>(new Map())
+export const listMembersCache = signal<Map<string, Account[]>>(new Map())
 /** The ids of the lists that hold each account, keyed by `listKey`. */
 export const accountListsCache = signal<Map<string, string[]>>(new Map())
 
 export const listKey = (userKey: UserKey, id: string) => `${userKey} ${id}`
 
-export function userLists(userKey: UserKey | null = activeUserKey.value): mastodon.v1.List[] | undefined {
+export function userLists(userKey: UserKey | null = activeUserKey.value): List[] | undefined {
   return userKey ? listsCache.value.get(userKey) : undefined
 }
 
-export function listById(id: string, userKey: UserKey | null = activeUserKey.value): mastodon.v1.List | undefined {
+export function listById(id: string, userKey: UserKey | null = activeUserKey.value): List | undefined {
   return userLists(userKey)?.find((l) => l.id === id)
 }
 
-export function listMembers(id: string, userKey: UserKey | null = activeUserKey.value): mastodon.v1.Account[] | undefined {
+export function listMembers(id: string, userKey: UserKey | null = activeUserKey.value): Account[] | undefined {
   return userKey ? listMembersCache.value.get(listKey(userKey, id)) : undefined
 }
 
@@ -53,13 +52,13 @@ function setIn<K, V>(sig: { value: Map<K, V> }, key: K, value: V | undefined): v
   sig.value = next
 }
 
-function putLists(userKey: UserKey, fn: (lists: mastodon.v1.List[]) => mastodon.v1.List[]): void {
+function putLists(userKey: UserKey, fn: (lists: List[]) => List[]): void {
   const current = listsCache.value.get(userKey)
   if (!current) return
   setIn(listsCache, userKey, fn(current))
 }
 
-const named = (list: mastodon.v1.List | undefined) => (list ? `the list "${list.title}"` : 'the list')
+const named = (list: List | undefined) => (list ? `the list "${list.title}"` : 'the list')
 
 // --- Reads and writes that overlap ---------------------------------------
 //
@@ -193,7 +192,7 @@ export function loadAccountLists(accountId: string, opts: ListsOpts = {}): Promi
  * A read of the lists that was out meanwhile asks again, so the new list
  * shows with the others even on a first visit.
  */
-export async function createList(input: ListInput, opts: ListsOpts = {}): Promise<mastodon.v1.List | null> {
+export async function createList(input: ListInput, opts: ListsOpts = {}): Promise<List | null> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return null
   const generation = ownerGeneration()
@@ -215,7 +214,7 @@ export async function createList(input: ListInput, opts: ListsOpts = {}): Promis
 // One list's writes: the server's last known copy, and how many writes are
 // queued. Only the last write of a run puts its answer (or, on a failure,
 // the last known copy) in the cache; until then the newest intent shows.
-interface ListWrites { confirmed: mastodon.v1.List | undefined; count: number }
+interface ListWrites { confirmed: List | undefined; count: number }
 const listWrites = new Map<string, ListWrites>()
 
 function listWritesFor(userKey: UserKey, id: string): ListWrites {
@@ -306,7 +305,7 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
 // Adds or removes the account in what is known: the list's members and the
 // account's lists. `at` puts a member back where it was.
 function applyMember(
-  userKey: UserKey, listId: string, account: mastodon.v1.Account, member: boolean, at = -1,
+  userKey: UserKey, listId: string, account: Account, member: boolean, at = -1,
 ): void {
   const mKey = listKey(userKey, listId)
   const members = listMembersCache.value.get(mKey)
@@ -337,7 +336,7 @@ const memberWrites = new Map<string, MemberWrites>()
  * added member goes in the known members (an Undo puts it back in place).
  */
 export async function setListMember(
-  listId: string, account: mastodon.v1.Account, member: boolean, opts: ListsOpts & { at?: number } = {},
+  listId: string, account: Account, member: boolean, opts: ListsOpts & { at?: number } = {},
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return false

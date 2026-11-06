@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Instance, MediaAttachment, Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, emptyDraft, findRedraftSlot, loadDraft, saveDraft, statusCache, users,
   type UserSession,
@@ -18,7 +18,7 @@ function signIn(account: object = ME, userKey = KEY): NonNullable<typeof activeC
   const client = activeClient.value!
   vi.spyOn(client, 'fetchInstance').mockResolvedValue({
     configuration: { statuses: { maxCharacters: 20, maxMediaAttachments: 2 }, mediaAttachments: {} },
-  } as unknown as mastodon.v2.Instance)
+  } as unknown as Instance)
   return client
 }
 
@@ -56,7 +56,7 @@ function postButton(el: CaribouComposeDialog) {
   return inner($(el, 'caribou-button.post')!)
 }
 
-async function compose(el: CaribouComposeDialog, inReplyTo?: mastodon.v1.Status) {
+async function compose(el: CaribouComposeDialog, inReplyTo?: Status) {
   window.dispatchEvent(new CustomEvent('caribou:compose', { detail: inReplyTo ? { inReplyTo } : {} }))
   await settle(el)
 }
@@ -79,16 +79,16 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function own(over: Partial<mastodon.v1.Status> = {}): mastodon.v1.Status {
+function own(over: Partial<Status> = {}): Status {
   return {
     id: '7', content: '<p>teh typo</p>', visibility: 'unlisted', spoilerText: '', sensitive: false,
     language: 'en', inReplyToId: null, editedAt: null, account: ME,
     mediaAttachments: [{ id: 'm1', type: 'image', url: 'https://x/m1.png', previewUrl: 'https://x/m1s.png', description: 'a cat' }],
     ...over,
-  } as unknown as mastodon.v1.Status
+  } as unknown as Status
 }
 
-async function edit(el: CaribouComposeDialog, status: mastodon.v1.Status, source = { id: status.id, text: 'teh typo', spoilerText: '' }) {
+async function edit(el: CaribouComposeDialog, status: Status, source = { id: status.id, text: 'teh typo', spoilerText: '' }) {
   window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status, source } } }))
   await settle(el)
 }
@@ -114,7 +114,7 @@ describe('caribou-compose-dialog edit mode', () => {
   it('saves with PUT, keeps the media and language, updates the cache, closes, and stores no draft', async () => {
     const client = signIn()
     const edited = { ...own(), content: '<p>the typo</p>', editedAt: '2026-11-01T00:00:00.000Z' }
-    const editStatus = vi.spyOn(client, 'editStatus').mockResolvedValue(edited as mastodon.v1.Status)
+    const editStatus = vi.spyOn(client, 'editStatus').mockResolvedValue(edited as Status)
     statusCache.value = new Map([['7', own()]])
     const el = await mount()
     await edit(el, own())
@@ -184,7 +184,7 @@ describe('caribou-compose-dialog edit mode', () => {
     const client = signIn()
     const editStatus = vi.spyOn(client, 'editStatus')
     const el = await mount()
-    await edit(el, own({ poll: { id: 'p', options: [] } } as unknown as Partial<mastodon.v1.Status>))
+    await edit(el, own({ poll: { id: 'p', options: [] } } as unknown as Partial<Status>))
     postButton(el).click()
     await settle(el)
     expect(editStatus).not.toHaveBeenCalled()
@@ -199,7 +199,7 @@ describe('caribou-compose-dialog edit mode', () => {
     // An edit from elsewhere lands while the dialog is open.
     statusCache.value = new Map([['7', own({
       editedAt: '2026-11-01T00:00:00.000Z', language: 'de',
-      mediaAttachments: [{ id: 'm1' }, { id: 'm9' }] as mastodon.v1.MediaAttachment[],
+      mediaAttachments: [{ id: 'm1' }, { id: 'm9' }] as MediaAttachment[],
     })]])
     postButton(el).click()
     await settle(el)

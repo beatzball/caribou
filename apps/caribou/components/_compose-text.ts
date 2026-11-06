@@ -1,4 +1,4 @@
-import type { mastodon } from 'masto'
+import type { Status, StatusVisibility } from '@beatzball/caribou-mastodon-client'
 
 // Mastodon counts every link as 23 characters, whatever its length, and a
 // remote mention `@alice@example.social` as just `@alice`. Counting the same
@@ -51,7 +51,7 @@ export function countChars(text: string, spoilerText = ''): number {
 
 // The text a reply starts with: the author, then everyone the post
 // mentions, without the person replying and without repeats.
-export function replyMentions(status: mastodon.v1.Status, selfAcct: string | null): string {
+export function replyMentions(status: Status, selfAcct: string | null): string {
   const self = selfAcct?.toLowerCase() ?? null
   const seen = new Set<string>()
   const out: string[] = []
@@ -64,15 +64,15 @@ export function replyMentions(status: mastodon.v1.Status, selfAcct: string | nul
   return out.length > 0 ? `${out.join(' ')} ` : ''
 }
 
-const VISIBILITY_RANK: Record<mastodon.v1.StatusVisibility, number> = {
+const VISIBILITY_RANK: Record<StatusVisibility, number> = {
   public: 0, unlisted: 1, private: 2, direct: 3,
 }
 
 // A reply is never more public than the post it answers.
 export function replyVisibility(
-  parent: mastodon.v1.StatusVisibility,
-  fallback: mastodon.v1.StatusVisibility,
-): mastodon.v1.StatusVisibility {
+  parent: StatusVisibility,
+  fallback: StatusVisibility,
+): StatusVisibility {
   return VISIBILITY_RANK[parent] >= VISIBILITY_RANK[fallback] ? parent : fallback
 }
 

@@ -2,8 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account, List } from '@beatzball/caribou-mastodon-client'
 import {
   accountListsCache, activeClient, activeUserKey, listKey, listsCache, loadAccountLists, loadLists, setListMember,
 } from '@beatzball/caribou-state'
@@ -40,11 +39,11 @@ export class CaribouListPicker extends LitElement {
     .buttons { display: flex; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-4); }
   `]
 
-  @property({ attribute: false }) account: mastodon.v1.Account | null = null
+  @property({ attribute: false }) account: Account | null = null
   /** Whether the reader follows the account: the server adds only those. */
   @property({ type: Boolean }) following = true
 
-  @state() private lists: mastodon.v1.List[] | undefined = undefined
+  @state() private lists: List[] | undefined = undefined
   @state() private memberOf: string[] | undefined = undefined
   @state() private loaded: Loaded = { status: 'loading' }
 
@@ -109,7 +108,7 @@ export class CaribouListPicker extends LitElement {
     this.finish()
   }
 
-  private onChange = (list: mastodon.v1.List, e: Event) => {
+  private onChange = (list: List, e: Event) => {
     const client = activeClient.peek()
     if (!client || !this.account) return
     const account = this.account
@@ -172,7 +171,7 @@ export class CaribouListPicker extends LitElement {
  * when it closes; it closes when the active account changes. Client only.
  * `account` must be the reader's own server's copy (its id is per server).
  */
-export async function openListPicker(account: mastodon.v1.Account, following: boolean): Promise<void> {
+export async function openListPicker(account: Account, following: boolean): Promise<void> {
   const el = document.createElement('caribou-list-picker') as CaribouListPicker
   el.account = account
   el.following = following

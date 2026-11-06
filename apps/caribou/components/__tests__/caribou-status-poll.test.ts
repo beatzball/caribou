@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   _testOnlyResetMutations, activeClient, activeUserKey, addUserSession, cacheStatus,
@@ -10,8 +10,6 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 import { shares, timeLeft } from '../caribou-status-poll.js'
 import type { CaribouStatusPoll } from '../caribou-status-poll.js'
 
-type Status = mastodon.v1.Status
-type Poll = mastodon.v1.Poll
 
 const FUTURE = '2099-01-01T00:00:00.000Z'
 
@@ -38,7 +36,7 @@ function post(over: Record<string, unknown> = {}): Status {
 function signIn(server = 'example.social') {
   addUserSession({
     userKey: toUserKey('alice', server), server, token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
   })
 }
 

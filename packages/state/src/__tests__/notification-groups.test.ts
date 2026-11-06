@@ -1,21 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import type { mastodon } from 'masto'
-import type { GroupedNotificationsPage, NotificationGroupData } from '@beatzball/caribou-mastodon-client'
+import type { GroupedNotificationsPage, NotificationGroupData, Account, Notification, Status } from '@beatzball/caribou-mastodon-client'
 import {
   appendOlderGroups, groupNotifications, groupsFromPage, prependNewerGroups, withoutSilencedAccounts,
   type NotificationGroup,
 } from '../notification-groups.js'
 
-function account(id: string): mastodon.v1.Account {
-  return { id, acct: id, username: id, displayName: id } as unknown as mastodon.v1.Account
+function account(id: string): Account {
+  return { id, acct: id, username: id, displayName: id } as unknown as Account
 }
 
-function notif(id: string, type: string, by: string, statusId?: string, extra: object = {}): mastodon.v1.Notification {
+function notif(id: string, type: string, by: string, statusId?: string, extra: object = {}): Notification {
   return {
     id, type, createdAt: '2026-11-01T10:00:00.000Z', account: account(by),
     ...(statusId ? { status: { id: statusId } } : {}),
     ...extra,
-  } as unknown as mastodon.v1.Notification
+  } as unknown as Notification
 }
 
 function summary(groups: NotificationGroup[]) {
@@ -88,7 +87,7 @@ function group(g: Partial<NotificationGroupData> & { groupKey: string; type: str
 function page(groups: NotificationGroupData[], ids: string[] = ['alice', 'bob', 'carol', 'dave']): GroupedNotificationsPage {
   return {
     accounts: ids.map(account),
-    statuses: [{ id: 's1' } as mastodon.v1.Status],
+    statuses: [{ id: 's1' } as Status],
     notificationGroups: groups,
   }
 }

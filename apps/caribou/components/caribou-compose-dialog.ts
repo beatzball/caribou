@@ -1,14 +1,13 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
   pollOptions,
   type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
-import { MediaProcessingTimeout, type CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { MediaProcessingTimeout, type CaribouClient, type AccountCredentials, type Status, type StatusSource, type StatusVisibility } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 import './caribou-icon-button.js'
@@ -22,8 +21,8 @@ import { draftMediaOf, POLL_EDIT_REFUSED } from './_redraft.js'
  * page has the post it replied to).
  */
 export interface ComposeDetail {
-  inReplyTo?: mastodon.v1.Status
-  edit?: { status: mastodon.v1.Status; source: mastodon.v1.StatusSource }
+  inReplyTo?: Status
+  edit?: { status: Status; source: StatusSource }
   redraft?: ComposeDraft
 }
 
@@ -170,12 +169,12 @@ function errorText(err: unknown): string {
 
 // The account's own default, once `loadActiveAccount` has stored the
 // verify_credentials body (it carries `source`). Until then, public.
-function defaultVisibility(user: UserSession): mastodon.v1.StatusVisibility {
-  const privacy = (user.account as Partial<mastodon.v1.AccountCredentials> | null)?.source?.privacy
+function defaultVisibility(user: UserSession): StatusVisibility {
+  const privacy = (user.account as Partial<AccountCredentials> | null)?.source?.privacy
   return privacy && ['public', 'unlisted', 'private', 'direct'].includes(privacy) ? privacy : 'public'
 }
 
-const VISIBILITIES: { value: mastodon.v1.StatusVisibility; label: string }[] = [
+const VISIBILITIES: { value: StatusVisibility; label: string }[] = [
   { value: 'public', label: 'Public' },
   { value: 'unlisted', label: 'Unlisted' },
   { value: 'private', label: 'Followers only' },
@@ -257,10 +256,10 @@ export class CaribouComposeDialog extends LitElement {
   @state() private ready = false
   private open = false
   @state() private draft: ComposeDraft = emptyDraft()
-  @state() private replyTo: mastodon.v1.Status | null = null
+  @state() private replyTo: Status | null = null
   // The reader's own post being edited. An edit is not kept as a draft,
   // keeps the post's visibility (Mastodon cannot change it) and its media.
-  @state() private editing: mastodon.v1.Status | null = null
+  @state() private editing: Status | null = null
   @state() private pending: PendingMedia[] = []
   @state() private posting = false
   // Counts openings, so a post that finishes after its dialog closed knows
@@ -394,7 +393,7 @@ export class CaribouComposeDialog extends LitElement {
    * Saving replaces the post's text and content warning; visibility and
    * media stay as they are.
    */
-  showEdit(status: mastodon.v1.Status, source: mastodon.v1.StatusSource): void {
+  showEdit(status: Status, source: StatusSource): void {
     if (!this.begin()) return
     this.editing = status
     this.draftKey = 'new'
@@ -423,7 +422,7 @@ export class CaribouComposeDialog extends LitElement {
    * is then kept in a `redraft:<key>` slot, which the next new post opens
    * first.
    */
-  showRedraft(draft: ComposeDraft, inReplyTo: mastodon.v1.Status | null = null): void {
+  showRedraft(draft: ComposeDraft, inReplyTo: Status | null = null): void {
     if (!this.begin()) return
     const client = this.client!
     const slot = draftSlot(draft.inReplyToId)
@@ -436,7 +435,7 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   /** Opens the dialog for a new post, or a reply to `inReplyTo`. */
-  show(inReplyTo: mastodon.v1.Status | null): void {
+  show(inReplyTo: Status | null): void {
     if (!this.begin()) return
     const user = activeUser.value!
     const client = this.client!
@@ -502,7 +501,7 @@ export class CaribouComposeDialog extends LitElement {
   // Media, language and the poll come from the newest copy of the post this
   // page knows, which may be newer than the one the dialog opened with: an
   // edit replaces the media list, so an older one would drop new media.
-  private async saveEdit(client: CaribouClient, opened: mastodon.v1.Status) {
+  private async saveEdit(client: CaribouClient, opened: Status) {
     const known = newestKnownStatus(opened.id)
     const post = known && olderEdit(opened, known) ? known : opened
     if (post.poll) {
@@ -858,7 +857,7 @@ export class CaribouComposeDialog extends LitElement {
             <label class="visually-hidden" for="compose-visibility">Visibility</label>
             <select id="compose-visibility" name="visibility" ?disabled=${busy || editing}
               aria-describedby=${editing ? 'compose-visibility-note' : nothing}
-              @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as mastodon.v1.StatusVisibility })}>
+              @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as StatusVisibility })}>
               ${VISIBILITIES.map((v) => html`<option value=${v.value}>${v.label}</option>`)}
             </select>
             ${editing ? html`<span class="note" id="compose-visibility-note">Visibility cannot change.</span>` : nothing}

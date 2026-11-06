@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
-import { CaribouError, type GroupedNotificationsPage } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type GroupedNotificationsPage, type Account, type Notification, type Relationship, type Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeUserKey, lastSeenNotificationId, resetGroupedSupport, relationshipCache, relationshipKey, statusCache, unreadNotificationCount, users,
 } from '@beatzball/caribou-state'
@@ -35,11 +34,11 @@ function notif(id: string, type: string, withStatus = !['follow', 'follow_reques
   return {
     id, type, createdAt: '2026-05-08T12:00:00Z', account: ACCT,
     ...(withStatus ? { status: status(`s${id}`) } : {}),
-  } as unknown as mastodon.v1.Notification
+  } as unknown as Notification
 }
 
-const fetchSpy = vi.fn(async (..._: unknown[]) => [] as mastodon.v1.Notification[])
-const accountsSpy = vi.fn(async (..._: unknown[]) => [] as mastodon.v1.Account[])
+const fetchSpy = vi.fn(async (..._: unknown[]) => [] as Notification[])
+const accountsSpy = vi.fn(async (..._: unknown[]) => [] as Account[])
 // By default the server is older than Mastodon 4.3: no grouped endpoint.
 const olderServer = async (..._: unknown[]): Promise<GroupedNotificationsPage> => {
   throw new CaribouError('not_found', 'Not found')
@@ -128,7 +127,7 @@ describe('caribou-notifications', () => {
   it('renders a generic line for a type it does not know, and survives missing fields', async () => {
     fetchSpy.mockResolvedValueOnce([
       notif('2', 'admin.sign_up', false),
-      { id: '1', type: 'something_new' } as unknown as mastodon.v1.Notification,
+      { id: '1', type: 'something_new' } as unknown as Notification,
     ])
     const el = await mount()
     const rows = items(el)
@@ -252,7 +251,7 @@ describe('caribou-notifications', () => {
   })
 
   it('a reply for the old session is dropped, and the list starts again for the new one', async () => {
-    let resolve!: (v: mastodon.v1.Notification[]) => void
+    let resolve!: (v: Notification[]) => void
     fetchSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const el = await mount()
     fetchSpy.mockResolvedValueOnce([notif('3', 'follow')])
@@ -289,7 +288,7 @@ describe('caribou-notifications', () => {
   })
 
   it('a count that comes in during a load polls once the load ends', async () => {
-    let resolve!: (v: mastodon.v1.Notification[]) => void
+    let resolve!: (v: Notification[]) => void
     fetchSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const el = await mount()
     unreadNotificationCount.value = 2
@@ -330,15 +329,15 @@ describe('caribou-notifications', () => {
       { ...notif('9', 'favourite'), status: mine },
       notif('8', 'follow'),
       { ...notif('7', 'follow'), account: carol },
-    ] as unknown as mastodon.v1.Notification[])
+    ] as unknown as Notification[])
     const el = await mount()
     expect(items(el)).toHaveLength(2)
     expect(lineText(items(el)[1]!)).toBe('Bob and Carol followed you')
-    relationshipCache.value = new Map([[relationshipKey(userKey, 'b1'), { id: 'b1', muting: true } as mastodon.v1.Relationship]])
+    relationshipCache.value = new Map([[relationshipKey(userKey, 'b1'), { id: 'b1', muting: true } as Relationship]])
     await el.updateComplete
     expect(items(el).map((li) => li.className.split(' ')[0])).toEqual(['n-follow'])
     expect(lineText(items(el)[0]!)).toBe('Carol followed you')
-    relationshipCache.value = new Map([[relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as mastodon.v1.Relationship]])
+    relationshipCache.value = new Map([[relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as Relationship]])
     await el.updateComplete
     expect(items(el)).toHaveLength(1)
     relationshipCache.value = new Map()
@@ -347,7 +346,7 @@ describe('caribou-notifications', () => {
   })
 
   it('does not drop rows for another account\'s mutes', async () => {
-    relationshipCache.value = new Map([[relationshipKey(bobKey, 'b1'), { id: 'b1', muting: true } as mastodon.v1.Relationship]])
+    relationshipCache.value = new Map([[relationshipKey(bobKey, 'b1'), { id: 'b1', muting: true } as Relationship]])
     fetchSpy.mockResolvedValueOnce([notif('8', 'follow')])
     const el = await mount()
     expect(items(el)).toHaveLength(1)
@@ -361,8 +360,8 @@ describe('caribou-notifications', () => {
 
     function groupedPage(): GroupedNotificationsPage {
       return {
-        accounts: [alice, ACCT, carol] as unknown as mastodon.v1.Account[],
-        statuses: [status('s1')] as unknown as mastodon.v1.Status[],
+        accounts: [alice, ACCT, carol] as unknown as Account[],
+        statuses: [status('s1')] as unknown as Status[],
         notificationGroups: [
           { groupKey: 'favourite-s1-1', type: 'favourite', notificationsCount: 14, mostRecentNotificationId: '30',
             pageMinId: '10', pageMaxId: '30', sampleAccountIds: ['a1', 'b1'], statusId: 's1' },
@@ -396,7 +395,7 @@ describe('caribou-notifications', () => {
 
     it('a poll that adds someone to a group loads its list again, open or closed', async () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
-      accountsSpy.mockResolvedValueOnce(fourteen() as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce(fourteen() as unknown as Account[])
       const el = await mount()
       toggleOf(el).click()
       await settle(el)
@@ -405,9 +404,9 @@ describe('caribou-notifications', () => {
       const newer = groupedPage()
       newer.notificationGroups = [{ ...newer.notificationGroups[0]!, notificationsCount: 15,
         mostRecentNotificationId: '31', pageMinId: '31', pageMaxId: '31', sampleAccountIds: ['d1', 'a1'] }]
-      newer.accounts = [dave, alice] as unknown as mastodon.v1.Account[]
+      newer.accounts = [dave, alice] as unknown as Account[]
       groupedSpy.mockResolvedValueOnce(newer)
-      accountsSpy.mockResolvedValueOnce([dave, ...fourteen()] as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce([dave, ...fourteen()] as unknown as Account[])
       unreadNotificationCount.value = 1
       await settle(el)
       await settle(el)
@@ -425,7 +424,7 @@ describe('caribou-notifications', () => {
       groupedSpy.mockResolvedValueOnce(later)
       unreadNotificationCount.value = 1
       await settle(el)
-      accountsSpy.mockResolvedValueOnce([dave, ...fourteen()] as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce([dave, ...fourteen()] as unknown as Account[])
       toggleOf(el).click()
       await settle(el)
       expect(accountsSpy).toHaveBeenCalledTimes(3)
@@ -436,7 +435,7 @@ describe('caribou-notifications', () => {
       let release!: () => void
       accountsSpy.mockReturnValueOnce(new Promise((resolve, reject) => {
         release = () => kind === 'answer'
-          ? resolve([person('z1', 'Stale')] as unknown as mastodon.v1.Account[])
+          ? resolve([person('z1', 'Stale')] as unknown as Account[])
           : reject(new Error('stale'))
       }))
       const el = await mount()
@@ -446,7 +445,7 @@ describe('caribou-notifications', () => {
       await settle(el)
       signIn(userKey)
       await settle(el)
-      accountsSpy.mockResolvedValueOnce(fourteen() as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce(fourteen() as unknown as Account[])
       toggleOf(el).click()
       await settle(el)
       expect(names(el)).toHaveLength(14)
@@ -459,16 +458,16 @@ describe('caribou-notifications', () => {
 
     it('a row left with one unnamed person can still show who it is', async () => {
       relationshipCache.value = new Map([
-        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as mastodon.v1.Relationship],
-        [relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as mastodon.v1.Relationship],
+        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as Relationship],
+        [relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as Relationship],
       ])
       groupedSpy.mockResolvedValueOnce({
-        accounts: [alice, ACCT] as unknown as mastodon.v1.Account[],
+        accounts: [alice, ACCT] as unknown as Account[],
         statuses: [],
         notificationGroups: [{ groupKey: 'follow-9', type: 'follow', notificationsCount: 3,
           mostRecentNotificationId: '9', pageMinId: '7', pageMaxId: '9', sampleAccountIds: ['a1', 'b1'] }],
       })
-      accountsSpy.mockResolvedValueOnce([alice, ACCT, carol] as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce([alice, ACCT, carol] as unknown as Account[])
       const el = await mount()
       expect(lineText(items(el)[0]!)).toBe('Someone followed you')
       toggleOf(el).click()
@@ -480,7 +479,7 @@ describe('caribou-notifications', () => {
 
     it('Show all loads everyone in a server group, keeps focus on the button, and Hide closes it', async () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
-      let resolve!: (a: mastodon.v1.Account[]) => void
+      let resolve!: (a: Account[]) => void
       accountsSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
       const el = await mount()
       const toggle = () => items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!
@@ -493,7 +492,7 @@ describe('caribou-notifications', () => {
       await el.updateComplete
       expect(accountsSpy).toHaveBeenCalledWith('favourite-s1-1')
       expect(items(el)[0]!.querySelector('.who')?.textContent).toContain('Loading')
-      resolve(fourteen() as unknown as mastodon.v1.Account[])
+      resolve(fourteen() as unknown as Account[])
       await settle(el)
       const who = items(el)[0]!.querySelector('.who')!
       expect([...who.querySelectorAll('li a')].map((a) => a.textContent?.trim())).toEqual(fourteen().map((a) => a.displayName))
@@ -526,7 +525,7 @@ describe('caribou-notifications', () => {
       expect(who.querySelector('[role="alert"]')?.textContent).toContain('Could not load everyone')
       toggle().click()
       await el.updateComplete
-      accountsSpy.mockResolvedValueOnce([alice, ACCT] as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce([alice, ACCT] as unknown as Account[])
       toggle().click()
       await settle(el)
       expect(accountsSpy).toHaveBeenCalledTimes(2)
@@ -534,7 +533,7 @@ describe('caribou-notifications', () => {
 
     it('a full list loaded for one account is dropped when the account changes', async () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
-      let resolve!: (a: mastodon.v1.Account[]) => void
+      let resolve!: (a: Account[]) => void
       accountsSpy.mockReturnValueOnce(new Promise((r) => { resolve = r }))
       const el = await mount()
       items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!.click()
@@ -542,13 +541,13 @@ describe('caribou-notifications', () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
       signIn(bobKey)
       await settle(el)
-      resolve([dave] as unknown as mastodon.v1.Account[])
+      resolve([dave] as unknown as Account[])
       await settle(el)
       // The new account's row starts closed, with nothing from the old one.
       const toggle = items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!
       expect(toggle.getAttribute('aria-expanded')).toBe('false')
       expect(items(el)[0]!.querySelector('.who')).toBeNull()
-      accountsSpy.mockResolvedValueOnce([alice] as unknown as mastodon.v1.Account[])
+      accountsSpy.mockResolvedValueOnce([alice] as unknown as Account[])
       toggle.click()
       await settle(el)
       expect(accountsSpy).toHaveBeenCalledTimes(2)
@@ -558,7 +557,7 @@ describe('caribou-notifications', () => {
       fetchSpy.mockResolvedValueOnce([
         { ...notif('3', 'reblog'), status: status('s1'), account: carol },
         { ...notif('2', 'reblog'), status: status('s1') },
-      ] as unknown as mastodon.v1.Notification[])
+      ] as unknown as Notification[])
       const el = await mount()
       items(el)[0]!.querySelector<HTMLButtonElement>('button.expand')!.click()
       await el.updateComplete
@@ -571,8 +570,8 @@ describe('caribou-notifications', () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
       const el = await mount()
       relationshipCache.value = new Map([
-        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as mastodon.v1.Relationship],
-        [relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as mastodon.v1.Relationship],
+        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as Relationship],
+        [relationshipKey(userKey, 'b1'), { id: 'b1', blocking: true } as Relationship],
       ])
       await el.updateComplete
       expect(lineText(items(el)[0]!)).toBe('12 people favourited your post')
@@ -584,7 +583,7 @@ describe('caribou-notifications', () => {
         { ...notif('3', 'reblog'), status: status('s1'), account: carol },
         { ...notif('2', 'reblog'), status: status('s1') },
         notif('1', 'mention'),
-      ] as unknown as mastodon.v1.Notification[])
+      ] as unknown as Notification[])
       const el = await mount()
       expect(groupedSpy).toHaveBeenCalledOnce()
       const rows = items(el)
@@ -597,8 +596,8 @@ describe('caribou-notifications', () => {
       groupedSpy.mockResolvedValueOnce(groupedPage())
       const el = await mount()
       relationshipCache.value = new Map([
-        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as mastodon.v1.Relationship],
-        [relationshipKey(userKey, 'c1'), { id: 'c1', blocking: true } as mastodon.v1.Relationship],
+        [relationshipKey(userKey, 'a1'), { id: 'a1', muting: true } as Relationship],
+        [relationshipKey(userKey, 'c1'), { id: 'c1', blocking: true } as Relationship],
       ])
       await el.updateComplete
       const rows = items(el)

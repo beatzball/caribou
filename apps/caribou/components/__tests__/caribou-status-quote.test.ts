@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Relationship, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { LitroRouter } from '@beatzball/litro-router'
 import {
@@ -9,7 +9,6 @@ import {
 import '../caribou-status-quote.js'
 import type { CaribouStatusQuote } from '../caribou-status-quote.js'
 
-type Status = mastodon.v1.Status
 type Quote = NonNullable<Status['quote']>
 
 const ME = toUserKey('alice', 'example.social')
@@ -28,7 +27,7 @@ const accepted = (s: Status): Quote => ({ state: 'accepted', quotedStatus: s })
 function signIn() {
   addUserSession({
     userKey: ME, server: 'example.social', token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
   })
 }
 
@@ -138,7 +137,7 @@ describe('<caribou-status-quote>', () => {
 
   it('hides a quoted post whose author the reader mutes', async () => {
     signIn()
-    relationshipCache.value = new Map([[relationshipKey(ME, '42'), { id: '42', muting: true } as mastodon.v1.Relationship]])
+    relationshipCache.value = new Map([[relationshipKey(ME, '42'), { id: '42', muting: true } as Relationship]])
     const el = await mount(accepted(post('9')))
     expect($(el, '.quote-note')?.textContent).toContain('you muted @bob')
     expect($(el, '.quote-content')).toBeNull()
@@ -146,7 +145,7 @@ describe('<caribou-status-quote>', () => {
 
   it('hides a quoted post whose author the reader blocks', async () => {
     signIn()
-    relationshipCache.value = new Map([[relationshipKey(ME, '42'), { id: '42', blocking: true } as mastodon.v1.Relationship]])
+    relationshipCache.value = new Map([[relationshipKey(ME, '42'), { id: '42', blocking: true } as Relationship]])
     const el = await mount(accepted(post('9')))
     expect($(el, '.quote-note')?.textContent).toContain('you blocked @bob')
   })

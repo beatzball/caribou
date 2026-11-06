@@ -1,11 +1,10 @@
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import type { CaribouClient, MediaAttachmentType, Status, StatusVisibility } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 
 export interface DraftMedia {
   id: string
-  type: mastodon.v1.MediaAttachmentType
+  type: MediaAttachmentType
   url: string
   previewUrl: string | null
   description: string
@@ -30,7 +29,7 @@ export interface ComposeDraft {
   text: string
   spoilerText: string
   cw: boolean
-  visibility: mastodon.v1.StatusVisibility
+  visibility: StatusVisibility
   inReplyToId: string | null
   media: DraftMedia[]
   // One key per draft, kept across reloads: a retry after a lost response
@@ -140,13 +139,13 @@ export function clearDraft(userKey: UserKey, slot: DraftSlot): void {
   writeAll(userKey, all)
 }
 
-export interface PostedDetail { status: mastodon.v1.Status }
+export interface PostedDetail { status: Status }
 
 // Posts the draft, then clears it. On failure the draft stays stored and
 // the error is rethrown for the caller to show.
 export async function postDraft(
   client: CaribouClient, slot: DraftSlot, draft: ComposeDraft,
-): Promise<mastodon.v1.Status> {
+): Promise<Status> {
   const status = await client.createStatus({
     status: draft.text,
     visibility: draft.visibility,

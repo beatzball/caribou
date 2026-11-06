@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import {
   activeClient, activeUserKey, addUserSession, emptyDraft, loadDraft, saveDraft, statusCache, users,
   type UserSession,
@@ -7,7 +6,7 @@ import {
 import '../caribou-compose-dialog.js'
 import { startShortcuts } from '../_shortcuts.js'
 import type { CaribouComposeDialog } from '../caribou-compose-dialog.js'
-import { MediaProcessingTimeout } from '@beatzball/caribou-mastodon-client'
+import { MediaProcessingTimeout, type Instance, type MediaAttachment, type Status } from '@beatzball/caribou-mastodon-client'
 
 const ME = { id: 'a1', username: 'alice', acct: 'alice', displayName: 'Alice' }
 const KEY = 'alice@example.social'
@@ -20,17 +19,17 @@ function signIn(account: object = ME, userKey = KEY): NonNullable<typeof activeC
   const client = activeClient.value!
   vi.spyOn(client, 'fetchInstance').mockResolvedValue({
     configuration: { statuses: { maxCharacters: 20, maxMediaAttachments: 2 }, mediaAttachments: {} },
-  } as unknown as mastodon.v2.Instance)
+  } as unknown as Instance)
   return client
 }
 
-function parent(over: Partial<mastodon.v1.Status> = {}): mastodon.v1.Status {
+function parent(over: Partial<Status> = {}): Status {
   return {
     id: '42', content: '<p>original <b>post</b></p>', visibility: 'private', spoilerText: '',
     account: { id: 'b1', acct: 'bob@example.net', username: 'bob', displayName: 'Bob' },
     mentions: [{ acct: 'alice' }, { acct: 'carol' }],
     ...over,
-  } as unknown as mastodon.v1.Status
+  } as unknown as Status
 }
 
 async function settle(el: CaribouComposeDialog) {
@@ -67,7 +66,7 @@ function postButton(el: CaribouComposeDialog) {
   return inner($(el, 'caribou-button.post')!)
 }
 
-async function compose(el: CaribouComposeDialog, inReplyTo?: mastodon.v1.Status) {
+async function compose(el: CaribouComposeDialog, inReplyTo?: Status) {
   window.dispatchEvent(new CustomEvent('caribou:compose', { detail: inReplyTo ? { inReplyTo } : {} }))
   await settle(el)
 }
@@ -254,7 +253,7 @@ describe('caribou-compose-dialog', () => {
   it('posts with Ctrl+Enter, closes, clears the draft and toasts', async () => {
     const client = signIn()
     const create = vi.spyOn(client, 'createStatus').mockResolvedValue(
-      { id: 'new', account: ME } as unknown as mastodon.v1.Status)
+      { id: 'new', account: ME } as unknown as Status)
     const el = await mount()
     await compose(el, parent())
     await type(el, '@bob@example.net hi')
@@ -288,7 +287,7 @@ describe('caribou-compose-dialog', () => {
 
   it('disables Post while media uploads, then attaches it', async () => {
     const client = signIn()
-    let finish!: (m: mastodon.v1.MediaAttachment) => void
+    let finish!: (m: MediaAttachment) => void
     vi.spyOn(client, 'uploadMedia').mockReturnValue(new Promise((r) => { finish = r }))
     const el = await mount()
     await compose(el)
@@ -299,7 +298,7 @@ describe('caribou-compose-dialog', () => {
     await settle(el)
     expect($(el, '[data-pending] .state')!.textContent!.trim()).toBe('Uploading…')
     expect(postButton(el).disabled).toBe(true)
-    finish({ id: 'm1', type: 'image', url: 'https://example.social/m1.png', previewUrl: 'https://example.social/m1s.png', description: null } as unknown as mastodon.v1.MediaAttachment)
+    finish({ id: 'm1', type: 'image', url: 'https://example.social/m1.png', previewUrl: 'https://example.social/m1s.png', description: null } as unknown as MediaAttachment)
     await settle(el)
     expect($(el, '[data-pending]')).toBeNull()
     expect($(el, '[data-media="m1"] img')!.getAttribute('src')).toBe('https://example.social/m1s.png')
@@ -346,7 +345,7 @@ describe('caribou-compose-dialog', () => {
 
   it('saves alt text on an uploaded item', async () => {
     const client = signIn()
-    const update = vi.spyOn(client, 'updateMedia').mockResolvedValue({} as mastodon.v1.MediaAttachment)
+    const update = vi.spyOn(client, 'updateMedia').mockResolvedValue({} as MediaAttachment)
     saveDraft(KEY, 'new', emptyDraft({
       media: [{ id: 'm9', type: 'image', url: 'u', previewUrl: null, description: '' }],
     }))
@@ -445,11 +444,11 @@ describe('caribou-compose-dialog', () => {
       const calls: string[] = []
       vi.spyOn(client, 'updateMedia').mockImplementation(async () => {
         calls.push('updateMedia')
-        return {} as mastodon.v1.MediaAttachment
+        return {} as MediaAttachment
       })
       vi.spyOn(client, 'createStatus').mockImplementation(async () => {
         calls.push('createStatus')
-        return { id: 'p', account: ME } as unknown as mastodon.v1.Status
+        return { id: 'p', account: ME } as unknown as Status
       })
       draftWithMedia()
       const el = await mount()
@@ -505,7 +504,7 @@ describe('caribou-compose-dialog', () => {
       const client = signIn()
       const upload = vi.spyOn(client, 'uploadMedia').mockRejectedValue(new MediaProcessingTimeout('m5'))
       const wait = vi.spyOn(client, 'waitForMedia').mockResolvedValue(
-        { id: 'm5', type: 'video', url: 'https://example.social/m5.mp4', previewUrl: null, description: null } as unknown as mastodon.v1.MediaAttachment)
+        { id: 'm5', type: 'video', url: 'https://example.social/m5.mp4', previewUrl: null, description: null } as unknown as MediaAttachment)
       const el = await mount()
       await compose(el)
       const file = $<HTMLInputElement>(el, 'input[type="file"]')!
@@ -521,7 +520,7 @@ describe('caribou-compose-dialog', () => {
 
     it('a post that lands after the dialog moved on leaves the new draft alone', async () => {
       const client = signIn()
-      let done!: (s: mastodon.v1.Status) => void
+      let done!: (s: Status) => void
       vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((r) => { done = r }))
       const el = await mount()
       await compose(el)
@@ -532,7 +531,7 @@ describe('caribou-compose-dialog', () => {
       await settle(el)
       await compose(el)
       await type(el, 'bob text')
-      done({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      done({ id: 'p', account: ME } as unknown as Status)
       await settle(el)
       expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
       expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('bob text')
@@ -542,7 +541,7 @@ describe('caribou-compose-dialog', () => {
 
     it('a post that lands after the same account closed and reopened the dialog leaves it open', async () => {
       const client = signIn()
-      let done!: (s: mastodon.v1.Status) => void
+      let done!: (s: Status) => void
       vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((r) => { done = r }))
       const el = await mount()
       await compose(el)
@@ -553,7 +552,7 @@ describe('caribou-compose-dialog', () => {
       await settle(el)
       await compose(el, parent())
       expect($<HTMLTextAreaElement>(el, 'textarea')!.readOnly).toBe(false)
-      done({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      done({ id: 'p', account: ME } as unknown as Status)
       await settle(el)
       expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(true)
       expect(loadDraft(KEY, 'new')).toBeNull()
@@ -570,7 +569,7 @@ describe('caribou-compose-dialog', () => {
       const client = signIn()
       const upload = vi.spyOn(client, 'uploadMedia')
         .mockRejectedValueOnce(new MediaProcessingTimeout('m5'))
-        .mockResolvedValueOnce({ id: 'm6', type: 'video', url: 'https://example.social/m6.mp4', previewUrl: null, description: null } as unknown as mastodon.v1.MediaAttachment)
+        .mockResolvedValueOnce({ id: 'm6', type: 'video', url: 'https://example.social/m6.mp4', previewUrl: null, description: null } as unknown as MediaAttachment)
       const wait = vi.spyOn(client, 'waitForMedia').mockRejectedValue(new Error('gone'))
       const el = await mount()
       await compose(el)
@@ -590,7 +589,7 @@ describe('caribou-compose-dialog', () => {
 
     it('a double Ctrl+Enter or double click posts once', async () => {
       const client = signIn()
-      let done!: (s: mastodon.v1.Status) => void
+      let done!: (s: Status) => void
       const create = vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((r) => { done = r }))
       const el = await mount()
       await compose(el)
@@ -601,7 +600,7 @@ describe('caribou-compose-dialog', () => {
       postButton(el).click()
       $<HTMLFormElement>(el, 'form')!.requestSubmit()
       await settle(el)
-      done({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+      done({ id: 'p', account: ME } as unknown as Status)
       await settle(el)
       expect(create).toHaveBeenCalledOnce()
     })
@@ -610,7 +609,7 @@ describe('caribou-compose-dialog', () => {
       const client = signIn()
       const create = vi.spyOn(client, 'createStatus')
         .mockRejectedValueOnce(new Error('timeout'))
-        .mockResolvedValueOnce({ id: 'p', account: ME } as unknown as mastodon.v1.Status)
+        .mockResolvedValueOnce({ id: 'p', account: ME } as unknown as Status)
       const el = await mount()
       await compose(el)
       await type(el, 'retry me')

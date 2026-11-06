@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Instance, Status, StatusSource } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, emptyDraft, loadDraft, saveDraft, statusCache, users,
   type UserSession,
@@ -19,7 +19,7 @@ function signIn(account: object = ME, userKey = KEY): NonNullable<typeof activeC
   vi.spyOn(client, 'fetchInstance').mockResolvedValue({
     configuration: { statuses: { maxCharacters: 100, maxMediaAttachments: 2 }, mediaAttachments: {},
       polls: { maxOptions: 3, maxCharactersPerOption: 25, minExpiration: 300, maxExpiration: 86400 } },
-  } as unknown as mastodon.v2.Instance)
+  } as unknown as Instance)
   return client
 }
 
@@ -57,7 +57,7 @@ function postButton(el: CaribouComposeDialog) {
   return inner($(el, 'caribou-button.post')!)
 }
 
-async function compose(el: CaribouComposeDialog, inReplyTo?: mastodon.v1.Status) {
+async function compose(el: CaribouComposeDialog, inReplyTo?: Status) {
   window.dispatchEvent(new CustomEvent('caribou:compose', { detail: inReplyTo ? { inReplyTo } : {} }))
   await settle(el)
 }
@@ -151,7 +151,7 @@ describe('<caribou-compose-dialog> poll builder', () => {
 
   it('posts the poll with its settings and keeps it in the draft until then', async () => {
     const client = signIn()
-    const create = vi.spyOn(client, 'createStatus').mockResolvedValue({ id: 'n1', account: ME } as unknown as mastodon.v1.Status)
+    const create = vi.spyOn(client, 'createStatus').mockResolvedValue({ id: 'n1', account: ME } as unknown as Status)
     const el = await mount()
     await compose(el)
     await type(el, 'which?')
@@ -209,8 +209,8 @@ describe('<caribou-compose-dialog> poll builder', () => {
   it('an edit has no poll button', async () => {
     signIn()
     const el = await mount()
-    el.showEdit({ id: '9', visibility: 'public', mediaAttachments: [], account: ME } as unknown as mastodon.v1.Status,
-      { id: '9', text: 'hi', spoilerText: '' } as mastodon.v1.StatusSource)
+    el.showEdit({ id: '9', visibility: 'public', mediaAttachments: [], account: ME } as unknown as Status,
+      { id: '9', text: 'hi', spoilerText: '' } as StatusSource)
     await settle(el)
     expect($(el, 'caribou-icon-button[data-action="toggle-poll"]')).toBeNull()
   })
@@ -221,7 +221,7 @@ describe('<caribou-compose-dialog> poll builder', () => {
       userKey: 'alice@late.example', server: 'late.example', token: 'TOKEN', vapidKey: '', account: ME, createdAt: 1,
     } as unknown as UserSession)
     const client = activeClient.value!
-    let resolve!: (i: mastodon.v2.Instance) => void
+    let resolve!: (i: Instance) => void
     vi.spyOn(client, 'fetchInstance').mockImplementation(() => new Promise((r) => { resolve = r }))
     const el = await mount()
     await compose(el)
@@ -231,7 +231,7 @@ describe('<caribou-compose-dialog> poll builder', () => {
     await fill(el, 1, 'b')
     expect($<HTMLSelectElement>(el, '#compose-poll-duration')!.value).toBe('86400')
     resolve({ configuration: { statuses: { maxCharacters: 100, maxMediaAttachments: 2 }, mediaAttachments: {},
-      polls: { maxOptions: 4, maxCharactersPerOption: 50, minExpiration: 300, maxExpiration: 3600 } } } as unknown as mastodon.v2.Instance)
+      polls: { maxOptions: 4, maxCharactersPerOption: 50, minExpiration: 300, maxExpiration: 3600 } } } as unknown as Instance)
     await settle(el)
     const select = $<HTMLSelectElement>(el, '#compose-poll-duration')!
     expect([...select.options].map((o) => Number(o.value)).every((v) => v <= 3600)).toBe(true)
@@ -265,7 +265,7 @@ describe('<caribou-compose-dialog> poll builder', () => {
       userKey: 'alice@late2.example', server: 'late2.example', token: 'TOKEN', vapidKey: '', account: ME, createdAt: 1,
     } as unknown as UserSession)
     const client = activeClient.value!
-    let resolve!: (i: mastodon.v2.Instance) => void
+    let resolve!: (i: Instance) => void
     vi.spyOn(client, 'fetchInstance').mockImplementation(() => new Promise((r) => { resolve = r }))
     const create = vi.spyOn(client, 'createStatus')
     const el = await mount()
@@ -282,7 +282,7 @@ describe('<caribou-compose-dialog> poll builder', () => {
     await fill(el, 3, 'x'.repeat(40))
     expect(postButton(el).disabled).toBe(false)
     resolve({ configuration: { statuses: { maxCharacters: 100, maxMediaAttachments: 2 }, mediaAttachments: {},
-      polls: { maxOptions: 3, maxCharactersPerOption: 25, minExpiration: 300, maxExpiration: 86400 } } } as unknown as mastodon.v2.Instance)
+      polls: { maxOptions: 3, maxCharactersPerOption: 25, minExpiration: 300, maxExpiration: 86400 } } } as unknown as Instance)
     await settle(el)
     expect(postButton(el).disabled).toBe(true)
     expect($(el, '[data-poll-problem]')?.textContent).toBe('This server allows at most 3 options.')

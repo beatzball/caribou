@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   activeClient, activeUserKey, addUserSession, clearKeptAlive, postRecords, readerChecks, statusCache, users,
@@ -17,7 +17,6 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 // carry none of the reader's filters. Signed in to the same server, the
 // list asks for the reader's copies, and a hide filter then applies.
 
-type Status = mastodon.v1.Status
 
 const ACCT = { id: 'a1', acct: 'bob', username: 'bob', displayName: 'Bob', avatar: '', avatarStatic: '' }
 const HIDE = [{ filter: { id: 'f', title: 'Spoilers', context: ['public', 'thread', 'account'], filterAction: 'hide' } }]
@@ -30,7 +29,7 @@ const post = (id: string, over: Record<string, unknown> = {}) => ({
 function signIn(server = 'example.social') {
   addUserSession({
     userKey: toUserKey('alice', server), server, token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
   })
   const client = activeClient.value!
   return vi.spyOn(client, 'fetchStatuses').mockImplementation(async (ids) => ids.map((id) => post(id, { filtered: HIDE })))
@@ -115,7 +114,7 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
     pr.handle = 'bob@example.social'
     pr.instance = 'example.social'
     pr.initial = {
-      account: { ...ACCT, note: '', followersCount: 0, followingCount: 0, statusesCount: 1 } as unknown as mastodon.v1.Account,
+      account: { ...ACCT, note: '', followersCount: 0, followingCount: 0, statusesCount: 1 } as unknown as Account,
       statuses: [post('1')], nextMaxId: null, tab: 'posts',
     }
     await inShell(pr, 'example.social')

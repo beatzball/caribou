@@ -13,9 +13,9 @@ time both fire the same fetch, (2) errors come back as a mix of
 `HttpError`, `TypeError("fetch failed")`, and unknown shapes that every
 caller would have to discriminate on, (3) auth-expiry needs a single
 "kick the user back to signin" hook instead of being open-coded. This
-package fixes all three behind one interface (`CaribouClient`) and
-re-exports the masto types we use so consumers can pin against this
-package, not against `masto` directly.
+package fixes all three behind one interface (`CaribouClient`). It also
+defines Caribou's own data types (`Status`, `Account`, ...), so the rest
+of Caribou never names masto's types.
 
 ## Position in the stack
 
@@ -37,10 +37,41 @@ package, not against `masto` directly.
 - `normalizeError(err)` — coerces masto / fetch / unknown errors into a `CaribouError`
 - `createDedup()` — generic key-keyed in-flight Promise dedup
 - `SessionSource` — interface for credential supply + 401 callback
-- `Status`, `Account` — re-exports of `mastodon.v1.Status` and `mastodon.v1.Account`
+- `Status`, `Account`, `Relationship`, `List`, `Notification`, and the types
+  they hold — Caribou's own data types (see below)
 
 Subpath export: `@beatzball/caribou-mastodon-client/sanitize-opts` →
 `PURIFY_OPTS` (DOMPurify config shared by client and server sanitizers).
+
+## How to use the owned types
+
+Import data types from this package, never from `masto`:
+
+```ts
+import type { Status, Account } from '@beatzball/caribou-mastodon-client'
+```
+
+- **Mastodon's field names.** `status.favouritesCount`,
+  `account.displayName` and the rest read as they always have.
+- **Recursive.** `Status.account` is a Caribou `Account`, `Status.reblog`
+  and `Quote.quotedStatus` are Caribou `Status`es, and
+  `Notification.status` is a Caribou `Status`.
+- **A network's extra data goes in its own field.** `Status.bluesky` and
+  `Relationship.bluesky` hold what Mastodon has no place for (record URIs,
+  labels, moderation). A Mastodon object never has them. Do not add a new
+  top-level field for one network.
+- **`src/types.ts` imports nothing.** A client for another network can
+  map into these types without pulling in masto.
+- **The Mastodon mapping costs nothing at run time.** masto's objects
+  already have these shapes. `src/masto-mapping.ts` checks that at compile
+  time, so a masto upgrade that changes a shape fails `pnpm typecheck`
+  there.
+- **Only two files may name masto's types:** `src/create-client.ts` and
+  `src/masto-mapping.ts`. The test `owned-types-boundary.test.ts` fails if
+  any other `.ts` file in `apps/` or `packages/` names `mastodon.v1.*`,
+  `mastodon.v2.*`, `mastodon.rest.*` or imports from `masto`.
+- **Need a field that is not here?** Add it to `src/types.ts` with
+  Mastodon's name and shape. The mapping check tells you if masto disagrees.
 
 ## How it works
 

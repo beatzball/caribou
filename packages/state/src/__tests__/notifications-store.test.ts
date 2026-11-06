@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient, FetchNotificationsParams } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, FetchNotificationsParams, Notification, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 
-const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<mastodon.v1.Notification[]>>()
+const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<Notification[]>>()
 
 vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -21,16 +20,16 @@ import type { PollHost } from '../polling.js'
 
 const key = toUserKey('alice', 'example.social')
 
-function status(id: string, extra: Partial<mastodon.v1.Status> = {}): mastodon.v1.Status {
-  return { id, content: `<p>${id}</p>`, account: { id: 'a1' }, ...extra } as unknown as mastodon.v1.Status
+function status(id: string, extra: Partial<Status> = {}): Status {
+  return { id, content: `<p>${id}</p>`, account: { id: 'a1' }, ...extra } as unknown as Status
 }
 
-function notif(id: string, type = 'mention', withStatus = type !== 'follow'): mastodon.v1.Notification {
+function notif(id: string, type = 'mention', withStatus = type !== 'follow'): Notification {
   return {
     id, type, createdAt: '2024-01-01T00:00:00.000Z', groupKey: `ungrouped-${id}`,
     account: { id: `acc${id}` },
     ...(withStatus ? { status: status(`s${id}`) } : {}),
-  } as unknown as mastodon.v1.Notification
+  } as unknown as Notification
 }
 
 function signIn(token = 'T1') {
@@ -105,7 +104,7 @@ describe('createNotificationsStore', () => {
   // Ids from `to` down to `from`, newest first, as the server sends them.
   const range = (to: number, from: number) =>
     Array.from({ length: to - from + 1 }, (_, i) => notif(String(to - i), 'follow'))
-  const ids = (store: { notifications: { value: mastodon.v1.Notification[] } }) =>
+  const ids = (store: { notifications: { value: Notification[] } }) =>
     store.notifications.value.map((n) => n.id)
 
   it('poll() prepends what is newer than the first one, paging forward with min_id', async () => {
@@ -196,7 +195,7 @@ describe('createNotificationsStore', () => {
     fetchNotifications.mockResolvedValueOnce([notif('1')])
     const store = createNotificationsStore({ clientSource: client })
     await store.load()
-    let resolve!: (v: mastodon.v1.Notification[]) => void
+    let resolve!: (v: Notification[]) => void
     fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const polled = store.poll()
     fetchNotifications.mockResolvedValueOnce([notif('5')])
@@ -316,7 +315,7 @@ describe('startUnreadNotifications', () => {
 
   it('drops a reply that arrives after the session changed', async () => {
     signIn('T1')
-    let resolve!: (v: mastodon.v1.Notification[]) => void
+    let resolve!: (v: Notification[]) => void
     fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const stop = startUnreadNotifications({ host: host() })
     signIn('T2')
@@ -328,9 +327,9 @@ describe('startUnreadNotifications', () => {
 
   // A held reply: `resolve` sends it.
   function held() {
-    let resolve!: (v: mastodon.v1.Notification[]) => void
+    let resolve!: (v: Notification[]) => void
     fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
-    return (v: mastodon.v1.Notification[]) => resolve(v)
+    return (v: Notification[]) => resolve(v)
   }
   const three = () => [notif('3'), notif('2'), notif('1')]
 
@@ -414,7 +413,7 @@ describe('startUnreadNotifications', () => {
 
   it('drops a reply that arrives after it was stopped', async () => {
     signIn()
-    let resolve!: (v: mastodon.v1.Notification[]) => void
+    let resolve!: (v: Notification[]) => void
     fetchNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const stop = startUnreadNotifications({ host: host() })
     stop()

@@ -1,13 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { statusCache } from '../caches.js'
 import { createTimelineStore } from '../timeline-store.js'
 import { activeUserKey } from '../users.js'
 
-function makeStatus(id: string): mastodon.v1.Status {
-  return { id, content: `<p>${id}</p>`, account: { id: 'a1' } } as unknown as mastodon.v1.Status
+function makeStatus(id: string): Status {
+  return { id, content: `<p>${id}</p>`, account: { id: 'a1' } } as unknown as Status
 }
 
 type FetchImpl = CaribouClient['fetchTimeline']
@@ -277,7 +276,7 @@ describe('createTimelineStore — revisit', () => {
   })
 
   it('drops a response that arrives after the active account changed', async () => {
-    let resolve!: (xs: mastodon.v1.Status[]) => void
+    let resolve!: (xs: Status[]) => void
     const client = fakeClient(() => new Promise((r) => { resolve = r }))
     const store = createTimelineStore('home', {
       clientSource: () => client, initial: { statuses: [makeStatus('a')], nextMaxId: null },

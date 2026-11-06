@@ -3,13 +3,13 @@ import {
   activeUserKey, cacheStatus, clearKeptAlive, statusCache,
 } from '@beatzball/caribou-state'
 import type { LitroLocation } from '@beatzball/litro/runtime'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 import {
   STALE_MS, UPDATING_MAX_MS, enterWithCache, isCachedSnapshot, trackUpdate, updating, type CachedPage,
 } from '../_page-cache.js'
 
 const loc = (pathname: string): LitroLocation => ({ pathname, params: {}, search: '', hash: '' })
-const status = (id: string, extra: object = {}) => ({ id, ...extra }) as unknown as mastodon.v1.Status
+const status = (id: string, extra: object = {}) => ({ id, ...extra }) as unknown as Status
 
 function page(fresh: () => Promise<unknown>): CachedPage {
   return { serverData: null, fetchData: vi.fn(fresh) }
@@ -94,7 +94,7 @@ describe('enterWithCache', () => {
     cacheStatus(status('x', { content: 'edited' }))
     const again = page(() => new Promise(() => {}))
     await enterWithCache(again, loc('/@a/1'), async () => {})
-    const data = again.serverData as { focused: mastodon.v1.Status; ancestors: mastodon.v1.Status[] }
+    const data = again.serverData as { focused: Status; ancestors: Status[] }
     expect(data.focused.favourited).toBe(true)
     expect(data.ancestors[0]!.content).toBe('edited')
   })
@@ -131,7 +131,7 @@ describe('enterWithCache', () => {
     expect([f.content, f.favourited, f.favouritesCount]).toEqual(['edited', true, 2])
     expect(statusCache.value.get('r')!.content).toBe('reply')
     const next = await heldRevisit('/@a/1')
-    expect((next.page.serverData as { focused: mastodon.v1.Status }).focused.content).toBe('edited')
+    expect((next.page.serverData as { focused: Status }).focused.content).toBe('edited')
   })
 
   it('does not keep an error page', async () => {

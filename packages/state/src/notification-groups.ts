@@ -1,5 +1,4 @@
-import type { GroupedNotificationsPage } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import type { GroupedNotificationsPage, Account, Notification, Status } from '@beatzball/caribou-mastodon-client'
 
 /**
  * One row of the notifications list. A favourite, a boost or a follow can
@@ -11,10 +10,10 @@ export interface NotificationGroup {
   /** How many notifications the row stands for, as far as the list knows. */
   count: number
   /** Who did it, newest first, each once. From a server group: a sample. */
-  accounts: mastodon.v1.Account[]
+  accounts: Account[]
   /** Whether `accounts` is everyone in the group, not a sample. */
   complete: boolean
-  status: mastodon.v1.Status | null
+  status: Status | null
   /** The newest and the oldest notification id the row covers. */
   newestId: string
   oldestId: string
@@ -38,8 +37,8 @@ type LooseNotification = {
   type: string
   createdAt?: string
   groupKey?: string
-  account?: mastodon.v1.Account | null
-  status?: mastodon.v1.Status | null
+  account?: Account | null
+  status?: Status | null
 }
 
 // The server's key when it sent one (Mastodon 4.3+ sends it on v1 too),
@@ -52,7 +51,7 @@ function clientGroupKey(n: LooseNotification): string {
   return `${n.type}-${n.status?.id ?? ''}-${day}`
 }
 
-function addAccount(list: mastodon.v1.Account[], account: mastodon.v1.Account | null | undefined) {
+function addAccount(list: Account[], account: Account | null | undefined) {
   if (account && !list.some((a) => a.id === account.id)) list.push(account)
 }
 
@@ -62,7 +61,7 @@ function addAccount(list: mastodon.v1.Account[], account: mastodon.v1.Account | 
  * list is grouped again on every change, so a page added below or above
  * joins its rows with no duplicates.
  */
-export function groupNotifications(list: readonly mastodon.v1.Notification[]): NotificationGroup[] {
+export function groupNotifications(list: readonly Notification[]): NotificationGroup[] {
   const out: NotificationGroup[] = []
   const byKey = new Map<string, NotificationGroup>()
   const seen = new Set<string>()
@@ -93,7 +92,7 @@ export function groupsFromPage(page: GroupedNotificationsPage): NotificationGrou
   const accounts = new Map(page.accounts.map((a) => [a.id, a]))
   const statuses = new Map(page.statuses.map((s) => [s.id, s]))
   return page.notificationGroups.map((g) => {
-    const list: mastodon.v1.Account[] = []
+    const list: Account[] = []
     for (const id of g.sampleAccountIds ?? []) addAccount(list, accounts.get(id))
     // Mastodon's count covers the sample, so the guard only matters for a
     // server that sends a wider sample than its count, or no count.
@@ -116,7 +115,7 @@ export function groupsFromPage(page: GroupedNotificationsPage): NotificationGrou
 // up to the top of its page, older ones included. So the newer part's count
 // is the total, and the older part's is already in it: never add them.
 function join(newer: NotificationGroup, older: NotificationGroup): NotificationGroup {
-  const accounts: mastodon.v1.Account[] = []
+  const accounts: Account[] = []
   for (const a of newer.accounts) addAccount(accounts, a)
   for (const a of older.accounts) addAccount(accounts, a)
   const count = Math.max(newer.count, accounts.length)

@@ -1,15 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { statusCache } from '../caches.js'
 import { createThreadStore } from '../thread-store.js'
 
-const FOCUSED = { id: '300', content: 'focused', account: { id: '42' } } as unknown as mastodon.v1.Status
-const ANC: mastodon.v1.Status[]  = [
-  { id: '299', content: 'anc',  account: { id: '42' } } as unknown as mastodon.v1.Status,
+const FOCUSED = { id: '300', content: 'focused', account: { id: '42' } } as unknown as Status
+const ANC: Status[]  = [
+  { id: '299', content: 'anc',  account: { id: '42' } } as unknown as Status,
 ]
-const DESC: mastodon.v1.Status[] = [
-  { id: '301', content: 'desc', account: { id: '42' } } as unknown as mastodon.v1.Status,
+const DESC: Status[] = [
+  { id: '301', content: 'desc', account: { id: '42' } } as unknown as Status,
 ]
 
 describe('createThreadStore', () => {
@@ -69,7 +68,7 @@ describe('createThreadStore', () => {
     const store = createThreadStore({} as unknown as CaribouClient, '300', {
       initial: { focused: FOCUSED, ancestors: ANC, descendants: [] },
     })
-    const newDesc = [{ id: '302', content: 'new', account: { id: '42' } } as unknown as mastodon.v1.Status]
+    const newDesc = [{ id: '302', content: 'new', account: { id: '42' } } as unknown as Status]
     store._testOnlySetDescendants(newDesc)
     if (store.context.value.status !== 'ready') throw new Error('expected ready')
     expect(store.context.value.data.ancestors[0]?.id).toBe('299')
@@ -79,7 +78,7 @@ describe('createThreadStore', () => {
 
 describe('ThreadStore.offer', () => {
   const st = (id: string, extra: object = {}) =>
-    ({ id, content: id, account: { id: '42' }, ...extra }) as unknown as mastodon.v1.Status
+    ({ id, content: id, account: { id: '42' }, ...extra }) as unknown as Status
 
   it('updates the shown posts in place and adds new replies at the end', () => {
     statusCache.value = new Map()

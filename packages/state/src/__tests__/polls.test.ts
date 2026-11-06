@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account, Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { cacheStatus, forgetReaderFields, mergeStatus, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
@@ -9,8 +8,6 @@ import { _testOnlyResetMutations } from '../mutations.js'
 import { inflight } from '../inflight.js'
 import { optimisticVote, refreshPoll, votePoll } from '../polls.js'
 
-type Status = mastodon.v1.Status
-type Poll = mastodon.v1.Poll
 
 function makePoll(over: Partial<Poll> = {}): Poll {
   return {
@@ -31,7 +28,7 @@ function makeStatus(id: string, over: Partial<Status> = {}): Status {
 }
 
 function wrapper(id: string, post: Status): Status {
-  return makeStatus(id, { poll: null, reblog: post, account: { id: 'c1', username: 'carol', acct: 'carol' } as mastodon.v1.Account })
+  return makeStatus(id, { poll: null, reblog: post, account: { id: 'c1', username: 'carol', acct: 'carol' } as Account })
 }
 
 function deferred<T>() {

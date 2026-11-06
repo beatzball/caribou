@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 import { activeUserKey, cacheStatus, postRecords, mergeStatus, statusCache, users } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
-type Status = mastodon.v1.Status
 
 const account = { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' }
 

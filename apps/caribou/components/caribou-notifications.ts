@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { computed, effect, untracked } from '@preact/signals-core'
-import type { mastodon } from 'masto'
+import type { Account } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, compareNotificationIds, createNotificationsStore, markNotificationsSeen, relationshipCache,
   startPolling, unreadNotificationCount, withoutSilencedAccounts, NOTIFICATIONS_POLL_MS,
@@ -100,7 +100,7 @@ export class CaribouNotifications extends LitElement {
   // group comes with a sample only. Each list is for the group as it was at
   // `newestId`: once a poll adds to the group, the list is loaded again.
   // Cleared with the session.
-  @state() private everyone: ReadonlyMap<string, { newestId: string; accounts: mastodon.v1.Account[] }> = new Map()
+  @state() private everyone: ReadonlyMap<string, { newestId: string; accounts: Account[] }> = new Map()
   @state() private loadingWho: ReadonlySet<string> = new Set()
   @state() private failedWho: ReadonlySet<string> = new Set()
   // Every session change, A -> B -> A too, starts a new activation; each
@@ -268,15 +268,15 @@ export class CaribouNotifications extends LitElement {
   private onMore = () => { void this.store?.loadMore() }
 
   // `acct` is relative to the user's own server for a local account.
-  private profileHref(a: mastodon.v1.Account): string {
+  private profileHref(a: Account): string {
     return profilePath(a.acct, activeUser.value?.server ?? '')
   }
 
-  private name(a: mastodon.v1.Account): string {
+  private name(a: Account): string {
     return a.displayName || a.username || a.acct
   }
 
-  private nameLink(a: mastodon.v1.Account) {
+  private nameLink(a: Account) {
     return html`<a href=${this.profileHref(a)} @click=${spaClick}>${this.name(a)}</a>`
   }
 
@@ -333,7 +333,7 @@ export class CaribouNotifications extends LitElement {
     this.whoRequest.set(key, request)
     this.loadingWho = new Set([...this.loadingWho, key])
     this.failedWho = CaribouNotifications.without(this.failedWho, key)
-    let accounts: mastodon.v1.Account[] | null = null
+    let accounts: Account[] | null = null
     try {
       accounts = await client.fetchNotificationGroupAccounts(key)
     } catch {

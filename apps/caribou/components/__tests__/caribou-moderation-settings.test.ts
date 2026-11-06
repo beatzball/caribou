@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import { toUserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type AccountPage, type CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type AccountPage, type CaribouClient, type Account, type Filter, type Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, relationshipCache, users,
 } from '@beatzball/caribou-state'
@@ -9,27 +8,27 @@ import '../caribou-moderation-settings.js'
 import type { CaribouModerationSettings } from '../caribou-moderation-settings.js'
 
 const account = (id: string, acct: string) =>
-  ({ id, acct, username: acct, displayName: acct.toUpperCase(), avatar: '', avatarStatic: '' }) as mastodon.v1.Account
+  ({ id, acct, username: acct, displayName: acct.toUpperCase(), avatar: '', avatarStatic: '' }) as Account
 
-const page = (items: mastodon.v1.Account[], nextMaxId: string | null = null): AccountPage =>
+const page = (items: Account[], nextMaxId: string | null = null): AccountPage =>
   Object.assign(items, { nextMaxId })
 
 const FILTER = {
   id: 'f1', title: 'Spoilers', context: ['home', 'thread'], filterAction: 'warn', expiresAt: null,
   keywords: [{ id: 'k1', keyword: 'finale', wholeWord: true }, { id: 'k2', keyword: 'ending', wholeWord: false }],
   statuses: [],
-} as unknown as mastodon.v2.Filter
+} as unknown as Filter
 
 function signIn(): CaribouClient {
   addUserSession({
     userKey: toUserKey('alice', 'example.social'), server: 'example.social', token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
   })
   return activeClient.value!
 }
 
 function stub(client: CaribouClient, over: {
-  filters?: () => Promise<mastodon.v2.Filter[]>
+  filters?: () => Promise<Filter[]>
   mutes?: (p?: { maxId?: string }) => Promise<AccountPage>
   blocks?: (p?: { maxId?: string }) => Promise<AccountPage>
 } = {}) {
@@ -99,8 +98,8 @@ describe('<caribou-moderation-settings>', () => {
   it('Unmute keeps the row with a Mute button; a click again mutes again', async () => {
     const client = signIn()
     stub(client)
-    const unmute = vi.spyOn(client, 'unmute').mockResolvedValue({ id: '7', muting: false } as mastodon.v1.Relationship)
-    const mute = vi.spyOn(client, 'mute').mockResolvedValue({ id: '7', muting: true } as mastodon.v1.Relationship)
+    const unmute = vi.spyOn(client, 'unmute').mockResolvedValue({ id: '7', muting: false } as Relationship)
+    const mute = vi.spyOn(client, 'mute').mockResolvedValue({ id: '7', muting: true } as Relationship)
     const el = await mount()
     const button = () => section(el, 'mutes-h').querySelector<HTMLElement>('li.account caribou-button')!
     button().click()
@@ -118,7 +117,7 @@ describe('<caribou-moderation-settings>', () => {
   it('Unblock calls the server and turns the button to Block', async () => {
     const client = signIn()
     stub(client)
-    const unblock = vi.spyOn(client, 'unblock').mockResolvedValue({ id: '8', blocking: false } as mastodon.v1.Relationship)
+    const unblock = vi.spyOn(client, 'unblock').mockResolvedValue({ id: '8', blocking: false } as Relationship)
     const el = await mount()
     section(el, 'blocks-h').querySelector<HTMLElement>('li.account caribou-button')!.click()
     await flush()
@@ -131,8 +130,8 @@ describe('<caribou-moderation-settings>', () => {
     HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
     const client = signIn()
     stub(client)
-    vi.spyOn(client, 'unblock').mockResolvedValue({ id: '8', blocking: false } as mastodon.v1.Relationship)
-    const block = vi.spyOn(client, 'block').mockResolvedValue({ id: '8', blocking: true } as mastodon.v1.Relationship)
+    vi.spyOn(client, 'unblock').mockResolvedValue({ id: '8', blocking: false } as Relationship)
+    const block = vi.spyOn(client, 'block').mockResolvedValue({ id: '8', blocking: true } as Relationship)
     const el = await mount()
     const button = () => section(el, 'blocks-h').querySelector<HTMLElement>('li.account caribou-button')!
     button().click()

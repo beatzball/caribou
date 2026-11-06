@@ -1,16 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   _testOnlyResetRelationships, loadRelationships, relationshipCache, relationshipKey, toggleFollow,
 } from '../relationships.js'
 
 const ME = 'alice@example.social' as UserKey
 
-function rel(id: string, patch: Partial<mastodon.v1.Relationship> = {}): mastodon.v1.Relationship {
-  return { id, following: false, requested: false, followedBy: false, ...patch } as mastodon.v1.Relationship
+function rel(id: string, patch: Partial<Relationship> = {}): Relationship {
+  return { id, following: false, requested: false, followedBy: false, ...patch } as Relationship
 }
 
 function fakeClient(over: Partial<CaribouClient> = {}): CaribouClient {
@@ -55,9 +54,9 @@ describe('loadRelationships', () => {
   })
 
   it('keeps a follow that started while the read was out', async () => {
-    let answer!: (r: mastodon.v1.Relationship[]) => void
+    let answer!: (r: Relationship[]) => void
     const client = fakeClient({
-      fetchRelationships: vi.fn(() => new Promise<mastodon.v1.Relationship[]>((r) => { answer = r })),
+      fetchRelationships: vi.fn(() => new Promise<Relationship[]>((r) => { answer = r })),
     })
     const opts = { clientSource: () => client }
     const loading = loadRelationships(['7', '8'], opts)
@@ -75,9 +74,9 @@ describe('loadRelationships', () => {
 
   // Review round 1 (Codex 5): a follow already on its way when the read starts.
   it('keeps a follow that was still waiting when the read started', async () => {
-    let answerFollow!: (r: mastodon.v1.Relationship) => void
+    let answerFollow!: (r: Relationship) => void
     const client = fakeClient({
-      follow: vi.fn(() => new Promise<mastodon.v1.Relationship>((r) => { answerFollow = r })),
+      follow: vi.fn(() => new Promise<Relationship>((r) => { answerFollow = r })),
     })
     const opts = { clientSource: () => client }
     const following = toggleFollow({ id: '7', acct: 'bob', locked: false }, opts)

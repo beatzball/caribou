@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 import { countChars, plainText, replyMentions, replyVisibility } from '../_compose-text.js'
 
-function status(acct: string, mentions: string[]): mastodon.v1.Status {
+function status(acct: string, mentions: string[]): Status {
   return {
     account: { acct },
     mentions: mentions.map((m) => ({ acct: m })),
-  } as unknown as mastodon.v1.Status
+  } as unknown as Status
 }
 
 describe('countChars', () => {

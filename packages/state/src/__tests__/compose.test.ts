@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import {
   clearDraft, draftSlot, emptyDraft, findRedraftSlot, loadDraft, postDraft, saveDraft,
 } from '../compose.js'
@@ -15,8 +14,8 @@ function fakeClient(userKey = alice, createStatus = vi.fn()): CaribouClient {
   return { userKey, createStatus } as unknown as CaribouClient
 }
 
-function posted(id: string): mastodon.v1.Status {
-  return { id, account: { id: 'a1' } } as mastodon.v1.Status
+function posted(id: string): Status {
+  return { id, account: { id: 'a1' } } as Status
 }
 
 beforeEach(() => {

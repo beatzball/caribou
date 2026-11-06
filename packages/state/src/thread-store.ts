@@ -1,6 +1,5 @@
 import { batch, signal, type ReadonlySignal } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { CaribouClient, CaribouError } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, CaribouError, Status } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, mergeStatus } from './caches.js'
 
 export type AsyncState<T> =
@@ -10,12 +9,12 @@ export type AsyncState<T> =
   | { status: 'error'; error: CaribouError }
 
 export interface ThreadContext {
-  ancestors: mastodon.v1.Status[]
-  descendants: mastodon.v1.Status[]
+  ancestors: Status[]
+  descendants: Status[]
 }
 
 export interface ThreadStore {
-  focused: ReadonlySignal<AsyncState<mastodon.v1.Status>>
+  focused: ReadonlySignal<AsyncState<Status>>
   context: ReadonlySignal<AsyncState<ThreadContext>>
   load(): Promise<void>
   /**
@@ -23,20 +22,20 @@ export interface ThreadStore {
    * server data). Posts already shown get their fresh copy in place; new
    * replies go after the last one, so nothing above the reader moves.
    */
-  offer(fresh: ThreadContext & { focused: mastodon.v1.Status }): void
+  offer(fresh: ThreadContext & { focused: Status }): void
 
   /** Test-only — do not use in production code. Injects descendants directly
    *  into the context signal so integration tests can drive descendant-arrival
    *  scenarios without a real Mastodon client. Mirrors _testOnlyPrepend on
    *  TimelineStore. */
-  _testOnlySetDescendants(xs: mastodon.v1.Status[]): void
+  _testOnlySetDescendants(xs: Status[]): void
 }
 
 export interface CreateThreadStoreOpts {
   initial?: {
-    focused: mastodon.v1.Status
-    ancestors: mastodon.v1.Status[]
-    descendants: mastodon.v1.Status[]
+    focused: Status
+    ancestors: Status[]
+    descendants: Status[]
   }
 }
 
@@ -45,7 +44,7 @@ export function createThreadStore(
   statusId: string,
   opts: CreateThreadStoreOpts,
 ): ThreadStore {
-  const focused = signal<AsyncState<mastodon.v1.Status>>({ status: 'idle' })
+  const focused = signal<AsyncState<Status>>({ status: 'idle' })
   const context = signal<AsyncState<ThreadContext>>({ status: 'idle' })
 
   if (opts.initial) {
@@ -91,16 +90,16 @@ export function createThreadStore(
     }
   }
 
-  function offer(fresh: ThreadContext & { focused: mastodon.v1.Status }) {
+  function offer(fresh: ThreadContext & { focused: Status }) {
     batch(() => offerNow(fresh))
   }
 
   // A reply that the fresh thread no longer has stays, and a new ancestor is
   // not added: both would move the posts above the reader.
-  function offerNow(fresh: ThreadContext & { focused: mastodon.v1.Status }) {
-    const byId = new Map<string, mastodon.v1.Status>()
+  function offerNow(fresh: ThreadContext & { focused: Status }) {
+    const byId = new Map<string, Status>()
     for (const s of [fresh.focused, ...fresh.ancestors, ...fresh.descendants]) byId.set(s.id, mergeStatus(s))
-    const latest = (s: mastodon.v1.Status) => byId.get(s.id) ?? s
+    const latest = (s: Status) => byId.get(s.id) ?? s
     focused.value = { status: 'ready', data: byId.get(fresh.focused.id)! }
     if (context.value.status !== 'ready') {
       context.value = { status: 'ready', data: {
@@ -120,7 +119,7 @@ export function createThreadStore(
   }
 
   // test-only — do not use in production code
-  function _testOnlySetDescendants(xs: mastodon.v1.Status[]): void {
+  function _testOnlySetDescendants(xs: Status[]): void {
     for (const s of xs) cacheStatus(s)
     const currentAncestors =
       context.value.status === 'ready' ? context.value.data.ancestors : []

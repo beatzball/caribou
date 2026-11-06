@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
-import type { mastodon } from 'masto'
+import type { Status, StatusSource } from '@beatzball/caribou-mastodon-client'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
@@ -62,7 +62,6 @@ function absoluteLabel(iso: string): string {
 // URL path (some non-Mastodon ActivityPub bridges expose ids with `/`,
 // `:`, etc.). Encode via `encodeURIComponent` so the URL stays
 // well-formed; the route resolver decodes it back.
-type Status = mastodon.v1.Status
 
 // The fields the action bar shows. The card re-reads them from the status
 // cache after mount, so an action taken anywhere shows here even when the
@@ -307,7 +306,7 @@ export class CaribouStatusCard extends LitElement {
     .boost-attribution a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   `]
 
-  @property({ attribute: false }) status: mastodon.v1.Status | null = null
+  @property({ attribute: false }) status: Status | null = null
   @property({ reflect: true }) variant: StatusCardVariant = 'timeline'
   // The instance the status came from. Optional: without it the card reads
   // the instance off the enclosing `<caribou-app-shell>` after mount.
@@ -664,7 +663,7 @@ export class CaribouStatusCard extends LitElement {
       return
     }
     let current: Status
-    let source: mastodon.v1.StatusSource
+    let source: StatusSource
     try {
       current = await owner.client.fetchStatus(post.id)
       if (!stillOwner(owner)) return

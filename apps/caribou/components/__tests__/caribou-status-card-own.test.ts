@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Status, StatusEdit } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   activeClient, activeUserKey, addUserSession, deletedStatusIds, statusCache, users,
@@ -9,7 +9,6 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 import type { CaribouConfirmDialog } from '../caribou-confirm-dialog.js'
 import type { CaribouStatusHistory } from '../caribou-status-history.js'
 
-type Status = mastodon.v1.Status
 
 const ME = toUserKey('alice', 'example.social')
 const alice = { id: 'me', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' }
@@ -23,7 +22,7 @@ const post = (id: string, over: Record<string, unknown> = {}) => ({
 function signIn(account: object | null = { id: 'me', acct: 'alice', username: 'alice' }) {
   addUserSession({
     userKey: ME, server: 'example.social', token: 't', vapidKey: '', createdAt: 0,
-    account: account as mastodon.v1.Account,
+    account: account as Account,
   })
 }
 
@@ -365,7 +364,7 @@ describe('<caribou-status-card> edits', () => {
     const history = vi.spyOn(activeClient.value!, 'fetchStatusHistory').mockResolvedValue([
       { content: '<p>teh typo</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z', mediaAttachments: [] },
       { content: '<p>the fix<img src=x onerror="alert(1)"></p>', spoilerText: 'cw', createdAt: '2026-04-28T13:00:00Z', mediaAttachments: [] },
-    ] as unknown as mastodon.v1.StatusEdit[])
+    ] as unknown as StatusEdit[])
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
     $(el, 'caribou-button.edited')!.click()
     await settle(el)
@@ -395,7 +394,7 @@ describe('<caribou-status-card> edits', () => {
 
   it('the history dialog closes on an account change and drops a late answer', async () => {
     signIn()
-    let resolve!: (v: mastodon.v1.StatusEdit[]) => void
+    let resolve!: (v: StatusEdit[]) => void
     vi.spyOn(activeClient.value!, 'fetchStatusHistory').mockReturnValue(new Promise((r) => { resolve = r }))
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
     $(el, 'caribou-button.edited')!.click()
@@ -405,7 +404,7 @@ describe('<caribou-status-card> edits', () => {
     activeUserKey.value = null
     await settle(el)
     expect(document.querySelector('caribou-status-history')).toBeNull()
-    resolve([{ content: '<p>late</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z' } as unknown as mastodon.v1.StatusEdit])
+    resolve([{ content: '<p>late</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z' } as unknown as StatusEdit])
     await settle(el)
     expect(dlg.versions).toBeNull()
   })
@@ -414,7 +413,7 @@ describe('<caribou-status-card> edits', () => {
     signIn()
     vi.spyOn(activeClient.value!, 'fetchStatusHistory').mockResolvedValue([
       { content: '<p>a</p>', spoilerText: '', createdAt: '2026-04-28T12:00:00Z', mediaAttachments: [] },
-    ] as unknown as mastodon.v1.StatusEdit[])
+    ] as unknown as StatusEdit[])
     const el = await mount(post('1', { editedAt: '2026-04-28T13:00:00Z' }))
     const mark = $(el, 'caribou-button.edited')!
     // happy-dom ignores delegatesFocus, so focus the inner button as a

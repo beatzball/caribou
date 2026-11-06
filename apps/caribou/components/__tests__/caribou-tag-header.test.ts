@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Tag } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, tagCache, users, type UserSession,
 } from '@beatzball/caribou-state'
@@ -8,7 +8,7 @@ import type { CaribouTagHeader } from '../caribou-tag-header.js'
 import type { CaribouButton } from '../caribou-button.js'
 
 const tag = (name: string, following: boolean) =>
-  ({ id: '1', name, url: `https://example.social/tags/${name}`, following }) as mastodon.v1.Tag
+  ({ id: '1', name, url: `https://example.social/tags/${name}`, following }) as Tag
 
 function signIn(): NonNullable<typeof activeClient.value> {
   addUserSession({

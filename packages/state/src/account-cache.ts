@@ -1,9 +1,8 @@
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account } from '@beatzball/caribou-mastodon-client'
 import { accountCache, cacheAccount } from './caches.js'
 
 export interface AccountCache {
-  lookup(handle: string): Promise<mastodon.v1.Account | null>
+  lookup(handle: string): Promise<Account | null>
 }
 
 export function createAccountCache(
@@ -15,7 +14,7 @@ export function createAccountCache(
   // thundering-herd case where multiple callers ask for the same handle
   // before the first request lands.
   const handleToId = new Map<string, string>()
-  const inflight = new Map<string, Promise<mastodon.v1.Account | null>>()
+  const inflight = new Map<string, Promise<Account | null>>()
 
   return {
     async lookup(handle) {

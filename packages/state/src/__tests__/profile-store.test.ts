@@ -1,12 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { statusCache } from '../caches.js'
 import { createProfileStore } from '../profile-store.js'
 
-const FIXTURE: mastodon.v1.Status[] = [
-  { id: '210', content: 'p1', account: { id: '42' } } as unknown as mastodon.v1.Status,
-  { id: '209', content: 'p0', account: { id: '42' } } as unknown as mastodon.v1.Status,
+const FIXTURE: Status[] = [
+  { id: '210', content: 'p1', account: { id: '42' } } as unknown as Status,
+  { id: '209', content: 'p0', account: { id: '42' } } as unknown as Status,
 ]
 
 beforeEach(() => {
@@ -40,7 +39,7 @@ describe('createProfileStore', () => {
       calls++
       return calls === 1
         ? FIXTURE
-        : ([{ id: '208', content: 'p-1', account: { id: '42' } }] as unknown as mastodon.v1.Status[])
+        : ([{ id: '208', content: 'p-1', account: { id: '42' } }] as unknown as Status[])
     })
     const client = { fetchAccountStatuses } as unknown as CaribouClient
     const store = createProfileStore('42', 'posts', { clientSource: () => client })

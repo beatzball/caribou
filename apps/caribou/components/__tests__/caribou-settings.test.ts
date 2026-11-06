@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { activeUserKey, users, type UserSession } from '@beatzball/caribou-state'
 import { toUserKey, type UserKey } from '@beatzball/caribou-auth'
-import type { mastodon } from 'masto'
+import type { Account } from '@beatzball/caribou-mastodon-client'
 import type { LitElement } from 'lit'
 import '../caribou-settings.js'
 import { SETTINGS_SECTIONS } from '../_settings-sections.js'
@@ -17,10 +17,10 @@ vi.mock('../_switch-account.js', async (importOriginal) => ({
 const alice = toUserKey('alice', 'example.social')
 const bob = toUserKey('bob', 'other.example')
 
-function session(userKey: UserKey, account: Partial<mastodon.v1.Account> | null = null): UserSession {
+function session(userKey: UserKey, account: Partial<Account> | null = null): UserSession {
   return {
     userKey, server: userKey.split('@')[1]!, token: 'T', vapidKey: '',
-    account: account as mastodon.v1.Account | null, createdAt: 1,
+    account: account as Account | null, createdAt: 1,
   }
 }
 

@@ -1,19 +1,19 @@
 import { batch, signal } from '@preact/signals-core'
-import type { mastodon } from 'masto'
+import type { Account, FilterResult, Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { inflight, isMutating } from './inflight.js'
 
 // Treat these signals as read-only. Mutating the Map in place
 // (`statusCache.value.set(...)`) skips the signal-write and consumers
 // won't re-render — always go through cacheStatus/cacheAccount/updateStatus.
-export const statusCache  = signal<Map<string, mastodon.v1.Status>>(new Map())
-export const accountCache = signal<Map<string, mastodon.v1.Account>>(new Map())
+export const statusCache  = signal<Map<string, Status>>(new Map())
+export const accountCache = signal<Map<string, Account>>(new Map())
 
 // Posts the reader deleted in this page session, by id. A list that keeps
 // its own copies (a thread, notifications) hides a card whose post is here.
 // The ids are the active account's server's, so an account change empties it.
 export const deletedStatusIds = signal<ReadonlySet<string>>(new Set())
 
-export function cacheAccount(acct: mastodon.v1.Account): void {
+export function cacheAccount(acct: Account): void {
   const next = new Map(accountCache.value)
   next.set(acct.id, acct)
   accountCache.value = next
@@ -29,11 +29,11 @@ export interface PostRecord {
   /** Write order of the last copy fetched with a token; 0 when none was. */
   tokenAt: number
   /** That copy's `filtered`. Undefined until a copy with a token arrives. */
-  filtered?: readonly mastodon.v1.FilterResult[]
+  filtered?: readonly FilterResult[]
   /** True once a copy carried `quote` (a Mastodon 4.5 server). */
   hasQuote: boolean
   /** The quote the post shows. */
-  quote?: mastodon.v1.Status['quote']
+  quote?: Status['quote']
 }
 
 export const postRecords = signal<ReadonlyMap<string, PostRecord>>(new Map())
@@ -44,7 +44,7 @@ let arrivals = 0
 
 // A shallow quote (an id only: Mastodon embeds a quoted post's own quote so)
 // that names the accepted post `had` carries in full says less than `had`.
-function shallowOf(now: mastodon.v1.Status['quote'], had: mastodon.v1.Status['quote']): boolean {
+function shallowOf(now: Status['quote'], had: Status['quote']): boolean {
   if (!now || now.state !== 'accepted' || 'quotedStatus' in now && now.quotedStatus) return false
   const full = had && had.state === 'accepted' && 'quotedStatus' in had ? had.quotedStatus : null
   return !!full && 'quotedStatusId' in now && now.quotedStatusId === full.id
@@ -62,7 +62,7 @@ function writeRecord(id: string, rec: PostRecord): void {
 // A copy without one counts for the quote only while no copy with a token
 // has arrived for this account: the quote state is the reader's (muted,
 // blocked, unauthorized …), and page data must not undo it.
-function noteCopy(copy: mastodon.v1.Status): PostRecord {
+function noteCopy(copy: Status): PostRecord {
   const had = postRecords.peek().get(copy.id) ?? { tokenAt: 0, hasQuote: false }
   const withToken = Array.isArray(copy.filtered)
   let rec = had
@@ -75,12 +75,12 @@ function noteCopy(copy: mastodon.v1.Status): PostRecord {
 }
 
 /** The newest `filtered` known for a post, or undefined when none is known. */
-export function readerFiltered(id: string): readonly mastodon.v1.FilterResult[] | undefined {
+export function readerFiltered(id: string): readonly FilterResult[] | undefined {
   return postRecords.value.get(id)?.filtered
 }
 
 /** The quote a post shows by the rules, null for none, undefined when no copy said. */
-export function readerQuote(id: string): mastodon.v1.Status['quote'] | undefined {
+export function readerQuote(id: string): Status['quote'] | undefined {
   const rec = postRecords.value.get(id)
   return rec?.hasQuote ? rec.quote ?? null : undefined
 }
@@ -88,16 +88,16 @@ export function readerQuote(id: string): mastodon.v1.Status['quote'] | undefined
 // The post a quote shows (Mastodon 4.5), when the copy carries it. The
 // quote inside a quoted post is shallow (an id only), so this goes one
 // level deep.
-function quotedIn(status: mastodon.v1.Status): mastodon.v1.Status | null {
+function quotedIn(status: Status): Status | null {
   const q = status.quote
   return q && 'quotedStatus' in q && q.quotedStatus ? q.quotedStatus : null
 }
 
-function withQuoted(status: mastodon.v1.Status, quoted: mastodon.v1.Status): mastodon.v1.Status {
+function withQuoted(status: Status, quoted: Status): Status {
   return { ...status, quote: { ...status.quote!, quotedStatus: quoted } }
 }
 
-function store(status: mastodon.v1.Status): void {
+function store(status: Status): void {
   const next = new Map(statusCache.value)
   next.set(status.id, status)
   statusCache.value = next
@@ -108,7 +108,7 @@ function store(status: mastodon.v1.Status): void {
  * Caches a copy just off the network, as it is, except that an older copy
  * never undoes a newer edit of the post (`protectEdits`).
  */
-export function cacheStatus(status: mastodon.v1.Status): void {
+export function cacheStatus(status: Status): void {
   batch(() => cacheOne(status))
 }
 
@@ -119,8 +119,8 @@ export function cacheStatus(status: mastodon.v1.Status): void {
 // cached again: its quoted post is an old copy, and its reader fields would
 // undo newer ones.
 function settleQuote(
-  fresh: mastodon.v1.Status, put: (s: mastodon.v1.Status) => mastodon.v1.Status,
-): mastodon.v1.Status {
+  fresh: Status, put: (s: Status) => Status,
+): Status {
   const rec = noteCopy(fresh)
   if (!rec.hasQuote) return fresh
   if (rec.quote !== fresh.quote) return { ...fresh, quote: rec.quote }
@@ -131,7 +131,7 @@ function settleQuote(
   return out
 }
 
-function cacheOne(status: mastodon.v1.Status): mastodon.v1.Status {
+function cacheOne(status: Status): Status {
   let out = settleQuote(protectVotes(protectEdits(status)), cacheOne)
   if (out.reblog) out = { ...out, reblog: settleQuote(out.reblog, cacheOne) }
   store(out)
@@ -144,7 +144,7 @@ function voting(id: string): boolean {
 }
 
 // The cached copy of post `id`: alone, or else inside a boost.
-function knownCopy(id: string, cache: Map<string, mastodon.v1.Status>): mastodon.v1.Status | undefined {
+function knownCopy(id: string, cache: Map<string, Status>): Status | undefined {
   const own = cache.get(id)
   if (own) return own
   for (const s of cache.values()) if (s.reblog?.id === id) return s.reblog
@@ -153,20 +153,20 @@ function knownCopy(id: string, cache: Map<string, mastodon.v1.Status>): mastodon
 
 // While the reader's vote is out, the cache shows it (the vote's own
 // optimistic write). A copy fetched before the vote must not take it back.
-function keepVoteInFlight(fresh: mastodon.v1.Status, cache: Map<string, mastodon.v1.Status>): mastodon.v1.Status {
+function keepVoteInFlight(fresh: Status, cache: Map<string, Status>): Status {
   if (!fresh.poll || !voting(fresh.id)) return fresh
   const had = knownCopy(fresh.id, cache)?.poll
   return had && had.id === fresh.poll.id ? { ...fresh, poll: had } : fresh
 }
 
-function protectVotes(fresh: mastodon.v1.Status): mastodon.v1.Status {
+function protectVotes(fresh: Status): Status {
   const cache = statusCache.peek()
   let out = keepVoteInFlight(fresh, cache)
   if (fresh.reblog) out = { ...out, reblog: keepVoteInFlight(fresh.reblog, cache) }
   return out
 }
 
-export function updateStatus(id: string, patch: Partial<mastodon.v1.Status>): void {
+export function updateStatus(id: string, patch: Partial<Status>): void {
   const current = statusCache.value.get(id)
   // Silent no-op on cache miss. Currently dormant (nothing evicts), but if
   // eviction ever lands, callers must not assume the patch took.
@@ -190,14 +190,14 @@ export const EDIT_FIELDS = [
 ] as const
 
 /** True when `known` carries a newer edit of the post than `fresh`. */
-export function olderEdit(fresh: mastodon.v1.Status, known: mastodon.v1.Status | null | undefined): boolean {
+export function olderEdit(fresh: Status, known: Status | null | undefined): boolean {
   if (!known?.editedAt) return false
   return !fresh.editedAt || Date.parse(fresh.editedAt) < Date.parse(known.editedAt)
 }
 
 // The newest edit of a post the cache knows: its own copy, or the copy
 // inside a boost of it, whichever was edited last.
-function newestKnown(id: string, cache: Map<string, mastodon.v1.Status>): mastodon.v1.Status | undefined {
+function newestKnown(id: string, cache: Map<string, Status>): Status | undefined {
   let best = cache.get(id)
   for (const s of cache.values()) {
     if (s.reblog?.id === id && (!best || olderEdit(best, s.reblog))) best = s.reblog
@@ -206,16 +206,16 @@ function newestKnown(id: string, cache: Map<string, mastodon.v1.Status>): mastod
 }
 
 /** The newest edit of a post the cache knows, alone or inside a boost. */
-export function newestKnownStatus(id: string): mastodon.v1.Status | undefined {
+export function newestKnownStatus(id: string): Status | undefined {
   return newestKnown(id, statusCache.peek())
 }
 
-function keepEdit(fresh: mastodon.v1.Status, known: mastodon.v1.Status | undefined): mastodon.v1.Status {
+function keepEdit(fresh: Status, known: Status | undefined): Status {
   if (!known || !olderEdit(fresh, known)) return fresh
   const out = { ...fresh } as Record<string, unknown>
   const had = known as unknown as Record<string, unknown>
   for (const key of EDIT_FIELDS) out[key] = had[key]
-  return out as unknown as mastodon.v1.Status
+  return out as unknown as Status
 }
 
 // A copy can be older than one already cached: a fetch that left before
@@ -223,7 +223,7 @@ function keepEdit(fresh: mastodon.v1.Status, known: mastodon.v1.Status | undefin
 // upstream cache, or an earlier edit's late answer. The newest edit wins,
 // for the post and for the post inside a boost; every other field comes
 // from the copy at hand.
-function protectEdits(fresh: mastodon.v1.Status): mastodon.v1.Status {
+function protectEdits(fresh: Status): Status {
   const cache = statusCache.peek()
   let out = keepEdit(fresh, newestKnown(fresh.id, cache))
   if (fresh.reblog) out = { ...out, reblog: keepEdit(fresh.reblog, newestKnown(fresh.reblog.id, cache)) }
@@ -236,8 +236,8 @@ function protectEdits(fresh: mastodon.v1.Status): mastodon.v1.Status {
 // A public copy with fewer votes than the one the reader voted on is older
 // (the server's upstream cache); its counts do not undo the vote.
 function keepPollVote(
-  fresh: mastodon.v1.Poll | null | undefined, had: mastodon.v1.Poll | null | undefined, voting: boolean,
-): mastodon.v1.Poll | null | undefined {
+  fresh: Poll | null | undefined, had: Poll | null | undefined, voting: boolean,
+): Poll | null | undefined {
   if (!fresh || !had || fresh.id !== had.id) return fresh
   if (voting) return had
   if (fresh.voted !== undefined || had.voted === undefined) return fresh
@@ -245,7 +245,7 @@ function keepPollVote(
   return { ...fresh, voted: had.voted, ownVotes: had.ownVotes ?? null }
 }
 
-function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status): mastodon.v1.Status {
+function keepReaderFields(fresh: Status, current: Status): Status {
   const out = { ...fresh } as Record<string, unknown>
   const had = current as unknown as Record<string, unknown>
   for (const key of READER_FIELDS) {
@@ -264,7 +264,7 @@ function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status
     // than the count the reader's own action came back with.
     if (isMutating(current.id) || (had[flag] === true && now < was)) out[count] = had[count]
   }
-  return out as unknown as mastodon.v1.Status
+  return out as unknown as Status
 }
 
 /**
@@ -272,11 +272,11 @@ function keepReaderFields(fresh: mastodon.v1.Status, current: mastodon.v1.Status
  * copy already cached. Content, edits and counts come from `fresh`. Returns
  * the status as now cached.
  */
-export function mergeStatus(fresh: mastodon.v1.Status): mastodon.v1.Status {
+export function mergeStatus(fresh: Status): Status {
   return batch(() => merge(fresh))
 }
 
-function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
+function merge(fresh: Status): Status {
   const cache = statusCache.peek()
   // A post cached only inside a boost is known too: its reader fields
   // (a vote cast through the boost) carry over to the post's own entry.
@@ -298,7 +298,7 @@ function merge(fresh: mastodon.v1.Status): mastodon.v1.Status {
   return next
 }
 
-function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
+function withoutReaderFields(status: Status): Status {
   const out = { ...status } as Record<string, unknown>
   for (const key of READER_FIELDS) delete out[key]
   if (status.poll) {
@@ -308,7 +308,7 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
   if (status.reblog) out.reblog = withoutReaderFields(status.reblog)
   const quoted = quotedIn(status)
   if (quoted) out.quote = { ...status.quote!, quotedStatus: withoutReaderFields(quoted) }
-  return out as unknown as mastodon.v1.Status
+  return out as unknown as Status
 }
 
 /**
@@ -320,8 +320,8 @@ function withoutReaderFields(status: mastodon.v1.Status): mastodon.v1.Status {
  */
 // A quote of a deleted post says so, since the mark that hid it is about
 // to go.
-function withoutDeletedQuotes(s: mastodon.v1.Status, gone: ReadonlySet<string>): mastodon.v1.Status {
-  const dead = (p: mastodon.v1.Status) => {
+function withoutDeletedQuotes(s: Status, gone: ReadonlySet<string>): Status {
+  const dead = (p: Status) => {
     const q = quotedIn(p)
     return q && gone.has(q.id) ? { ...p, quote: { state: 'deleted' as const, quotedStatus: null } } : p
   }
@@ -330,7 +330,7 @@ function withoutDeletedQuotes(s: mastodon.v1.Status, gone: ReadonlySet<string>):
 }
 
 export function forgetReaderFields(): void {
-  const next = new Map<string, mastodon.v1.Status>()
+  const next = new Map<string, Status>()
   // The deleted marks go with the account; a copy of a deleted post that a
   // fetch brought back must go with them, or it would show again.
   const gone = deletedStatusIds.peek()

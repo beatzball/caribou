@@ -1,22 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import {
   CaribouError, type CaribouClient, type FetchGroupedNotificationsParams, type FetchNotificationsParams,
   type GroupedNotificationsPage, type NotificationGroupData,
+  type Account,
+  type Notification,
+  type Status,
 } from '@beatzball/caribou-mastodon-client'
 import { accountCache, cacheStatus, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
 import { createNotificationsStore, NOTIFICATIONS_PAGE, resetGroupedSupport } from '../notifications-store.js'
 
-const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<mastodon.v1.Notification[]>>()
+const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<Notification[]>>()
 const fetchGroupedNotifications = vi.fn<(p?: FetchGroupedNotificationsParams) => Promise<GroupedNotificationsPage>>()
 
 function client(userKey = 'alice@example.social'): CaribouClient {
   return { userKey, fetchNotifications, fetchGroupedNotifications } as unknown as CaribouClient
 }
 
-function account(id: string): mastodon.v1.Account {
-  return { id, acct: id, username: id, displayName: id } as unknown as mastodon.v1.Account
+function account(id: string): Account {
+  return { id, acct: id, username: id, displayName: id } as unknown as Account
 }
 
 function g(key: string, type: string, min: string, max: string, by: string[], count = by.length): NotificationGroupData {
@@ -30,7 +32,7 @@ function g(key: string, type: string, min: string, max: string, by: string[], co
 function page(groups: NotificationGroupData[]): GroupedNotificationsPage {
   return {
     accounts: ['alice', 'bob', 'carol', 'dave'].map(account),
-    statuses: [{ id: 's1', content: '<p>s1</p>', account: { id: 'me' } } as unknown as mastodon.v1.Status],
+    statuses: [{ id: 's1', content: '<p>s1</p>', account: { id: 'me' } } as unknown as Status],
     notificationGroups: groups,
   }
 }
@@ -105,7 +107,7 @@ describe('createNotificationsStore with grouped notifications', () => {
     fetchNotifications.mockResolvedValue([
       { id: '3', type: 'favourite', createdAt: '2026-11-01T00:00:00Z', account: account('alice'), status: { id: 's1' } },
       { id: '2', type: 'favourite', createdAt: '2026-11-01T00:00:00Z', account: account('bob'), status: { id: 's1' } },
-    ] as unknown as mastodon.v1.Notification[])
+    ] as unknown as Notification[])
     const store = createNotificationsStore({ clientSource: () => client() })
     await store.load()
     expect(store.error.value).toBeNull()
@@ -160,7 +162,7 @@ describe('createNotificationsStore with grouped notifications', () => {
   })
 
   const post = (content: string, favourited: boolean) =>
-    ({ id: 's1', content, favourited, account: { id: 'me' } }) as unknown as mastodon.v1.Status
+    ({ id: 's1', content, favourited, account: { id: 'me' } }) as unknown as Status
   const pageWith = (id: string, content: string, favourited: boolean, by: string): GroupedNotificationsPage => ({
     accounts: [{ ...account(by), displayName: `${by} ${content}` }],
     statuses: [post(content, favourited)],
@@ -218,7 +220,7 @@ describe('createNotificationsStore with grouped notifications', () => {
     fetchGroupedNotifications.mockResolvedValueOnce(page([g('favourite-s1', 'favourite', '5', '9', ['alice'])]))
     const store = createNotificationsStore({ clientSource: () => client() })
     await store.load()
-    cacheStatus({ id: 's1', content: '<p>s1</p>', account: { id: 'me' }, favourited: true } as unknown as mastodon.v1.Status)
+    cacheStatus({ id: 's1', content: '<p>s1</p>', account: { id: 'me' }, favourited: true } as unknown as Status)
     expect(store.groups.value[0]!.status?.favourited).toBe(true)
   })
 })
