@@ -186,7 +186,7 @@ probe). Phase 0 found that it does (12.2).
 | 1 | OAuth client | Public browser client now; client-assertion backend later | BFF; token-mediating backend (5.3) |
 | 2 | Where tokens live | Browser IndexedDB, keyed by DID | Caribou server |
 | 3 | Model between screens and clients | Caribou-owned types with Mastodon field names + `bluesky` field + `capabilities` | A neutral model with new field names |
-| 4 | Client library | **Open again** (12.3 item 5, 12.2): `@atproto/api` + `@atproto/oauth-client-browser` measured 181.6 KB gzipped | Hand-written XRPC calls with `@atproto/oauth-client-browser` |
+| 4 | Client library | `@atproto/api` and `@atproto/oauth-client-browser`, in one lazy chunk (181.6 KB gzipped) that only Bluesky pages load (decided 2026-11-06; 12.3 item 5) | The OAuth library with hand-written XRPC calls: about 56 KB, but moderation and rich text would also be hand-written |
 | 5 | UserKey for Bluesky | `<did>@bsky` | `<handle>@<pds host>` |
 | 6 | Profile route | `/@alice.example.com` (a dot and no second `@` means Bluesky) | A prefix, like `/bsky/@alice.example.com` |
 | 7 | Post route | `/@<handle or did>/<rkey>` | The full AT URI in the path |
@@ -196,7 +196,7 @@ probe). Phase 0 found that it does (12.2).
 | 11 | Scopes | `atproto transition:generic` | Granular scopes when the PDS has them |
 | 12 | Moderation | The SDK's `moderatePost` / `moderateProfile` with label definitions, kept per surface | Map labels onto Mastodon's CW fields |
 
-The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions. Row 4 is open again: phase 0 measured the chunk over the 100 KB line (12.2, 12.3 item 5).
+The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions. Row 4 was reopened when phase 0 measured the chunk over the 100 KB line (12.2), and the owner decided it again on 2026-11-06 (12.3 item 5).
 
 ---
 
@@ -1102,7 +1102,7 @@ request's destination host and the links built, not only disabled buttons.
 
 | risk | how we handle it |
 |---|---|
-| The atproto libraries are large. | Phase 0 measured 181.6 KB gzipped for both libraries (12.2). A dynamic `import()` only when a Bluesky account is active or a Bluesky page opens. Mastodon-only readers pay nothing. |
+| The atproto libraries are large. | Phase 0 measured 181.6 KB gzipped for both libraries (12.2), and the owner accepted that size (12.3 item 5). A dynamic `import()` only when a Bluesky account is active or a Bluesky page opens. The `codeSplitting` group (12.2) keeps the chunk off Mastodon pages, and a test checks it. Mastodon-only readers pay nothing. |
 | The two-week re-approval annoys readers. | Expiry keeps drafts, prefs and the page (5.6). Option D (5.3) is the upgrade. |
 | Moderation done wrong shows harmful media. | SDK functions, label definitions, fail closed, the veil, `noOverride` (7.4). |
 | `!no-unauthenticated` ignored in SSR. | Test that the content is absent (8.3). |
@@ -1130,13 +1130,13 @@ request's destination host and the links built, not only disabled buttons.
 
 | unknown | answer |
 |---|---|
-| Lazy chunk size | **181.6 KB gzipped** (942.9 KB minified, 145.8 KB brotli). This is over the 100 KB line in 12.3 item 5, so the owner decides again. |
+| Lazy chunk size | **181.6 KB gzipped** (942.9 KB minified, 145.8 KB brotli). This is over the 100 KB line in 12.3 item 5, so the owner decided again (decided: both libraries, 12.3 item 5). |
 | SDK with Vite and Lit SSR | Works without patches. It needs one Vite setting (below). The build passes and SSR pages render. The server does not import the libraries at render time (only a dynamic `import()` in `firstUpdated` reaches them). The build still copies them into `dist/server` (about 5 MB). |
 | `!no-unauthenticated` on the public AppView | **The AppView returns everything.** `getProfile`, `getAuthorFeed` and `getPostThread` all answer 200 with full text. So Caribou must hide it (8.3). |
 | `litro dev` and a dotted route | Works. `/@alice.example.com`, `/@alice.example.com/<rkey>`, `/@did:plc:...` and handles that end like a file (`.ts`, `.md`, `.js`, `.css`, `.json`, `.png`) all render the profile page. |
 | Public AppView rate limit | **Not advertised.** No `ratelimit-*` or `retry-after` headers, on 200 or 403. 15 requests in a row to `app.bsky.actor.getProfile?actor=bsky.app`, each with a random extra query parameter so the CDN missed its cache (`cdn-cache: MISS`), all answered 200. A small sample. |
 | Option-D key binding | **Not run.** It needs a registered confidential client (below). |
-| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. The callback and the Following fetch: **pending** (they need a person to approve). |
+| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. A person approved it on 2026-11-06. After a reload the page showed the account signed in and fetched Following (9 posts on a 10-post request; Following can return fewer). The session came back from IndexedDB, through the SDK's own stored `sub` pointer (5.6 restores by Caribou's stored DID instead). The spike page still said "Not signed in" right after the redirect back; a reload then showed the account. The cause was not isolated: the page sets its state from `init()`'s result, so `init()` resolved without a session on the callback load while the session was stored anyway (a second `init()` call on that load would do this). Phase 2b's callback page must call `init()` once and act on its result (5.5 steps 4–6); test it against the fixture authorization server (5.5). |
 
 Versions measured: `@atproto/api` 0.30.3, `@atproto/oauth-client-browser`
 0.5.14, Vite 8.3.2.
@@ -1148,6 +1148,12 @@ the Vite build report prints it (minified, gzipped): `@atproto/api` about
 about 14 KB. `@atproto/api` is about three quarters of the chunk. The OAuth
 library alone is under the line. Hand-written XRPC calls (section 4, row 4,
 other way) plus the OAuth library would come to about 56 KB plus our own code.
+But the moderation (7.4) and rich-text (7.1, 7.2) parts of `@atproto/api` do not
+load small on their own. Measured with esbuild, tree-shaken, gzipped: the moderation module
+alone (bundled by file path; the package does not export those paths) is about 123 KB, of the rich-text module
+alone about 126 KB, and `moderatePost`, `moderateProfile` and `RichText` from
+the package root about 154 KB. So hand-written XRPC calls save little unless
+moderation and facet detection are hand-written too.
 
 **The Vite setting.** Without it, rolldown (Vite's bundler) puts its own runtime
 helpers inside the atproto chunk. `app-main` uses one of those helpers, so it
@@ -1203,7 +1209,13 @@ The owner took the recommended answer to each open question.
 4. **Local and Public:** hidden for Bluesky. Feeds come in phase 5.
 5. **Client library:** `@atproto/api`, if its lazy chunk is under about 100 KB
    gzipped (measured in phase 0). If it is larger, the owner decides again.
-   **Open again:** phase 0 measured 181.6 KB (12.2).
+   Phase 0 measured 181.6 KB (12.2). **Decided again (owner, 2026-11-06):**
+   use both libraries, `@atproto/api` and `@atproto/oauth-client-browser`, and
+   accept the 181.6 KB lazy chunk. Only Bluesky pages and Bluesky accounts load
+   it (the `codeSplitting` group in 12.2). Why: moderation (7.4) and
+   `RichText.detectFacets` (7.1, 7.2) come from `@atproto/api`, and those parts
+   alone are 123–154 KB gzipped (12.2). Writing them by hand would add about 3–4
+   weeks and would replace Bluesky's own label handling with ours.
 6. **Signed-out SSR:** yes, for Bluesky profiles and threads, honoring
    `!no-unauthenticated`.
 7. **Video:** day one ships without playback (thumbnail and link only).
@@ -1241,7 +1253,7 @@ it missed the seams.
 Add the two libraries on a branch. Build and record the lazy chunk's size.
 Sign in through the loopback client; fetch Following; check Lit SSR still
 builds. Probe the other unknowns in 12.2. Write the numbers into 12.2.
-The result (181.6 KB gzipped) reopened the client library choice (12.3 item 5).
+The result (181.6 KB gzipped) reopened the client library choice; the owner accepted both libraries in the lazy chunk (12.3 item 5).
 
 ### Phase 1a — type and paging seams
 
