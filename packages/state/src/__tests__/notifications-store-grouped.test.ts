@@ -170,6 +170,8 @@ describe('createNotificationsStore with grouped notifications', () => {
   })
 
   it('a superseded load writes nothing to the shared caches', async () => {
+    // The client is alice's: her copies carry her flags.
+    activeUserKey.value = 'alice@example.social' as never
     let release!: (p: GroupedNotificationsPage) => void
     fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
     const store = createNotificationsStore({ clientSource: () => client() })
@@ -185,6 +187,8 @@ describe('createNotificationsStore with grouped notifications', () => {
   })
 
   it('a superseded Load older writes nothing to the shared caches', async () => {
+    // The client is alice's: her copies carry her flags.
+    activeUserKey.value = 'alice@example.social' as never
     fetchGroupedNotifications.mockResolvedValueOnce(pageWith('9', 'new', false, 'bob'))
     const store = createNotificationsStore({ clientSource: () => client() })
     await store.load()

@@ -1,6 +1,6 @@
 import { batch } from '@preact/signals-core'
 import type { CaribouClient, EditStatusInput, Status } from '@beatzball/caribou-mastodon-client'
-import { deletedStatusIds, mergeStatus, olderEdit, statusCache } from './caches.js'
+import { deletedStatusIds, mergeStatus, olderEdit, readSource, statusCache } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
 
@@ -19,13 +19,14 @@ export async function editOwnStatus(
   client: CaribouClient, statusId: string, input: EditStatusInput,
 ): Promise<Status | null> {
   const generation = ownerGeneration()
+  const source = readSource(client.userKey)
   const fresh = await client.editStatus(statusId, input)
   if (generation !== ownerGeneration()) return null
   // Always cached, even when only a boost held the post: a later stale
   // copy then has this one to lose against. The merge keeps the newest
   // edit, so a late answer to an earlier edit changes nothing.
   return batch(() => {
-    const cached = mergeStatus(fresh)
+    const cached = mergeStatus(fresh, source)
     replaceInBoosts(cached)
     return cached
   })

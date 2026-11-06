@@ -90,6 +90,14 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   // nothing, not even the rollback: the change already dropped the
   // optimistic flag (`forgetReaderFields`).
   const generation = ownerGeneration()
+  // The slot records the flag and ref the cached post ended with; the
+  // given ones stand in when the post is not cached.
+  const finish = (flagIfNone: boolean, refIfNone: string | null) => {
+    const ended = statusCache.value.get(id) ?? findWrapped(id)
+    const on = ended ? ended[flag] === true : flagIfNone
+    const ref = !record ? null : ended ? ended.bluesky?.[record] ?? null : refIfNone
+    slotWriteFinished(id, slot, on, ref, lagOf(client))
+  }
   inflight.add(key)
   // The slot rule: no copy changes this slot while the write is out, and a
   // copy fetched before it finished never does (README, "Viewer state").
@@ -105,7 +113,7 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
       [flag]: fresh[flag],
       ...(count ? { [count]: fresh[count] } : {}),
     }, record, record ? fresh.bluesky?.[record] : undefined))
-    slotWriteFinished(id, slot, fresh[flag] === true, lagOf(client))
+    finish(fresh[flag] === true, record ? fresh.bluesky?.[record] ?? null : null)
   } catch {
     if (generation !== ownerGeneration()) return
     // Undo only what this click did. If the flag no longer holds the
@@ -113,7 +121,7 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
     writePost(id, (post) => post[flag] === !wasOn
       ? withRecord(shift(post, flag, wasOn, count, -delta), record, oldRecord)
       : post)
-    slotWriteFinished(id, slot, wasOn, lagOf(client))
+    finish(wasOn, oldRecord)
     toast(`Could not ${VERBS[method]} this post. Try again.`)
   } finally {
     inflight.delete(key)

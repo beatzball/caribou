@@ -1,7 +1,9 @@
 import { batch, signal } from '@preact/signals-core'
 import type { Account, FilterResult, Poll, Status } from '@beatzball/caribou-mastodon-client'
-import { inflight, isMutating } from './inflight.js'
-import { forgetSlots, readerNow, settleViewer, PAGE_DATA, type CopySource } from './viewer-slots.js'
+import { inflight } from './inflight.js'
+import {
+  forgetSlots, readerNow, settleViewer, withoutViewerState, PAGE_DATA, type CopySource,
+} from './viewer-slots.js'
 
 export { PAGE_DATA, readAs, readerNow, readSource, type CopySource } from './viewer-slots.js'
 
@@ -188,13 +190,6 @@ export function updateStatus(id: string, patch: Partial<Status>): void {
   statusCache.value = next
 }
 
-// What the reader has done to a post. `forgetReaderFields` drops them all.
-// Who may change them is the slot rule (`viewer-slots.ts`); `filtered` has
-// its own (the post's record).
-const READER_FIELDS = ['favourited', 'reblogged', 'bookmarked', 'muted', 'pinned', 'filtered'] as const
-
-const PAIRED_COUNTS = [['favourited', 'favouritesCount'], ['reblogged', 'reblogsCount']] as const
-
 /** The fields an edit of a post changes. */
 export const EDIT_FIELDS = [
   'content', 'spoilerText', 'sensitive', 'mediaAttachments', 'card', 'poll', 'editedAt',
@@ -264,15 +259,6 @@ function keepReaderFields(fresh: Status, current: Status, source: CopySource): S
   // the reader's own and newer: a filter added or removed since shows.
   if (!Array.isArray(out.filtered) && 'filtered' in had) out.filtered = had.filtered
   out.poll = keepPollVote(fresh.poll, current.poll, voting(current.id))
-  for (const [flag, count] of PAIRED_COUNTS) {
-    const was = (had[count] as number | undefined) ?? 0
-    const now = (out[count] as number | undefined) ?? 0
-    // While an action is out, the count holds its optimistic step, and a
-    // failure undoes that step from whatever the count is then. And page
-    // data passes through the server's upstream cache, so it can be older
-    // than the count the reader's own action came back with.
-    if (isMutating(current.id) || (had[flag] === true && now < was)) out[count] = had[count]
-  }
   return out as unknown as Status
 }
 
@@ -310,12 +296,12 @@ function merge(fresh: Status, source: CopySource): Status {
   return next
 }
 
+// What the reader has done to a post: the viewer fields (`viewer-slots.ts`),
+// `filtered` and a poll's vote. With them gone the copy is as page data
+// would have it.
 function withoutReaderFields(status: Status): Status {
-  const out = { ...status } as Record<string, unknown>
-  for (const key of READER_FIELDS) delete out[key]
-  // A Bluesky post's record refs are the reader's too; with them gone the
-  // copy is as page data would have it.
-  if (status.bluesky) out.bluesky = { ...status.bluesky, likeUri: null, repostUri: null, viewerOf: null }
+  const out = { ...withoutViewerState(status) } as Record<string, unknown>
+  delete out.filtered
   if (status.poll) {
     const { voted: _voted, ownVotes: _own, ...poll } = status.poll
     out.poll = poll

@@ -67,6 +67,15 @@ async function mount(status: Status, instance?: string): Promise<CaribouStatusCa
   return el
 }
 
+// Lets the client's answer land and the card and its buttons render again.
+async function settle(el: CaribouStatusCard): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 0))
+    while (!(await el.updateComplete)) { /* settle */ }
+    for (const b of el.shadowRoot!.querySelectorAll('caribou-icon-button')) await (b as unknown as { updateComplete: Promise<unknown> }).updateComplete
+  }
+}
+
 function button(el: CaribouStatusCard, cls: string): HTMLButtonElement {
   return el.shadowRoot!.querySelector(`.actions caribou-icon-button.${cls}`)!.shadowRoot!.querySelector('button')!
 }
@@ -98,6 +107,31 @@ describe('Mastodon reader, Mastodon post (as today)', () => {
     expect(permalink(el)).toBe('/@bob/7')
     button(el, 'favourite').click()
     expect(favourite).toHaveBeenCalledWith({ id: '7' })
+  })
+
+  it('a favourite and its undo show in the card: pressed state, name and count', async () => {
+    signIn()
+    vi.spyOn(activeClient.value!, 'favourite').mockResolvedValue(mastodonPost({ favourited: true, favouritesCount: 4 }))
+    const unfavourite = vi.spyOn(activeClient.value!, 'unfavourite')
+      .mockResolvedValue(mastodonPost({ favourited: false, favouritesCount: 3 }))
+    // A list caches its posts before it shows a card.
+    cacheStatus(mastodonPost())
+    const el = await mount(statusCache.value.get('7')!, 'example.social')
+    const fav = () => button(el, 'favourite')
+    expect([fav().getAttribute('aria-pressed'), fav().getAttribute('aria-label'), fav().textContent?.trim()])
+      .toEqual(['false', 'Favourite', '3'])
+
+    fav().click()
+    await settle(el)
+    expect([fav().getAttribute('aria-pressed'), fav().getAttribute('aria-label'), fav().textContent?.trim()])
+      .toEqual(['true', 'Unfavourite', '4'])
+    expect(statusCache.value.get('7')!.favourited).toBe(true)
+
+    fav().click()
+    await settle(el)
+    expect(unfavourite).toHaveBeenCalledWith({ id: '7' })
+    expect([fav().getAttribute('aria-pressed'), fav().getAttribute('aria-label'), fav().textContent?.trim()])
+      .toEqual(['false', 'Favourite', '3'])
   })
 })
 

@@ -211,8 +211,8 @@ hold what they decide:
 | `quote` | record | a copy with a token has arrived and this one has none, or this quote is shallow (an id only) and names the accepted post the record carries in full |
 | the quoted post | cache, under its own id | — it is cached only when the copy's own quote wins; a quote kept from the record is not cached again |
 | edit fields (`EDIT_FIELDS`) | cache | the known copy has a newer `editedAt` |
-| viewer state: the slots (`favourited` + `likeUri`, `reblogged` + `repostUri`, `bookmarked`) and `muted`, `pinned`, `replyDisabled`, `embeddingDisabled` | cache | it is not the reader's copy (page data, another account's); for a slot also: its write is out, the copy's fetch started before that write finished, or it disagrees with that write inside the network's lag window. The rule is in the `@beatzball/caribou-state` README, "Viewer state" |
-| counts beside a flag | cache | on a merge: an action is out, or the flag is set and the new count is lower. A kept slot moves the copy's count by one to match the kept flag |
+| viewer state: the slots (`favourited` + `likeUri`, `reblogged` + `repostUri`, `bookmarked`) and `muted`, `pinned`, `replyDisabled`, `embeddingDisabled` | cache | it is not the reader's copy (page data, another account's); for a slot also: its write is out, the copy's fetch started before that write finished, or it disagrees with that write (flag or record ref) inside the network's lag window. A copy from another account never brings viewer state, cached or not. The rule is in the `@beatzball/caribou-state` README, "Viewer state" |
+| counts beside a flag | cache | the reader's copy: never, but when its slot is kept the count moves by one to match the kept flag. Any other copy: the slot's write is out, or the cached flag is set and the new count is lower |
 | `poll` | cache | the reader's vote is out; on a merge, the new copy has no `voted` (it keeps the known `voted`, `ownVotes`, and counts when they are higher) |
 
 The reader flags stay in the cached copy: the reader's own actions write

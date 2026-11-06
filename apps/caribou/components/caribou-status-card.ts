@@ -8,7 +8,7 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
+  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { accountPath, postPath } from './_profile-path.js'
@@ -679,6 +679,8 @@ export class CaribouStatusCard extends LitElement {
     }
     let current: Status
     let source: StatusSource
+    // The reader's copy: its source is taken before the request.
+    const read = readSource(owner.client.userKey)
     try {
       current = await owner.client.fetchStatus(post.id)
       if (!stillOwner(owner)) return
@@ -692,7 +694,7 @@ export class CaribouStatusCard extends LitElement {
       return
     }
     if (!stillOwner(owner)) return
-    const status = mergeStatus(current)
+    const status = mergeStatus(current, read)
     window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status, source } } }))
   }
 
