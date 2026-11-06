@@ -1149,8 +1149,8 @@ about 14 KB. `@atproto/api` is about three quarters of the chunk. The OAuth
 library alone is under the line. Hand-written XRPC calls (section 4, row 4,
 other way) plus the OAuth library would come to about 56 KB plus our own code.
 But the moderation (7.4) and rich-text (7.1, 7.2) parts of `@atproto/api` do not
-load small on their own. Measured with esbuild, tree-shaken, gzipped: a deep
-import of the moderation module alone is about 123 KB, of the rich-text module
+load small on their own. Measured with esbuild, tree-shaken, gzipped: the moderation module
+alone (bundled by file path; the package does not export those paths) is about 123 KB, of the rich-text module
 alone about 126 KB, and `moderatePost`, `moderateProfile` and `RichText` from
 the package root about 154 KB. So hand-written XRPC calls save little unless
 moderation and facet detection are hand-written too.
