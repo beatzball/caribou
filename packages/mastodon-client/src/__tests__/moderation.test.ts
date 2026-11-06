@@ -84,10 +84,10 @@ describe('CaribouClient moderation lists', () => {
     const fetch = kind === 'mutes' ? c.fetchMutes : c.fetchBlocks
     const first = await fetch()
     expect(first.map((a) => a.id)).toEqual(['9', '5'])
-    expect(first.nextMaxId).toBe('300')
-    const second = await fetch({ maxId: '300' })
+    expect(first.nextCursor).toBe('300')
+    const second = await fetch({ cursor: '300' })
     expect(second.map((a) => a.id)).toEqual(['1'])
-    expect(second.nextMaxId).toBeNull()
+    expect(second.nextCursor).toBeNull()
     expect(seen).toEqual([null, '300'])
   })
 

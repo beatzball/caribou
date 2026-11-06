@@ -13,8 +13,8 @@ import type { CaribouModerationSettings } from '../caribou-moderation-settings.j
 const account = (id: string, acct: string) =>
   ({ id, acct, username: acct, displayName: acct.toUpperCase(), avatar: '', avatarStatic: '' }) as Account
 
-const page = (items: Account[], nextMaxId: string | null = null): AccountPage =>
-  Object.assign(items, { nextMaxId })
+const page = (items: Account[], nextCursor: string | null = null): AccountPage =>
+  Object.assign(items, { nextCursor })
 
 const FILTER = {
   id: 'f1', title: 'Spoilers', context: ['home', 'thread'], filterAction: 'warn', expiresAt: null,
@@ -32,8 +32,8 @@ function signIn(): CaribouClient {
 
 function stub(client: CaribouClient, over: {
   filters?: () => Promise<Filter[]>
-  mutes?: (p?: { maxId?: string }) => Promise<AccountPage>
-  blocks?: (p?: { maxId?: string }) => Promise<AccountPage>
+  mutes?: (p?: { cursor?: string }) => Promise<AccountPage>
+  blocks?: (p?: { cursor?: string }) => Promise<AccountPage>
 } = {}) {
   return {
     filters: vi.spyOn(client, 'fetchFilters').mockImplementation(over.filters ?? (async () => [FILTER])),
@@ -168,7 +168,7 @@ describe('<caribou-moderation-settings>', () => {
   it('loads more by the cursor', async () => {
     const client = signIn()
     const s = stub(client, {
-      mutes: async (p) => p?.maxId === '300' ? page([account('5', 'dave')]) : page([account('7', 'bob')], '300'),
+      mutes: async (p) => p?.cursor === '300' ? page([account('5', 'dave')]) : page([account('7', 'bob')], '300'),
     })
     const el = await mount()
     const more = section(el, 'mutes-h').querySelector<HTMLElement>('.more caribou-button')!
@@ -176,7 +176,7 @@ describe('<caribou-moderation-settings>', () => {
     more.click()
     await flush()
     await el.updateComplete
-    expect(s.mutes).toHaveBeenLastCalledWith({ maxId: '300' })
+    expect(s.mutes).toHaveBeenLastCalledWith({ cursor: '300' })
     expect([...section(el, 'mutes-h').querySelectorAll('li.account')].map((li) => li.getAttribute('data-account-id')))
       .toEqual(['7', '5'])
     expect(section(el, 'mutes-h').querySelector('.more')).toBeNull()

@@ -71,7 +71,7 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
     const fetch = signIn()
     const tl = document.createElement('caribou-timeline') as CaribouTimeline
     tl.kind = 'local'
-    tl.initial = { statuses: [post('1'), post('2')], nextMaxId: null }
+    tl.initial = { statuses: [post('1'), post('2')], nextCursor: null }
     await inShell(tl, 'example.social')
     expect(fetch).toHaveBeenCalledWith(['1', '2'])
     expect(cards(tl).every((c) => c.hasAttribute('hidden'))).toBe(true)
@@ -81,7 +81,7 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
     const fetch = signIn('other.example')
     const tl = document.createElement('caribou-timeline') as CaribouTimeline
     tl.kind = 'public'
-    tl.initial = { statuses: [post('1')], nextMaxId: null }
+    tl.initial = { statuses: [post('1')], nextCursor: null }
     await inShell(tl, 'example.social')
     expect(fetch).not.toHaveBeenCalled()
   })
@@ -89,7 +89,7 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
   it('timeline: signed out — does not ask', async () => {
     const tl = document.createElement('caribou-timeline') as CaribouTimeline
     tl.kind = 'local'
-    tl.initial = { statuses: [post('1')], nextMaxId: null }
+    tl.initial = { statuses: [post('1')], nextCursor: null }
     await inShell(tl, 'example.social')
     expect(cards(tl)[0]!.hasAttribute('hidden')).toBe(false)
   })
@@ -115,7 +115,7 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
     pr.instance = 'example.social'
     pr.initial = {
       account: { ...ACCT, note: '', followersCount: 0, followingCount: 0, statusesCount: 1 } as unknown as Account,
-      statuses: [post('1')], nextMaxId: null, tab: 'posts',
+      statuses: [post('1')], nextCursor: null, tab: 'posts',
     }
     await inShell(pr, 'example.social')
     expect(fetch).toHaveBeenCalledWith(['1'])
@@ -140,7 +140,7 @@ describe('lists ask for the reader\'s view of server-rendered posts', () => {
   async function timelineWith(statuses: Status[]) {
     const tl = document.createElement('caribou-timeline') as CaribouTimeline
     tl.kind = 'local'
-    tl.initial = { statuses, nextMaxId: null }
+    tl.initial = { statuses, nextCursor: null }
     return inShell(tl, 'example.social')
   }
 

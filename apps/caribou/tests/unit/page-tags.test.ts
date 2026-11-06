@@ -50,7 +50,7 @@ describe('/tags/[tag] pageData', () => {
     const { pageData } = await import('../../pages/tags/[tag].js')
     const result = await pageData.fetcher(eventFor('Caturday'))
     expect(result).toMatchObject({
-      kind: 'ok', statuses: fixture, nextMaxId: '10', tag: 'Caturday',
+      kind: 'ok', statuses: fixture, nextCursor: '10', tag: 'Caturday',
       shell: { instance: 'example.social', source: 'cookie' },
     })
     expect(fetchTagTimeline).toHaveBeenCalledWith(
@@ -91,7 +91,7 @@ describe('/tags/[tag] pageData', () => {
     const { pageData } = await import('../../pages/tags/[tag].js')
     const result = await pageData.fetcher(eventFor('ai', '?max_id=10'))
     expect(fetchTagTimeline).toHaveBeenCalledWith(expect.objectContaining({ maxId: '10' }))
-    expect(result).toMatchObject({ kind: 'ok', statuses: [], nextMaxId: null })
+    expect(result).toMatchObject({ kind: 'ok', statuses: [], nextCursor: null })
   })
 
   it('sanitizes status content', async () => {
@@ -149,20 +149,20 @@ describe('<page-tags-tag> render', () => {
       id: '5', content: '<p>five</p>', createdAt: '2026-05-08T12:00:00Z',
       account: { id: '1', acct: 'alice', username: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' },
     }] as unknown as Fetched
-    const el = await mount({ kind: 'ok', statuses, nextMaxId: '5', shell, tag: 'Caturday' })
+    const el = await mount({ kind: 'ok', statuses, nextCursor: '5', shell, tag: 'Caturday' })
     const header = el.shadowRoot!.querySelector('caribou-tag-header')!
     expect(header.getAttribute('name')).toBe('Caturday')
     const timeline = el.shadowRoot!.querySelector<CaribouTimeline>('caribou-timeline')!
     expect(timeline.getAttribute('kind')).toBe('hashtag')
     expect(timeline.getAttribute('tag')).toBe('Caturday')
-    expect(timeline.initial).toMatchObject({ statuses, nextMaxId: '5' })
+    expect(timeline.initial).toMatchObject({ statuses, nextCursor: '5' })
     await timeline.updateComplete
     expect(timeline.shadowRoot!.querySelectorAll('caribou-status-card')).toHaveLength(1)
   })
 
   it('sets the document title, and puts the app title back when it leaves', async () => {
     history.replaceState(null, '', '/tags/ai')
-    const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' })
+    const el = await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' })
     expect(document.title).toBe('#ai · Caribou')
     el.remove()
     expect(document.title).toBe('Caribou')
@@ -172,10 +172,10 @@ describe('<page-tags-tag> render', () => {
   // left it. That late render must not take the title of the page now shown.
   it('a page the reader has left does not change the title', async () => {
     history.replaceState(null, '', '/tags/ai')
-    const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' })
+    const el = await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' })
     el.remove()
     history.replaceState(null, '', '/home')
-    el.serverData = { kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' }
+    el.serverData = { kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' }
     await el.updateComplete
     expect(document.title).toBe('Caribou')
   })
@@ -183,13 +183,13 @@ describe('<page-tags-tag> render', () => {
   it('a page that is not the one at the address does not change the title', async () => {
     history.replaceState(null, '', '/home')
     document.title = 'Caribou'
-    await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: 'ai' })
+    await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' })
     expect(document.title).toBe('Caribou')
   })
 
   it('sets the title of a non-ASCII tag, and of a name that is not a hashtag', async () => {
     history.replaceState(null, '', `/tags/${encodeURIComponent('日本')}`)
-    const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell, tag: '日本' })
+    const el = await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: '日本' })
     expect(document.title).toBe('#日本 · Caribou')
     el.remove()
     history.replaceState(null, '', '/tags/a-b')
@@ -227,7 +227,7 @@ describe('<page-tags-tag> signed in, with no instance on the server', () => {
       account: { id: '1', acct: 'me' }, createdAt: 1,
     } as never)
     const client = activeClient.value!
-    const fetchTimeline = vi.spyOn(client, 'fetchTimeline').mockResolvedValue([])
+    const fetchTimeline = vi.spyOn(client, 'fetchTimeline').mockResolvedValue(Object.assign([], { nextCursor: null }))
     vi.spyOn(client, 'fetchTag').mockResolvedValue({ id: '1', name: 'ai', url: '', following: false })
     try {
       await import('../../pages/tags/[tag].js')

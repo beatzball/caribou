@@ -65,7 +65,7 @@ test.beforeEach(async ({ page }) => {
     await page.route((url) => url.pathname === `/@${handle}`, (route) => {
       if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
       return route.fulfill(json({
-        kind: 'ok', account: a, statuses: [], nextMaxId: null, tab: 'posts',
+        kind: 'ok', account: a, statuses: [], nextCursor: null, tab: 'posts',
         shell: { instance: INSTANCE }, handle,
       }))
     })
@@ -91,7 +91,7 @@ test("a hashtag keeps its instance href and opens Caribou's tag page without a p
   await page.route((url) => url.pathname === '/tags/AI', (route) => {
     if (!/application\/json/.test(route.request().headers()['accept'] ?? '')) return route.continue()
     return route.fulfill(json({
-      kind: 'ok', statuses: [], nextMaxId: null, shell: { instance: INSTANCE }, tag: 'AI',
+      kind: 'ok', statuses: [], nextCursor: null, shell: { instance: INSTANCE }, tag: 'AI',
     }))
   })
   await gotoSettled(page, '/home')

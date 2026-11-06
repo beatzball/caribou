@@ -21,7 +21,8 @@ export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag'
 
 export interface TimelineInitial {
   statuses: Status[]
-  nextMaxId: string | null
+  /** Where the next page starts, as the server's page named it: opaque. */
+  nextCursor: string | null
 }
 
 function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
@@ -85,6 +86,8 @@ export class CaribouTimeline extends LitElement {
   // A failed older page shows at the bottom, where the reader is looking.
   @state() private failedOlder = false
   @state() private hasMore = true
+  // The store's cursor for the next page, which the no-JS link carries.
+  @state() private nextCursor: string | null = null
   @state() private newPostsCount = 0
   // False while nobody is signed in on this device (browsing /local or
   // /public with the instance cookie only). The store then has no client
@@ -133,7 +136,7 @@ export class CaribouTimeline extends LitElement {
     if (this.store) {
       // The page got fresh data in the background (`enterWithCache`).
       if (changed.has('initial') && this.initial && !isCachedSnapshot(this.initial)) {
-        this.store.offer(this.initial.statuses, this.initial.nextMaxId)
+        this.store.offer(this.initial.statuses, this.initial.nextCursor)
         this.loadReaderView(this.initial.statuses)
       }
       return
@@ -150,7 +153,7 @@ export class CaribouTimeline extends LitElement {
       // The list is already there; what is new goes to the banner. A cached
       // snapshot is what the store was filled from, so it adds nothing.
       if (this.initial && !isCachedSnapshot(this.initial)) {
-        kept.offer(this.initial.statuses, this.initial.nextMaxId)
+        kept.offer(this.initial.statuses, this.initial.nextCursor)
         this.loadReaderView(this.initial.statuses)
       }
       if (activeClient.peek() && !firstLoadSettling()) {
@@ -191,6 +194,7 @@ export class CaribouTimeline extends LitElement {
       this.errorMsg = store.error.value?.message ?? null
       this.failedOlder = store.failedOp.value === 'loadMore'
       this.hasMore = store.hasMore.value
+      this.nextCursor = store.nextCursor.value
       this.newPostsCount = store.newPostsCount.value
       this.canFetch = activeClient.value !== null
     })
@@ -294,7 +298,10 @@ export class CaribouTimeline extends LitElement {
   override render() {
     // No store: this is the server. It renders from `initial` alone.
     const statuses = this.store ? this.statuses : (this.initial?.statuses ?? [])
-    const hasMore = this.store ? this.hasMore : this.initial?.nextMaxId != null
+    // The cursor is opaque: the link carries it as the page named it, never
+    // the last post's id.
+    const nextCursor = this.store ? this.nextCursor : (this.initial?.nextCursor ?? null)
+    const hasMore = nextCursor != null && (this.store ? this.hasMore : true)
     // A failed background check must not hide the list the reader has; it
     // shows above it until a later check works.
     const failed = this.errorMsg !== null || this.retrying !== null
@@ -334,7 +341,7 @@ export class CaribouTimeline extends LitElement {
         ${failed && failedOlder
           ? this.renderFailed()
           : hasMore
-          ? html`<a href="?max_id=${encodeURIComponent(last.id)}" rel="next" data-sentinel
+          ? html`<a href="?max_id=${encodeURIComponent(nextCursor!)}" rel="next" data-sentinel
                     @click=${this.onSentinelClick}>Older posts →</a>`
           : nothing}
       </div>

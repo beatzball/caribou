@@ -1,5 +1,7 @@
 import { computed, signal, type ReadonlySignal } from '@preact/signals-core'
-import type { CaribouClient, CaribouError, Status } from '@beatzball/caribou-mastodon-client'
+import type {
+  CaribouClient, CaribouError, Status, TimelinePage,
+} from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, mergeStatus, statusCache } from './caches.js'
 
 export type ProfileTab = 'posts' | 'replies' | 'media'
@@ -10,13 +12,20 @@ export interface ProfileStore {
   loading:   ReadonlySignal<boolean>
   error:     ReadonlySignal<CaribouError | null>
   hasMore:   ReadonlySignal<boolean>
+  /**
+   * Where the next older page starts, as the last page named it: opaque,
+   * passed back to the client as it came. Null before the first page and
+   * after the last.
+   */
+  nextCursor: ReadonlySignal<string | null>
   load(): Promise<void>
   loadMore(): Promise<void>
 }
 
 export interface CreateProfileStoreOpts {
   clientSource: () => CaribouClient | null
-  initial?: { statuses: Status[]; nextMaxId: string | null }
+  /** The server's first page and the cursor it named for the next one. */
+  initial?: { statuses: Status[]; nextCursor: string | null }
 }
 
 export function createProfileStore(
@@ -28,6 +37,8 @@ export function createProfileStore(
   const loading   = signal(false)
   const error     = signal<CaribouError | null>(null)
   const hasMore   = signal(true)
+  // Never derived from a status id: on another network it is not one.
+  const cursor    = signal<string | null>(null)
 
   const statuses = computed<Status[]>(() => {
     const cache = statusCache.value
@@ -42,14 +53,21 @@ export function createProfileStore(
     // reader state (filters, flags) over the server's token-less one.
     for (const s of opts.initial.statuses) mergeStatus(s)
     statusIds.value = opts.initial.statuses.map((s) => s.id)
-    hasMore.value = opts.initial.nextMaxId != null
+    hasMore.value = opts.initial.nextCursor != null
+    cursor.value = opts.initial.nextCursor
     firstLoadConsumed = true
   }
 
-  async function runFetch(maxId?: string): Promise<Status[]> {
+  async function runFetch(cursor?: string): Promise<TimelinePage> {
     const client = opts.clientSource()
-    if (!client) return []
-    return client.fetchAccountStatuses(accountId, { tab, maxId })
+    if (!client) return Object.assign([], { nextCursor: null })
+    return client.fetchAccountStatuses(accountId, { tab, cursor })
+  }
+
+  // A page that names no cursor is the last one.
+  function setPaging(page: TimelinePage) {
+    cursor.value = page.nextCursor ?? null
+    hasMore.value = page.length > 0 && cursor.value !== null
   }
 
   async function load() {
@@ -63,7 +81,7 @@ export function createProfileStore(
       const page = await runFetch(undefined)
       for (const s of page) cacheStatus(s)
       statusIds.value = page.map((s) => s.id)
-      hasMore.value = page.length > 0
+      setPaging(page)
     } catch (err) {
       error.value = err as CaribouError
     } finally {
@@ -73,20 +91,21 @@ export function createProfileStore(
 
   async function loadMore() {
     if (loading.value || !hasMore.value) return
-    const last = statusIds.value[statusIds.value.length - 1]
-    if (!last) return
+    const anchor = cursor.value
+    if (!anchor) return
     loading.value = true
     try {
-      const page = await runFetch(last)
+      const page = await runFetch(anchor)
       for (const s of page) cacheStatus(s)
       statusIds.value = [...statusIds.value, ...page.map((s) => s.id)]
-      hasMore.value = page.length > 0
+      setPaging(page)
     } catch (err) {
+      // The cursor is unchanged: the next try asks from the same place.
       error.value = err as CaribouError
     } finally {
       loading.value = false
     }
   }
 
-  return { statusIds, statuses, loading, error, hasMore, load, loadMore }
+  return { statusIds, statuses, loading, error, hasMore, nextCursor: cursor, load, loadMore }
 }

@@ -25,7 +25,7 @@ function status(id: string): Status {
 }
 
 const INITIAL: ProfileInitial = {
-  account: ACCOUNT, statuses: [status('210'), status('209')], nextMaxId: '209', tab: 'posts',
+  account: ACCOUNT, statuses: [status('210'), status('209')], nextCursor: '209', tab: 'posts',
 }
 
 // Lit wraps each binding in comment markers; drop them to read the text.
@@ -97,8 +97,16 @@ describe('caribou-profile SSR', () => {
     expect(out).toMatch(/<a href="\/@alice@example\.social\?tab=posts&amp;max_id=209"\s+rel="next"\s+data-sentinel[^>]*>Older posts →<\/a>/)
   })
 
+  // Seam 5: the cursor is opaque. Another network's cursor is no post id,
+  // so the link carries the cursor the page named, as it came.
+  it('puts the page cursor in the next-page link, not the last post id', async () => {
+    const out = await render({ ...INITIAL, nextCursor: 'tok:2026-11-05T10' })
+    expect(out).toMatch(/<a href="\/@alice@example\.social\?tab=posts&amp;max_id=tok%3A2026-11-05T10"\s+rel="next"/)
+    expect(out).not.toContain('max_id=209')
+  })
+
   it('renders no next-page link on the last page', async () => {
-    const out = await render({ ...INITIAL, nextMaxId: null })
+    const out = await render({ ...INITIAL, nextCursor: null })
     expect(out).not.toMatch(/<a [^>]*rel="next"/)
   })
 

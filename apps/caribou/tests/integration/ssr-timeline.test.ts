@@ -12,7 +12,7 @@ const mkStatus = (id: string) => ({
 
 describe('caribou-timeline SSR', () => {
   it('renders every card from .initial, inside the timeline shadow root', async () => {
-    const initial = { statuses: [mkStatus('3'), mkStatus('2'), mkStatus('1')], nextMaxId: '1' }
+    const initial = { statuses: [mkStatus('3'), mkStatus('2'), mkStatus('1')], nextCursor: '1' }
     const out = await ssr(html`<caribou-timeline kind="local" .initial=${initial}></caribou-timeline>`)
 
     expect(out).toMatch(/<caribou-timeline[^>]*kind="local"[^>]*><template shadowroot="open" shadowrootmode="open">/)
@@ -33,13 +33,13 @@ describe('caribou-timeline SSR', () => {
   })
 
   it('renders the no-JS pagination link as a query-only href', async () => {
-    const initial = { statuses: [mkStatus('7'), mkStatus('5')], nextMaxId: '5' }
+    const initial = { statuses: [mkStatus('7'), mkStatus('5')], nextCursor: '5' }
     const out = await ssr(html`<caribou-timeline kind="public" .initial=${initial}></caribou-timeline>`)
     expect(out).toMatch(/<a href="\?max_id=5" rel="next" data-sentinel\s*>Older posts →<\/a>/)
   })
 
   it('renders the empty notice for an empty first page', async () => {
-    const out = await ssr(html`<caribou-timeline kind="local" .initial=${{ statuses: [], nextMaxId: null }}></caribou-timeline>`)
+    const out = await ssr(html`<caribou-timeline kind="local" .initial=${{ statuses: [], nextCursor: null }}></caribou-timeline>`)
     expect(out).toContain('No posts yet.')
     expect(out).not.toContain('<ul>')
     expect(out).not.toContain('rel="next"')
@@ -47,7 +47,7 @@ describe('caribou-timeline SSR', () => {
 
   it('does not write to the process-wide status cache', async () => {
     const before = statusCache.value
-    await ssr(html`<caribou-timeline kind="local" .initial=${{ statuses: [mkStatus('9')], nextMaxId: '9' }}></caribou-timeline>`)
+    await ssr(html`<caribou-timeline kind="local" .initial=${{ statuses: [mkStatus('9')], nextCursor: '9' }}></caribou-timeline>`)
     expect(statusCache.value).toBe(before)
     expect(statusCache.value.size).toBe(0)
   })

@@ -23,9 +23,18 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-type Page = Status[] & { nextMaxId?: string | null }
-function clientWith(fetchTimeline: (kind: string, params?: { sinceId?: string; maxId?: string }) => Promise<Page>) {
-  return { fetchTimeline } as unknown as CaribouClient
+type Page = Status[] & { nextCursor?: string | null }
+// The fakes answer as a Mastodon timeline does: unless a page names its
+// cursor, it is the last status id, and an empty page names none.
+function clientWith(fetchTimeline: (kind: string, params?: { sinceId?: string; cursor?: string }) => Promise<Page>) {
+  return {
+    async fetchTimeline(kind: string, params?: { sinceId?: string; cursor?: string }) {
+      const page = await fetchTimeline(kind, params)
+      return page.nextCursor === undefined
+        ? Object.assign(page, { nextCursor: page[page.length - 1]?.id ?? null })
+        : page
+    },
+  } as unknown as CaribouClient
 }
 
 const alice = toUserKey('alice', 'example.social')
@@ -69,7 +78,7 @@ describe('account isolation', () => {
       activeUserKey.value = alice
       ownerGeneration()
       const net = deferred<Page>()
-      const initial = name === 'load' ? undefined : { statuses: [st('a')], nextMaxId: 'a' }
+      const initial = name === 'load' ? undefined : { statuses: [st('a')], nextCursor: 'a' }
       const store = createTimelineStore('home', {
         clientSource: () => clientWith(() => net.promise),
         ...(initial ? { initial } : {}),
@@ -112,10 +121,10 @@ describe('the new-posts buffer', () => {
     const net = deferred<Page>()
     const store = createTimelineStore('local', {
       clientSource: () => clientWith(() => net.promise),
-      initial: { statuses: [st('b')], nextMaxId: null },
+      initial: { statuses: [st('b')], nextCursor: null },
     })
     const check = store.refresh()
-    store.offer([st('c'), st('b')])
+    store.offer([st('c'), st('b')], null)
     store.applyNewPosts()
     net.resolve([st('c')])
     await check
@@ -127,10 +136,10 @@ describe('the new-posts buffer', () => {
 
   it('offer() keeps the posts between a polled post and the list', () => {
     const store = createTimelineStore('local', {
-      clientSource: () => null, initial: { statuses: [st('b'), st('a')], nextMaxId: null },
+      clientSource: () => null, initial: { statuses: [st('b'), st('a')], nextCursor: null },
     })
     store._testOnlyPrepend([st('z')])
-    store.offer([st('z'), st('y'), st('x'), st('b'), st('a')])
+    store.offer([st('z'), st('y'), st('x'), st('b'), st('a')], null)
     store.applyNewPosts()
     expect(store.statusIds.value).toEqual(['z', 'y', 'x', 'b', 'a'])
   })
@@ -139,10 +148,10 @@ describe('the new-posts buffer', () => {
   // post the check found. They go below it, not above.
   it('stays newest first when offer() brings posts older than a polled one', () => {
     const store = createTimelineStore('local', {
-      clientSource: () => null, initial: { statuses: [st('200'), st('100')], nextMaxId: null },
+      clientSource: () => null, initial: { statuses: [st('200'), st('100')], nextCursor: null },
     })
     store._testOnlyPrepend([st('1000')])
-    store.offer([st('900'), st('300'), st('200'), st('100')])
+    store.offer([st('900'), st('300'), st('200'), st('100')], null)
     store.applyNewPosts()
     // '1000' is newer than '900': ids compare by length first.
     expect(store.statusIds.value).toEqual(['1000', '900', '300', '200', '100'])
@@ -154,19 +163,19 @@ describe('an empty kept store', () => {
     const calls: unknown[] = []
     const store = createTimelineStore('public', {
       clientSource: () => clientWith(async (_k, params) => { calls.push(params); return [] }),
-      initial: { statuses: [], nextMaxId: null },
+      initial: { statuses: [], nextCursor: null },
     })
     store.offer([st('new')], 'new')
     expect(store.hasMore.value).toBe(true)
     await store.loadMore()
-    expect(calls).toEqual([{ maxId: 'new' }])
+    expect(calls).toEqual([{ cursor: 'new' }])
   })
 
   it('refresh() on a store seeded empty by the server fetches', async () => {
     const calls: unknown[] = []
     const store = createTimelineStore('home', {
       clientSource: () => clientWith(async (_k, params) => { calls.push(params); return [st('a')] }),
-      initial: { statuses: [], nextMaxId: null },
+      initial: { statuses: [], nextCursor: null },
     })
     await store.refresh()
     expect(calls).toHaveLength(1)
@@ -179,10 +188,10 @@ describe('retry', () => {
     let fail = true
     const store = createTimelineStore('home', {
       clientSource: () => clientWith(async (_k, params) => {
-        if (params?.maxId && fail) throw new Error('offline')
-        return params?.maxId ? [st('0')] : []
+        if (params?.cursor && fail) throw new Error('offline')
+        return params?.cursor ? [st('0')] : []
       }),
-      initial: { statuses: [st('1')], nextMaxId: '1' },
+      initial: { statuses: [st('1')], nextCursor: '1' },
     })
     await store.loadMore()
     expect(store.error.value?.message).toBe('offline')
@@ -197,9 +206,9 @@ describe('retry', () => {
     const store = createTimelineStore('home', {
       clientSource: () => clientWith(async (_k, params) => {
         if (fail) throw new Error('offline')
-        return params?.maxId ? [st('0')] : []
+        return params?.cursor ? [st('0')] : []
       }),
-      initial: { statuses: [st('1')], nextMaxId: '1' },
+      initial: { statuses: [st('1')], nextCursor: '1' },
     })
     expect(store.failedOp.value).toBeNull()
     await store.poll()
@@ -216,7 +225,7 @@ describe('retry', () => {
   it('a failed poll keeps a pending loadMore failure', async () => {
     const store = createTimelineStore('home', {
       clientSource: () => clientWith(async () => { throw new Error('offline') }),
-      initial: { statuses: [st('1')], nextMaxId: '1' },
+      initial: { statuses: [st('1')], nextCursor: '1' },
     })
     await store.loadMore()
     await store.poll()
@@ -231,10 +240,10 @@ describe('retry', () => {
     let fail = true
     const store = createTimelineStore('home', {
       clientSource: () => clientWith(async (_k, params) => {
-        if (params?.maxId && fail) throw new Error('offline')
+        if (params?.cursor && fail) throw new Error('offline')
         return params?.sinceId ? [st('2')] : [st('0')]
       }),
-      initial: { statuses: [st('1')], nextMaxId: '1' },
+      initial: { statuses: [st('1')], nextCursor: '1' },
     })
     await store.loadMore()
     await store.poll()
@@ -253,14 +262,14 @@ describe('retry', () => {
     let olderCalls = 0
     const store = createTimelineStore('home', {
       clientSource: () => clientWith(async (_k, params) => {
-        if (params?.maxId) {
+        if (params?.cursor) {
           olderCalls++
           if (olderCalls === 1) throw new Error('offline')
           return older.promise
         }
         throw new Error('poll offline')
       }),
-      initial: { statuses: [st('1')], nextMaxId: '1' },
+      initial: { statuses: [st('1')], nextCursor: '1' },
     })
     await store.loadMore()
     const retrying = store.retry()

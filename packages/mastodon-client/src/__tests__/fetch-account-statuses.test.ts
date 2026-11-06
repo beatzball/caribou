@@ -54,10 +54,25 @@ describe('CaribouClient.fetchAccountStatuses', () => {
     expect(ref.url?.searchParams.get('exclude_replies')).toBeNull()
   })
 
-  it('threads maxId through to the request', async () => {
+  it('threads the cursor through to the request as max_id', async () => {
     const ref = captureQuery()
     const c = createCaribouClient(userKey, sessionSource())
-    await c.fetchAccountStatuses('42', { tab: 'posts', maxId: '110' })
+    await c.fetchAccountStatuses('42', { tab: 'posts', cursor: '110' })
     expect(ref.url?.searchParams.get('max_id')).toBe('110')
+  })
+
+  it('returns a page whose cursor is the last status id, or null when empty', async () => {
+    server.use(
+      http.get('https://fosstodon.org/api/v1/accounts/:id/statuses', ({ request }) =>
+        new URL(request.url).searchParams.get('max_id') === '5'
+          ? HttpResponse.json([])
+          : HttpResponse.json([{ id: '9' }, { id: '5' }])),
+    )
+    const c = createCaribouClient(userKey, sessionSource())
+    const page = await c.fetchAccountStatuses('42', { tab: 'posts' })
+    expect(page.map((s) => s.id)).toEqual(['9', '5'])
+    expect(page.nextCursor).toBe('5')
+    const end = await c.fetchAccountStatuses('42', { tab: 'posts', cursor: '5' })
+    expect(end.nextCursor).toBeNull()
   })
 })

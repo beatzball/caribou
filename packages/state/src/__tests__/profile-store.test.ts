@@ -18,7 +18,7 @@ describe('createProfileStore', () => {
     const client = { fetchAccountStatuses } as unknown as CaribouClient
     const store = createProfileStore('42', 'posts', {
       clientSource: () => client,
-      initial: { statuses: FIXTURE, nextMaxId: null },
+      initial: { statuses: FIXTURE, nextCursor: null },
     })
     await store.load()
     expect(fetchAccountStatuses).not.toHaveBeenCalled()
@@ -30,22 +30,22 @@ describe('createProfileStore', () => {
     const client = { fetchAccountStatuses } as unknown as CaribouClient
     const store = createProfileStore('42', 'media', { clientSource: () => client })
     await store.load()
-    expect(fetchAccountStatuses).toHaveBeenCalledWith('42', { tab: 'media', maxId: undefined })
+    expect(fetchAccountStatuses).toHaveBeenCalledWith('42', { tab: 'media', cursor: undefined })
   })
 
-  it('loadMore appends with maxId from last status id', async () => {
+  it('loadMore appends with the cursor the last page named', async () => {
     let calls = 0
     const fetchAccountStatuses = vi.fn(async () => {
       calls++
       return calls === 1
-        ? FIXTURE
-        : ([{ id: '208', content: 'p-1', account: { id: '42' } }] as unknown as Status[])
+        ? Object.assign([...FIXTURE], { nextCursor: '209' })
+        : Object.assign([{ id: '208', content: 'p-1', account: { id: '42' } }] as unknown as Status[], { nextCursor: '208' })
     })
     const client = { fetchAccountStatuses } as unknown as CaribouClient
     const store = createProfileStore('42', 'posts', { clientSource: () => client })
     await store.load()
     await store.loadMore()
-    expect(fetchAccountStatuses).toHaveBeenLastCalledWith('42', { tab: 'posts', maxId: '209' })
+    expect(fetchAccountStatuses).toHaveBeenLastCalledWith('42', { tab: 'posts', cursor: '209' })
     expect(store.statuses.value.map((s) => s.id)).toEqual(['210', '209', '208'])
   })
 

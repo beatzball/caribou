@@ -37,7 +37,7 @@ describe('/public pageData', () => {
     )
   })
 
-  it('returns sanitized statuses with the last id as nextMaxId', async () => {
+  it('returns sanitized statuses with the last id as nextCursor', async () => {
     vi.mocked(resolveInstanceForRoute).mockResolvedValue({
       instance: 'example.social', source: 'cookie',
     })
@@ -48,7 +48,7 @@ describe('/public pageData', () => {
     const { pageData } = await import('../../pages/public.js')
     const result = await pageData.fetcher({} as Parameters<typeof pageData.fetcher>[0])
     expect(result).toMatchObject({
-      kind: 'ok', nextMaxId: '8', shell: { instance: 'example.social' },
+      kind: 'ok', nextCursor: '8', shell: { instance: 'example.social' },
       statuses: [{ id: '9', content: '<p>nine</p>' }, { id: '8', content: '<p>eight</p>' }],
     })
   })
@@ -90,9 +90,9 @@ describe('<page-public> render', () => {
   })
 
   it('renders a public timeline seeded with the server data', async () => {
-    const el = await mount({ kind: 'ok', statuses: [], nextMaxId: null, shell: { instance: 'example.social' } })
+    const el = await mount({ kind: 'ok', statuses: [], nextCursor: null, shell: { instance: 'example.social' } })
     const timeline = el.shadowRoot!.querySelector<CaribouTimeline>('caribou-timeline')!
     expect(timeline.getAttribute('kind')).toBe('public')
-    expect(timeline.initial).toMatchObject({ statuses: [], nextMaxId: null })
+    expect(timeline.initial).toMatchObject({ statuses: [], nextCursor: null })
   })
 })

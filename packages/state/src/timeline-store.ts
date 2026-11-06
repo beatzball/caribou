@@ -17,6 +17,12 @@ export interface TimelineStore {
    */
   failedOp:      ReadonlySignal<TimelineOp | null>
   hasMore:       ReadonlySignal<boolean>
+  /**
+   * Where the next older page starts, as the last page named it: opaque,
+   * passed back to the client as it came. Null before the first page and
+   * after the last.
+   */
+  nextCursor:    ReadonlySignal<string | null>
   /** True while `refresh()` is fetching in the background. */
   refreshing:    ReadonlySignal<boolean>
   /** When the list was last fetched or seeded (epoch ms), or 0 before. */
@@ -39,10 +45,10 @@ export interface TimelineStore {
    * server data). Posts above the newest one the store knows go to the
    * new-posts buffer; known posts only update the status cache. Never pass
    * a cached snapshot: it would count as a sync. Into an empty list the
-   * page goes as the list itself, and `nextMaxId` says where the next page
-   * starts (its last post when not given).
+   * page goes as the list itself, and `nextCursor` says where the next page
+   * starts (null: there is none).
    */
-  offer(page: Status[], nextMaxId?: string | null): void
+  offer(page: Status[], nextCursor: string | null): void
   /** Runs the last fetch that failed again, if any. */
   retry(): Promise<void>
 
@@ -64,7 +70,7 @@ function newerFirst(a: string, b: string): number {
 export interface CreateTimelineStoreOpts {
   clientSource: () => CaribouClient | null
   pollIntervalMs?: number
-  initial?: { statuses: Status[]; nextMaxId: string | null }
+  initial?: { statuses: Status[]; nextCursor: string | null }
 }
 
 export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStoreOpts): TimelineStore {
@@ -76,6 +82,10 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   const newPostIds = signal<string[]>([])
   const refreshing = signal(false)
   const syncedAt   = signal(0)
+  // The cursor the last page named. It lives here and not in the client,
+  // because `activeClient` is a new client whenever `users` changes. It is
+  // never derived from a status id: on another network it is not one.
+  const cursor     = signal<string | null>(null)
 
   const statuses = computed<Status[]>(() => {
     const cache = statusCache.value
@@ -96,45 +106,37 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     return page.map((s) => s.id)
   }
 
-  // Track whether the SSR-seeded first page has been "consumed". Two
-  // distinct invariants:
-  //   1. load() — the first call after construction is a no-op when seeded
-  //      (the SSR pageData already paid for that fetch). Subsequent load()s
-  //      run normally.
-  //   2. loadMore() — the first call uses opts.initial.nextMaxId as the
-  //      anchor (the SSR fetcher knows where the next page starts).
-  //      Subsequent calls fall through to last-status-id behavior.
+  // Track whether the SSR-seeded first page has been "consumed": the first
+  // load() after construction is a no-op when seeded (the SSR pageData
+  // already paid for that fetch). Subsequent load()s run normally. The
+  // first loadMore() starts from `opts.initial.nextCursor`: the SSR fetcher
+  // knows where the next page starts.
   let firstLoadConsumed = false
-  let nextMaxIdForFirstLoadMore: string | null = null
-  // The cursor the last page named, for timelines whose next page is not
-  // found by the last status id (bookmarks). It lives here and not in the
-  // client, because `activeClient` is a new client whenever `users` changes.
-  let nextCursor: string | undefined
 
   if (opts.initial) {
     // A merge: a copy cached earlier with the reader's token keeps its
     // reader state (filters, flags) over the server's token-less one.
     for (const s of opts.initial.statuses) mergeStatus(s)
     statusIds.value = opts.initial.statuses.map((s) => s.id)
-    hasMore.value = opts.initial.nextMaxId != null
+    hasMore.value = opts.initial.nextCursor != null
     firstLoadConsumed = true
-    nextMaxIdForFirstLoadMore = opts.initial.nextMaxId
+    cursor.value = opts.initial.nextCursor
     syncedAt.value = Date.now()
   }
 
   async function runFetch(
-    params: { sinceId?: string; maxId?: string; limit?: number } | undefined,
+    params: { sinceId?: string; cursor?: string; limit?: number } | undefined,
   ): Promise<TimelinePage> {
     const client = opts.clientSource()
-    if (!client) return []
+    if (!client) return Object.assign([], { nextCursor: null })
     return client.fetchTimeline(kind, params)
   }
 
-  // A page that names its cursor also says whether there is a next page, so
-  // the store does not ask once more only to learn the list has ended.
+  // A page that names no cursor is the last one, so the store does not ask
+  // once more only to learn the list has ended.
   function setPaging(page: TimelinePage) {
-    nextCursor = page.nextMaxId ?? undefined
-    hasMore.value = page.length > 0 && page.nextMaxId !== null
+    cursor.value = page.nextCursor ?? null
+    hasMore.value = page.length > 0 && cursor.value !== null
   }
 
   // The operation `retry()` runs again: the last one that failed.
@@ -207,13 +209,12 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
 
   async function loadMore() {
     if (loading.value || !hasMore.value) return
-    const anchor = nextMaxIdForFirstLoadMore ?? nextCursor ?? statusIds.value[statusIds.value.length - 1]
+    const anchor = cursor.value
     if (!anchor) return
     const generation = ownerGeneration()
-    nextMaxIdForFirstLoadMore = null
     loading.value = true
     try {
-      const page = await runFetch({ maxId: anchor })
+      const page = await runFetch({ cursor: anchor })
       if (generation !== ownerGeneration()) return
       batch(() => {
         statusIds.value = [...statusIds.value, ...ingest(page)]
@@ -222,8 +223,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       })
     } catch (err) {
       if (generation !== ownerGeneration()) return
-      // The next try asks from the same place.
-      nextMaxIdForFirstLoadMore = anchor
+      // The cursor is unchanged: the next try asks from the same place.
       fail(err, 'loadMore')
     } finally {
       loading.value = false
@@ -279,7 +279,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     }
   }
 
-  function offer(page: Status[], nextMaxId?: string | null) {
+  function offer(page: Status[], nextCursor: string | null) {
     batch(() => {
       // Page data comes from the public API, which knows nothing of the
       // reader: its copy of a post the reader favourited says it is not.
@@ -289,10 +289,8 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       if (statusIds.value.length === 0) {
         statusIds.value = ids
         // The page names where the next one starts.
-        const next = nextMaxId === undefined ? ids[ids.length - 1] ?? null : nextMaxId
-        hasMore.value = next != null
-        nextMaxIdForFirstLoadMore = next
-        nextCursor = undefined
+        hasMore.value = nextCursor != null
+        cursor.value = nextCursor
         firstLoadConsumed = false
         return
       }
@@ -318,7 +316,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   }
 
   return {
-    statusIds, statuses, loading, error, failedOp, hasMore, refreshing, syncedAt,
+    statusIds, statuses, loading, error, failedOp, hasMore, nextCursor: cursor, refreshing, syncedAt,
     newPosts, newPostsCount,
     load, loadMore, poll, applyNewPosts, refresh, retry, offer, _testOnlyPrepend,
   }

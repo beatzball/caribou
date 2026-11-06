@@ -349,8 +349,11 @@ from the stub upstream and hydrates them in CI.
 
 **Bookmarks page by a cursor, not a status id.** Mastodon orders
 `/api/v1/bookmarks` by bookmark id and names the next page only in the Link
-header. The client returns it as the page's `nextMaxId`, and the timeline
-store keeps it and sends it back as `maxId`. It lives in the store, not the
+header. The client returns it as the page's `nextCursor`, and the timeline
+store keeps it and sends it back as `cursor`. Every page carries a
+`nextCursor`, profiles included, and the stores treat it as opaque: the
+server hands the first one to the client with the page data, and the
+"Older posts" link carries it as `?max_id=`. It lives in the store, not the
 client: `activeClient` is a new client whenever `users` changes. The browser can
 read the header because Mastodon sends `Access-Control-Expose-Headers: Link`;
 an e2e mock must send it too (`tests/e2e/bookmarks.spec.ts`).

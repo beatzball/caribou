@@ -18,9 +18,13 @@ export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
 
 export interface CaribouClient {
   userKey: UserKey
+  /**
+   * A page of the timeline. `cursor` is a page's `nextCursor`, passed back
+   * as it came: the caller never makes one up.
+   */
   fetchTimeline(kind: TimelineKind, params?: {
     sinceId?: string
-    maxId?: string
+    cursor?: string
     limit?: number
   }): Promise<TimelinePage>
   fetchStatus(statusId: string): Promise<Status>
@@ -38,8 +42,8 @@ export interface CaribouClient {
   verifyCredentials(): Promise<AccountCredentials>
   fetchAccountStatuses(
     accountId: string,
-    params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
-  ): Promise<Status[]>
+    params: { tab: 'posts' | 'replies' | 'media'; cursor?: string; limit?: number },
+  ): Promise<TimelinePage>
 
   // Status actions. Each resolves to the post itself as the server now has
   // it, never the reblog wrapper `reblog` creates.
@@ -60,10 +64,10 @@ export interface CaribouClient {
   unmute(accountId: string): Promise<Relationship>
   block(accountId: string): Promise<Relationship>
   unblock(accountId: string): Promise<Relationship>
-  /** The muted accounts, newest first. Pages by the cursor in `nextMaxId`. */
-  fetchMutes(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
-  /** The blocked accounts, newest first. Pages by the cursor in `nextMaxId`. */
-  fetchBlocks(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
+  /** The muted accounts, newest first. Pages by the cursor in `nextCursor`. */
+  fetchMutes(params?: { cursor?: string; limit?: number }): Promise<AccountPage>
+  /** The blocked accounts, newest first. Pages by the cursor in `nextCursor`. */
+  fetchBlocks(params?: { cursor?: string; limit?: number }): Promise<AccountPage>
   /** The reader's filters (filters v2). An older server answers 404. */
   fetchFilters(): Promise<Filter[]>
 
@@ -212,16 +216,26 @@ export interface FetchNotificationsParams {
   limit?: number
 }
 
-// A page of a timeline. `nextMaxId` is set only where the last status id is
-// not the cursor for the next page (bookmarks): the `max_id` to ask for next,
-// or null when there is no next page. Undefined means "page by the last
-// status id", as every other timeline does.
-export type TimelinePage = Status[] & { nextMaxId?: string | null }
+/**
+ * A page of results. `nextCursor` names the next page, or is null on the
+ * last one. It is opaque: the caller keeps it and passes it back as
+ * `cursor`, and never derives it from the items. A Mastodon timeline's
+ * cursor is its last status id; bookmarks, mutes and blocks page by an id
+ * the Link header names; another network pages by a token of its own.
+ */
+export type Page<T> = T[] & { nextCursor: string | null }
 
-// A page of accounts. Mastodon pages mutes and blocks by the mute or block
-// id, not the account id, and names the next page only in the Link header:
-// `nextMaxId` is that cursor, or null on the last page.
-export type AccountPage = Account[] & { nextMaxId: string | null }
+/** A page of a timeline or of a profile's posts. */
+export type TimelinePage = Page<Status>
+
+/** A page of accounts (mutes, blocks). */
+export type AccountPage = Page<Account>
+
+// Mastodon pages most timelines by status id: the next page starts below
+// the last post. An empty page is the end.
+function pageByLastId(statuses: Status[]): TimelinePage {
+  return Object.assign(statuses, { nextCursor: statuses[statuses.length - 1]?.id ?? null })
+}
 
 // A list's fields. `exclusive` (Mastodon 4.2+) keeps the members' posts out
 // of the home timeline; an older server ignores it. Unset fields are not sent.
@@ -326,32 +340,31 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
   }
 
   // Mastodon pages bookmarks by bookmark id, not status id, and names the
-  // next page only in the Link header. The caller keeps that cursor and
-  // passes it back as `maxId`.
+  // next page only in the Link header. That id is the page's cursor.
   async function fetchBookmarkTimeline(
-    c: mastodon.rest.Client, params: { sinceId?: string; maxId?: string; limit?: number },
+    c: mastodon.rest.Client, params: { sinceId?: string; cursor?: string; limit?: number },
   ): Promise<TimelinePage> {
     // Bookmarks are not polled; a since_id would be a status id here too.
-    if (params.sinceId) return Object.assign([], { nextMaxId: null })
+    if (params.sinceId) return Object.assign([], { nextCursor: null })
     const res = await c.v1.bookmarks.list.$raw({
-      ...(params.maxId ? { maxId: params.maxId } : {}),
+      ...(params.cursor ? { maxId: params.cursor } : {}),
       ...(params.limit ? { limit: params.limit } : {}),
     })
-    return Object.assign(res.data, { nextMaxId: nextMaxIdFromLink(res.headers.get('link')) })
+    return Object.assign(res.data, { nextCursor: nextMaxIdFromLink(res.headers.get('link')) })
   }
 
   async function fetchAccountPage(
-    kind: 'mutes' | 'blocks', params: { maxId?: string; limit?: number },
+    kind: 'mutes' | 'blocks', params: { cursor?: string; limit?: number },
   ): Promise<AccountPage> {
-    return run(`${kind}:${params.maxId ?? ''}:${params.limit ?? ''}`, async (c) => {
+    return run(`${kind}:${params.cursor ?? ''}:${params.limit ?? ''}`, async (c) => {
       const query = {
-        ...(params.maxId ? { maxId: params.maxId } : {}),
+        ...(params.cursor ? { maxId: params.cursor } : {}),
         ...(params.limit ? { limit: params.limit } : {}),
       }
       const res = kind === 'mutes'
         ? await c.v1.mutes.list.$raw(query)
         : await c.v1.blocks.list.$raw(query)
-      return Object.assign(res.data, { nextMaxId: nextMaxIdFromLink(res.headers.get('link')) })
+      return Object.assign(res.data, { nextCursor: nextMaxIdFromLink(res.headers.get('link')) })
     })
   }
 
@@ -362,15 +375,15 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       return run(key, async (c) => {
         const listParams = {
           ...(params.sinceId ? { sinceId: params.sinceId } : {}),
-          ...(params.maxId ? { maxId: params.maxId } : {}),
+          ...(params.cursor ? { maxId: params.cursor } : {}),
           ...(params.limit ? { limit: params.limit } : {}),
         }
-        if (kind === 'home')   return c.v1.timelines.home.list(listParams)
-        if (kind === 'local')  return c.v1.timelines.public.list({ ...listParams, local: true })
-        if (kind === 'public') return c.v1.timelines.public.list(listParams)
+        if (kind === 'home')   return pageByLastId(await c.v1.timelines.home.list(listParams))
+        if (kind === 'local')  return pageByLastId(await c.v1.timelines.public.list({ ...listParams, local: true }))
+        if (kind === 'public') return pageByLastId(await c.v1.timelines.public.list(listParams))
         if (kind === 'bookmarks') return fetchBookmarkTimeline(c, params)
-        if (kind.type === 'hashtag') return c.v1.timelines.tag.$select(encodeURIComponent(kind.tag)).list(listParams)
-        if (kind.type === 'list')    return c.v1.timelines.list.$select(encodeURIComponent(kind.id)).list(listParams)
+        if (kind.type === 'hashtag') return pageByLastId(await c.v1.timelines.tag.$select(encodeURIComponent(kind.tag)).list(listParams))
+        if (kind.type === 'list')    return pageByLastId(await c.v1.timelines.list.$select(encodeURIComponent(kind.id)).list(listParams))
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
       })
     },
@@ -396,16 +409,16 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         c.v1.accounts.lookup({ acct: handle }),
       )
     },
-    async fetchAccountStatuses(accountId, { tab, maxId, limit }) {
-      const key = `acct-statuses:${accountId}:${tab}:${maxId ?? ''}:${limit ?? ''}`
-      return run(key, async (c) =>
-        c.v1.accounts.$select(accountId).statuses.list({
+    async fetchAccountStatuses(accountId, { tab, cursor, limit }) {
+      const key = `acct-statuses:${accountId}:${tab}:${cursor ?? ''}:${limit ?? ''}`
+      return run(key, async (c) => pageByLastId(
+        await c.v1.accounts.$select(accountId).statuses.list({
           ...(tab === 'posts' ? { excludeReplies: true } : {}),
           ...(tab === 'media' ? { onlyMedia: true } : {}),
-          ...(maxId ? { maxId } : {}),
+          ...(cursor ? { maxId: cursor } : {}),
           ...(limit ? { limit } : {}),
         }),
-      )
+      ))
     },
 
     // --- status actions ---

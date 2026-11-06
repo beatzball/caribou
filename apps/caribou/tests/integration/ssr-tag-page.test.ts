@@ -17,7 +17,7 @@ const page = (data: TagPageData) => ssr(html`<page-tags-tag .serverData=${data}>
 describe('/tags/[tag] SSR', () => {
   it('paints the heading and the first page of cards, with no follow button', async () => {
     const out = await page({
-      kind: 'ok', statuses: [mkStatus('2'), mkStatus('1')] as never, nextMaxId: '1',
+      kind: 'ok', statuses: [mkStatus('2'), mkStatus('1')] as never, nextCursor: '1',
       shell: { instance: 'example.social' }, tag: 'Caturday',
     })
     expect(out.replace(/<!--[\s\S]*?-->/g, '')).toContain('<h1>#Caturday</h1>')
@@ -34,7 +34,7 @@ describe('/tags/[tag] SSR', () => {
 
   it('says so when nobody has used the tag', async () => {
     const out = await page({
-      kind: 'ok', statuses: [], nextMaxId: null, shell: { instance: 'example.social' }, tag: '日本',
+      kind: 'ok', statuses: [], nextCursor: null, shell: { instance: 'example.social' }, tag: '日本',
     })
     expect(out).toContain('No posts with #日本 yet.')
   })

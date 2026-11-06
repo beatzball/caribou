@@ -13,12 +13,12 @@ beforeEach(() => {
 })
 
 describe('createTimelineStore({ initial })', () => {
-  it('seeds statuses + nextMaxId without calling fetchTimeline', async () => {
+  it('seeds statuses + nextCursor without calling fetchTimeline', async () => {
     const fetchTimeline = vi.fn()
     const client = { fetchTimeline } as unknown as CaribouClient
     const store = createTimelineStore('local', {
       clientSource: () => client,
-      initial: { statuses: FIXTURE, nextMaxId: '108' },
+      initial: { statuses: FIXTURE, nextCursor: '108' },
     })
     expect(store.statuses.value.map((s) => s.id)).toEqual(['110', '109'])
     expect(store.loading.value).toBe(false)
@@ -28,42 +28,42 @@ describe('createTimelineStore({ initial })', () => {
     expect(fetchTimeline).not.toHaveBeenCalled()
   })
 
-  it('uses nextMaxId for the next loadMore() call', async () => {
+  it('uses nextCursor for the next loadMore() call', async () => {
     const fetchTimeline = vi.fn(async () => [])
     const client = { fetchTimeline } as unknown as CaribouClient
     const store = createTimelineStore('local', {
       clientSource: () => client,
-      initial: { statuses: FIXTURE, nextMaxId: '108' },
+      initial: { statuses: FIXTURE, nextCursor: '108' },
     })
     await store.loadMore()
-    expect(fetchTimeline).toHaveBeenCalledWith('local', { maxId: '108' })
+    expect(fetchTimeline).toHaveBeenCalledWith('local', { cursor: '108' })
   })
 
-  it('falls back to last-id anchor on subsequent loadMore() after first append', async () => {
+  it('uses the cursor of the appended page on the next loadMore()', async () => {
     let calls = 0
     const fetchTimeline = vi.fn(async () => {
       calls++
       return calls === 1
-        ? ([{ id: '107', content: 'c', account: { id: '1' } }] as unknown as Status[])
-        : ([] as Status[])
+        ? Object.assign([{ id: '107', content: 'c', account: { id: '1' } }] as unknown as Status[], { nextCursor: '107' })
+        : Object.assign([] as Status[], { nextCursor: null })
     })
     const client = { fetchTimeline } as unknown as CaribouClient
     const store = createTimelineStore('local', {
       clientSource: () => client,
-      initial: { statuses: FIXTURE, nextMaxId: '108' },
+      initial: { statuses: FIXTURE, nextCursor: '108' },
     })
     await store.loadMore()
-    expect(fetchTimeline).toHaveBeenLastCalledWith('local', { maxId: '108' })
+    expect(fetchTimeline).toHaveBeenLastCalledWith('local', { cursor: '108' })
     await store.loadMore()
-    expect(fetchTimeline).toHaveBeenLastCalledWith('local', { maxId: '107' })
+    expect(fetchTimeline).toHaveBeenLastCalledWith('local', { cursor: '107' })
   })
 
-  it('hasMore is false when initial.nextMaxId is null', () => {
+  it('hasMore is false when initial.nextCursor is null', () => {
     const fetchTimeline = vi.fn()
     const client = { fetchTimeline } as unknown as CaribouClient
     const store = createTimelineStore('local', {
       clientSource: () => client,
-      initial: { statuses: FIXTURE, nextMaxId: null },
+      initial: { statuses: FIXTURE, nextCursor: null },
     })
     expect(store.hasMore.value).toBe(false)
   })
