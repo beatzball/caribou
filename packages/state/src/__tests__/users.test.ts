@@ -607,6 +607,28 @@ describe('another tab (rule 2: storage decides)', () => {
     expect(activeUserKey.value).toBe(key)
   })
 
+  it('a sign-out elsewhere of the account active here: an expiry for another account takes the stored active key', () => {
+    addUserSession(otherSession())
+    addUserSession(sampleSession())
+    // The other tab signs out of the active account (key); `other` is active there.
+    otherTabWrites([[other, otherSession()]])
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(other))
+    expect(markExpired(other, 'GA')).toBe('marked')
+    expect([...users.value.keys()]).toEqual([other])
+    expect(activeUserKey.value).toBe(other)
+  })
+
+  it('a sign-out elsewhere of the account active here: a 401 for the last other account leaves none active', () => {
+    addUserSession(otherSession())
+    addUserSession(sampleSession())
+    otherTabWrites([[other, otherSession()]])
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(other))
+    expect(removeSession(other, 'GA')).toBe('inactive')
+    expect(users.value.size).toBe(0)
+    expect(activeUserKey.value).toBeNull()
+    expect(JSON.parse(localStorage.getItem('caribou.activeUserKey')!)).toBeNull()
+  })
+
   it('a stored entry without a generation matches its token, as loadFromStorage reads it', () => {
     addUserSession({ ...sampleSession(), generation: 'TOKEN-1' })
     const { generation: _, ...legacy } = sampleSession()

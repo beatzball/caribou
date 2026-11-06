@@ -247,6 +247,8 @@ function writeStored(map: Map<UserKey, UserSession>): void {
 
 // This tab's accounts become the stored ones. An entry that did not change
 // keeps its object, so the active client is not made again for nothing.
+// When another tab signed out of the account active here, the active key
+// follows storage: the stored active key when it is in the map, else null.
 function adoptStored(stored: Map<UserKey, UserSession>): void {
   const before = users.value
   const next = new Map<UserKey, UserSession>()
@@ -256,6 +258,11 @@ function adoptStored(stored: Map<UserKey, UserSession>): void {
   }
   const same = next.size === before.size && [...next].every(([k, v]) => before.get(k) === v)
   if (!same) users.value = next
+  const active = activeUserKey.value
+  if (active && !next.has(active)) {
+    const storedActive = readStoredActive()
+    activeUserKey.value = storedActive && next.has(storedActive) ? storedActive : null
+  }
 }
 
 const K_USERS = 'caribou.users'

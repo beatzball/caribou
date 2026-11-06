@@ -141,6 +141,12 @@ test('an expiry keeps the session, its drafts and the page; an old one is ignore
 // again, then signs out, the way the sign-in page and sign-out write storage.
 test('another tab: an old 401 or expiry never undoes its sign-in or sign-out', async ({ page, context }) => {
   const other = await context.newPage()
+  // Page B never reaches a real server: every request to the instance is answered here.
+  await other.route(`https://${INSTANCE}/**`, (route) => {
+    const path = new URL(route.request().url()).pathname
+    const body = path === '/api/v1/accounts/verify_credentials' ? BOB_ACCOUNT : []
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  })
   await other.goto('/home')
   await other.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
 
