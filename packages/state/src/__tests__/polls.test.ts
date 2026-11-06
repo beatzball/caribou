@@ -13,7 +13,7 @@ function makePoll(over: Partial<Poll> = {}): Poll {
   return {
     id: 'p1', expiresAt: '2030-01-01T00:00:00.000Z', expired: false, multiple: false,
     votesCount: 4, votersCount: 4,
-    options: [{ title: 'yes', votesCount: 3, emojis: [] }, { title: 'no', votesCount: 1, emojis: [] }],
+    options: [{ title: 'yes', votesCount: 3 }, { title: 'no', votesCount: 1 }],
     emojis: [],
     ...over,
   } as Poll
@@ -65,7 +65,7 @@ describe('optimisticVote', () => {
   })
 
   it('leaves hidden counts hidden', () => {
-    const hidden = makePoll({ options: [{ title: 'a', emojis: [] }, { title: 'b', emojis: [] }] as Poll['options'], votersCount: null })
+    const hidden = makePoll({ options: [{ title: 'a' }, { title: 'b' }] as Poll['options'], votersCount: null })
     const p = optimisticVote(hidden, [1])
     expect(p.options.map((o) => o.votesCount)).toEqual([undefined, undefined])
     expect(p.votersCount).toBeNull()
@@ -85,7 +85,7 @@ describe('votePoll', () => {
     expect(get('w1')?.reblog?.poll?.ownVotes).toEqual([1])
     expect(get('1')?.poll?.options[1]?.votesCount).toBe(2)
     d.resolve(makePoll({ voted: true, ownVotes: [1], votesCount: 9, options: [
-      { title: 'yes', votesCount: 6, emojis: [] }, { title: 'no', votesCount: 3, emojis: [] }] as Poll['options'] }))
+      { title: 'yes', votesCount: 6 }, { title: 'no', votesCount: 3 }] as Poll['options'] }))
     expect(await p).toBe(true)
     expect(get('1')?.poll?.votesCount).toBe(9)
     expect(get('w1')?.reblog?.poll?.votesCount).toBe(9)

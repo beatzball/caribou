@@ -4,6 +4,8 @@ import type {
   MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
   Status, StatusEdit, StatusSource, StatusVisibility, Tag,
 } from './types.js'
+// Loads masto-mapping's correction to masto's declarations (see there).
+import type {} from './masto-mapping.js'
 import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError } from './caribou-error.js'
 import { normalizeError } from './normalize-error.js'

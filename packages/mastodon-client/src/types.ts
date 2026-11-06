@@ -69,7 +69,8 @@ export interface Account {
   suspended?: boolean | null
   limited?: boolean | null
   createdAt: string
-  lastStatusAt: string
+  /** Null for an account that has never posted. */
+  lastStatusAt?: string | null
   statusesCount: number
   followersCount: number
   followingCount: number
@@ -132,7 +133,7 @@ export interface MediaAttachment {
   id: string
   type: MediaAttachmentType
   url?: string | null
-  previewUrl: string
+  previewUrl?: string | null
   remoteUrl?: string | null
   previewRemoteUrl?: string | null
   textUrl?: string | null
@@ -143,8 +144,8 @@ export interface MediaAttachment {
 
 export interface PollOption {
   title: string
-  votesCount?: number
-  emojis: CustomEmoji[]
+  /** Null while the results are hidden. */
+  votesCount?: number | null
 }
 
 export interface Poll {
@@ -157,6 +158,8 @@ export interface Poll {
   voted?: boolean
   ownVotes?: number[] | null
   options: PollOption[]
+  /** The custom emoji used in the option titles. */
+  emojis: CustomEmoji[]
 }
 
 export type PreviewCardType = 'link' | 'photo' | 'video' | 'rich'
@@ -173,7 +176,7 @@ export interface PreviewCard {
   title: string
   description: string
   type: PreviewCardType
-  blurhash: string
+  blurhash?: string | null
   authors: PreviewCardAuthor[]
   authorName?: string | null
   authorUrl?: string | null
@@ -292,7 +295,8 @@ export interface Status {
   sensitive: boolean
   spoilerText: string
   mediaAttachments: MediaAttachment[]
-  application: Application
+  /** Only when the author shares it, or the reader is the author. */
+  application?: Application | null
   mentions: StatusMention[]
   tags: Tag[]
   emojis: CustomEmoji[]
@@ -302,7 +306,8 @@ export interface Status {
   repliesCount: number
   quote?: Quote | ShallowQuote | null
   quotesCount: number
-  quoteApproval: QuoteApproval
+  /** Mastodon 4.5 and later only. */
+  quoteApproval?: QuoteApproval | null
   url?: string | null
   inReplyToId?: string | null
   inReplyToAccountId?: string | null
@@ -388,7 +393,7 @@ export interface StatusBluesky {
   labels: BlueskyLabel[]
   moderation: BlueskyModerationResult
   /** The UserKey whose viewer state this copy carries, or null for a public copy. */
-  viewerOf: string | null
+  viewerOf: `${string}@${string}` | null
 }
 
 // ---------------------------------------------------------- relationship
@@ -398,7 +403,7 @@ export interface Relationship {
   following: boolean
   showingReblogs: boolean
   notifying: boolean
-  languages: string[]
+  languages?: string[] | null
   followedBy: boolean
   blocking: boolean
   blockedBy: boolean

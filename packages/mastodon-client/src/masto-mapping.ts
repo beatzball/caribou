@@ -13,6 +13,17 @@
 import type { mastodon } from 'masto'
 import type * as Caribou from './types.js'
 
+// masto 7.10.2 declares `emojis` on each poll option. The Mastodon API puts
+// it on the poll (https://docs.joinmastodon.org/entities/Poll/#emojis), so
+// the object masto hands back has it there. This corrects masto's
+// declaration to match the wire, in this one place, so the `Fits` check
+// below stays honest. Drop it once masto fixes its type.
+declare module 'masto/mastodon/entities/v1/poll.js' {
+  interface Poll {
+    emojis: mastodon.v1.CustomEmoji[]
+  }
+}
+
 /** Fails to compile unless `From` can be used where `To` is expected. */
 type Fits<From extends To, To> = [From, To]
 
