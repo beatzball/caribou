@@ -1136,7 +1136,7 @@ request's destination host and the links built, not only disabled buttons.
 | `litro dev` and a dotted route | Works. `/@alice.example.com`, `/@alice.example.com/<rkey>`, `/@did:plc:...` and handles that end like a file (`.ts`, `.md`, `.js`, `.css`, `.json`, `.png`) all render the profile page. |
 | Public AppView rate limit | **Not advertised.** No `ratelimit-*` or `retry-after` headers, on 200 or 403. 15 requests in a row to `app.bsky.actor.getProfile?actor=bsky.app`, each with a random extra query parameter so the CDN missed its cache (`cdn-cache: MISS`), all answered 200. A small sample. |
 | Option-D key binding | **Not run.** It needs a registered confidential client (below). |
-| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. The callback and the Following fetch: **pending** (they need a person to approve). |
+| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. A person approved it on 2026-11-06. After a reload the page showed the account signed in and fetched Following (9 posts on a 10-post request; Following can return fewer). The session came back from IndexedDB. The spike page still said "Not signed in" right after the redirect back: it did not redraw after handling the callback. A spike-page bug, not an SDK one; phase 2b's callback page must update its state after the callback resolves (test it). |
 
 Versions measured: `@atproto/api` 0.30.3, `@atproto/oauth-client-browser`
 0.5.14, Vite 8.3.2.
