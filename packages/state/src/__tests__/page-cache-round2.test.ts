@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import { mastodonTimelineOrder, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { accountCache, cacheStatus, mergeStatus, statusCache } from '../caches.js'
 import { _testOnlyResetMutations, toggleFavourite } from '../mutations.js'
@@ -25,7 +25,7 @@ function deferred<T>() {
 
 type Page = Status[] & { nextMaxId?: string | null }
 function clientWith(fetchTimeline: (kind: string, params?: { sinceId?: string; maxId?: string }) => Promise<Page>) {
-  return { fetchTimeline } as unknown as CaribouClient
+  return { fetchTimeline, timelineOrder: mastodonTimelineOrder } as unknown as CaribouClient
 }
 
 const alice = toUserKey('alice', 'example.social')

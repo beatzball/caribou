@@ -1,7 +1,8 @@
 import { batch, computed, signal, type ReadonlySignal } from '@preact/signals-core'
-import type {
-  CaribouClient, CaribouError, TimelineKind, TimelinePage,
-  Status,
+import {
+  mastodonTimelineOrder,
+  type CaribouClient, type CaribouError, type TimelineKind, type TimelineOrder, type TimelinePage,
+  type Status,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, mergeStatus, statusCache } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -53,13 +54,6 @@ export interface TimelineStore {
 }
 
 export type TimelineOp = 'load' | 'loadMore' | 'poll'
-
-// Mastodon ids are numbers too large for a double, sent as strings. A longer
-// id is a larger number; ids of one length compare as text.
-function newerFirst(a: string, b: string): number {
-  if (a.length !== b.length) return b.length - a.length
-  return a < b ? 1 : a > b ? -1 : 0
-}
 
 export interface CreateTimelineStoreOpts {
   clientSource: () => CaribouClient | null
@@ -166,15 +160,25 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   let retryingOlder = false
   const olderPagePending = () => failedOp.value === 'loadMore' || retryingOlder
 
+  // The client says how this timeline is ordered: Mastodon sorts by post
+  // id, newest first, except bookmarks; a feed whose ids say nothing of age
+  // keeps the order it was sent in. With no client the page came from a
+  // Mastodon server's public API.
+  function order(): TimelineOrder {
+    const client = opts.clientSource()
+    return client ? client.timelineOrder(kind) : mastodonTimelineOrder(kind)
+  }
+
   // Posts go to the buffer only when the list does not show them yet; a
   // post can come back from the page data and from a check at once. A page
   // can also bring posts older than one a check already found, so the
-  // buffer is kept newest first. Bookmarks run in the order they were made,
-  // not by post id, and keep the order they came in.
+  // buffer is kept in the timeline's order. Newer pages come first, so a
+  // feed kept in sent order stays newest first.
   function buffer(ids: string[]) {
     const shown = new Set(statusIds.value)
     const next = Array.from(new Set([...ids, ...newPostIds.value])).filter((id) => !shown.has(id))
-    newPostIds.value = kind === 'bookmarks' ? next : next.sort(newerFirst)
+    const compare = order()
+    newPostIds.value = compare ? next.sort(compare) : next
   }
 
   // Each fetch reads the owner generation before its request and checks it

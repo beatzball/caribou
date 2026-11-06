@@ -50,6 +50,8 @@ Sources of truth — see file for full signatures.
 
 - `createTimelineStore(kind, opts)` — `home` / `local` / `public`. Supports
   SSR seeding (`opts.initial`) and visibility-aware polling.
+  The new-posts buffer keeps the order the client gives
+  (`client.timelineOrder(kind)`); with no client, Mastodon's.
 - `createThreadStore(client, statusId, opts)` — focused status + ancestors
   + descendants, fetched in parallel via `Promise.allSettled`.
 - `createProfileStore(accountId, tab, opts)` — `posts` / `replies` / `media`

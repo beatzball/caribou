@@ -8,8 +8,8 @@ import {
   type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
 import {
-  MediaProcessingTimeout, type CaribouClient, type AccountCredentials,
-  type Status, type StatusSource, type StatusVisibility,
+  MASTODON_CAPABILITIES, MediaProcessingTimeout, type CaribouClient, type AccountCredentials,
+  type Capabilities, type Status, type StatusSource, type StatusVisibility,
 } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
@@ -36,7 +36,14 @@ interface Limits { maxChars: number; maxMedia: number; accept: string; polls: Po
 // Mastodon's own defaults, for a server that does not say.
 const DEFAULT_POLL_LIMITS: PollLimits = { maxOptions: 4, maxChars: 50, minExpiration: 300, maxExpiration: 2_629_746 }
 
-const DEFAULT_LIMITS: Limits = { maxChars: 500, maxMedia: 4, accept: 'image/*,video/*,audio/*', polls: DEFAULT_POLL_LIMITS }
+const DEFAULT_ACCEPT = 'image/*,video/*,audio/*'
+
+// The network's own limits, for a server that does not say.
+function defaultLimits(caps: Capabilities): Limits {
+  return { maxChars: caps.maxChars, maxMedia: caps.maxImages, accept: DEFAULT_ACCEPT, polls: DEFAULT_POLL_LIMITS }
+}
+
+const DEFAULT_LIMITS = defaultLimits(MASTODON_CAPABILITIES)
 
 const HOUR = 3600
 const DAY = 24 * HOUR
@@ -115,10 +122,11 @@ const limitsByServer = new Map<string, Promise<Limits>>()
 function fetchLimits(client: CaribouClient, server: string): Promise<Limits> {
   let p = limitsByServer.get(server)
   if (!p) {
+    const base = defaultLimits(client.capabilities)
     p = client.fetchInstance().then((i) => ({
-      maxChars: i.configuration?.statuses?.maxCharacters ?? DEFAULT_LIMITS.maxChars,
-      maxMedia: i.configuration?.statuses?.maxMediaAttachments ?? DEFAULT_LIMITS.maxMedia,
-      accept: i.configuration?.mediaAttachments?.supportedMimeTypes?.join(',') || DEFAULT_LIMITS.accept,
+      maxChars: i.configuration?.statuses?.maxCharacters ?? base.maxChars,
+      maxMedia: i.configuration?.statuses?.maxMediaAttachments ?? base.maxMedia,
+      accept: i.configuration?.mediaAttachments?.supportedMimeTypes?.join(',') || base.accept,
       polls: {
         maxOptions: i.configuration?.polls?.maxOptions ?? DEFAULT_POLL_LIMITS.maxOptions,
         maxChars: i.configuration?.polls?.maxCharactersPerOption ?? DEFAULT_POLL_LIMITS.maxChars,
@@ -127,7 +135,7 @@ function fetchLimits(client: CaribouClient, server: string): Promise<Limits> {
       },
     })).catch(() => {
       limitsByServer.delete(server)
-      return DEFAULT_LIMITS
+      return base
     })
     limitsByServer.set(server, p)
   }
@@ -361,6 +369,7 @@ export class CaribouComposeDialog extends LitElement {
     const active = document.activeElement
     this.returnFocus = active instanceof HTMLElement ? deepActive(active) : null
     this.client = client
+    this.limits = defaultLimits(client.capabilities)
     this.session += 1
     this.posting = false
     this.syncedAlt = new Map()
@@ -485,8 +494,23 @@ export class CaribouComposeDialog extends LitElement {
     if (!this.editing) saveDraft(this.client.userKey, this.draftKey, this.draft)
   }
 
+  // What the account's network can do; a control it lacks is not shown.
+  private get caps(): Capabilities {
+    return this.client?.capabilities ?? MASTODON_CAPABILITIES
+  }
+
+  // The draft as it can be sent: a content warning or a poll kept in a
+  // stored draft is left out where the network has none.
+  private get sendable(): ComposeDraft {
+    const d = this.draft
+    const caps = this.caps
+    if ((caps.contentWarningText || !d.cw) && (caps.polls || !d.poll)) return d
+    return { ...d, cw: caps.contentWarningText && d.cw, poll: caps.polls ? d.poll : null }
+  }
+
   private get count(): number {
-    return countChars(this.draft.text, this.draft.cw ? this.draft.spoilerText : '')
+    const d = this.sendable
+    return countChars(d.text, d.cw ? d.spoilerText : '')
   }
 
   // A poll needs text with it: Mastodon refuses a post with only a poll.
@@ -512,7 +536,7 @@ export class CaribouComposeDialog extends LitElement {
       return
     }
     const session = this.session
-    const d = this.draft
+    const d = this.sendable
     const cw = d.cw && d.spoilerText.trim() !== ''
     this.posting = true
     try {
@@ -553,7 +577,7 @@ export class CaribouComposeDialog extends LitElement {
         toast('error', `Could not save the alt text: ${errorText(err)}`)
         return
       }
-      await postDraft(client, this.draftKey, this.draft)
+      await postDraft(client, this.draftKey, this.sendable)
       // The dialog was closed, and maybe reopened for another draft, while
       // this post was in flight. That draft is not ours to clear.
       if (client !== this.client || session !== this.session) {
@@ -661,7 +685,7 @@ export class CaribouComposeDialog extends LitElement {
   // The draft's poll, when this dialog may send one: not in an edit, and
   // never beside media.
   private get activePoll(): DraftPoll | null {
-    return !this.editing && this.draft.poll && this.draft.media.length === 0 ? this.draft.poll : null
+    return !this.editing && this.caps.polls && this.draft.poll && this.draft.media.length === 0 ? this.draft.poll : null
   }
 
   private togglePoll = () => {
@@ -758,6 +782,7 @@ export class CaribouComposeDialog extends LitElement {
     const hasPoll = this.activePoll !== null
     const title = editing ? 'Edit post' : this.replyTo || d.inReplyToId ? 'Reply' : 'New post'
     const busy = this.posting
+    const caps = this.caps
     const submitLabel = editing ? (busy ? 'Saving…' : 'Save')
       : busy ? 'Posting…' : this.replyTo || d.inReplyToId ? 'Reply' : 'Post'
     return html`
@@ -775,7 +800,7 @@ export class CaribouComposeDialog extends LitElement {
             </div>` : nothing}
           ${this.keptRedraft ? html`
             <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
-          ${d.cw ? html`
+          ${d.cw && caps.contentWarningText ? html`
             <label class="visually-hidden" for="compose-cw">Content warning</label>
             <input id="compose-cw" type="text" name="spoiler" placeholder="Content warning"
               ?readonly=${busy} .value=${d.spoilerText}
@@ -849,21 +874,21 @@ export class CaribouComposeDialog extends LitElement {
               description=${hasPoll ? 'Remove the poll to add media.' : nothing}
               @click=${() => { if (!hasPoll) this.fileEl?.click() }}></caribou-icon-button>
             <input type="file" hidden multiple accept=${this.limits.accept}
-              ?disabled=${full || busy || hasPoll} @change=${this.onFiles}>
-            <caribou-icon-button icon="chartColumn" label="Poll" hint="Poll" data-action="toggle-poll"
+              ?disabled=${full || busy || hasPoll} @change=${this.onFiles}>`}
+            ${editing || !caps.polls ? nothing : html`<caribou-icon-button icon="chartColumn" label="Poll" hint="Poll" data-action="toggle-poll"
               pressed=${hasPoll ? 'true' : 'false'} ?disabled=${busy} ?soft-disabled=${mediaCount > 0}
               description=${mediaCount > 0 ? 'Remove the media to add a poll.' : nothing}
               @click=${this.togglePoll}></caribou-icon-button>`}
-            <caribou-icon-button icon="triangleAlert" label="Content warning" hint="Content warning" data-action="toggle-cw"
+            ${caps.contentWarningText ? html`<caribou-icon-button icon="triangleAlert" label="Content warning" hint="Content warning" data-action="toggle-cw"
               pressed=${d.cw ? 'true' : 'false'} ?disabled=${busy}
-              @click=${() => this.patchDraft({ cw: !d.cw })}></caribou-icon-button>
-            <label class="visually-hidden" for="compose-visibility">Visibility</label>
+              @click=${() => this.patchDraft({ cw: !d.cw })}></caribou-icon-button>` : nothing}
+            ${caps.visibility ? html`<label class="visually-hidden" for="compose-visibility">Visibility</label>
             <select id="compose-visibility" name="visibility" ?disabled=${busy || editing}
               aria-describedby=${editing ? 'compose-visibility-note' : nothing}
               @change=${(e: Event) => this.patchDraft({ visibility: (e.target as HTMLSelectElement).value as StatusVisibility })}>
               ${VISIBILITIES.map((v) => html`<option value=${v.value}>${v.label}</option>`)}
-            </select>
-            ${editing ? html`<span class="note" id="compose-visibility-note">Visibility cannot change.</span>` : nothing}
+            </select>` : nothing}
+            ${caps.visibility && editing ? html`<span class="note" id="compose-visibility-note">Visibility cannot change.</span>` : nothing}
             <span class="spacer"></span>
             <span class="count" ?data-over=${over}
               aria-label=${`${this.limits.maxChars - count} characters left`}>${this.limits.maxChars - count}</span>

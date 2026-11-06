@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import {
+  MASTODON_CAPABILITIES, mastodonTimelineOrder, type CaribouClient, type Status,
+} from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { statusCache } from '../caches.js'
 import { createTimelineStore } from '../timeline-store.js'
@@ -19,6 +21,8 @@ function fakeClient(impl?: FetchImpl): FakeClient {
   const unused = () => Promise.reject(new Error('not used in timeline-store tests'))
   return {
     userKey: toUserKey('beatzball', 'fosstodon.org'),
+    capabilities: MASTODON_CAPABILITIES,
+    timelineOrder: mastodonTimelineOrder,
     fetchTimeline: vi.fn<FetchImpl>(impl ?? (async () => [])),
     fetchStatus: unused as CaribouClient['fetchStatus'],
     fetchThread: unused as CaribouClient['fetchThread'],

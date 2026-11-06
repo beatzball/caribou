@@ -1,8 +1,9 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
+import type { Capabilities } from '@beatzball/caribou-mastodon-client'
 import {
-  activeUserKey, UNREAD_CAP, unreadNotificationCount, userName, users, type UserSession,
+  activeClient, activeUserKey, UNREAD_CAP, unreadNotificationCount, userName, users, type UserSession,
 } from '@beatzball/caribou-state'
 import { spaClick } from './_spa-link.js'
 import { switchToAccount } from './_switch-account.js'
@@ -16,17 +17,21 @@ import './caribou-signout-form.js'
 // `more`: on a phone the item lives in the More menu instead of the bar.
 // `dot`: the item carries the changelog's unread dot (`<caribou-changelog-dot>`).
 // `signedIn`: the item shows only while an account is signed in.
-interface NavItem { label: string; icon: IconName; href: string; more?: boolean; dot?: boolean; signedIn?: boolean }
+// `needs`: the item shows only when the active account's network has it.
+interface NavItem {
+  label: string; icon: IconName; href: string; more?: boolean; dot?: boolean; signedIn?: boolean
+  needs?: 'localTimeline' | 'publicTimeline'
+}
 
 // The items above New post. DOM order is the visual order at every width,
 // so Tab and the picture agree: the phone bar reads Home, Local, …, New
 // post, Profile, More once the `more` items are hidden.
 const ITEMS: NavItem[] = [
   { label: 'Home',    icon: 'home',  href: '/home' },
-  { label: 'Local',   icon: 'users', href: '/local' },
+  { label: 'Local',   icon: 'users', href: '/local', needs: 'localTimeline' },
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
   { label: 'Search',  icon: 'search', href: '/search', more: true },
-  { label: 'Public',  icon: 'globe', href: '/public', more: true },
+  { label: 'Public',  icon: 'globe', href: '/public', more: true, needs: 'publicTimeline' },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
   { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true },
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
@@ -264,6 +269,11 @@ export class CaribouNavRail extends LitElement {
   @state() private accounts: UserSession[] = []
   @state() private activeKey: string | null = null
 
+  // What the active account's network can do. Null on the server and in the
+  // first client render, which then show every item: the server does not
+  // know the account. Filled in by firstUpdated and then kept in step.
+  @state() private caps: Capabilities | null = null
+
   private _onPopState = () => {
     const to = window.location.pathname
     this.pending = to === (this.current || this.path) ? '' : to
@@ -281,9 +291,11 @@ export class CaribouNavRail extends LitElement {
       const unread = unreadNotificationCount.value
       const all = users.value
       const key = activeUserKey.value
+      const caps = activeClient.value?.capabilities ?? null
       if (this.hasUpdated) {
         this.unread = unread
         this.readAccounts(all, key)
+        this.caps = caps
       }
     })
     window.addEventListener('popstate', this._onPopState)
@@ -302,6 +314,13 @@ export class CaribouNavRail extends LitElement {
     this.path = window.location.pathname
     this.unread = unreadNotificationCount.value
     this.readAccounts(users.value, activeUserKey.value)
+    this.caps = activeClient.value?.capabilities ?? null
+  }
+
+  // The items the active account's network has; all of them before mount.
+  private shown(items: NavItem[]): NavItem[] {
+    const caps = this.caps
+    return caps ? items.filter((it) => !it.needs || caps[it.needs]) : items
   }
 
   private readAccounts(all: Map<string, UserSession>, key: string | null) {
@@ -407,10 +426,11 @@ export class CaribouNavRail extends LitElement {
 
   override render() {
     const active = this.current || this.path
-    const moved = ITEMS.filter((it) => it.more)
+    const items = this.shown(ITEMS)
+    const moved = items.filter((it) => it.more)
     return html`
       <nav aria-label="Primary">
-        ${ITEMS.map((it) => this.renderItem(it, active))}
+        ${items.map((it) => this.renderItem(it, active))}
         <caribou-button variant="primary" class="compose-btn" @click=${openCompose}
           ><caribou-icon class="icon" name="squarePen"></caribou-icon><span class="label">New post</span></caribou-button>
         ${this.renderItem(PROFILE, active)}

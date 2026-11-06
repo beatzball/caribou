@@ -1,6 +1,6 @@
 import { createRestAPIClient, type mastodon } from 'masto'
 import type {
-  Account, AccountCredentials, Filter, Instance, List, ListRepliesPolicy,
+  Account, AccountCredentials, Capabilities, Filter, Instance, List, ListRepliesPolicy,
   MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
   Status, StatusEdit, StatusSource, StatusVisibility, Tag,
 } from './types.js'
@@ -16,8 +16,18 @@ export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
   | { type: 'hashtag'; tag: string }
   | { type: 'list'; id: string }
 
+/**
+ * How a timeline's posts are ordered: a compare function that sorts two
+ * post ids newest first, or null to keep the order the feed sent.
+ */
+export type TimelineOrder = ((a: string, b: string) => number) | null
+
 export interface CaribouClient {
   userKey: UserKey
+  /** What this client's network can do. Fixed for the client's lifetime. */
+  capabilities: Capabilities
+  /** The order the timeline store keeps `kind` in (see `TimelineOrder`). */
+  timelineOrder(kind: TimelineKind): TimelineOrder
   fetchTimeline(kind: TimelineKind, params?: {
     sinceId?: string
     maxId?: string
@@ -282,6 +292,40 @@ export interface EditStatusInput {
   mediaIds: readonly string[]
 }
 
+/** What Mastodon supports. `maxChars` and `maxImages` are its defaults; the server can say others. */
+export const MASTODON_CAPABILITIES: Capabilities = Object.freeze({
+  network: 'mastodon',
+  localTimeline: true,
+  publicTimeline: true,
+  visibility: true,
+  contentWarningText: true,
+  polls: true,
+  edit: true,
+  customEmoji: true,
+  followTags: true,
+  privateLists: true,
+  serverFilters: true,
+  maxChars: 500,
+  maxBytes: null,
+  maxImages: 4,
+  maxImageBytes: null,
+})
+
+// Mastodon ids are numbers too large for a double, sent as strings. A longer
+// id is a larger number; ids of one length compare as text.
+function newerFirst(a: string, b: string): number {
+  if (a.length !== b.length) return b.length - a.length
+  return a < b ? 1 : a > b ? -1 : 0
+}
+
+/**
+ * Mastodon's timeline order: newest first by post id. Bookmarks run in the
+ * order they were made, not by post id, so they keep the server's order.
+ */
+export function mastodonTimelineOrder(kind: TimelineKind): TimelineOrder {
+  return kind === 'bookmarks' ? null : newerFirst
+}
+
 export function createCaribouClient(userKey: UserKey, session: SessionSource): CaribouClient {
   const dedup = createDedup()
 
@@ -357,6 +401,8 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
 
   return {
     userKey,
+    capabilities: MASTODON_CAPABILITIES,
+    timelineOrder: mastodonTimelineOrder,
     async fetchTimeline(kind, params = {}) {
       const key = `timeline:${JSON.stringify(kind)}:${JSON.stringify(params)}`
       return run(key, async (c) => {
