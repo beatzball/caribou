@@ -57,7 +57,7 @@ describe('toggleFavourite', () => {
 
     expect(get('1').favourited).toBe(true)
     expect(get('1').favouritesCount).toBe(5)
-    expect(favourite).toHaveBeenCalledWith('1')
+    expect(favourite).toHaveBeenCalledWith({ id: '1' })
 
     d.resolve(makeStatus('1', { favourited: true, favouritesCount: 7, content: '<p>fresh</p>' }))
     await p
@@ -74,7 +74,7 @@ describe('toggleFavourite', () => {
     expect(get('1').favourited).toBe(false)
     expect(get('1').favouritesCount).toBe(0)
     await p
-    expect(unfavourite).toHaveBeenCalledWith('1')
+    expect(unfavourite).toHaveBeenCalledWith({ id: '1' })
   })
 
   it('never drops a count below zero', async () => {
@@ -140,7 +140,7 @@ describe('boost wrappers', () => {
     const favourite = vi.fn(() => d.promise)
     const p = toggleFavourite(get('w1'), { clientSource: () => fakeClient({ favourite }) })
 
-    expect(favourite).toHaveBeenCalledWith('1')
+    expect(favourite).toHaveBeenCalledWith({ id: '1' })
     for (const id of ['1']) expect(get(id).favouritesCount).toBe(4)
     for (const id of ['w1', 'w2']) {
       expect(get(id).reblog!.favourited).toBe(true)
@@ -166,7 +166,7 @@ describe('boost wrappers', () => {
     expect(get('w1').reblog!.reblogsCount).toBe(2)
     expect(statusCache.value.has('1')).toBe(false)
     await p
-    expect(reblog).toHaveBeenCalledWith('1')
+    expect(reblog).toHaveBeenCalledWith({ id: '1' })
     expect(get('w1').reblog!.reblogsCount).toBe(2)
   })
 

@@ -24,11 +24,11 @@ function deferred<T>() {
 function fakeClient(over: Partial<CaribouClient> = {}): CaribouClient {
   return {
     userKey: ME,
-    mute: vi.fn(async (id: string) => rel(id, { muting: true, mutingNotifications: true })),
-    unmute: vi.fn(async (id: string) => rel(id)),
-    block: vi.fn(async (id: string) => rel(id, { blocking: true })),
-    unblock: vi.fn(async (id: string) => rel(id)),
-    follow: vi.fn(async (id: string) => rel(id, { following: true })),
+    mute: vi.fn(async ({ id }: { id: string }) => rel(id, { muting: true, mutingNotifications: true })),
+    unmute: vi.fn(async ({ id }: { id: string }) => rel(id)),
+    block: vi.fn(async ({ id }: { id: string }) => rel(id, { blocking: true })),
+    unblock: vi.fn(async ({ id }: { id: string }) => rel(id)),
+    follow: vi.fn(async ({ id }: { id: string }) => rel(id, { following: true })),
     ...over,
   } as unknown as CaribouClient
 }
@@ -104,7 +104,7 @@ describe('setMute', () => {
     // The answer to the mute does not show while the unmute waits.
     expect(cached('7')?.muting).toBe(false)
     expect(await unmuting).toBe(true)
-    expect(client.unmute).toHaveBeenCalledWith('7')
+    expect(client.unmute).toHaveBeenCalledWith({ id: '7' })
     expect(cached('7')?.muting).toBe(false)
   })
 
@@ -112,7 +112,7 @@ describe('setMute', () => {
     const m = deferred<Relationship>()
     const client = fakeClient({
       mute: vi.fn(() => m.promise),
-      block: vi.fn(async (id: string) => rel(id, { muting: true, blocking: true })),
+      block: vi.fn(async ({ id }: { id: string }) => rel(id, { muting: true, blocking: true })),
     })
     const muting = setMute(BOB, true, { clientSource: () => client })
     const blocking = setBlock(BOB, true, { clientSource: () => client })
@@ -122,7 +122,7 @@ describe('setMute', () => {
     m.resolve(rel('7', { muting: true }))
     await muting
     await blocking
-    expect(client.block).toHaveBeenCalledWith('7')
+    expect(client.block).toHaveBeenCalledWith({ id: '7' })
     expect(cached('7')).toMatchObject({ muting: true, blocking: true })
   })
 
@@ -130,7 +130,7 @@ describe('setMute', () => {
     const m = deferred<Relationship>()
     const client = fakeClient({
       mute: vi.fn(() => m.promise),
-      follow: vi.fn(async (id: string) => rel(id, { following: true })),
+      follow: vi.fn(async ({ id }: { id: string }) => rel(id, { following: true })),
     })
     const muting = setMute(BOB, true, { clientSource: () => client })
     const follow = toggleFollow(BOB, { clientSource: () => client })
@@ -143,7 +143,7 @@ describe('setMute', () => {
   it('an unmute for an account the cache knows nothing about still asks the server', async () => {
     const client = fakeClient()
     expect(await setMute(BOB, false, { clientSource: () => client })).toBe(true)
-    expect(client.unmute).toHaveBeenCalledWith('7')
+    expect(client.unmute).toHaveBeenCalledWith({ id: '7' })
   })
 
   it('a failure after the reader moved to another account rolls back without a toast', async () => {
@@ -187,7 +187,7 @@ describe('setBlock', () => {
     seed(rel('7', { blocking: true }))
     const client = fakeClient()
     expect(await setBlock(BOB, false, { clientSource: () => client })).toBe(true)
-    expect(client.unblock).toHaveBeenCalledWith('7')
+    expect(client.unblock).toHaveBeenCalledWith({ id: '7' })
     expect(cached('7')?.blocking).toBe(false)
   })
 })

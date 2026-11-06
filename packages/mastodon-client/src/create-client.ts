@@ -1,8 +1,8 @@
 import { createRestAPIClient, type mastodon } from 'masto'
 import type {
-  Account, AccountCredentials, Capabilities, Filter, Instance, List, ListRepliesPolicy,
+  Account, AccountCredentials, AccountRef, Capabilities, Filter, Instance, List, ListRepliesPolicy,
   MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
-  Status, StatusEdit, StatusSource, StatusVisibility, Tag,
+  Status, StatusEdit, StatusRef, StatusSource, StatusVisibility, Tag,
 } from './types.js'
 // Loads masto-mapping's correction to masto's declarations (see there).
 import type {} from './masto-mapping.js'
@@ -51,25 +51,27 @@ export interface CaribouClient {
     params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
   ): Promise<Status[]>
 
-  // Status actions. Each resolves to the post itself as the server now has
-  // it, never the reblog wrapper `reblog` creates.
-  favourite(statusId: string): Promise<Status>
-  unfavourite(statusId: string): Promise<Status>
-  reblog(statusId: string): Promise<Status>
-  unreblog(statusId: string): Promise<Status>
-  bookmark(statusId: string): Promise<Status>
-  unbookmark(statusId: string): Promise<Status>
+  // Status actions. Each takes the post's ref (`statusRef`) and resolves to
+  // the post itself as the server now has it, never the reblog wrapper
+  // `reblog` creates. The result carries the record refs the write made.
+  favourite(ref: StatusRef): Promise<Status>
+  unfavourite(ref: StatusRef): Promise<Status>
+  reblog(ref: StatusRef): Promise<Status>
+  unreblog(ref: StatusRef): Promise<Status>
+  bookmark(ref: StatusRef): Promise<Status>
+  unbookmark(ref: StatusRef): Promise<Status>
 
-  // Relationships (follow / unfollow).
+  // Relationships (follow / unfollow). Each write takes the account's ref
+  // (`accountRef`), so an undo can name the record the earlier write made.
   fetchRelationships(accountIds: readonly string[]): Promise<Relationship[]>
-  follow(accountId: string): Promise<Relationship>
-  unfollow(accountId: string): Promise<Relationship>
+  follow(ref: AccountRef): Promise<Relationship>
+  unfollow(ref: AccountRef): Promise<Relationship>
   // Mute and block. Each resolves to the relationship as the server now has
   // it. A mute hides the account's notifications too.
-  mute(accountId: string): Promise<Relationship>
-  unmute(accountId: string): Promise<Relationship>
-  block(accountId: string): Promise<Relationship>
-  unblock(accountId: string): Promise<Relationship>
+  mute(ref: AccountRef): Promise<Relationship>
+  unmute(ref: AccountRef): Promise<Relationship>
+  block(ref: AccountRef): Promise<Relationship>
+  unblock(ref: AccountRef): Promise<Relationship>
   /** The muted accounts, newest first. Pages by the cursor in `nextMaxId`. */
   fetchMutes(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
   /** The blocked accounts, newest first. Pages by the cursor in `nextMaxId`. */
@@ -455,26 +457,26 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
 
     // --- status actions ---
-    async favourite(statusId) {
-      return write((c) => c.v1.statuses.$select(statusId).favourite())
+    async favourite({ id }) {
+      return write((c) => c.v1.statuses.$select(id).favourite())
     },
-    async unfavourite(statusId) {
-      return write((c) => c.v1.statuses.$select(statusId).unfavourite())
+    async unfavourite({ id }) {
+      return write((c) => c.v1.statuses.$select(id).unfavourite())
     },
-    async reblog(statusId) {
+    async reblog({ id }) {
       // Mastodon answers a boost with the new wrapper status; the caller
       // wants the post it wraps, with `reblogged` and the count updated.
-      const wrapper = await write((c) => c.v1.statuses.$select(statusId).reblog())
+      const wrapper = await write((c) => c.v1.statuses.$select(id).reblog())
       return wrapper.reblog ?? wrapper
     },
-    async unreblog(statusId) {
-      return write((c) => c.v1.statuses.$select(statusId).unreblog())
+    async unreblog({ id }) {
+      return write((c) => c.v1.statuses.$select(id).unreblog())
     },
-    async bookmark(statusId) {
-      return write((c) => c.v1.statuses.$select(statusId).bookmark())
+    async bookmark({ id }) {
+      return write((c) => c.v1.statuses.$select(id).bookmark())
     },
-    async unbookmark(statusId) {
-      return write((c) => c.v1.statuses.$select(statusId).unbookmark())
+    async unbookmark({ id }) {
+      return write((c) => c.v1.statuses.$select(id).unbookmark())
     },
 
     // --- relationships ---
@@ -483,23 +485,23 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         c.v1.accounts.relationships.fetch({ id: [...accountIds] }),
       )
     },
-    async follow(accountId) {
-      return write((c) => c.v1.accounts.$select(accountId).follow())
+    async follow({ id }) {
+      return write((c) => c.v1.accounts.$select(id).follow())
     },
-    async unfollow(accountId) {
-      return write((c) => c.v1.accounts.$select(accountId).unfollow())
+    async unfollow({ id }) {
+      return write((c) => c.v1.accounts.$select(id).unfollow())
     },
-    async mute(accountId) {
-      return write((c) => c.v1.accounts.$select(accountId).mute({ notifications: true }))
+    async mute({ id }) {
+      return write((c) => c.v1.accounts.$select(id).mute({ notifications: true }))
     },
-    async unmute(accountId) {
-      return write((c) => c.v1.accounts.$select(accountId).unmute())
+    async unmute({ id }) {
+      return write((c) => c.v1.accounts.$select(id).unmute())
     },
-    async block(accountId) {
-      return write((c) => c.v1.accounts.$select(accountId).block())
+    async block({ id }) {
+      return write((c) => c.v1.accounts.$select(id).block())
     },
-    async unblock(accountId) {
-      return write((c) => c.v1.accounts.$select(accountId).unblock())
+    async unblock({ id }) {
+      return write((c) => c.v1.accounts.$select(id).unblock())
     },
     async fetchMutes(params = {}) {
       return fetchAccountPage('mutes', params)

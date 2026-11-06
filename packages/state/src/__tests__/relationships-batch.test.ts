@@ -16,8 +16,8 @@ function fakeClient(over: Partial<CaribouClient> = {}): CaribouClient {
   return {
     userKey: ME,
     fetchRelationships: vi.fn(async (ids: readonly string[]) => ids.map((id) => rel(id, { followedBy: true }))),
-    follow: vi.fn(async (id: string) => rel(id, { following: true })),
-    unfollow: vi.fn(async (id: string) => rel(id)),
+    follow: vi.fn(async ({ id }: { id: string }) => rel(id, { following: true })),
+    unfollow: vi.fn(async ({ id }: { id: string }) => rel(id)),
     ...over,
   } as unknown as CaribouClient
 }
