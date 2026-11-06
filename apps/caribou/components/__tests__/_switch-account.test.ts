@@ -9,7 +9,7 @@ import {
 const a = toUserKey('alice', 'example.social')
 const b = toUserKey('bob', 'other.example')
 function s(userKey: typeof a, server: string): UserSession {
-  return { userKey, server, token: 'T', vapidKey: 'V', account: null, createdAt: 1 }
+  return { userKey, server, token: 'T', generation: 'G', vapidKey: 'V', account: null, createdAt: 1 }
 }
 
 // Lands as `session` the way a caller does: make it the only active account,

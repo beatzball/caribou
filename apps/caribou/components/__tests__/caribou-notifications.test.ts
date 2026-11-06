@@ -50,7 +50,7 @@ const groupedSpy = vi.fn(olderServer)
 
 function signIn(key: Key = userKey) {
   users.value = new Map([...users.value, [key, {
-    userKey: key, server: 'example.social', token: 'TOKEN', vapidKey: '', createdAt: 1, account: null,
+    userKey: key, server: 'example.social', token: 'TOKEN', generation: 'G', vapidKey: '', createdAt: 1, account: null,
   }]])
   activeUserKey.value = key
 }

@@ -2,19 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { activeUserKey, addUserSession, switchAccount, users, type UserSession } from '@beatzball/caribou-state'
 import type { LandRequest } from '../_switch-account.js'
-import { installUnauthorizedHandler } from '../_unauthorized.js'
+import { installSessionExpiredHandler, installUnauthorizedHandler } from '../_unauthorized.js'
 
 const bob = toUserKey('bob', 'example.social')
 const alice = toUserKey('alice', 'example.social')
 
+// One sign-in: its token doubles as its generation here.
 function session(userKey: typeof bob, token: string): UserSession {
   return {
-    userKey, server: 'example.social', token, vapidKey: 'VAPID', account: null, createdAt: 1,
+    userKey, server: 'example.social', token, generation: token, vapidKey: 'VAPID', account: null, createdAt: 1,
   }
 }
 
-function fire(target: EventTarget, userKey: string, token: string): void {
-  target.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey, token } }))
+function fire(target: EventTarget, userKey: string, generation: string, type = 'caribou:unauthorized'): void {
+  target.dispatchEvent(new CustomEvent(type, { detail: { userKey, generation } }))
 }
 
 describe('installUnauthorizedHandler', () => {
@@ -56,7 +57,25 @@ describe('installUnauthorizedHandler', () => {
     expect(redirect).toHaveBeenCalledWith({ from: 'example.social', expired: false })
   })
 
-  it('still checks the token before it moves to the next account', () => {
+  it('keeps the drafts and prefs of the session it removes', () => {
+    addUserSession(session(alice, 'A1'))
+    addUserSession(session(bob, 'B1'))
+    localStorage.setItem(`caribou.drafts.${bob}`, '{"new":{"text":"half a post"}}')
+    localStorage.setItem(`caribou.prefs.${bob}`, '{"theme":"light"}')
+    fire(target, bob, 'B1')
+    expect(users.value.has(bob)).toBe(false)
+    expect(localStorage.getItem(`caribou.drafts.${bob}`)).toBe('{"new":{"text":"half a post"}}')
+    expect(localStorage.getItem(`caribou.prefs.${bob}`)).toBe('{"theme":"light"}')
+  })
+
+  it('ignores caribou:session-expired', () => {
+    addUserSession(session(bob, 'B1'))
+    fire(target, bob, 'B1', 'caribou:session-expired')
+    expect(users.value.size).toBe(1)
+    expect(redirect).not.toHaveBeenCalled()
+  })
+
+  it('still checks the generation before it moves to the next account', () => {
     addUserSession(session(alice, 'A1'))
     addUserSession(session(bob, 'B2'))
     fire(target, bob, 'B1')
@@ -115,5 +134,46 @@ describe('installUnauthorizedHandler', () => {
     target.dispatchEvent(new Event('caribou:unauthorized'))
     expect(users.value.size).toBe(1)
     expect(redirect).not.toHaveBeenCalled()
+  })
+})
+
+describe('installSessionExpiredHandler', () => {
+  let target: EventTarget
+
+  beforeEach(() => {
+    users.value = new Map()
+    activeUserKey.value = null
+    localStorage.clear()
+    sessionStorage.clear()
+    target = new EventTarget()
+    installSessionExpiredHandler(target)
+  })
+
+  it('marks the active session expired and keeps it, its drafts and the page', () => {
+    addUserSession(session(alice, 'A1'))
+    addUserSession(session(bob, 'B1'))
+    localStorage.setItem(`caribou.drafts.${bob}`, '{"new":{"text":"half a post"}}')
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {})
+    fire(target, bob, 'B1', 'caribou:session-expired')
+    expect(users.value.get(bob)?.expired).toBe(true)
+    expect(users.value.get(alice)?.expired).toBeUndefined()
+    expect(activeUserKey.value).toBe(bob)
+    expect(localStorage.getItem(`caribou.drafts.${bob}`)).toBe('{"new":{"text":"half a post"}}')
+    expect(replace).not.toHaveBeenCalled()
+    replace.mockRestore()
+  })
+
+  it('ignores an old expiry after a new sign-in', () => {
+    addUserSession(session(bob, 'B2'))
+    fire(target, bob, 'B1', 'caribou:session-expired')
+    expect(users.value.get(bob)?.expired).toBeUndefined()
+  })
+
+  it('ignores caribou:unauthorized and an event without a session', () => {
+    addUserSession(session(bob, 'B1'))
+    fire(target, bob, 'B1')
+    target.dispatchEvent(new Event('caribou:session-expired'))
+    expect(users.value.get(bob)?.expired).toBeUndefined()
+    expect(users.value.size).toBe(1)
   })
 })

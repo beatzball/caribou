@@ -3,6 +3,7 @@ import type { UserKey } from '@beatzball/caribou-auth'
 // One account's settings, in `caribou.prefs.<userKey>` (localStorage). Every
 // per-account preference lives in this one object, so signing out of the
 // account (which removes the key, `dropSession` in `users.ts`) clears them all.
+// A 401 or an expiry keeps them (README, "Session rules").
 //
 // Two inline head scripts read the same key before the app loads: the theme
 // (`apps/caribou/server/lib/theme-head.ts`) and the forward from `/`

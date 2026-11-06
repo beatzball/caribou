@@ -19,7 +19,7 @@ const bob = toUserKey('bob', 'other.example')
 
 function session(userKey: UserKey, account: Partial<Account> | null = null): UserSession {
   return {
-    userKey, server: userKey.split('@')[1]!, token: 'T', vapidKey: '',
+    userKey, server: userKey.split('@')[1]!, token: 'T', generation: 'G', vapidKey: '',
     account: account as Account | null, createdAt: 1,
   }
 }

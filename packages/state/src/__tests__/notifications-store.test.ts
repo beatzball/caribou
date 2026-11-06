@@ -34,7 +34,7 @@ function notif(id: string, type = 'mention', withStatus = type !== 'follow'): No
 
 function signIn(token = 'T1') {
   addUserSession({
-    userKey: key, server: 'example.social', token, vapidKey: '',
+    userKey: key, server: 'example.social', token, generation: token, vapidKey: '',
     account: null, createdAt: 1,
   })
 }
@@ -372,7 +372,7 @@ describe('startUnreadNotifications', () => {
     const bob = toUserKey('bob', 'example.social')
     function switchAway() {
       users.value = new Map([...users.value, [bob, {
-        userKey: bob, server: 'example.social', token: 'TB', vapidKey: '', account: null, createdAt: 2,
+        userKey: bob, server: 'example.social', token: 'TB', generation: 'TB', vapidKey: '', account: null, createdAt: 2,
       }]])
       activeUserKey.value = bob
       activeUserKey.value = key

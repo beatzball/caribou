@@ -3,7 +3,7 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import {
   users, activeUserKey, activeUser,
   addUserSession, removeActiveUser, removeSession, switchAccount, signOutActive, nextAccountKey, isOwnAccount, userName, loadActiveAccount,
-  loadFromStorage, saveToStorage,
+  loadFromStorage, saveToStorage, markExpired, emitSessionExpired,
   type UserSession,
 } from '../users.js'
 
@@ -14,6 +14,7 @@ function sampleSession(): UserSession {
     userKey: key,
     server: 'fosstodon.org',
     token: 'TOKEN-1',
+    generation: 'G1',
     vapidKey: 'VAPID',
     account: { id: 'a1', username: 'beatzball', acct: 'beatzball' } as UserSession['account'],
     createdAt: 1_700_000_000_000,
@@ -60,7 +61,23 @@ describe('persistence', () => {
     localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
     loadFromStorage()
     expect(users.value.get(key)?.userKey).toBe(key)
+    expect(removeSession(key, 'G1')).toBe('active')
+  })
+
+  it('loadFromStorage fills a missing generation from the token, so the guard still works', () => {
+    const { generation: _, ...stored } = sampleSession()
+    localStorage.setItem('caribou.users', JSON.stringify([[key, stored]]))
+    localStorage.setItem('caribou.activeUserKey', JSON.stringify(key))
+    loadFromStorage()
+    expect(users.value.get(key)?.generation).toBe('TOKEN-1')
+    expect(removeSession(key, 'TOKEN-0')).toBe('stale')
     expect(removeSession(key, 'TOKEN-1')).toBe('active')
+  })
+
+  it('loadFromStorage keeps a stored generation and expired', () => {
+    localStorage.setItem('caribou.users', JSON.stringify([[key, { ...sampleSession(), expired: true }]]))
+    loadFromStorage()
+    expect(users.value.get(key)).toMatchObject({ generation: 'G1', expired: true })
   })
 
   it('loadFromStorage hydrates the signals', () => {
@@ -203,7 +220,7 @@ describe('loadActiveAccount', () => {
     addUserSession(bareSession())
     const loading = loadActiveAccount()
     removeActiveUser()
-    addUserSession({ ...bareSession(), token: 'TOKEN-2' })
+    addUserSession({ ...bareSession(), token: 'TOKEN-2', generation: 'G2' })
     answer(new Response(
       JSON.stringify({ id: 'old', username: 'beatzball', acct: 'beatzball' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
@@ -220,7 +237,7 @@ describe('removeSession (a 401 for one client)', () => {
 
   function otherSession(): UserSession {
     return {
-      userKey: other, server: 'example.social', token: 'TOKEN-A', vapidKey: 'VAPID',
+      userKey: other, server: 'example.social', token: 'TOKEN-A', generation: 'GA', vapidKey: 'VAPID',
       account: null, createdAt: 1_700_000_000_001,
     }
   }
@@ -230,21 +247,31 @@ describe('removeSession (a 401 for one client)', () => {
     localStorage.setItem(`caribou.drafts.${k}`, '[]')
   }
 
-  it('removes the active session when the token matches, with its prefs and drafts', () => {
+  // Rule 4: a 401 removes the session but keeps its prefs and drafts. Only a
+  // sign-out deletes them (rule 6).
+  it('removes the active session when the generation matches, and keeps its prefs and drafts', () => {
     addUserSession(sampleSession())
     seedLocal(key)
-    expect(removeSession(key, 'TOKEN-1')).toBe('active')
+    expect(removeSession(key, 'G1')).toBe('active')
     expect(users.value.has(key)).toBe(false)
     expect(activeUserKey.value).toBeNull()
-    expect(localStorage.getItem(`caribou.prefs.${key}`)).toBeNull()
-    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBeNull()
+    expect(localStorage.getItem(`caribou.prefs.${key}`)).toBe('{}')
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('[]')
     expect(JSON.parse(localStorage.getItem('caribou.users')!)).toEqual([])
   })
 
-  it('keeps a session that was replaced under the same key', () => {
-    addUserSession({ ...sampleSession(), token: 'TOKEN-2' })
+  it('a new sign-in to the same account finds the drafts a 401 kept', () => {
+    addUserSession(sampleSession())
     seedLocal(key)
-    expect(removeSession(key, 'TOKEN-1')).toBe('stale')
+    removeSession(key, 'G1')
+    addUserSession({ ...sampleSession(), token: 'TOKEN-2', generation: 'G2' })
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('[]')
+  })
+
+  it('keeps a session that was replaced under the same key', () => {
+    addUserSession({ ...sampleSession(), token: 'TOKEN-2', generation: 'G2' })
+    seedLocal(key)
+    expect(removeSession(key, 'G1')).toBe('stale')
     expect(users.value.get(key)?.token).toBe('TOKEN-2')
     expect(activeUserKey.value).toBe(key)
     expect(localStorage.getItem(`caribou.prefs.${key}`)).toBe('{}')
@@ -253,7 +280,7 @@ describe('removeSession (a 401 for one client)', () => {
 
   it('does nothing for a session that is already gone', () => {
     addUserSession(sampleSession())
-    expect(removeSession(other, 'TOKEN-A')).toBe('stale')
+    expect(removeSession(other, 'GA')).toBe('stale')
     expect(users.value.size).toBe(1)
     expect(activeUserKey.value).toBe(key)
   })
@@ -263,11 +290,11 @@ describe('removeSession (a 401 for one client)', () => {
     addUserSession(sampleSession())
     seedLocal(key)
     seedLocal(other)
-    expect(removeSession(other, 'TOKEN-A')).toBe('inactive')
+    expect(removeSession(other, 'GA')).toBe('inactive')
     expect([...users.value.keys()]).toEqual([key])
     expect(activeUserKey.value).toBe(key)
-    expect(localStorage.getItem(`caribou.prefs.${other}`)).toBeNull()
-    expect(localStorage.getItem(`caribou.drafts.${other}`)).toBeNull()
+    expect(localStorage.getItem(`caribou.prefs.${other}`)).toBe('{}')
+    expect(localStorage.getItem(`caribou.drafts.${other}`)).toBe('[]')
     expect(localStorage.getItem(`caribou.prefs.${key}`)).toBe('{}')
     expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('[]')
     expect(JSON.parse(localStorage.getItem('caribou.activeUserKey')!)).toBe(key)
@@ -280,7 +307,7 @@ describe('the 401 event', () => {
     addUserSession(sampleSession())
     const client = activeClient.value!
     // Another session becomes active while the first client's request is in flight.
-    addUserSession({ ...sampleSession(), userKey: toUserKey('alice', 'example.social'), token: 'TOKEN-A' })
+    addUserSession({ ...sampleSession(), userKey: toUserKey('alice', 'example.social'), token: 'TOKEN-A', generation: 'GA' })
     const details: unknown[] = []
     const listener = (e: Event) => { details.push((e as CustomEvent).detail) }
     window.addEventListener('caribou:unauthorized', listener)
@@ -292,7 +319,7 @@ describe('the 401 event', () => {
     ) as typeof fetch
     try {
       await expect(client.fetchTimeline('home')).rejects.toMatchObject({ code: 'unauthorized' })
-      expect(details).toEqual([{ userKey: key, token: 'TOKEN-1' }])
+      expect(details).toEqual([{ userKey: key, generation: 'G1' }])
     } finally {
       globalThis.fetch = originalFetch
       window.removeEventListener('caribou:unauthorized', listener)
@@ -305,7 +332,7 @@ describe('several accounts', () => {
   const b = toUserKey('bob', 'other.example')
   const c = toUserKey('carol', 'example.social')
   function s(userKey: typeof a, server: string): UserSession {
-    return { userKey, server, token: `T-${userKey}`, vapidKey: 'V', account: null, createdAt: 1 }
+    return { userKey, server, token: `T-${userKey}`, generation: `G-${userKey}`, vapidKey: 'V', account: null, createdAt: 1 }
   }
   function seed(...keys: (typeof a)[]): void {
     for (const k of keys) addUserSession(s(k, k.slice(k.indexOf('@') + 1)))
@@ -373,5 +400,149 @@ describe('several accounts', () => {
     expect(nextAccountKey([a], a)).toBeNull()
     expect(nextAccountKey([], a)).toBeNull()
     expect(nextAccountKey([b, c], a)).toBe(b)
+  })
+})
+
+describe('generation (rule 1: a sign-in always wins)', () => {
+  it('a sign-in without a generation gets a new one each time', () => {
+    const { generation: _, ...noGen } = sampleSession()
+    addUserSession(noGen)
+    const first = users.value.get(key)!.generation
+    addUserSession(noGen)
+    const second = users.value.get(key)!.generation
+    expect(first).toMatch(/^[0-9a-f]{32}$/)
+    expect(second).toMatch(/^[0-9a-f]{32}$/)
+    expect(second).not.toBe(first)
+  })
+
+  it('a sign-in clears expired', () => {
+    addUserSession(sampleSession())
+    markExpired(key, 'G1')
+    addUserSession({ ...sampleSession(), token: 'TOKEN-2', generation: 'G2' })
+    expect(users.value.get(key)?.expired).toBeUndefined()
+    addUserSession({ ...sampleSession(), expired: true } as UserSession)
+    expect(users.value.get(key)?.expired).toBeUndefined()
+  })
+})
+
+describe('markExpired (rule 3: credentials gone)', () => {
+  const other = toUserKey('alice', 'example.social')
+
+  function seedLocal(k: string): void {
+    localStorage.setItem(`caribou.prefs.${k}`, '{"theme":"light"}')
+    localStorage.setItem(`caribou.drafts.${k}`, '{"new":{"text":"half a post"}}')
+  }
+
+  it('marks the session and keeps it, its prefs, its drafts and the active account', () => {
+    addUserSession(sampleSession())
+    seedLocal(key)
+    expect(markExpired(key, 'G1')).toBe('marked')
+    expect(users.value.get(key)).toMatchObject({ generation: 'G1', token: 'TOKEN-1', expired: true })
+    expect(activeUserKey.value).toBe(key)
+    expect(localStorage.getItem(`caribou.prefs.${key}`)).toBe('{"theme":"light"}')
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('{"new":{"text":"half a post"}}')
+    const stored = JSON.parse(localStorage.getItem('caribou.users')!) as [string, UserSession][]
+    expect(stored[0]![1].expired).toBe(true)
+  })
+
+  it('marking twice is the same as once', () => {
+    addUserSession(sampleSession())
+    markExpired(key, 'G1')
+    const after = users.value
+    expect(markExpired(key, 'G1')).toBe('marked')
+    expect(users.value).toBe(after)
+  })
+
+  it('ignores an old expiry after a new sign-in', () => {
+    addUserSession(sampleSession())
+    addUserSession({ ...sampleSession(), token: 'TOKEN-2', generation: 'G2' })
+    expect(markExpired(key, 'G1')).toBe('stale')
+    expect(users.value.get(key)?.expired).toBeUndefined()
+  })
+
+  it('ignores an expiry for a session that is gone', () => {
+    expect(markExpired(key, 'G1')).toBe('stale')
+    expect(users.value.size).toBe(0)
+  })
+
+  it('leaves the other account alone, active or not', () => {
+    addUserSession({ ...sampleSession(), userKey: other, generation: 'GA' })
+    addUserSession(sampleSession())
+    seedLocal(other)
+    markExpired(other, 'GA')
+    expect(users.value.get(key)?.expired).toBeUndefined()
+    expect(users.value.get(other)?.expired).toBe(true)
+    expect(activeUserKey.value).toBe(key)
+    markExpired(key, 'G1')
+    expect(activeUserKey.value).toBe(key)
+    expect([...users.value.keys()]).toEqual([other, key])
+    expect(localStorage.getItem(`caribou.drafts.${other}`)).toBe('{"new":{"text":"half a post"}}')
+  })
+
+  it('a 401 for the same sign-in still removes an expired session', () => {
+    addUserSession(sampleSession())
+    markExpired(key, 'G1')
+    expect(removeSession(key, 'G1')).toBe('active')
+  })
+
+  it('emitSessionExpired sends caribou:session-expired on the window', () => {
+    const details: unknown[] = []
+    const listener = (e: Event) => { details.push((e as CustomEvent).detail) }
+    window.addEventListener('caribou:session-expired', listener)
+    try {
+      emitSessionExpired({ userKey: key, generation: 'G1' })
+      expect(details).toEqual([{ userKey: key, generation: 'G1' }])
+    } finally {
+      window.removeEventListener('caribou:session-expired', listener)
+    }
+  })
+
+  it('loadActiveAccount keeps expired when it stores the account', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ id: 'a1', username: 'beatzball', acct: 'beatzball' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    ))
+    addUserSession({ ...sampleSession(), account: null })
+    const loading = loadActiveAccount()
+    markExpired(key, 'G1')
+    await loading
+    expect(users.value.get(key)).toMatchObject({ expired: true, account: { id: 'a1' } })
+    fetchSpy.mockRestore()
+  })
+})
+
+describe('rule 5: network errors change no session', () => {
+  async function failWith(fetchImpl: () => Promise<Response>) {
+    const { activeClient } = await import('../users.js')
+    addUserSession(sampleSession())
+    localStorage.setItem(`caribou.drafts.${key}`, '[]')
+    const before = users.value
+    const events: string[] = []
+    const listener = (e: Event) => { events.push(e.type) }
+    window.addEventListener('caribou:unauthorized', listener)
+    window.addEventListener('caribou:session-expired', listener)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(fetchImpl) as typeof fetch
+    try {
+      await expect(activeClient.value!.fetchTimeline('home')).rejects.toBeTruthy()
+    } finally {
+      globalThis.fetch = originalFetch
+      window.removeEventListener('caribou:unauthorized', listener)
+      window.removeEventListener('caribou:session-expired', listener)
+    }
+    expect(events).toEqual([])
+    expect(users.value).toBe(before)
+    expect(activeUserKey.value).toBe(key)
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBe('[]')
+  }
+
+  it('a failed connection', async () => {
+    await failWith(async () => { throw new TypeError('Failed to fetch') })
+  })
+
+  it('a 503', async () => {
+    await failWith(async () => new Response(JSON.stringify({ error: 'down' }), {
+      status: 503, headers: { 'content-type': 'application/json' },
+    }))
   })
 })

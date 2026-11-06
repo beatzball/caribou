@@ -81,7 +81,8 @@ export function pollOptions(poll: DraftPoll): string[] {
   return poll.options.map((o) => o.trim()).filter((o) => o !== '')
 }
 
-// Sign-out (`signOutActive`, `removeSession`) clears this key.
+// Sign-out (`signOutActive`) clears this key. A 401 or an expiry keeps it
+// (README, "Session rules").
 function storageKey(userKey: UserKey): string {
   return `caribou.drafts.${userKey}`
 }

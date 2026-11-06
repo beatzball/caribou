@@ -16,7 +16,7 @@ const B = toUserKey('bob', 'two.example')
 const C = toUserKey('carol', 'three.example')
 
 function session(userKey: UserKey, server: string): UserSession {
-  return { userKey, server, token: `T-${userKey}`, vapidKey: 'V', account: null, createdAt: 1 }
+  return { userKey, server, token: `T-${userKey}`, generation: `T-${userKey}`, vapidKey: 'V', account: null, createdAt: 1 }
 }
 
 function store(...list: [UserKey, string][]): void {
@@ -25,7 +25,7 @@ function store(...list: [UserKey, string][]): void {
 }
 
 function fire(target: EventTarget, userKey: UserKey): void {
-  target.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey, token: `T-${userKey}` } }))
+  target.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey, generation: `T-${userKey}` } }))
 }
 
 // A fetch whose every call stays pending until `release(i)`.
@@ -126,7 +126,7 @@ describe('401s during a landing (Codex 1)', () => {
     store([A, 'one.example'], [B, 'two.example'])
     const { net, replace, target } = setup()
     fire(target, A)
-    target.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey: B, token: 'old' } }))
+    target.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey: B, generation: 'old' } }))
     await tick()
     await net.release(0)
     expect(activeUserKey.value).toBe(B)

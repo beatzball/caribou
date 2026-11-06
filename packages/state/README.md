@@ -45,6 +45,45 @@ Sources of truth — see file for full signatures.
 - `addUserSession(s)`, `removeActiveUser()` — mutators that also persist
   to `localStorage`.
 - `loadFromStorage()`, `saveToStorage()` — explicit hydration boundary.
+- `markExpired(userKey, generation)`, `removeSession(userKey, generation)` —
+  what a failure may do to a session. The rules are below.
+- `emitSessionExpired(detail)` — the event a client sends when the network
+  says its credentials are gone.
+
+**Session rules** (`users.ts`; the handlers are in
+`apps/caribou/components/_unauthorized.ts`)
+
+A session has a `generation`: a random id made at each sign-in. It names that
+sign-in, not a token. A client is made for one session and keeps that
+session's `generation`.
+
+1. **A sign-in always wins.** It writes a new entry under the key, with a new
+   `generation` and no `expired`. It replaces whatever was there.
+2. **A failure names its sign-in.** Every failure event carries the
+   `userKey` and the `generation` of the client that saw it. It changes the
+   store only while the stored entry has that same `generation`. Otherwise it
+   is stale and changes nothing. No other check decides a race: a late
+   failure from an earlier sign-in never touches a later one.
+3. **Credentials gone: `caribou:session-expired`** `{ userKey, generation }`.
+   The entry gets `expired: true` and stays. Its prefs, its drafts, the
+   active account and the page all stay. Only a sign-in (rule 1) clears
+   `expired`. Marking it twice is the same as marking it once. No client
+   sends this event yet; the Bluesky client will.
+4. **A Mastodon 401: `caribou:unauthorized`** `{ userKey, generation }`. The
+   entry is removed (rule 2 guards it). Its prefs and drafts stay in
+   `localStorage`, so a new sign-in to the same account finds them. When it
+   was the active entry, the app moves to the next account, or to `/`.
+   Whether Mastodon should use rule 3 instead is a separate issue (spec 5.6).
+5. **Network errors, timeouts and 5xx change no session.** They send no
+   event. The request fails like any other.
+6. **Only a sign-out deletes local data.** `signOutActive` and
+   `removeActiveUser` remove the entry, its prefs and its drafts.
+7. **A late result writes only to its own sign-in.** `loadActiveAccount`
+   stores the account only while the entry has the `generation` it started
+   with. It keeps `expired` as it is.
+
+`loadFromStorage` fills a missing `generation` from the token. So an entry
+stored before these rules keeps its guard: a new sign-in has a new token.
 
 **Stores**
 

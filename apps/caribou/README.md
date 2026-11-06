@@ -460,8 +460,8 @@ active. Accounts live in the browser; the server keeps no session.
 |---|---|
 | `caribou.users` | every account: `[userKey, session]` pairs, in sign-in order |
 | `caribou.activeUserKey` | the active account's `userKey` (`name@server`), or `null` |
-| `caribou.prefs.<userKey>` | that account's settings: `theme`, `defaultTimeline`, `shortcuts`, `lastSeenNotificationId` (removed on its sign-out) |
-| `caribou.drafts.<userKey>` | that account's compose drafts (removed on its sign-out) |
+| `caribou.prefs.<userKey>` | that account's settings: `theme`, `defaultTimeline`, `shortcuts`, `lastSeenNotificationId` (removed on its sign-out; a 401 keeps it) |
+| `caribou.drafts.<userKey>` | that account's compose drafts (removed on its sign-out; a 401 keeps them) |
 
 **Switching reloads the page.** A switch from the account menu, a sign-out
 that leaves another account, and a 401 on the active account all change the
@@ -471,6 +471,9 @@ account's server, then does one full navigation: the same page when it means
 the same for any account (`pathAfterSwitch`), else `/home`; `/` when no account
 is left. Requests that arrive while a landing runs join it. A 401 on an
 account that is not active removes only that account, with no reload.
+A 401 for an earlier sign-in of an account (`generation`) changes nothing.
+`caribou:session-expired` marks the account expired and changes nothing on
+screen. The rules are "Session rules" in `packages/state/README.md`.
 
 **The instance cookie** (`caribou.instance`, httpOnly) names the server that SSR
 reads `/local`, `/public` and threads from (`server/lib/instance-cookie.ts`).

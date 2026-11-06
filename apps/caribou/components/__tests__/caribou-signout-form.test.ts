@@ -14,6 +14,7 @@ function sampleSession(): UserSession {
     userKey: key,
     server: 'example.social',
     token: 'TOKEN-1',
+    generation: 'G1',
     vapidKey: 'VAPID',
     account: { id: 'a1', username: 'alice', acct: 'alice' } as UserSession['account'],
     createdAt: 1_700_000_000_000,

@@ -47,12 +47,20 @@ const SCRIPT = `
         } catch (e) { /* bad prefs: the default */ }
         return '/feed';
       }
+      // A new id for this sign-in (session rule 1, packages/state/README.md):
+      // 128 random bits as hex, as newGeneration() makes it.
+      function generation() {
+        var bytes = crypto.getRandomValues(new Uint8Array(16)), hex = '';
+        for (var i = 0; i < bytes.length; i++) hex += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+        return hex;
+      }
       try {
         var s = JSON.parse(document.getElementById('session').textContent);
         if (!s || !s.token || !s.server || !s.userKey) return showFallback();
+        // A new entry: it replaces any stored one, expired included.
         var session = {
           userKey: s.userKey, server: s.server, token: s.token, vapidKey: s.vapidKey || '',
-          account: null, createdAt: Date.now(),
+          generation: generation(), account: null, createdAt: Date.now(),
         };
         var users = new Map();
         try {

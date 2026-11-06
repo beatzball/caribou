@@ -7,16 +7,34 @@ import {
 } from '@beatzball/caribou-mastodon-client'
 import { prefsKey } from './prefs.js'
 
+// The rules for `generation` and `expired`, and for what a failure may do to
+// a session, are in this package's README ("Session rules"). The numbers in
+// the comments below name them.
 export interface UserSession {
   userKey: UserKey
   server: string
   token: string
   vapidKey: string
+  // A random id made at each sign-in (rule 1). It names the sign-in, not the
+  // token; every failure event carries it (rule 2).
+  generation: string
   // Null until it is loaded: sign-in stores the session before the app has
   // the account (`server/lib/signin-complete-page.ts`). `loadActiveAccount`
   // fills it in. Code that needs the user's handle uses `userName()`.
   account: Account | null
   createdAt: number
+  // Set when the network says the credentials are gone (rule 3). The session
+  // stays, with its prefs and drafts. Only a new sign-in clears it.
+  expired?: true
+}
+
+/** A session as a sign-in hands it over: its `generation` is made if absent. */
+export type NewUserSession = Omit<UserSession, 'generation' | 'expired'> & { generation?: string }
+
+/** A new sign-in id: 128 random bits as hex. */
+export function newGeneration(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 export const users = signal<Map<UserKey, UserSession>>(new Map())
@@ -27,18 +45,29 @@ export const activeUser = computed<UserSession | null>(() => {
   return key ? users.value.get(key) ?? null : null
 })
 
-/** Detail of `caribou:unauthorized`: the session whose request got the 401. */
-export interface UnauthorizedDetail {
+/**
+ * Detail of `caribou:unauthorized` (a Mastodon 401, rule 4) and of
+ * `caribou:session-expired` (credentials gone, rule 3): the sign-in of the
+ * client that saw it.
+ */
+export interface SessionFailureDetail {
   userKey: UserKey
-  token: string
+  generation: string
 }
+export type UnauthorizedDetail = SessionFailureDetail
+export type SessionExpiredDetail = SessionFailureDetail
 
 // The detail names the client's own session, not the active one: a request
-// started before a switch or a re-sign-in can return 401 after it.
-function emitUnauthorized(detail: UnauthorizedDetail): void {
+// started before a switch or a re-sign-in can fail after it.
+function emit(type: string, detail: SessionFailureDetail): void {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent<UnauthorizedDetail>('caribou:unauthorized', { detail }))
+    window.dispatchEvent(new CustomEvent<SessionFailureDetail>(type, { detail }))
   }
+}
+
+/** What a client sends when the network says its credentials are gone (rule 3). */
+export function emitSessionExpired(detail: SessionExpiredDetail): void {
+  emit('caribou:session-expired', detail)
 }
 
 export const activeClient = computed<CaribouClient | null>(() => {
@@ -46,14 +75,16 @@ export const activeClient = computed<CaribouClient | null>(() => {
   if (!user) return null
   const source: SessionSource = {
     get: () => ({ userKey: user.userKey, server: user.server, token: user.token }),
-    onUnauthorized: () => { emitUnauthorized({ userKey: user.userKey, token: user.token }) },
+    onUnauthorized: () => { emit('caribou:unauthorized', { userKey: user.userKey, generation: user.generation }) },
   }
   return createCaribouClient(user.userKey, source)
 })
 
-export function addUserSession(session: UserSession): void {
+/** A sign-in (rule 1): it replaces any entry under the key, without `expired`. */
+export function addUserSession(session: NewUserSession): void {
+  const { expired: _, ...rest } = session as NewUserSession & { expired?: true }
   const next = new Map(users.value)
-  next.set(session.userKey, session)
+  next.set(session.userKey, { ...rest, generation: session.generation ?? newGeneration() })
   users.value = next
   activeUserKey.value = session.userKey
   saveToStorage()
@@ -89,18 +120,18 @@ export async function loadActiveAccount(): Promise<void> {
   } catch {
     return
   }
-  // Store it only on the session that asked: after a sign-out and a new
-  // sign-in under the same key, the entry is a new session with a new token.
+  // Store it only on the sign-in that asked (rule 7): after a sign-out and a
+  // new sign-in under the same key, the entry has a new generation.
   const current = users.value.get(user.userKey)
-  if (!current || current.account || current.token !== user.token) return
+  if (!current || current.account || current.generation !== user.generation) return
   const next = new Map(users.value)
   next.set(user.userKey, { ...current, account })
   users.value = next
   saveToStorage()
 }
 
-// Drops a session and the local data kept for it. It does not touch
-// `activeUserKey`; the caller decides what is active next.
+// Drops a session and the local data kept for it (rule 6: sign-out only). It
+// does not touch `activeUserKey`; the caller decides what is active next.
 function dropSession(key: UserKey): void {
   const next = new Map(users.value)
   next.delete(key)
@@ -162,18 +193,38 @@ export function signOutActive(): UserSession | null {
 }
 
 /**
- * Removes the session `userKey` only if it still has `token`; a 401 from an
- * older token must not remove the session that replaced it. Returns whether
- * the removed session was the active one, or `'stale'` when nothing changed.
+ * A Mastodon 401 (rule 4). Removes the session `userKey` only while it has
+ * `generation` (rule 2): a 401 from an earlier sign-in must not remove the one
+ * that replaced it. Its prefs and drafts stay, for the next sign-in. Returns
+ * whether the removed session was the active one, or `'stale'` when nothing
+ * changed.
  */
-export function removeSession(userKey: UserKey, token: string): 'active' | 'inactive' | 'stale' {
+export function removeSession(userKey: UserKey, generation: string): 'active' | 'inactive' | 'stale' {
   const current = users.value.get(userKey)
-  if (!current || current.token !== token) return 'stale'
-  dropSession(userKey)
+  if (!current || current.generation !== generation) return 'stale'
+  const next = new Map(users.value)
+  next.delete(userKey)
+  users.value = next
   const wasActive = activeUserKey.value === userKey
   if (wasActive) activeUserKey.value = null
   saveToStorage()
   return wasActive ? 'active' : 'inactive'
+}
+
+/**
+ * Credentials gone (rule 3). Marks the session `userKey` expired only while it
+ * has `generation` (rule 2). The session, its prefs, its drafts and the active
+ * account all stay. Returns `'stale'` when nothing matched.
+ */
+export function markExpired(userKey: UserKey, generation: string): 'marked' | 'stale' {
+  const current = users.value.get(userKey)
+  if (!current || current.generation !== generation) return 'stale'
+  if (current.expired) return 'marked'
+  const next = new Map(users.value)
+  next.set(userKey, { ...current, expired: true })
+  users.value = next
+  saveToStorage()
+  return 'marked'
 }
 
 const K_USERS = 'caribou.users'
@@ -191,9 +242,16 @@ export function loadFromStorage(): void {
     if (rawUsers) {
       const entries = JSON.parse(rawUsers) as [UserKey, UserSession][]
       const map = new Map<UserKey, UserSession>()
-      // Older entries can lack `userKey`; the 401 event needs it to find the
-      // session again, so take it from the map key.
-      for (const [k, v] of entries) if (isUserKey(k)) map.set(k, v.userKey ? v : { ...v, userKey: k })
+      // Older entries can lack `userKey` or `generation`; a failure event needs
+      // both to find its session again. Take the key from the map key and the
+      // generation from the token: a new sign-in has a new token.
+      for (const [k, v] of entries) {
+        if (!isUserKey(k)) continue
+        const generation = typeof v.generation === 'string' && v.generation !== ''
+          ? v.generation
+          : typeof v.token === 'string' && v.token !== '' ? v.token : newGeneration()
+        map.set(k, { ...v, userKey: v.userKey ?? k, generation })
+      }
       users.value = map
     }
     if (rawActive) {

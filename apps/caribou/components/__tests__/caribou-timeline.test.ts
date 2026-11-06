@@ -32,7 +32,7 @@ type Writable<T> = { value: T }
 function signIn() {
   const userKey = 'alice@example.social' as NonNullable<typeof activeUserKey.value>
   users.value = new Map([[userKey, {
-    userKey, server: 'example.social', token: 'TOKEN', vapidKey: '', createdAt: 1,
+    userKey, server: 'example.social', token: 'TOKEN', generation: 'G', vapidKey: '', createdAt: 1,
     account: {} as never,
   }]])
   activeUserKey.value = userKey
