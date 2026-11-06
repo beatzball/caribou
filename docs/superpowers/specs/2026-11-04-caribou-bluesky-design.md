@@ -186,7 +186,7 @@ probe). Phase 0 found that it does (12.2).
 | 1 | OAuth client | Public browser client now; client-assertion backend later | BFF; token-mediating backend (5.3) |
 | 2 | Where tokens live | Browser IndexedDB, keyed by DID | Caribou server |
 | 3 | Model between screens and clients | Caribou-owned types with Mastodon field names + `bluesky` field + `capabilities` | A neutral model with new field names |
-| 4 | Client library | **Open again** (12.3 item 5, 12.2): `@atproto/api` + `@atproto/oauth-client-browser` measured 181.6 KB gzipped | Hand-written XRPC calls with `@atproto/oauth-client-browser` |
+| 4 | Client library | `@atproto/oauth-client-browser` for sign-in, with hand-written XRPC calls (decided 2026-11-06; 12.3 item 5) | `@atproto/api` too: 181.6 KB gzipped together, over the 100 KB line |
 | 5 | UserKey for Bluesky | `<did>@bsky` | `<handle>@<pds host>` |
 | 6 | Profile route | `/@alice.example.com` (a dot and no second `@` means Bluesky) | A prefix, like `/bsky/@alice.example.com` |
 | 7 | Post route | `/@<handle or did>/<rkey>` | The full AT URI in the path |
@@ -196,7 +196,7 @@ probe). Phase 0 found that it does (12.2).
 | 11 | Scopes | `atproto transition:generic` | Granular scopes when the PDS has them |
 | 12 | Moderation | The SDK's `moderatePost` / `moderateProfile` with label definitions, kept per surface | Map labels onto Mastodon's CW fields |
 
-The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions. Row 4 is open again: phase 0 measured the chunk over the 100 KB line (12.2, 12.3 item 5).
+The owner accepted all of them on 2026-11-04. Section 12.3 records the ones that were open questions. Row 4 was reopened when phase 0 measured the chunk over the 100 KB line (12.2), and the owner decided it again on 2026-11-06 (12.3 item 5).
 
 ---
 
@@ -1203,7 +1203,10 @@ The owner took the recommended answer to each open question.
 4. **Local and Public:** hidden for Bluesky. Feeds come in phase 5.
 5. **Client library:** `@atproto/api`, if its lazy chunk is under about 100 KB
    gzipped (measured in phase 0). If it is larger, the owner decides again.
-   **Open again:** phase 0 measured 181.6 KB (12.2).
+   Phase 0 measured 181.6 KB (12.2). **Decided again (owner, 2026-11-06):**
+   keep `@atproto/oauth-client-browser` (about 56 KB gzipped) for sign-in and
+   write the XRPC calls by hand in `packages/bluesky-client`. Do not add
+   `@atproto/api`. This adds about 1–2 weeks to phase 2a (issue #177).
 6. **Signed-out SSR:** yes, for Bluesky profiles and threads, honoring
    `!no-unauthenticated`.
 7. **Video:** day one ships without playback (thumbnail and link only).
@@ -1241,7 +1244,7 @@ it missed the seams.
 Add the two libraries on a branch. Build and record the lazy chunk's size.
 Sign in through the loopback client; fetch Following; check Lit SSR still
 builds. Probe the other unknowns in 12.2. Write the numbers into 12.2.
-The result (181.6 KB gzipped) reopened the client library choice (12.3 item 5).
+The result (181.6 KB gzipped) reopened the client library choice; the owner chose hand-written XRPC calls with the OAuth library (12.3 item 5).
 
 ### Phase 1a — type and paging seams
 
