@@ -299,6 +299,26 @@ describe('<caribou-profile> — pagination', () => {
     expect(next.getAttribute('href')).toBe('/@alice@example.social?tab=posts&max_id=208')
   })
 
+  // Spec section 11: a profile pages only through a client on its own
+  // network. A Mastodon client would ask its server for a DID's posts.
+  it('a Mastodon reader on a Bluesky profile: the link stays a plain link and no page is asked for', async () => {
+    const BSKY = {
+      ...ACCOUNT, id: 'did:plc:bob', acct: 'bob.example.com',
+      bluesky: { did: 'did:plc:bob', handleInvalid: false },
+    } as unknown as Account
+    const observers = stubIntersectionObserver()
+    const client = signIn()
+    const list = vi.spyOn(client, 'fetchAccountStatuses')
+    const el = await mount({ handle: 'bob.example.com', initial: { ...initialOf([STATUS], 'opaque'), account: BSKY } })
+    const next = sentinelOf(el)!
+    expect(next).not.toBeNull()
+    expect(watching(observers, next)).toBeUndefined()
+    expect(clickIsPrevented(next)).toBe(false)
+    for (const o of observers) o.callback([{ isIntersecting: true, target: next }])
+    await flush()
+    expect(list).not.toHaveBeenCalled()
+  })
+
   // Seam 5: three pages whose cursors are not post ids. The first comes from
   // the server; the store asks for the next two by the cursor each page
   // named, and the link follows the cursor, never the last post.

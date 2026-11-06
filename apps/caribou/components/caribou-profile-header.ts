@@ -4,7 +4,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
 import { effect, signal } from '@preact/signals-core'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
-import type { Account, Relationship } from '@beatzball/caribou-mastodon-client'
+import { canActOn, resourceNetwork, type Account, type Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, activeUserKey, isOwnAccount, loadRelationship, relationshipCache, relationshipKey,
   setBlock, setMute, toggleFollow, type UserSession,
@@ -146,9 +146,14 @@ export class CaribouProfileHeader extends LitElement {
     this.targetSignal.value = null
     const account = this.account
     const client = activeClient.value
-    if (!user || !account || !client || !this.instance) return
+    // Only a client on the account's own network reads its relationship
+    // or follows it (spec section 11).
+    if (!user || !account || !client || !canActOn(client, account)) return
+    const mastodon = resourceNetwork(account) === 'mastodon'
+    if (mastodon && !this.instance) return
     let target: Account | null = account
-    if (!this.sameInstance(user.server)) {
+    // A Bluesky DID is the same for every account: nothing to look up.
+    if (mastodon && !this.sameInstance(user.server)) {
       try {
         target = await client.lookupAccount(this.fullAcct(account))
       } catch {

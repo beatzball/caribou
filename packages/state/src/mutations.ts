@@ -3,6 +3,7 @@ import { statusCache } from './caches.js'
 import { inflight } from './inflight.js'
 import { ownerGeneration } from './keep-alive.js'
 import { activeClient } from './users.js'
+import { slotWriteFinished, slotWriteStarted, type Slot } from './viewer-slots.js'
 
 type Flag = 'favourited' | 'reblogged' | 'bookmarked'
 type Count = 'favouritesCount' | 'reblogsCount'
@@ -13,6 +14,7 @@ type Method = 'favourite' | 'unfavourite' | 'reblog' | 'unreblog' | 'bookmark' |
 export type StatusAction = 'favourite' | 'reblog' | 'bookmark'
 
 interface ActionSpec {
+  slot: Slot
   flag: Flag
   count: Count | null
   record: RecordRef | null
@@ -21,9 +23,9 @@ interface ActionSpec {
 }
 
 const SPECS: Record<StatusAction, ActionSpec> = {
-  favourite: { flag: 'favourited', count: 'favouritesCount', record: 'likeUri',   on: 'favourite', off: 'unfavourite' },
-  reblog:    { flag: 'reblogged',  count: 'reblogsCount',    record: 'repostUri', on: 'reblog',    off: 'unreblog' },
-  bookmark:  { flag: 'bookmarked', count: null,              record: null,        on: 'bookmark',  off: 'unbookmark' },
+  favourite: { slot: 'like',     flag: 'favourited', count: 'favouritesCount', record: 'likeUri',   on: 'favourite', off: 'unfavourite' },
+  reblog:    { slot: 'repost',   flag: 'reblogged',  count: 'reblogsCount',    record: 'repostUri', on: 'reblog',    off: 'unreblog' },
+  bookmark:  { slot: 'bookmark', flag: 'bookmarked', count: null,              record: null,        on: 'bookmark',  off: 'unbookmark' },
 }
 
 const VERBS: Record<Method, string> = {
@@ -68,7 +70,7 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   const client = (opts.clientSource ?? (() => activeClient.value))()
   if (!client) return
 
-  const { flag, count, record } = SPECS[action]
+  const { slot, flag, count, record } = SPECS[action]
   const before = statusCache.value.get(id) ?? findWrapped(id) ?? target
   const wasOn = before[flag] === true
   // The ref carries the record an undo deletes, as the cache knows it now.
@@ -89,6 +91,9 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   // optimistic flag (`forgetReaderFields`).
   const generation = ownerGeneration()
   inflight.add(key)
+  // The slot rule: no copy changes this slot while the write is out, and a
+  // copy fetched before it finished never does (README, "Viewer state").
+  slotWriteStarted(id, slot)
   // An undo removes the record at once, with the flag; a new record is
   // known only once the server answers.
   writePost(id, (post) => withRecord(shift(post, flag, !wasOn, count, delta), record, wasOn ? null : undefined))
@@ -100,6 +105,7 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
       [flag]: fresh[flag],
       ...(count ? { [count]: fresh[count] } : {}),
     }, record, record ? fresh.bluesky?.[record] : undefined))
+    slotWriteFinished(id, slot, fresh[flag] === true, lagOf(client))
   } catch {
     if (generation !== ownerGeneration()) return
     // Undo only what this click did. If the flag no longer holds the
@@ -107,10 +113,16 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
     writePost(id, (post) => post[flag] === !wasOn
       ? withRecord(shift(post, flag, wasOn, count, -delta), record, oldRecord)
       : post)
+    slotWriteFinished(id, slot, wasOn, lagOf(client))
     toast(`Could not ${VERBS[method]} this post. Try again.`)
   } finally {
     inflight.delete(key)
   }
+}
+
+// How long the client's reads can lag behind this write (0 for Mastodon).
+function lagOf(client: CaribouClient): number {
+  return client.capabilities?.readLagMs ?? 0
 }
 
 function shift(post: Status, flag: Flag, on: boolean, count: Count | null, delta: number): Status {

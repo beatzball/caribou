@@ -115,6 +115,93 @@ fetch on construction; the differences are in pagination handoff:
   `load()` is a no-op when both signals are already `ready`. There's no
   pagination to hand off.
 
+## Viewer state: slots and who wins
+
+A post's viewer state is what the reader did to it. One rule decides
+which copy of a post may change it (spec 6.3, seam 4). It is the same
+for Mastodon and Bluesky. The code is `caches.ts` (`viewerOf`,
+`readSource`, `slotWriteStarted`, `slotWriteFinished`).
+
+**Words.**
+
+- **Slot.** One action's flag and its record ref, kept together:
+  `like` = `favourited` + `bluesky.likeUri`, `repost` = `reblogged` +
+  `bluesky.repostUri`, `bookmark` = `bookmarked`. A Mastodon post has no
+  record refs; its slots are the flags only. Slots are separate: a like
+  in flight does not hold back a repost.
+- **Other viewer fields.** `muted`, `pinned`, and on a Bluesky post
+  `replyDisabled` and `embeddingDisabled`. `filtered` and a poll's vote
+  keep their own rules (the app README's "Which copy wins").
+- **Source.** Where a copy came from. `readSource(owner)`, read just
+  before the request starts, gives `{ owner, startedAt }`: the account
+  whose token fetched it, and the viewer clock at that moment.
+  `PAGE_DATA` is the server's page data: no token, and maybe older,
+  because it passes through the server's upstream cache.
+- **The reader's copy.** A copy whose source's owner is the active
+  account. A Bluesky copy must also name that account in
+  `bluesky.viewerOf`. Page data is never the reader's copy.
+- **The viewer clock.** A number that goes up by one each time a slot
+  write finishes.
+
+**Who writes a slot.** Only two things:
+
+1. The reader's own action (`mutations.ts`). It writes at once
+   (optimistic) and marks the slot as written to. When the server answers,
+   it writes the answer (commit) or puts the old flag and ref back
+   (rollback). Either way the write is finished: the slot records the
+   clock (after one step up), the time, the flag it ended with, and the
+   client's lag window.
+2. A copy, by the merge rule below.
+
+**The merge rule, for each slot.** A copy changes the slot only when all
+four hold. Otherwise the slot keeps its cached flag and ref.
+
+1. It is the reader's copy.
+2. No write to the slot is out.
+3. Its fetch started at or after the slot's last write finished
+   (`startedAt >= finishedAt`).
+4. It agrees with the slot's last write, or the lag window has passed
+   since that write finished. The window is the writing client's
+   `capabilities.readLagMs`: 60 seconds on Bluesky, whose AppView can lag
+   behind a write; 0 on Mastodon, which reads its own writes at once.
+
+When a slot is kept, the count beside it (`favouritesCount`,
+`reblogsCount`) is still the copy's, so other readers' likes show. It
+moves by one when the kept flag differs from the copy's flag: that copy's
+count does not hold the reader's write yet. A merge also keeps the rule it
+always had for counts (the app README's "Which copy wins").
+
+The other viewer fields follow rule 1 only: the reader's copy wins,
+any other copy keeps what is cached.
+
+**When nothing is cached for the post.** The copy is cached as it is.
+Page data has no viewer state (Mastodon leaves the fields out; a Bluesky
+public copy says "not done"). One exception: a copy whose
+`bluesky.viewerOf` names another account is cached without its viewer
+fields, so one account's like never shows as another's (#131).
+
+**Defaults.** `cacheStatus(s)` with no source means "the active reader
+fetched it just now". `mergeStatus(s)` with no source means page data.
+Every store passes a real source from `readSource` taken before its
+request. That is what makes rule 3 work.
+
+**An account change** empties every slot record, with the reader flags
+(`forgetReaderFields`). A write still out for the old account finds a
+new owner generation when it answers and writes nothing.
+
+**Relationships** (`relationships.ts`) follow the same rule. The cache
+is keyed by the reader's UserKey, so every read is the reader's copy. A
+read does not replace the cached relationship while a write is out, when
+a write started after the read did, or inside the lag window after a
+write finished when it disagrees with what that write left
+(`following`, `requested`, `muting`, `blocking`).
+
+**Network.** Each post and account says its network: it has a `bluesky`
+field or it is Mastodon (`resourceNetwork` in the client package). The
+reader can act on a resource only when the active client's network is
+the resource's (`canActOn`). A Mastodon post also needs the reader's
+server, as before.
+
 ## Gotchas
 
 - **Don't mutate cache Maps directly.** Direct `.set` skips the signal-write

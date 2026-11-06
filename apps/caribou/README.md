@@ -211,13 +211,15 @@ hold what they decide:
 | `quote` | record | a copy with a token has arrived and this one has none, or this quote is shallow (an id only) and names the accepted post the record carries in full |
 | the quoted post | cache, under its own id | — it is cached only when the copy's own quote wins; a quote kept from the record is not cached again |
 | edit fields (`EDIT_FIELDS`) | cache | the known copy has a newer `editedAt` |
-| reader flags (`favourited`, `reblogged`, `bookmarked`, `muted`, `pinned`) | cache | on a merge, always (the known copy's stay) |
-| counts beside a flag | cache | an action is out, or the flag is set and the new count is lower |
+| viewer state: the slots (`favourited` + `likeUri`, `reblogged` + `repostUri`, `bookmarked`) and `muted`, `pinned`, `replyDisabled`, `embeddingDisabled` | cache | it is not the reader's copy (page data, another account's); for a slot also: its write is out, the copy's fetch started before that write finished, or it disagrees with that write inside the network's lag window. The rule is in the `@beatzball/caribou-state` README, "Viewer state" |
+| counts beside a flag | cache | on a merge: an action is out, or the flag is set and the new count is lower. A kept slot moves the copy's count by one to match the kept flag |
 | `poll` | cache | the reader's vote is out; on a merge, the new copy has no `voted` (it keeps the known `voted`, `ownVotes`, and counts when they are higher) |
 
 The reader flags stay in the cached copy: the reader's own actions write
-them there (`updateStatus`), and no reader-side decision reads them from
-a boost. An account change empties the records and drops every reader
+them there (`mutations.ts`), and no reader-side decision reads them from
+a boost. A store hands every copy it fetched to the cache with its source
+(`readSource`, taken before the request); server page data has none and
+counts as page data. An account change empties the records and drops every reader
 flag (`forgetReaderFields`), so the next copy is taken.
 
 **The reader's server filters hide or warn.** A status fetched with a

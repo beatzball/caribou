@@ -3,6 +3,7 @@ import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient, Relationship, Status, StatusBluesky } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, statusCache } from '../caches.js'
 import { _testOnlyResetMutations, toggleFavourite, toggleReblog } from '../mutations.js'
+import { activeUserKey } from '../users.js'
 import {
   _testOnlyResetRelationships, relationshipCache, relationshipKey, setBlock, setMute, toggleFollow,
 } from '../relationships.js'
@@ -49,12 +50,18 @@ function deferred<T>() {
 }
 
 beforeEach(() => {
+  // The copies below carry ME's viewer state (`viewerOf: ME`), so ME is
+  // the active account: only the reader's copy writes viewer state.
+  activeUserKey.value = ME
   statusCache.value = new Map()
   relationshipCache.value = new Map()
   _testOnlyResetMutations()
   _testOnlyResetRelationships()
 })
-afterEach(() => { vi.restoreAllMocks() })
+afterEach(() => {
+  vi.restoreAllMocks()
+  activeUserKey.value = null
+})
 
 describe('status writes send refs and commit the record refs', () => {
   it('sends the post ref and commits the like record the result carries', async () => {

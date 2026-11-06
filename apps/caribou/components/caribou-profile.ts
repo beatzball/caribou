@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import type { Account, Status } from '@beatzball/caribou-mastodon-client'
+import { canActOn, resourceNetwork, type Account, type Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, createAccountCache, createProfileStore,
   type ProfileStore, type ProfileTab,
@@ -107,7 +107,13 @@ export class CaribouProfile extends LitElement {
   }
 
   private async start() {
-    const clientSource = () => activeClient.value
+    // Pages come only from a client on the profile's own network (spec
+    // section 11); another network's client would ask for the wrong ids.
+    const clientSource = () => {
+      const client = activeClient.value
+      const shown = this.account ?? this.initial?.account
+      return !shown || canActOn(client, shown) ? client : null
+    }
     let account: Account | null
     let store: ProfileStore | null = null
     if (this.initial) {
@@ -151,7 +157,12 @@ export class CaribouProfile extends LitElement {
   }
 
   private syncCanFetch() {
-    this.canFetch = activeClient.value !== null && this.sameInstance(activeUser.value?.server)
+    const shown = this.account ?? this.initial?.account
+    const network = shown ? resourceNetwork(shown) : 'mastodon'
+    // A Bluesky profile has no server to match: a DID is the same for
+    // every account.
+    this.canFetch = activeClient.value?.capabilities.network === network
+      && (network === 'bluesky' || this.sameInstance(activeUser.value?.server))
   }
 
   // Hosts are case-insensitive; `server` is a bare host, like `instance`.

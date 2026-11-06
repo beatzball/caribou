@@ -76,6 +76,18 @@ export interface Account {
   followingCount: number
   roles: Pick<Role, 'id' | 'name' | 'color'>[]
   memorial?: boolean | null
+  /** Only on a Bluesky account. A Mastodon account never has it. */
+  bluesky?: AccountBluesky
+}
+
+export interface AccountBluesky {
+  /** The account's DID. `id` holds it too; this field says the network. */
+  did: string
+  /**
+   * True when the AppView could not verify the handle (`handle.invalid`).
+   * Links then use the DID, not the handle (spec 8.4).
+   */
+  handleInvalid: boolean
 }
 
 /** Who may quote the reader's posts, as the reader set it. */
@@ -588,4 +600,11 @@ export interface Capabilities {
   maxImages: number
   /** Bytes per image, or null when the server does not say. */
   maxImageBytes: number | null
+  /**
+   * How long a read can lag behind the reader's own write, in ms. For that
+   * long after a write, a read that disagrees with it is not believed
+   * (`@beatzball/caribou-state` README, "Viewer state"). Mastodon reads its
+   * own writes at once: 0. Bluesky's AppView can lag: 60 000.
+   */
+  readLagMs: number
 }

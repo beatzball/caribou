@@ -325,6 +325,7 @@ export const MASTODON_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
   maxBytes: null,
   maxImages: 4,
   maxImageBytes: null,
+  readLagMs: 0,
 })
 
 // Mastodon ids are numbers too large for a double, sent as strings. A longer

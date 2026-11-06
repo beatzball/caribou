@@ -2,7 +2,7 @@ import { computed, signal, type ReadonlySignal } from '@preact/signals-core'
 import type {
   CaribouClient, CaribouError, Status, TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, mergeStatus, statusCache } from './caches.js'
+import { cacheStatus, mergeStatus, readAs, statusCache, type CopySource } from './caches.js'
 
 export type ProfileTab = 'posts' | 'replies' | 'media'
 
@@ -58,10 +58,10 @@ export function createProfileStore(
     firstLoadConsumed = true
   }
 
-  async function runFetch(cursor?: string): Promise<TimelinePage> {
+  async function runFetch(cursor?: string): Promise<[TimelinePage, CopySource | undefined]> {
     const client = opts.clientSource()
-    if (!client) return Object.assign([], { nextCursor: null })
-    return client.fetchAccountStatuses(accountId, { tab, cursor })
+    if (!client) return [Object.assign([], { nextCursor: null }), undefined]
+    return readAs(client, () => client.fetchAccountStatuses(accountId, { tab, cursor }))
   }
 
   // A page that names no cursor is the last one.
@@ -78,8 +78,8 @@ export function createProfileStore(
     loading.value = true
     error.value = null
     try {
-      const page = await runFetch(undefined)
-      for (const s of page) cacheStatus(s)
+      const [page, source] = await runFetch(undefined)
+      for (const s of page) cacheStatus(s, source)
       statusIds.value = page.map((s) => s.id)
       setPaging(page)
     } catch (err) {
@@ -95,8 +95,8 @@ export function createProfileStore(
     if (!anchor) return
     loading.value = true
     try {
-      const page = await runFetch(anchor)
-      for (const s of page) cacheStatus(s)
+      const [page, source] = await runFetch(anchor)
+      for (const s of page) cacheStatus(s, source)
       statusIds.value = [...statusIds.value, ...page.map((s) => s.id)]
       setPaging(page)
     } catch (err) {

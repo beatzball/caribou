@@ -411,3 +411,57 @@ describe('<caribou-profile-header> mute and block', () => {
     expect(el.shadowRoot!.activeElement).toBe(before)
   })
 })
+
+// Spec section 11: relationships are read and written only through a client
+// on the account's own network.
+describe('<caribou-profile-header> across networks', () => {
+  const BSKY = {
+    ...ACCOUNT, id: 'did:plc:bob', acct: 'bob.example.com',
+    bluesky: { did: 'did:plc:bob', handleInvalid: false },
+  } as unknown as Account
+  const asBluesky = (client: NonNullable<typeof activeClient.value>) => {
+    (client as { capabilities: typeof client.capabilities }).capabilities =
+      { ...client.capabilities, network: 'bluesky', readLagMs: 60_000 }
+  }
+
+  afterEach(() => {
+    document.body.replaceChildren()
+    activeUserKey.value = null
+    users.value = new Map()
+    relationshipCache.value = new Map()
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('a Mastodon reader on a Bluesky profile: no lookup, no relationship read, no button', async () => {
+    const client = signIn()
+    const lookup = vi.spyOn(client, 'lookupAccount')
+    const fetchRel = vi.spyOn(client, 'fetchRelationships')
+    const el = await mountWith(BSKY, '')
+    expect(lookup).not.toHaveBeenCalled()
+    expect(fetchRel).not.toHaveBeenCalled()
+    expect(button(el)).toBeNull()
+  })
+
+  it('a Bluesky reader on a Bluesky profile reads by DID, with no server to match', async () => {
+    const client = signIn()
+    asBluesky(client)
+    const lookup = vi.spyOn(client, 'lookupAccount')
+    const fetchRel = vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ id: 'did:plc:bob' })])
+    const el = await mountWith(BSKY, '')
+    expect(lookup).not.toHaveBeenCalled()
+    expect(fetchRel).toHaveBeenCalledWith(['did:plc:bob'])
+    expect(button(el)?.textContent).toBe('Follow')
+  })
+
+  it('a Bluesky reader on a Mastodon profile: no lookup, no relationship read, no button', async () => {
+    const client = signIn()
+    asBluesky(client)
+    const lookup = vi.spyOn(client, 'lookupAccount')
+    const fetchRel = vi.spyOn(client, 'fetchRelationships')
+    const el = await mountWith(ACCOUNT, 'other.example')
+    expect(lookup).not.toHaveBeenCalled()
+    expect(fetchRel).not.toHaveBeenCalled()
+    expect(button(el)).toBeNull()
+  })
+})
