@@ -52,6 +52,10 @@ Sources of truth — see file for full signatures.
   SSR seeding (`opts.initial`) and visibility-aware polling.
   The new-posts buffer keeps the order the client gives
   (`client.timelineOrder(kind)`); with no client, Mastodon's.
+  In feed order (`timelineOrder` null) a page merges only by a post the
+  store knows. A page with none is a gap: `gap` turns true, and
+  `applyNewPosts()` replaces the list with the newest gap page. No view
+  shows `gap` yet. One check runs at a time.
 - `createThreadStore(client, statusId, opts)` — focused status + ancestors
   + descendants, fetched in parallel via `Promise.allSettled`.
 - `createProfileStore(accountId, tab, opts)` — `posts` / `replies` / `media`

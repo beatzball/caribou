@@ -47,7 +47,9 @@ of Caribou never names masto's types.
 - `CaribouClient.timelineOrder(kind)` — how the timeline store orders
   new posts: a compare function, or null to keep the order the feed sent.
   Mastodon (`mastodonTimelineOrder`) sorts by id, newest first, except
-  bookmarks.
+  bookmarks. With null, a check's page must end with the newest post
+  the store knows (page from the top until you meet it); a page that meets
+  nothing becomes the store's `gap`, which replaces the list when applied.
 
 Subpath export: `@beatzball/caribou-mastodon-client/sanitize-opts` →
 `PURIFY_OPTS` (DOMPurify config shared by client and server sanitizers).
