@@ -2,16 +2,16 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
-import type { Status, StatusSource } from '@beatzball/caribou-mastodon-client'
+import { resourceNetwork, type Network, type Status, type StatusSource } from '@beatzball/caribou-mastodon-client'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
+  isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
-import { profilePath } from './_profile-path.js'
+import { accountPath, postPath } from './_profile-path.js'
 import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import { confirmBlock, confirmDialog } from './caribou-confirm-dialog.js'
@@ -163,8 +163,8 @@ function toast(kind: 'error' | 'info', message: string): void {
 
 type Moderated = { verb: 'muted' | 'blocked'; account: Status['account']; owner: Owner }
 
-export function statusPermalink(s: { id: string; account: { acct: string } }): string {
-  return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
+export function statusPermalink(s: Parameters<typeof postPath>[0]): string {
+  return postPath(s)
 }
 
 @customElement('caribou-status-card')
@@ -320,6 +320,9 @@ export class CaribouStatusCard extends LitElement {
   // Both start false, so the server and the first client render show the
   // signed-out bar. `bindActions` sets them after mount.
   @state() private canAct = false
+  // The network the reader must sign in with to act here, when the active
+  // account is on another one (spec section 11). Null otherwise.
+  @state() private actNetwork: Network | null = null
   @state() private ownPost = false
   // The post is the active account's own, by account id (never by handle):
   // its menu offers Edit and Delete instead of Mute and Block.
@@ -437,7 +440,14 @@ export class CaribouStatusCard extends LitElement {
       const user = activeUser.value
       const s = this.status
       const post = s?.reblog ?? s
-      this.canAct = client !== null && this.sameInstance(user?.server)
+      // Only a client on the post's own network acts on it; a Mastodon post
+      // also needs the reader's server (section 11). A Bluesky post has no
+      // server: an AT URI is the same for every account.
+      const network = post ? resourceNetwork(post) : 'mastodon'
+      const sameNetwork = client !== null && client.capabilities.network === network
+      this.canAct = sameNetwork && (network === 'bluesky' || this.sameInstance(user?.server))
+      const actNetwork = client !== null && !sameNetwork ? network : null
+      if (actNetwork !== this.actNetwork) this.actNetwork = actNetwork
       this.ownPost = this.canAct && post !== null && post !== undefined && user !== null && isOwnAccount(user, post.account)
       const mine = this.canAct && !!post && !!user?.account && user.account.id === post.account.id
       if (mine !== this.mine) this.mine = mine
@@ -669,6 +679,8 @@ export class CaribouStatusCard extends LitElement {
     }
     let current: Status
     let source: StatusSource
+    // The reader's copy: its source is taken before the request.
+    const read = readSource(owner.client.userKey)
     try {
       current = await owner.client.fetchStatus(post.id)
       if (!stillOwner(owner)) return
@@ -682,7 +694,7 @@ export class CaribouStatusCard extends LitElement {
       return
     }
     if (!stillOwner(owner)) return
-    const status = mergeStatus(current)
+    const status = mergeStatus(current, read)
     window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status, source } } }))
   }
 
@@ -801,14 +813,18 @@ export class CaribouStatusCard extends LitElement {
     const f = this.liveFields ?? actionFields(post)
     const off = !this.canAct
     const boostable = this.canBoost(post)
+    // Signed in on another network: say which account would act.
+    const signIn = this.actNetwork
+      ? `Sign in with a ${this.actNetwork === 'bluesky' ? 'Bluesky' : 'Mastodon'} account to`
+      : 'Sign in to'
     const boostHint = !boostable
       ? 'This post cannot be boosted'
-      : off ? 'Sign in to boost' : ''
+      : off ? `${signIn} boost` : ''
     const count = (n: number) => n > 0 ? String(n) : ''
     // The label names the action; the description carries the count and
     // the hint a mouse user reads in the title.
     const describe = (...parts: string[]) => parts.filter(Boolean).join('. ')
-    const hint = (verb: string) => off ? `Sign in to ${verb}` : ''
+    const hint = (verb: string) => off ? `${signIn} ${verb}` : ''
     return html`
       <div class="actions" role="group" aria-label="Post actions">
         <caribou-icon-button class="reply" variant="ghost" icon="messageCircle" label="Reply"
@@ -932,8 +948,8 @@ export class CaribouStatusCard extends LitElement {
   // server whose web domain differs from its account domain it names the
   // wrong host, and the profile lookup then fails the way a mistyped handle
   // does.
-  private profileHref(account: { acct: string; url?: string | null }): string {
-    return profilePath(account.acct, this.instance || this.shellInstance || hostOf(account.url ?? ''))
+  private profileHref(account: { acct: string; url?: string | null } & Pick<Status['account'], 'bluesky'>): string {
+    return accountPath(account, this.instance || this.shellInstance || hostOf(account.url ?? ''))
   }
 
   // The page's `pageData` pre-sanitizes on the server with the jsdom-backed

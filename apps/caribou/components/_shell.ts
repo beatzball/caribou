@@ -25,5 +25,7 @@ export function loadReaderViewFrom(instance: string, statuses: readonly Status[]
   const client = activeClient.peek()
   const server = activeUser.peek()?.server
   if (!client || !server || !instance || instance.toLowerCase() !== server.toLowerCase()) return
+  // `instance` is a Mastodon server; only a Mastodon client matches it.
+  if (client.capabilities.network !== 'mastodon') return
   void loadReaderView(statuses, client)
 }

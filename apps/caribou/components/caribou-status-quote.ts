@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
-import type { MediaAttachment, Status } from '@beatzball/caribou-mastodon-client'
+import type { Account, MediaAttachment, Status } from '@beatzball/caribou-mastodon-client'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
@@ -11,7 +11,7 @@ import {
   relationshipCache, relationshipKey, statusCache,
 } from '@beatzball/caribou-state'
 import { findShell } from './_shell.js'
-import { profilePath } from './_profile-path.js'
+import { accountPath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import { hashtagOf, sameUrl } from './_post-links.js'
 import { tagPath } from './_tag-path.js'
@@ -230,8 +230,8 @@ export class CaribouStatusQuote extends LitElement {
     })
   }
 
-  private profileHref(account: { acct: string; url?: string | null }): string {
-    return profilePath(account.acct, this.instance || this.shellInstance || hostOf(account.url ?? ''))
+  private profileHref(account: { acct: string; url?: string | null } & Pick<Account, 'bluesky'>): string {
+    return accountPath(account, this.instance || this.shellInstance || hostOf(account.url ?? ''))
   }
 
   // As in the status card: the server pre-sanitizes, the hydrating render

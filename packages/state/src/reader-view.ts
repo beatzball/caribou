@@ -1,6 +1,6 @@
 import { batch, signal } from '@preact/signals-core'
 import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
-import { mergeStatus, postRecords } from './caches.js'
+import { mergeStatus, postRecords, readSource } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
 
@@ -70,6 +70,9 @@ export async function loadReaderView(statuses: readonly Status[], client: Caribo
   const unknown = ids.filter((id) => postRecords.peek().get(id)?.filtered === undefined)
   const request = ++requests
   claim(userKey, unknown, request)
+  // The reader's own copies: they fill the viewer state a page-data copy
+  // lacks, by the slot rule (README, "Viewer state").
+  const source = readSource(userKey)
   let fresh: Status[] = []
   try {
     fresh = await batched(client, ids)
@@ -87,7 +90,7 @@ export async function loadReaderView(statuses: readonly Status[], client: Caribo
     for (const f of fresh) {
       const own = byId.get(f.id)
       if (!own || own.uri !== f.uri) continue
-      mergeStatus(f)
+      mergeStatus(f, source)
       settled.push(f.id)
     }
     const done = new Set(settled)

@@ -59,12 +59,31 @@ const following = new Set<string>()
 // if a write started in between — still on its way or already done — the
 // read carries older state than the write and must not replace it.
 const revisions = new Map<string, number>()
+// What the last finished write left, and when. For the client's
+// `capabilities.readLagMs` after it, a read that disagrees is not believed:
+// Bluesky's AppView can lag behind a write; Mastodon's reads do not (0).
+// Package README, "Viewer state".
+const finished = new Map<string, { time: number; lagMs: number; rel: Relationship | undefined }>()
+const WRITTEN = ['following', 'requested', 'muting', 'blocking'] as const
+
+function lagging(key: string, read: Relationship): boolean {
+  const last = finished.get(key)
+  if (!last || Date.now() - last.time >= last.lagMs) return false
+  return WRITTEN.some((f) => (read[f] === true) !== (last.rel?.[f] === true))
+}
+
+// A read replaces the cached relationship only when no write is out, none
+// started since the read did, and it is not lagging behind the last one.
+function readWins(key: string, revision: number | undefined, read: Relationship): boolean {
+  return (revisions.get(key) ?? 0) === revision && !queues.has(key) && !lagging(key, read)
+}
 
 /** Test-only — forgets queued writes between tests. */
 export function _testOnlyResetRelationships(): void {
   queues.clear()
   following.clear()
   revisions.clear()
+  finished.clear()
 }
 
 function shown(q: Queue, id: string): Relationship | undefined {
@@ -104,6 +123,9 @@ function enqueue(
     }
     queue.pending.splice(queue.pending.indexOf(patch), 1)
     put(key, shown(queue, accountId))
+    finished.set(key, {
+      time: Date.now(), lagMs: client.capabilities?.readLagMs ?? 0, rel: shown(queue, accountId),
+    })
     if (queue.pending.length === 0 && queues.get(key) === queue) queues.delete(key)
     return ok
   }
@@ -139,7 +161,7 @@ export async function loadRelationship(
   try {
     const [rel] = await client.fetchRelationships([accountId])
     if (!rel) return null
-    if ((revisions.get(key) ?? 0) === revision && !queues.has(key)) put(key, rel)
+    if (readWins(key, revision, rel)) put(key, rel)
     return relationshipCache.value.get(key) ?? rel
   } catch {
     return null
@@ -173,7 +195,7 @@ export async function loadRelationships(
     for (const rel of rels) {
       const key = relationshipKey(client.userKey, rel.id)
       if (!before.has(rel.id)) continue
-      if ((revisions.get(key) ?? 0) === before.get(rel.id) && !queues.has(key)) {
+      if (readWins(key, before.get(rel.id), rel)) {
         next.set(key, rel)
         changed = true
       }

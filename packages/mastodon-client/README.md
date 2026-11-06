@@ -44,6 +44,16 @@ of Caribou never names masto's types.
   screen hides a control the network lacks; it does not show it broken.
   Capabilities need the active account, which the server does not know:
   read them in `firstUpdated()` or later, never in the first render.
+- `resourceNetwork(resource)` — `'bluesky'` when a post, account or
+  relationship has a `bluesky` field, else `'mastodon'`. Every cached
+  resource says its network this way, at no cost to Mastodon objects.
+- `canActOn(client, resource)` — true only when the client's network is the
+  resource's. A screen asks this, never just "is there a client" (spec
+  section 11). A Mastodon resource also needs the client's server; the
+  screen checks that as before.
+- `Capabilities.readLagMs` — how long a read can lag behind the reader's own
+  write: 0 for Mastodon, 60 000 for Bluesky. The state package's slot rule
+  uses it.
 - `CaribouClient.timelineOrder(kind)` — how the timeline store orders
   new posts: a compare function, or null to keep the order the feed sent.
   Mastodon (`mastodonTimelineOrder`) sorts by id, newest first, except
@@ -68,7 +78,7 @@ import type { Status, Account } from '@beatzball/caribou-mastodon-client'
 - **Recursive.** `Status.account` is a Caribou `Account`, `Status.reblog`
   and `Quote.quotedStatus` are Caribou `Status`es, and
   `Notification.status` is a Caribou `Status`.
-- **A network's extra data goes in its own field.** `Status.bluesky` and
+- **A network's extra data goes in its own field.** `Status.bluesky`, `Account.bluesky` and
   `Relationship.bluesky` hold what Mastodon has no place for (record URIs,
   labels, moderation). A Mastodon object never has them. Do not add a new
   top-level field for one network.

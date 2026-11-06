@@ -4,7 +4,7 @@ import type {
   CaribouClient, CaribouError, GroupedNotificationsPage, Notification,
   NotificationType,
 } from '@beatzball/caribou-mastodon-client'
-import { cacheAccount, cacheStatus, statusCache } from './caches.js'
+import { cacheAccount, cacheStatus, readSource, statusCache, type CopySource } from './caches.js'
 import {
   appendOlderGroups, compareNotificationIds, groupNotifications, groupsFromPage, prependNewerGroups,
   type NotificationGroup,
@@ -116,16 +116,21 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     })
   })
 
-  function ingest(page: Notification[]): Notification[] {
+  // The source of a fetch that starts now (the slot rule needs the start).
+  function startRead(): CopySource {
+    return readSource(opts.clientSource()?.userKey ?? null)
+  }
+
+  function ingest(page: Notification[], source: CopySource): Notification[] {
     for (const n of page) {
-      if (n.status) cacheStatus(n.status)
+      if (n.status) cacheStatus(n.status, source)
       if (n.account) cacheAccount(n.account)
     }
     return page
   }
 
-  function ingestGroups(page: GroupedNotificationsPage): NotificationGroup[] {
-    for (const s of page.statuses) cacheStatus(s)
+  function ingestGroups(page: GroupedNotificationsPage, source: CopySource): NotificationGroup[] {
+    for (const s of page.statuses) cacheStatus(s, source)
     for (const a of page.accounts) cacheAccount(a)
     return groupsFromPage(page)
   }
@@ -170,17 +175,18 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     const owner = ownerGeneration()
     loading.value = true
     error.value = null
+    const source = startRead()
     try {
       const first = await fetchFirst()
       if (!current(mine, owner)) return
       if (first.grouped) {
-        const groups = ingestGroups(first.grouped)
+        const groups = ingestGroups(first.grouped, source)
         serverGroups.value = groups
         items.value = []
         hasMore.value = groups.length > 0
       } else {
         serverGroups.value = null
-        items.value = ingest(first.page)
+        items.value = ingest(first.page, source)
         hasMore.value = first.page.length > 0
       }
     } catch (err) {
@@ -210,19 +216,20 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     const mine = generation
     const owner = ownerGeneration()
     loading.value = true
+    const source = startRead()
     try {
       if (grouped) {
         const client = opts.clientSource()
         if (!client) return
         const raw = await fetchGroups(client, { maxId: anchor })
         if (!current(mine, owner)) return
-        const older = ingestGroups(raw)
+        const older = ingestGroups(raw, source)
         serverGroups.value = appendOlderGroups(serverGroups.value ?? [], older)
         hasMore.value = older.length > 0
       } else {
         const page = await fetchPage({ maxId: anchor })
         if (!current(mine, owner)) return
-        items.value = [...items.value, ...withoutKnown(ingest(page))]
+        items.value = [...items.value, ...withoutKnown(ingest(page, source))]
         hasMore.value = page.length > 0
       }
       error.value = null
@@ -233,7 +240,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     }
   }
 
-  async function pollGroups(mine: number, owner: number, first: string) {
+  async function pollGroups(mine: number, owner: number, first: string, source: CopySource) {
     const client = opts.clientSource()
     if (!client) return
     // Page forward from the newest one shown, and merge once every page is
@@ -252,7 +259,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     }
     // Each page is newer than the one before it.
     let list = serverGroups.value ?? []
-    for (const page of pages) list = prependNewerGroups(list, ingestGroups(page))
+    for (const page of pages) list = prependNewerGroups(list, ingestGroups(page, source))
     serverGroups.value = list
     error.value = null
   }
@@ -262,21 +269,22 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     const owner = ownerGeneration()
     const grouped = serverGroups.value
     const first = grouped ? newestGroupId(grouped) : items.value[0]?.id
+    const source = startRead()
     try {
       if (!first) {
         // Nothing to page from yet: ask for the first page.
         const firstPage = await fetchFirst()
         if (!current(mine, owner)) return
         if ((serverGroups.value?.length ?? 0) > 0 || items.value.length > 0) return
-        const groups = firstPage.grouped ? ingestGroups(firstPage.grouped) : null
+        const groups = firstPage.grouped ? ingestGroups(firstPage.grouped, source) : null
         serverGroups.value = groups
-        items.value = groups ? [] : ingest(firstPage.page)
+        items.value = groups ? [] : ingest(firstPage.page, source)
         hasMore.value = (groups?.length ?? firstPage.page.length) > 0
         error.value = null
         return
       }
       if (grouped) {
-        await pollGroups(mine, owner, first)
+        await pollGroups(mine, owner, first, source)
         return
       }
       // Page forward from the newest one shown. `since_id` would give the
@@ -294,7 +302,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
       }
       // Merge only once every page is in. What is merged always joins the
       // old first one, so the list has no hole.
-      const merged = withoutKnown(ingest([...fresh.values()]))
+      const merged = withoutKnown(ingest([...fresh.values()], source))
         .sort((a, b) => compareNotificationIds(b.id, a.id))
       if (merged.length > 0) items.value = [...merged, ...items.value]
       error.value = null

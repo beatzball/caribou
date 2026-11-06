@@ -1,6 +1,11 @@
 import { batch, signal } from '@preact/signals-core'
 import type { Account, FilterResult, Poll, Status } from '@beatzball/caribou-mastodon-client'
-import { inflight, isMutating } from './inflight.js'
+import { inflight } from './inflight.js'
+import {
+  forgetSlots, readerNow, settleViewer, withoutViewerState, PAGE_DATA, type CopySource,
+} from './viewer-slots.js'
+
+export { PAGE_DATA, readAs, readerNow, readSource, type CopySource } from './viewer-slots.js'
 
 // Treat these signals as read-only. Mutating the Map in place
 // (`statusCache.value.set(...)`) skips the signal-write and consumers
@@ -106,10 +111,13 @@ function store(status: Status): void {
 
 /**
  * Caches a copy just off the network, as it is, except that an older copy
- * never undoes a newer edit of the post (`protectEdits`).
+ * never undoes a newer edit of the post (`protectEdits`), and its viewer
+ * fields follow the slot rule (README, "Viewer state"). `source` says who
+ * fetched it and when: take it with `readSource` before the request. With
+ * none, the active reader fetched it just now.
  */
-export function cacheStatus(status: Status): void {
-  batch(() => cacheOne(status))
+export function cacheStatus(status: Status, source: CopySource = readerNow()): void {
+  batch(() => cacheOne(status, source))
 }
 
 // Gives a copy the quote its record says (`noteCopy`). When that is the
@@ -131,9 +139,15 @@ function settleQuote(
   return out
 }
 
-function cacheOne(status: Status): Status {
-  let out = settleQuote(protectVotes(protectEdits(status)), cacheOne)
-  if (out.reblog) out = { ...out, reblog: settleQuote(out.reblog, cacheOne) }
+function cacheOne(status: Status, source: CopySource): Status {
+  const put = (s: Status) => cacheOne(s, source)
+  const cache = statusCache.peek()
+  let out = settleQuote(protectVotes(protectEdits(status)), put)
+  out = settleViewer(out, knownCopy(out.id, cache), source)
+  if (out.reblog) {
+    const inner = settleQuote(out.reblog, put)
+    out = { ...out, reblog: settleViewer(inner, knownCopy(inner.id, cache), source) }
+  }
   store(out)
   return out
 }
@@ -175,13 +189,6 @@ export function updateStatus(id: string, patch: Partial<Status>): void {
   next.set(id, { ...current, ...patch })
   statusCache.value = next
 }
-
-// What the reader has done to a post. A copy from the public API (the page
-// data the server fetches has no token) always says "not done", so a merge
-// keeps these from the copy already cached.
-const READER_FIELDS = ['favourited', 'reblogged', 'bookmarked', 'muted', 'pinned', 'filtered'] as const
-
-const PAIRED_COUNTS = [['favourited', 'favouritesCount'], ['reblogged', 'reblogsCount']] as const
 
 /** The fields an edit of a post changes. */
 export const EDIT_FIELDS = [
@@ -245,38 +252,29 @@ function keepPollVote(
   return { ...fresh, voted: had.voted, ownVotes: had.ownVotes ?? null }
 }
 
-function keepReaderFields(fresh: Status, current: Status): Status {
-  const out = { ...fresh } as Record<string, unknown>
+function keepReaderFields(fresh: Status, current: Status, source: CopySource): Status {
+  const out = { ...settleViewer(fresh, current, source) } as Record<string, unknown>
   const had = current as unknown as Record<string, unknown>
-  for (const key of READER_FIELDS) {
-    // Only a reader with a token gets `filtered`, so a copy that has it is
-    // the reader's own and newer: a filter added or removed since shows.
-    if (key === 'filtered' && Array.isArray(out.filtered)) continue
-    if (key in had) out[key] = had[key]
-  }
+  // Only a reader with a token gets `filtered`, so a copy that has it is
+  // the reader's own and newer: a filter added or removed since shows.
+  if (!Array.isArray(out.filtered) && 'filtered' in had) out.filtered = had.filtered
   out.poll = keepPollVote(fresh.poll, current.poll, voting(current.id))
-  for (const [flag, count] of PAIRED_COUNTS) {
-    const was = (had[count] as number | undefined) ?? 0
-    const now = (out[count] as number | undefined) ?? 0
-    // While an action is out, the count holds its optimistic step, and a
-    // failure undoes that step from whatever the count is then. And page
-    // data passes through the server's upstream cache, so it can be older
-    // than the count the reader's own action came back with.
-    if (isMutating(current.id) || (had[flag] === true && now < was)) out[count] = had[count]
-  }
   return out as unknown as Status
 }
 
 /**
- * Caches a fresh copy of a status, keeping the reader's own flags from the
- * copy already cached. Content, edits and counts come from `fresh`. Returns
- * the status as now cached.
+ * Caches a fresh copy of a status. Content, edits and counts come from
+ * `fresh`; the reader's own flags follow the slot rule (README, "Viewer
+ * state"). `source` says who fetched it and when; with none it is page
+ * data, which never changes cached viewer state. Returns the status as
+ * now cached.
  */
-export function mergeStatus(fresh: Status): Status {
-  return batch(() => merge(fresh))
+export function mergeStatus(fresh: Status, source: CopySource = PAGE_DATA): Status {
+  return batch(() => merge(fresh, source))
 }
 
-function merge(fresh: Status): Status {
+function merge(fresh: Status, source: CopySource): Status {
+  const put = (s: Status) => merge(s, source)
   const cache = statusCache.peek()
   // A post cached only inside a boost is known too: its reader fields
   // (a vote cast through the boost) carry over to the post's own entry.
@@ -285,12 +283,12 @@ function merge(fresh: Status): Status {
   if (current === fresh) return current
   fresh = protectEdits(fresh)
   // The quote first: its record reads the fresh copy's own `filtered`.
-  let next = settleQuote(fresh, merge)
-  if (current) next = keepReaderFields(next, current)
+  let next = settleQuote(fresh, put)
+  next = current ? keepReaderFields(next, current, source) : settleViewer(next, undefined, source)
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
-    let reblog = settleQuote(fresh.reblog, merge)
-    if (inner) reblog = keepReaderFields(reblog, inner)
+    let reblog = settleQuote(fresh.reblog, put)
+    reblog = inner ? keepReaderFields(reblog, inner, source) : settleViewer(reblog, undefined, source)
     next = { ...next, reblog }
     if (cache.has(fresh.reblog.id)) store(reblog)
   }
@@ -298,9 +296,12 @@ function merge(fresh: Status): Status {
   return next
 }
 
+// What the reader has done to a post: the viewer fields (`viewer-slots.ts`),
+// `filtered` and a poll's vote. With them gone the copy is as page data
+// would have it.
 function withoutReaderFields(status: Status): Status {
-  const out = { ...status } as Record<string, unknown>
-  for (const key of READER_FIELDS) delete out[key]
+  const out = { ...withoutViewerState(status) } as Record<string, unknown>
+  delete out.filtered
   if (status.poll) {
     const { voted: _voted, ownVotes: _own, ...poll } = status.poll
     out.poll = poll
@@ -338,6 +339,7 @@ export function forgetReaderFields(): void {
     if (gone.has(id) || (s.reblog && gone.has(s.reblog.id))) continue
     next.set(id, withoutReaderFields(withoutDeletedQuotes(s, gone)))
   }
+  forgetSlots()
   batch(() => {
     statusCache.value = next
     postRecords.value = new Map()

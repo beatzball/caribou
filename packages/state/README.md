@@ -115,6 +115,124 @@ fetch on construction; the differences are in pagination handoff:
   `load()` is a no-op when both signals are already `ready`. There's no
   pagination to hand off.
 
+## Viewer state: slots and who wins
+
+A post's viewer state is what the reader did to it. One rule decides
+which copy of a post may change it (spec 6.3, seam 4). It is the same
+for Mastodon and Bluesky. The code is `viewer-slots.ts` (`settleViewer`,
+`readSource`, `slotWriteStarted`, `slotWriteFinished`).
+
+**Words.**
+
+- **Slot.** One action's flag and its record ref, kept together:
+  `like` = `favourited` + `bluesky.likeUri`, `repost` = `reblogged` +
+  `bluesky.repostUri`, `bookmark` = `bookmarked`. A Mastodon post has no
+  record refs. The count beside a slot (`favouritesCount`,
+  `reblogsCount`) goes with it. Slots are separate: a like in flight does
+  not hold back a repost.
+- **Other viewer fields.** `muted`, `pinned`, and on a Bluesky post
+  `replyDisabled`, `embeddingDisabled` and `viewerOf`. `filtered` and a
+  poll's vote keep their own rules (the app README's "Which copy wins").
+- **Viewer fields.** The slot flags and refs plus the other viewer
+  fields. One list in `viewer-slots.ts` (`VIEWER_FIELDS`,
+  `BLUESKY_VIEWER_FIELDS`). With the viewer fields removed, a post is as
+  a signed-out reader sees it: no flags, refs null, `replyDisabled` and
+  `embeddingDisabled` false.
+- **Source.** Where a copy came from. `readSource(owner)`, read just
+  before the request starts, gives `{ owner, startedAt }`: the account
+  whose token fetched it, and the viewer clock at that moment.
+  `PAGE_DATA` is the server's page data: no token, and maybe older,
+  because it passes through the server's upstream cache.
+- **Three kinds of copy.**
+  - **The reader's copy.** Its source's owner is the active account. A
+    Bluesky copy must also name that account in `bluesky.viewerOf`.
+  - **Another account's copy.** Its source's owner is not the active
+    account (a late answer to a fetch the last account started), or its
+    `bluesky.viewerOf` names an account that is not the active one.
+  - **Page data.** Neither: `PAGE_DATA` with no other account named.
+- **The viewer clock.** A number that goes up by one each time a slot
+  write finishes.
+
+**Who writes a slot.** Only two things:
+
+1. The reader's own action (`mutations.ts`). It writes at once
+   (optimistic) and marks the slot as written to. When the server answers,
+   it writes the answer (commit) or puts the old flag and ref back
+   (rollback). Either way the write is finished: the slot records the
+   clock (after one step up), the time, the flag and ref the cached post
+   ended with, and the client's lag window.
+2. A copy, by the merge rule below.
+
+**The merge rule, for each slot.** A copy changes the slot only when all
+four hold. Otherwise the slot keeps its cached flag and ref.
+
+1. It is the reader's copy.
+2. No write to the slot is out.
+3. Its fetch started at or after the slot's last write finished
+   (`startedAt >= finishedAt`).
+4. It agrees with the slot's last write, or the lag window has passed
+   since that write finished. To agree, the copy's flag and its record
+   ref must both be what the write left (a Mastodon copy has the flag
+   only). The window is the writing client's `capabilities.readLagMs`:
+   60 seconds on Bluesky, whose AppView can lag behind a write; 0 on
+   Mastodon, which reads its own writes at once.
+
+**Counts.** A copy's count and flag come from one server read, so the
+count holds the reader's own action exactly when the flag does.
+
+- When the copy changes the slot, its count is taken as it is. No other
+  rule moves it.
+- When the slot is kept, the count is the copy's, moved by one to match
+  the kept flag (+1 when the kept flag is on and the copy's is off, -1
+  the other way). Other readers' likes still show, and the reader's own
+  action is counted once.
+
+The other viewer fields follow rule 1 only: the reader's copy wins.
+
+**Copies that are not the reader's.** They never bring viewer state.
+
+- **Another account's copy** keeps every cached viewer field. A field
+  the cache does not have is removed. With nothing cached, the copy is
+  cached with its viewer fields removed. This holds on both networks.
+- **Page data** keeps every cached viewer field. A field the cache does
+  not have is the copy's (page data has none: Mastodon leaves the fields
+  out, and a Bluesky public copy says "not done"). Its counts are the
+  copy's, with two exceptions. While a write to the slot is out, the
+  cached count stays. When the cached flag is on, a lower count stays
+  cached: page data passes through the server's upstream cache and can
+  be older than the reader's own write.
+
+**With nothing cached**, the reader's copy and page data are cached as
+they are. Rules 2 to 4 need a cached post: they decide between a copy
+and the cached slot. A write to a post that is not cached writes
+nothing, so there is nothing to keep. Every list caches its posts before
+it shows a card, so a card's write always has a cached post.
+
+**Defaults.** `cacheStatus(s)` with no source means "the active reader
+fetched it just now". `mergeStatus(s)` with no source means page data.
+A store or component that fetches with the reader's token passes a
+source from `readSource` taken before its request. That is what makes
+rule 3 work. A copy that came from the page (a thread's or timeline's
+server data, the card's own copy) stays page data.
+
+**An account change** removes every viewer field from every cached post
+(nested posts too) and empties every slot record (`forgetReaderFields`).
+A write still out for the old account finds a new owner generation when
+it answers and writes nothing, so no slot stays marked as written to.
+
+**Relationships** (`relationships.ts`) follow the same rule. The cache
+is keyed by the reader's UserKey, so every read is the reader's copy. A
+read does not replace the cached relationship while a write is out, when
+a write started after the read did, or inside the lag window after a
+write finished when it disagrees with what that write left
+(`following`, `requested`, `muting`, `blocking`).
+
+**Network.** Each post and account says its network: it has a `bluesky`
+field or it is Mastodon (`resourceNetwork` in the client package). The
+reader can act on a resource only when the active client's network is
+the resource's (`canActOn`). A Mastodon post also needs the reader's
+server, as before.
+
 ## Gotchas
 
 - **Don't mutate cache Maps directly.** Direct `.set` skips the signal-write

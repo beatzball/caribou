@@ -4,7 +4,7 @@ import {
   type CaribouClient, type CaribouError, type TimelineKind, type TimelineOrder, type TimelinePage,
   type Status,
 } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, mergeStatus, statusCache } from './caches.js'
+import { cacheStatus, mergeStatus, readAs, readerNow, statusCache, type CopySource } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
 export interface TimelineStore {
@@ -106,8 +106,8 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   })
   const newPostsCount = computed(() => newPostIds.value.length)
 
-  function ingest(page: Status[]): string[] {
-    batch(() => { for (const s of page) cacheStatus(s) })
+  function ingest(page: Status[], source: CopySource): string[] {
+    batch(() => { for (const s of page) cacheStatus(s, source) })
     return page.map((s) => s.id)
   }
 
@@ -149,9 +149,9 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   async function runFetch(
     params: { sinceId?: string; cursor?: string; limit?: number } | undefined,
     client = opts.clientSource(),
-  ): Promise<TimelinePage> {
-    if (!client) return Object.assign([], { nextCursor: null })
-    return client.fetchTimeline(kind, params)
+  ): Promise<[TimelinePage, CopySource]> {
+    if (!client) return [Object.assign([], { nextCursor: null }), readerNow()]
+    return readAs(client, () => client.fetchTimeline(kind, params))
   }
 
   // A page that names no cursor is the last one, so the store does not ask
@@ -240,10 +240,10 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     loading.value = true
     succeed()
     try {
-      const page = await runFetch(undefined)
+      const [page, source] = await runFetch(undefined)
       if (generation !== ownerGeneration()) return
       batch(() => {
-        statusIds.value = ingest(page)
+        statusIds.value = ingest(page, source)
         setPaging(page)
         syncedAt.value = Date.now()
         succeed()
@@ -268,12 +268,12 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     const epoch = listEpoch
     loading.value = true
     try {
-      const page = await runFetch({ cursor: anchor })
+      const [page, source] = await runFetch({ cursor: anchor })
       // The list started again from a new top while this page was out: it
       // belongs to the old list.
       if (generation !== ownerGeneration() || epoch !== listEpoch) return
       batch(() => {
-        statusIds.value = [...statusIds.value, ...ingest(page)]
+        statusIds.value = [...statusIds.value, ...ingest(page, source)]
         setPaging(page)
         succeed()
       })
@@ -307,13 +307,13 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     const stale = () => generation !== ownerGeneration() || epoch !== listEpoch
       || opts.clientSource()?.userKey !== client?.userKey
     try {
-      const page = await runFetch({ sinceId: first }, client)
+      const [page, source] = await runFetch({ sinceId: first }, client)
       if (stale()) return
       batch(() => {
         syncedAt.value = Date.now()
         // A failed check earlier left an error; this one worked.
         if (!olderPagePending()) succeed()
-        const ids = ingest(page)
+        const ids = ingest(page, source)
         if (!compare) answer(page, ids)
         else if (ids.length > 0) buffer(ids, compare)
       })
@@ -403,7 +403,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
 
   // test-only — do not use in production code
   function _testOnlyPrepend(xs: Status[]): void {
-    const ids = ingest(xs)
+    const ids = ingest(xs, readerNow())
     const compare = order()
     if (compare) buffer(ids, compare)
     else newPostIds.value = Array.from(new Set([...ids, ...newPostIds.value]))

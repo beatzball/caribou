@@ -22,6 +22,7 @@ describe('Mastodon capabilities', () => {
       polls: true, edit: true, customEmoji: true,
       followTags: true, privateLists: true, serverFilters: true,
       maxChars: 500, maxBytes: null, maxImages: 4, maxImageBytes: null,
+      readLagMs: 0,
     })
     expect(client().capabilities).toBe(MASTODON_CAPABILITIES)
   })

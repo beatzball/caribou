@@ -1,6 +1,6 @@
 import { batch, signal, type ReadonlySignal } from '@preact/signals-core'
 import type { CaribouClient, CaribouError, Status } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, mergeStatus } from './caches.js'
+import { cacheStatus, mergeStatus, readSource } from './caches.js'
 
 export type AsyncState<T> =
   | { status: 'idle' }
@@ -69,21 +69,22 @@ export function createThreadStore(
     if (focused.value.status !== 'ready') focused.value = { status: 'loading' }
     if (context.value.status !== 'ready') context.value = { status: 'loading' }
 
+    const source = readSource(client.userKey)
     const [focusedResult, contextResult] = await Promise.allSettled([
       client.fetchStatus(statusId),
       client.fetchThread(statusId),
     ])
 
     if (focusedResult.status === 'fulfilled') {
-      cacheStatus(focusedResult.value)
+      cacheStatus(focusedResult.value, source)
       focused.value = { status: 'ready', data: focusedResult.value }
     } else {
       focused.value = { status: 'error', error: focusedResult.reason as CaribouError }
     }
 
     if (contextResult.status === 'fulfilled') {
-      for (const s of contextResult.value.ancestors) cacheStatus(s)
-      for (const s of contextResult.value.descendants) cacheStatus(s)
+      for (const s of contextResult.value.ancestors) cacheStatus(s, source)
+      for (const s of contextResult.value.descendants) cacheStatus(s, source)
       context.value = { status: 'ready', data: contextResult.value }
     } else {
       context.value = { status: 'error', error: contextResult.reason as CaribouError }

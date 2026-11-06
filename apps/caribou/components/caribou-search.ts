@@ -4,7 +4,7 @@ import { repeat } from 'lit/directives/repeat.js'
 import { batch, effect } from '@preact/signals-core'
 import { searchPublic, type SearchType, type Account, type Search, type Tag } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUser, isOwnAccount, loadRelationships, mergeStatus, ownerGeneration,
+  activeClient, activeUser, isOwnAccount, loadRelationships, mergeStatus, ownerGeneration, readSource,
   relationshipCache, relationshipFor, toggleFollow,
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
@@ -180,6 +180,8 @@ export class CaribouSearch extends LitElement {
     const current = () => seq === this.seq && generation === ownerGeneration()
     let data: Search
     let host: string
+    // The reader's copies: the source is taken before the request.
+    const source = client && user ? readSource(client.userKey) : undefined
     try {
       if (client && user) {
         host = user.server
@@ -203,7 +205,7 @@ export class CaribouSearch extends LitElement {
       if (client && resolve && this.goToResolved(q, data, host)) return
       if (client) {
         const clean = data
-        const statuses = batch(() => clean.statuses.map((s) => mergeStatus(s)))
+        const statuses = batch(() => clean.statuses.map((s) => mergeStatus(s, source)))
         data = { ...data, statuses }
         void loadRelationships(data.accounts.map((a) => a.id))
       }
