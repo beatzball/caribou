@@ -177,13 +177,13 @@ describe('<caribou-profile-header> follow button', () => {
     expect(button(el)?.variant).toBe('secondary')
     expect(visibleLabel(button(el)!)).toBe('Following')
     expect(button(el)!.querySelector('.hover')?.textContent).toBe('Unfollow')
-    expect(follow).toHaveBeenCalledWith('42')
+    expect(follow).toHaveBeenCalledWith({ id: '42' })
     await flush()
 
     inner(el).click()
     await el.updateComplete
     expect(button(el)?.textContent).toBe('Follow')
-    expect(unfollow).toHaveBeenCalledWith('42')
+    expect(unfollow).toHaveBeenCalledWith({ id: '42' })
   })
 
   it('shows Requested for a locked account, and a click withdraws the request', async () => {
@@ -196,7 +196,7 @@ describe('<caribou-profile-header> follow button', () => {
     inner(el).click()
     await el.updateComplete
     expect(button(el)?.textContent).toBe('Follow')
-    expect(unfollow).toHaveBeenCalledWith('42')
+    expect(unfollow).toHaveBeenCalledWith({ id: '42' })
   })
 
   it('says "Follows you" when the account follows the reader', async () => {
@@ -224,7 +224,7 @@ describe('<caribou-profile-header> follow button', () => {
     expect(lookup).toHaveBeenCalledWith('alice@example.social')
     expect(fetchRel).toHaveBeenCalledWith(['900'])
     inner(el).click()
-    expect(follow).toHaveBeenCalledWith('900')
+    expect(follow).toHaveBeenCalledWith({ id: '900' })
   })
 
   it('hides the button when the reader’s server does not know the account', async () => {
@@ -275,7 +275,7 @@ describe('<caribou-profile-header> follow button', () => {
     await el.updateComplete
     expect(lookup).toHaveBeenCalledWith('alice@one.example')
     inner(el).click()
-    expect(follow).toHaveBeenCalledWith('555')
+    expect(follow).toHaveBeenCalledWith({ id: '555' })
     expect(follow).not.toHaveBeenCalledWith('42')
     expect(firstFollow).not.toHaveBeenCalled()
   })
@@ -353,10 +353,10 @@ describe('<caribou-profile-header> mute and block', () => {
     expect(badges(el)).toEqual(['Muted'])
     expect(item(el, 'mute')!.textContent).toBe('Unmute @alice@example.social')
     await settle(el)
-    expect(mute).toHaveBeenCalledWith('42')
+    expect(mute).toHaveBeenCalledWith({ id: '42' })
     item(el, 'mute')!.click()
     await settle(el)
-    expect(unmute).toHaveBeenCalledWith('42')
+    expect(unmute).toHaveBeenCalledWith({ id: '42' })
     expect(badges(el)).toEqual([])
   })
 
@@ -386,13 +386,13 @@ describe('<caribou-profile-header> mute and block', () => {
     expect(dialog.shadowRoot!.querySelector('h2')!.textContent).toBe('Block @alice@example.social?')
     dialog.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
     await settle(el)
-    expect(block).toHaveBeenCalledWith('42')
+    expect(block).toHaveBeenCalledWith({ id: '42' })
     expect(badges(el)).toEqual(['Blocked'])
     expect(button(el)!.dataset.state).toBe('blocked')
     expect(visibleLabel(button(el)!)).toBe('Unblock')
     button(el)!.click()
     await settle(el)
-    expect(unblock).toHaveBeenCalledWith('42')
+    expect(unblock).toHaveBeenCalledWith({ id: '42' })
     expect(button(el)!.dataset.state).toBe('follow')
   })
 

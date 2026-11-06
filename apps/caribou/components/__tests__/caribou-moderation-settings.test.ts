@@ -109,11 +109,11 @@ describe('<caribou-moderation-settings>', () => {
     await el.updateComplete
     expect(button().textContent).toBe('Mute @bob')
     await flush()
-    expect(unmute).toHaveBeenCalledWith('7')
+    expect(unmute).toHaveBeenCalledWith({ id: '7' })
     button().click()
     await flush()
     await el.updateComplete
-    expect(mute).toHaveBeenCalledWith('7')
+    expect(mute).toHaveBeenCalledWith({ id: '7' })
     expect(button().textContent).toBe('Unmute @bob')
   })
 
@@ -125,7 +125,7 @@ describe('<caribou-moderation-settings>', () => {
     section(el, 'blocks-h').querySelector<HTMLElement>('li.account caribou-button')!.click()
     await flush()
     await el.updateComplete
-    expect(unblock).toHaveBeenCalledWith('8')
+    expect(unblock).toHaveBeenCalledWith({ id: '8' })
     expect(section(el, 'blocks-h').querySelector('li.account caribou-button')!.textContent).toBe('Block @carol@other.example')
   })
 
@@ -155,7 +155,7 @@ describe('<caribou-moderation-settings>', () => {
     again.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
     await flush()
     await el.updateComplete
-    expect(block).toHaveBeenCalledWith('8')
+    expect(block).toHaveBeenCalledWith({ id: '8' })
     expect(button().textContent).toBe('Unblock @carol@other.example')
   })
 

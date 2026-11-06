@@ -38,7 +38,7 @@ describe('CaribouClient status actions', () => {
         return HttpResponse.json({ ...makeStatus(String(params.id)), ...patch })
       }))
       const c = createCaribouClient(userKey, sessionSource())
-      const s = await c[method]('110')
+      const s = await c[method]({ id: '110' })
       expect(calls).toEqual(['POST 110'])
       expect(s.id).toBe('110')
       expect(s[field]).toBe(Object.values(patch)[0])
@@ -51,7 +51,7 @@ describe('CaribouClient status actions', () => {
       reblog: { ...makeStatus(String(params.id)), reblogged: true, reblogs_count: 1 },
     })))
     const c = createCaribouClient(userKey, sessionSource())
-    const s = await c.reblog('110')
+    const s = await c.reblog({ id: '110' })
     expect(s.id).toBe('110')
     expect(s.reblogged).toBe(true)
     expect(s.reblogsCount).toBe(1)
@@ -70,7 +70,7 @@ describe('CaribouClient status actions', () => {
       }),
     )
     const c = createCaribouClient(userKey, sessionSource())
-    const [a, b, d] = await Promise.all([c.favourite('110'), c.favourite('110'), c.unfavourite('110')])
+    const [a, b, d] = await Promise.all([c.favourite({ id: '110' }), c.favourite({ id: '110' }), c.unfavourite({ id: '110' })])
     expect(hits).toBe(3)
     expect(a.favourited).toBe(true)
     expect(b.favourited).toBe(true)
@@ -82,7 +82,7 @@ describe('CaribouClient status actions', () => {
       HttpResponse.json({ error: 'The access token is invalid' }, { status: 401 })))
     const src = sessionSource()
     const c = createCaribouClient(userKey, src)
-    await expect(c.favourite('110')).rejects.toMatchObject({ code: 'unauthorized' })
+    await expect(c.favourite({ id: '110' })).rejects.toMatchObject({ code: 'unauthorized' })
     expect(src.onUnauthorized).toHaveBeenCalledOnce()
   })
 
@@ -90,6 +90,6 @@ describe('CaribouClient status actions', () => {
     server.use(http.post(`${base}/bookmark`, () =>
       HttpResponse.json({ error: 'boom' }, { status: 500 })))
     const c = createCaribouClient(userKey, sessionSource())
-    await expect(c.bookmark('110')).rejects.toMatchObject({ name: 'CaribouError' })
+    await expect(c.bookmark({ id: '110' })).rejects.toMatchObject({ name: 'CaribouError' })
   })
 })

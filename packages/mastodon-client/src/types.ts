@@ -425,6 +425,26 @@ export interface RelationshipBluesky {
   blockUri: string | null
 }
 
+// ------------------------------------------------------------ write refs
+//
+// A write names its target by a ref, not a bare id. Mastodon needs only the
+// id. A Bluesky like needs the post's URI and CID, and an undo needs the
+// record the earlier write made (spec 6.3, seam 2).
+
+/** What a status action needs to name the post. */
+export interface StatusRef {
+  id: string
+  /** Only for a Bluesky post. A Mastodon ref never has it. */
+  bluesky?: Pick<StatusBluesky, 'uri' | 'cid' | 'likeUri' | 'repostUri'>
+}
+
+/** What a follow, mute or block needs to name the account. */
+export interface AccountRef {
+  id: string
+  /** Only for a Bluesky account: the records an undo deletes. */
+  bluesky?: RelationshipBluesky
+}
+
 // ------------------------------------------------------------------ lists
 
 export type ListRepliesPolicy = 'followed' | 'list' | 'none'
