@@ -154,11 +154,19 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
 
   async function runFetch(
     params: { sinceId?: string; maxId?: string; limit?: number } | undefined,
+    client = opts.clientSource(),
   ): Promise<TimelinePage> {
-    const client = opts.clientSource()
     if (!client) return []
     return client.fetchTimeline(kind, params)
   }
+
+  // Counts each time the list is loaded again from the top. A check that
+  // started before then asked about a list that is gone.
+  let listEpoch = 0
+  // The check in flight, if any. A check while one is in flight joins it:
+  // two checks from the same top can finish in reverse order with pages
+  // that share no post, and nothing in either page says which is newer.
+  let inFlightPoll: Promise<void> | null = null
 
   // A page that names its cursor also says whether there is a next page, so
   // the store does not ask once more only to learn the list has ended.
@@ -230,6 +238,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       return
     }
     const generation = ownerGeneration()
+    listEpoch += 1
     loading.value = true
     succeed()
     try {
@@ -273,14 +282,27 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     }
   }
 
-  async function poll() {
+  function poll(): Promise<void> {
+    if (inFlightPoll) return inFlightPoll
+    const run = checkOnce().finally(() => { if (inFlightPoll === run) inFlightPoll = null })
+    inFlightPoll = run
+    return run
+  }
+
+  async function checkOnce() {
     // The buffer holds posts newer than the list, so ask from its top.
     const first = newPostIds.value[0] ?? statusIds.value[0]
     if (!first) return
     const generation = ownerGeneration()
+    const epoch = listEpoch
+    const client = opts.clientSource()
+    // A check that lands for another account, or for a list loaded again
+    // since it started, is dropped; the next check asks again.
+    const stale = () => generation !== ownerGeneration() || epoch !== listEpoch
+      || opts.clientSource()?.userKey !== client?.userKey
     try {
-      const page = await runFetch({ sinceId: first })
-      if (generation !== ownerGeneration()) return
+      const page = await runFetch({ sinceId: first }, client)
+      if (stale()) return
       batch(() => {
         syncedAt.value = Date.now()
         // A failed check earlier left an error; this one worked.
@@ -289,7 +311,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
         if (ids.length > 0) buffer(ids)
       })
     } catch (err) {
-      if (generation === ownerGeneration() && !olderPagePending()) fail(err, 'poll')
+      if (!stale() && !olderPagePending()) fail(err, 'poll')
     }
   }
 
@@ -330,6 +352,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       const ids = page.map((s) => mergeStatus(s).id)
       syncedAt.value = Date.now()
       if (statusIds.value.length === 0) {
+        listEpoch += 1
         statusIds.value = ids
         // The page names where the next one starts.
         const next = nextMaxId === undefined ? ids[ids.length - 1] ?? null : nextMaxId

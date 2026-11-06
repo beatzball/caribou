@@ -104,28 +104,82 @@ describe('timeline order from the client', () => {
     expect(store.statusIds.value).toEqual(['D', 'C', 'B', 'A'])
   })
 
-  it('two overlapping checks that finish in reverse order keep feed order', async () => {
-    const pages: Array<(p: Status[]) => void> = []
+  // A client whose checks (`sinceId` fetches) wait until the test answers.
+  function deferredClient(order: TimelineOrder = null, userKey = toUserKey('beatzball', 'fosstodon.org')) {
+    const pending: Array<(p: Status[]) => void> = []
     const fetchTimeline = vi.fn((_k: unknown, params?: { sinceId?: string }) =>
       params?.sinceId
-        ? new Promise<TimelinePage>((r) => { pages.push(r) })
+        ? new Promise<TimelinePage>((r) => { pending.push(r) })
         : Promise.resolve([makeStatus('A')] as TimelinePage))
     const c = {
-      userKey: toUserKey('beatzball', 'fosstodon.org'),
-      capabilities: MASTODON_CAPABILITIES, timelineOrder: () => null, fetchTimeline,
+      userKey, capabilities: MASTODON_CAPABILITIES, timelineOrder: () => order, fetchTimeline,
     } as unknown as CaribouClient
+    return { c, pending, fetchTimeline }
+  }
+  const ids = (xs: Status[]) => xs.map((s) => s.id)
+
+  // Two checks in flight at once could finish in reverse order with pages
+  // that share no post, and the stale one would go on top. So a check while
+  // one is in flight joins it: one request, one answer.
+  it('a check while one is in flight joins it: one request', async () => {
+    const { c, pending, fetchTimeline } = deferredClient()
+    const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
+    await store.load()
+    const first = store.poll()
+    const second = store.poll()
+    expect(second).toBe(first)
+    expect(fetchTimeline).toHaveBeenCalledTimes(2) // the load and one check
+    pending[0]!(['D', 'C'].map(makeStatus))
+    await first
+    expect(pending).toHaveLength(1)
+    expect(ids(store.newPosts.value)).toEqual(['D', 'C'])
+    // The next check after it asks again, from the buffer's top.
+    const third = store.poll()
+    expect(fetchTimeline).toHaveBeenLastCalledWith('home', { sinceId: 'D' })
+    pending[1]!(['B'].map(makeStatus))
+    await third
+    expect(ids(store.newPosts.value)).toEqual(['B', 'D', 'C'])
+  })
+
+  // The review's sequence: the newer page lands, the older one never goes
+  // out, so nothing stale can land above it.
+  it('a disjoint stale page cannot land above a newer one', async () => {
+    const { c, pending } = deferredClient()
     const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
     await store.load()
     const older = store.poll()
     const newer = store.poll()
-    // The second check sees more of the feed and lands first.
-    pages[1]!([makeStatus('E'), makeStatus('D'), makeStatus('C'), makeStatus('B')])
+    pending[0]!(['D', 'C'].map(makeStatus))
     await newer
-    // The first, stale check lands last with part of the same feed and a
-    // post the newer one no longer has (deleted, say) between C and B.
-    pages[0]!([makeStatus('C'), makeStatus('X'), makeStatus('B')])
     await older
-    expect(store.newPosts.value.map((s) => s.id)).toEqual(['E', 'D', 'C', 'X', 'B'])
+    expect(pending).toHaveLength(1)
+    store.applyNewPosts()
+    expect(store.statusIds.value).toEqual(['D', 'C', 'A'])
+  })
+
+  it('drops a check that lands after the list was loaded again', async () => {
+    const { c, pending } = deferredClient()
+    const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
+    await store.load()
+    const check = store.poll()
+    await store.load()
+    pending[0]!(['B'].map(makeStatus))
+    await check
+    expect(ids(store.newPosts.value)).toEqual([])
+    expect(store.statusIds.value).toEqual(['A'])
+  })
+
+  it('drops a check that lands after the client changed', async () => {
+    const one = deferredClient()
+    const two = deferredClient(null, toUserKey('bob', 'example.social'))
+    let current = one.c
+    const store = createTimelineStore('home', { clientSource: () => current, pollIntervalMs: 0 })
+    await store.load()
+    const check = store.poll()
+    current = two.c
+    one.pending[0]!(['B'].map(makeStatus))
+    await check
+    expect(ids(store.newPosts.value)).toEqual([])
   })
 
   it('asks the client for the order of its own timeline kind', async () => {
