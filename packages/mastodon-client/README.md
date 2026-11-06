@@ -68,8 +68,14 @@ import type { Status, Account } from '@beatzball/caribou-mastodon-client'
   there.
 - **Only two files may name masto's types:** `src/create-client.ts` and
   `src/masto-mapping.ts`. The test `owned-types-boundary.test.ts` fails if
-  any other `.ts` file in `apps/` or `packages/` names `mastodon.v1.*`,
-  `mastodon.v2.*`, `mastodon.rest.*` or imports from `masto`.
+  any other TypeScript file in `apps/` or `packages/` (`.d.ts` included)
+  names `mastodon.v1.*`, `mastodon.v2.*` or `mastodon.rest.*`, or reaches
+  `masto` or a `masto/...` subpath by any import, export, `import()` or
+  `require`. It parses each file, so line breaks and aliases do not hide one.
+- **masto's own declarations can be wrong.** masto puts poll `emojis` on
+  each option; the API puts them on the poll. `src/masto-mapping.ts` fixes
+  masto's declaration there, with a note. Fix the next one the same way,
+  never with a cast.
 - **Need a field that is not here?** Add it to `src/types.ts` with
   Mastodon's name and shape. The mapping check tells you if masto disagrees.
 
