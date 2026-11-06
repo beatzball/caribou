@@ -175,7 +175,7 @@ From Mastodon's `app/models/account.rb`: local usernames must match
 
 Not checked, left to phase 0: whether the public AppView still returns the
 posts of an account with `!no-unauthenticated` (we had no such account to
-probe).
+probe). Phase 0 found that it does (12.2).
 
 ---
 
@@ -1123,6 +1123,66 @@ request's destination host and the links built, not only disabled buttons.
 - Whether `bsky.social` grants confidential lifetimes to an option-D client, and whether it rejects an assertion bound to another DPoP key (the release gate in 5.3; a
   small manual test with a hand-made assertion).
 
+**Phase 0 results (2026-11-05, #170).** The spike code is on the branch
+`spike-bluesky-170-code`. It is for reference only and is not merged.
+
+| unknown | answer |
+|---|---|
+| Lazy chunk size | **181.6 KB gzipped** (942.9 KB minified, 145.8 KB brotli). This is over the 100 KB line in decision 5, so the owner decides again (12.3). |
+| SDK with Vite and Lit SSR | Works without patches. It needs one Vite setting (below). The build passes, SSR pages render, and the server bundle does not load the libraries. |
+| `!no-unauthenticated` on the public AppView | **The AppView returns everything.** `getProfile`, `getAuthorFeed` and `getPostThread` all answer 200 with full text. So Caribou must hide it (8.3). |
+| `litro dev` and a dotted route | Works. `/@alice.example.com`, `/@alice.example.com/<rkey>`, `/@did:plc:...` and handles that end like a file (`.ts`, `.md`, `.js`, `.css`, `.json`, `.png`) all render the profile page. |
+| Public AppView rate limit | **Not advertised.** No `ratelimit-*` or `retry-after` headers, on 200 or 403. 15 requests in a row, past the CDN cache, all answered 200. |
+| Option-D key binding | **Not run.** It needs a registered confidential client (below). |
+| Loopback sign-in | The loopback client resolves the handle and sends PAR with PKCE and DPoP. `bsky.social` accepts it and shows its approval page. The callback and the Following fetch need a person to approve; see the PR. |
+
+Versions measured: `@atproto/api` 0.30.3, `@atproto/oauth-client-browser`
+0.5.14, Vite 8.3.2.
+
+**The chunk, in parts.** Each library built alone, minified and gzipped:
+`@atproto/api` 157.2 KB, `@atproto/oauth-client-browser` 62.6 KB. They share
+about 15 KB. So `@atproto/api` is about three quarters of the chunk. The OAuth
+library alone is under the line. Hand-written XRPC calls (decision 4, other way)
+plus the OAuth library would come to about 63 KB plus our own code.
+
+**The Vite setting.** Without it, rolldown (Vite's bundler) puts its own runtime
+helpers inside the atproto chunk. `app-main` uses one of those helpers, so it
+imports the chunk statically, and every page downloads 182 KB. A
+`codeSplitting` group for `@atproto` moves the libraries into their own chunk
+and fixes this. Rolldown does not pass its runtime module to a group's `test`,
+so a group for the runtime itself does not work. A test must check that a
+Mastodon page does not request the Bluesky chunk.
+
+**`!no-unauthenticated`, how we found accounts.** We watched profile records
+on the public Jetstream firehose
+(`wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.actor.profile`)
+and kept those whose `labels.values` held `!no-unauthenticated`. Two accounts
+showed up within 15 profile updates. The AppView puts the label on
+`author.labels` of each post and on the profile's `labels`, so the server can
+see it without a token. We do not name the accounts.
+
+**Rate limit.** The public AppView sits behind a CDN (BunnyCDN). It caches
+for 30 seconds, so repeated SSR of the same page does not reach the AppView.
+The limit stays unknown. Keep the plan in 12.1: the 30 s cache, and a client
+render on 429.
+
+**What option D needs.** `bsky.social` advertises `private_key_jwt` with ES256
+and accepts client metadata documents. A loopback client is always public, so
+the test cannot run from local dev. It needs:
+
+1. A public HTTPS host that serves `client-metadata.json` with
+   `token_endpoint_auth_method: "private_key_jwt"`, an ES256 key in `jwks`,
+   and a redirect URI on that host.
+2. A test account on `bsky.social`, and a person to approve once.
+3. A script that makes two DPoP keys, signs a client assertion with `cnf.jkt`
+   set to key 1, and sends PAR, the code swap and a refresh with DPoP proofs
+   from key 2.
+4. The pass mark from 5.3: each of the three requests is rejected. A control
+   run with matching keys must succeed.
+5. Lifetimes: the token response does not state the session or refresh
+   lifetime. Checking the 2-year session means refreshing past 2 weeks. So
+   lifetimes can only be checked over time, not in one sitting.
+
 ### 12.3 Decisions (owner, 2026-11-04)
 
 The owner took the recommended answer to each open question.
@@ -1138,6 +1198,7 @@ The owner took the recommended answer to each open question.
 4. **Local and Public:** hidden for Bluesky. Feeds come in phase 5.
 5. **Client library:** `@atproto/api`, if its lazy chunk is under about 100 KB
    gzipped (measured in phase 0). If it is larger, the owner decides again.
+   **Open again:** phase 0 measured 181.6 KB (12.2).
 6. **Signed-out SSR:** yes, for Bluesky profiles and threads, honoring
    `!no-unauthenticated`.
 7. **Video:** day one ships without playback (thumbnail and link only).
