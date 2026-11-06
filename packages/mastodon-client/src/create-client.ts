@@ -25,7 +25,7 @@ export type TimelineOrder = ((a: string, b: string) => number) | null
 export interface CaribouClient {
   userKey: UserKey
   /** What this client's network can do. Fixed for the client's lifetime. */
-  capabilities: Capabilities
+  readonly capabilities: Readonly<Capabilities>
   /** The order the timeline store keeps `kind` in (see `TimelineOrder`). */
   timelineOrder(kind: TimelineKind): TimelineOrder
   fetchTimeline(kind: TimelineKind, params?: {
@@ -293,7 +293,7 @@ export interface EditStatusInput {
 }
 
 /** What Mastodon supports. `maxChars` and `maxImages` are its defaults; the server can say others. */
-export const MASTODON_CAPABILITIES: Capabilities = Object.freeze({
+export const MASTODON_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
   network: 'mastodon',
   localTimeline: true,
   publicTimeline: true,

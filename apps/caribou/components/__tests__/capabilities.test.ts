@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  MASTODON_CAPABILITIES,
   type Account, type Capabilities, type Instance, type Status,
 } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUserKey, addUserSession, deletedStatusIds, statusCache, unreadNotificationCount, users,
+  activeClient, activeUserKey, addUserSession, deletedStatusIds, emptyDraft, loadDraft, saveDraft, statusCache,
+  unreadNotificationCount, users,
   type UserSession,
 } from '@beatzball/caribou-state'
 import '../caribou-nav-rail.js'
@@ -13,20 +13,39 @@ import '../caribou-status-card.js'
 import type { CaribouNavRail } from '../caribou-nav-rail.js'
 import type { CaribouComposeDialog } from '../caribou-compose-dialog.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
+import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 
 // A control for a feature the active account's network lacks is hidden,
 // not shown broken (`CaribouClient.capabilities`).
 
+// The capabilities each test's client has, by user key. The client is a
+// stub: the real Mastodon client with these capabilities in place of its own.
+const capsFor = new Map<string, Partial<Capabilities>>()
+
+vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
+  const real = await importOriginal<typeof ClientModule>()
+  return {
+    ...real,
+    createCaribouClient: (...args: Parameters<typeof real.createCaribouClient>) => {
+      const client = real.createCaribouClient(...args)
+      const caps = capsFor.get(args[0])
+      return caps ? { ...client, capabilities: Object.freeze({ ...real.MASTODON_CAPABILITIES, ...caps }) } : client
+    },
+  }
+})
+
+const KEY = 'alice@example.social'
 const ME = { id: 'me', username: 'alice', acct: 'alice', displayName: 'Alice', avatar: '', avatarStatic: '' }
 
-function signIn(caps: Partial<Capabilities> = {}) {
+function signIn(caps: Partial<Capabilities> = {}, instance?: Instance) {
+  capsFor.set(KEY, caps)
   addUserSession({
-    userKey: 'alice@example.social', server: 'example.social', token: 'TOKEN',
+    userKey: KEY, server: 'example.social', token: 'TOKEN',
     vapidKey: '', account: ME as unknown as Account, createdAt: 1,
   } as unknown as UserSession)
   const client = activeClient.value!
-  client.capabilities = { ...MASTODON_CAPABILITIES, ...caps }
-  vi.spyOn(client, 'fetchInstance').mockRejectedValue(new Error('no instance'))
+  if (instance) vi.spyOn(client, 'fetchInstance').mockResolvedValue(instance)
+  else vi.spyOn(client, 'fetchInstance').mockRejectedValue(new Error('no instance'))
   return client
 }
 
@@ -46,6 +65,7 @@ async function mount<T extends HTMLElement & { updateComplete: Promise<boolean> 
 const $ = (el: Element, sel: string) => el.shadowRoot!.querySelector<HTMLElement>(sel)
 
 beforeEach(() => {
+  capsFor.clear()
   localStorage.clear()
   users.value = new Map()
   activeUserKey.value = null
@@ -90,19 +110,28 @@ describe('nav rail', () => {
     expect(hrefs(el)).toContain('/public')
   })
 
+  // The server does not know the account, so it renders every item. The
+  // first client render must match it; the items go after mount.
+  it('renders every item first, then hides what the network lacks', async () => {
+    signIn({ localTimeline: false, publicTimeline: false })
+    const el = document.createElement('caribou-nav-rail') as CaribouNavRail
+    let first: (string | null)[] | null = null
+    el.addController({ hostUpdated: () => { first ??= hrefs(el) } })
+    await mount(el)
+    expect(first).toEqual(['/home', '/local', '/notifications', '/search', '/public', '/bookmarks', '/lists', '/settings', '/@me'])
+    expect(hrefs(el)).not.toContain('/local')
+  })
+
   it('follows a switch to an account on another network', async () => {
     signIn()
     const el = await mount(document.createElement('caribou-nav-rail') as CaribouNavRail)
     expect(hrefs(el)).toContain('/local')
-    // A new client for a new session, as a switch makes.
+    // A switch makes a new client for the new session.
+    capsFor.set('bob@other.example', { localTimeline: false })
     addUserSession({
       userKey: 'bob@other.example', server: 'other.example', token: 'T2',
       vapidKey: '', account: null, createdAt: 2,
     } as unknown as UserSession)
-    activeClient.value!.capabilities = { ...MASTODON_CAPABILITIES, localTimeline: false }
-    // The edit above is not a signal change; another signal the rail's
-    // effect reads runs it again with the edited client.
-    unreadNotificationCount.value = 1
     await settle(el)
     expect(hrefs(el)).not.toContain('/local')
   })
@@ -133,14 +162,48 @@ describe('compose dialog', () => {
     expect($(el, '[data-action="add-media"]')).not.toBeNull()
   })
 
+  const image = (id: string) => ({ id, type: 'image' as const, url: 'u', previewUrl: null, description: '' })
+  const fileInput = (el: CaribouComposeDialog) => $(el, 'input[type="file"]') as HTMLInputElement
+
   it('takes the character and image limits from the capabilities when the server says nothing', async () => {
+    saveDraft(KEY as never, 'new', emptyDraft({ text: 'pic', media: [image('m1')] }))
     const el = await open({ maxChars: 300, maxImages: 2 })
-    expect($(el, '.count')!.textContent).toBe('300')
+    expect($(el, '.count')!.textContent).toBe('297')
+    expect(fileInput(el).disabled).toBe(false)
+    document.body.replaceChildren()
+    saveDraft(KEY as never, 'new', emptyDraft({ text: 'pic', media: [image('m1'), image('m2')] }))
+    const full = await mount(document.createElement('caribou-compose-dialog') as CaribouComposeDialog)
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: {} }))
+    await settle(full)
+    expect(fileInput(full).disabled).toBe(true)
   })
 
+  // Mastodon has both, so a stored draft with a content warning and a poll
+  // is sent whole, also on a retry after a failed post, and kept until then.
+  it('keeps a Mastodon draft with a content warning and a poll through a failed post', async () => {
+    const poll = { options: ['a', 'b'], expiresIn: 86400, multiple: false, hideTotals: false }
+    saveDraft(KEY as never, 'new', emptyDraft({ text: 'q', cw: true, spoilerText: 'spoiler', poll }))
+    const el = await open()
+    const create = vi.spyOn(activeClient.value!, 'createStatus')
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({ id: 'n1', account: ME } as unknown as Status)
+    const post = () => $(el, 'caribou-button.post')!.shadowRoot!.querySelector('button')!.click()
+    post()
+    await settle(el)
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(loadDraft(KEY as never, 'new')).toMatchObject({ cw: true, spoilerText: 'spoiler', poll })
+    post()
+    await settle(el)
+    expect(create).toHaveBeenCalledTimes(2)
+    for (const [input] of create.mock.calls) {
+      expect(input).toMatchObject({ status: 'q', spoilerText: 'spoiler', poll: { options: ['a', 'b'], expiresIn: 86400 } })
+    }
+    expect(loadDraft(KEY as never, 'new')).toBeNull()
+  })
+
+  // Last: a server's limits stay cached for the page's lifetime.
   it('still takes the server\'s own limits over the defaults', async () => {
-    signIn({ maxChars: 300 })
-    vi.mocked(activeClient.value!.fetchInstance).mockResolvedValue({
+    signIn({ maxChars: 300 }, {
       configuration: { statuses: { maxCharacters: 1000, maxMediaAttachments: 4 }, mediaAttachments: {}, polls: {} },
     } as unknown as Instance)
     const el = await mount(document.createElement('caribou-compose-dialog') as CaribouComposeDialog)

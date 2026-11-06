@@ -55,6 +55,42 @@ export interface TimelineStore {
 
 export type TimelineOp = 'load' | 'loadMore' | 'poll'
 
+/**
+ * Merges a page into a buffer kept in the order the feed sent. Pages can
+ * land out of order (late page data, two checks in flight), so arrival says
+ * nothing about which page is fresher. A post already buffered or shown
+ * keeps its place. Each run of new posts goes in beside its neighbors in
+ * the page: just above the next older post the store knows, else just
+ * below the next newer one. A run whose older neighbor is shown goes at the
+ * buffer's end, right above the list. A page with no known post is newer
+ * than everything and goes on top.
+ */
+function mergeFeedOrder(
+  buffered: readonly string[], page: readonly string[], shown: ReadonlySet<string>,
+): string[] {
+  const out = [...buffered]
+  const known = (id: string) => shown.has(id) || out.includes(id)
+  let i = 0
+  while (i < page.length) {
+    if (known(page[i]!)) { i += 1; continue }
+    const run: string[] = []
+    const seen = new Set<string>()
+    let j = i
+    for (; j < page.length && !known(page[j]!); j += 1) {
+      if (!seen.has(page[j]!)) { seen.add(page[j]!); run.push(page[j]!) }
+    }
+    const older = page[j]
+    const newer = i > 0 ? page[i - 1] : undefined
+    let at: number
+    if (older !== undefined) at = shown.has(older) ? out.length : out.indexOf(older)
+    else if (newer !== undefined) at = shown.has(newer) ? out.length : out.indexOf(newer) + 1
+    else at = 0
+    out.splice(at, 0, ...run)
+    i = j
+  }
+  return out
+}
+
 export interface CreateTimelineStoreOpts {
   clientSource: () => CaribouClient | null
   pollIntervalMs?: number
@@ -172,13 +208,16 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   // Posts go to the buffer only when the list does not show them yet; a
   // post can come back from the page data and from a check at once. A page
   // can also bring posts older than one a check already found, so the
-  // buffer is kept in the timeline's order. Newer pages come first, so a
-  // feed kept in sent order stays newest first.
+  // buffer is kept in the timeline's order: sorted, or merged by feed order.
   function buffer(ids: string[]) {
     const shown = new Set(statusIds.value)
-    const next = Array.from(new Set([...ids, ...newPostIds.value])).filter((id) => !shown.has(id))
     const compare = order()
-    newPostIds.value = compare ? next.sort(compare) : next
+    if (compare) {
+      const next = Array.from(new Set([...ids, ...newPostIds.value])).filter((id) => !shown.has(id))
+      newPostIds.value = next.sort(compare)
+      return
+    }
+    newPostIds.value = mergeFeedOrder(newPostIds.value, ids, shown)
   }
 
   // Each fetch reads the owner generation before its request and checks it

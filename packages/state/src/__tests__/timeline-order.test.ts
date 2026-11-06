@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  MASTODON_CAPABILITIES, mastodonTimelineOrder,
+  MASTODON_CAPABILITIES,
   type CaribouClient, type Status, type TimelineOrder, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
@@ -63,16 +63,69 @@ describe('timeline order from the client', () => {
   })
 
   it('sorts the buffer with the compare function the client gives', async () => {
-    const { c } = client(mastodonTimelineOrder('home'), [
-      [makeStatus('100')],
-      [makeStatus('101')],
-      [makeStatus('103'), makeStatus('102')],
+    // Oldest first by letter: neither Mastodon's order nor the order the
+    // pages came in, so the test fails if the comparator is not used.
+    const oldestFirst = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+    const { c } = client(oldestFirst, [
+      [makeStatus('top')],
+      [makeStatus('m'), makeStatus('z')],
+      [makeStatus('b'), makeStatus('y')],
     ])
     const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
     await store.load()
     await store.poll()
     await store.poll()
-    expect(store.newPosts.value.map((s) => s.id)).toEqual(['103', '102', '101'])
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['b', 'm', 'y', 'z'])
+  })
+
+  // A page can land after a newer one: page data offered late, or two
+  // checks in flight at once. Arrival order says nothing about which page
+  // is fresher, so a post already buffered or shown keeps its place, and
+  // only new posts go in, next to their neighbors in the incoming page.
+  it('a late, older, overlapping page does not move buffered posts', async () => {
+    const { c } = client(null, [[makeStatus('A')], [makeStatus('C'), makeStatus('B')]])
+    const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
+    await store.load()
+    await store.poll()
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['C', 'B'])
+    store.offer([makeStatus('B'), makeStatus('A')])
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['C', 'B'])
+  })
+
+  it('a late page puts its new posts next to their neighbors in that page', async () => {
+    const { c } = client(null, [[makeStatus('A')], [makeStatus('D'), makeStatus('B')]])
+    const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
+    await store.load()
+    await store.poll()
+    // C sits between D and B in the feed; it arrives in an older page.
+    store.offer([makeStatus('C'), makeStatus('B'), makeStatus('A')])
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['D', 'C', 'B'])
+    store.applyNewPosts()
+    expect(store.statusIds.value).toEqual(['D', 'C', 'B', 'A'])
+  })
+
+  it('two overlapping checks that finish in reverse order keep feed order', async () => {
+    const pages: Array<(p: Status[]) => void> = []
+    const fetchTimeline = vi.fn((_k: unknown, params?: { sinceId?: string }) =>
+      params?.sinceId
+        ? new Promise<TimelinePage>((r) => { pages.push(r) })
+        : Promise.resolve([makeStatus('A')] as TimelinePage))
+    const c = {
+      userKey: toUserKey('beatzball', 'fosstodon.org'),
+      capabilities: MASTODON_CAPABILITIES, timelineOrder: () => null, fetchTimeline,
+    } as unknown as CaribouClient
+    const store = createTimelineStore('home', { clientSource: () => c, pollIntervalMs: 0 })
+    await store.load()
+    const older = store.poll()
+    const newer = store.poll()
+    // The second check sees more of the feed and lands first.
+    pages[1]!([makeStatus('E'), makeStatus('D'), makeStatus('C'), makeStatus('B')])
+    await newer
+    // The first, stale check lands last with part of the same feed and a
+    // post the newer one no longer has (deleted, say) between C and B.
+    pages[0]!([makeStatus('C'), makeStatus('X'), makeStatus('B')])
+    await older
+    expect(store.newPosts.value.map((s) => s.id)).toEqual(['E', 'D', 'C', 'X', 'B'])
   })
 
   it('asks the client for the order of its own timeline kind', async () => {
