@@ -4,7 +4,7 @@ import type { CaribouClient, Relationship, Status, StatusBluesky } from '@beatzb
 import { cacheStatus, statusCache } from '../caches.js'
 import { _testOnlyResetMutations, toggleFavourite, toggleReblog } from '../mutations.js'
 import {
-  _testOnlyResetRelationships, relationshipCache, relationshipKey, setBlock, toggleFollow,
+  _testOnlyResetRelationships, relationshipCache, relationshipKey, setBlock, setMute, toggleFollow,
 } from '../relationships.js'
 
 // Seams 2 and 3 (spec 6.3): writes send a ref, the result's record refs are
@@ -14,6 +14,7 @@ import {
 const ME = 'did:plc:me@bsky' as UserKey
 const POST_URI = 'at://did:plc:bob/app.bsky.feed.post/3k1'
 const LIKE_URI = 'at://did:plc:me/app.bsky.feed.like/3l1'
+const OTHER_LIKE_URI = 'at://did:plc:me/app.bsky.feed.like/3l2'
 const REPOST_URI = 'at://did:plc:me/app.bsky.feed.repost/3r1'
 
 function bsky(over: Partial<StatusBluesky> = {}): StatusBluesky {
@@ -69,7 +70,7 @@ describe('status writes send refs and commit the record refs', () => {
     expect(get().bluesky?.likeUri).toBe(LIKE_URI)
   })
 
-  it('sends the like record to the unlike, and commits its removal', async () => {
+  it('sends the like record to the unlike, and commits the record the result carries', async () => {
     cacheStatus(post({ favourited: true, favouritesCount: 1, bluesky: bsky({ likeUri: LIKE_URI }) }))
     const d = deferred<Status>()
     const unfavourite = vi.fn(() => d.promise)
@@ -79,9 +80,11 @@ describe('status writes send refs and commit the record refs', () => {
     })])
     // The like is gone at once, and its record with it.
     expect(get().bluesky?.likeUri).toBeNull()
-    d.resolve(post({ favourited: false, favouritesCount: 0, bluesky: bsky() }))
+    // The result differs from the optimistic null, so only a commit puts
+    // this value in the cache.
+    d.resolve(post({ favourited: false, favouritesCount: 0, bluesky: bsky({ likeUri: OTHER_LIKE_URI }) }))
     await p
-    expect(get().bluesky?.likeUri).toBeNull()
+    expect(get().bluesky?.likeUri).toBe(OTHER_LIKE_URI)
   })
 
   it('restores the like record when the unlike fails', async () => {
@@ -147,6 +150,24 @@ describe('relationship writes send refs and commit the record refs', () => {
     d.resolve(rel({ blocking: true, bluesky: { followUri: null, blockUri: BLOCK_URI } }))
     await Promise.all([on, off])
     expect(unblock).toHaveBeenCalledWith({ id: BOB.id, bluesky: { followUri: null, blockUri: BLOCK_URI } })
+  })
+
+  it('a failure mid-queue keeps the block before it, and the unblock after it sends that block record', async () => {
+    relationshipCache.value = new Map([[key, rel()]])
+    const d = deferred<Relationship>()
+    const block = vi.fn(() => d.promise)
+    const mute = vi.fn(async () => { throw new Error('500') })
+    const unblock = vi.fn(async () => { throw new Error('500') })
+    const c = client({ block, mute, unblock })
+    const blocking = setBlock(BOB, true, { clientSource: () => c })
+    const muting = setMute(BOB, true, { clientSource: () => c })
+    const unblocking = setBlock(BOB, false, { clientSource: () => c })
+    d.resolve(rel({ blocking: true, bluesky: { followUri: null, blockUri: BLOCK_URI } }))
+    expect(await Promise.all([blocking, muting, unblocking])).toEqual([true, false, false])
+    expect(unblock).toHaveBeenCalledWith({ id: BOB.id, bluesky: { followUri: null, blockUri: BLOCK_URI } })
+    expect(relationshipCache.value.get(key)).toMatchObject({
+      blocking: true, muting: false, bluesky: { followUri: null, blockUri: BLOCK_URI },
+    })
   })
 
   it('restores the follow record when the unfollow fails', async () => {

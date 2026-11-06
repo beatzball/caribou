@@ -37,7 +37,9 @@ const defaultSource = () => activeClient.value
 // The server's answer is kept whole, record refs included (a Bluesky follow
 // or block record), so a rollback puts the old refs back too. A write builds
 // its ref when it starts, from the last answer: an unfollow queued behind a
-// follow names the record that follow made.
+// follow names the record that follow made. So while an undo waits, the
+// cache can show `following: false` with the `followUri` still set, on
+// purpose: the next write builds its ref from `queue.confirmed`.
 type RelationshipFlags = Partial<Pick<Relationship,
   'muting' | 'mutingNotifications' | 'blocking' | 'following' | 'requested'>>
 
