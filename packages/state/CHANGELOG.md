@@ -1,5 +1,20 @@
 # @beatzball/caribou-state
 
+## 0.4.5
+
+### Patch Changes
+
+- [#209](https://github.com/beatzball/caribou/pull/209) [`a789261`](https://github.com/beatzball/caribou/commit/a789261653998910ec7d5ae03cb328e4bf180f45) Thanks [@beatzball](https://github.com/beatzball)! - The timeline store takes its order from the client instead of always sorting by Mastodon id. A sorted timeline merges new posts as before. A timeline in feed order takes new posts only from checks: each check's answer replaces the new-posts buffer, and an answer that does not reach the list is a gap that replaces the list when applied. Bookmarks take the feed-order path, but a bookmarks check answers with an empty page, so they never fill the new-posts banner. One check runs at a time. No visible change for Mastodon.
+
+- [#204](https://github.com/beatzball/caribou/pull/204) [`c553d3f`](https://github.com/beatzball/caribou/commit/c553d3f98db40ee718aeb0ba3df9826a1b37c796) Thanks [@beatzball](https://github.com/beatzball)! - Stores name Caribou's own data types from the client package instead of masto's types. No behavior change.
+
+- [#210](https://github.com/beatzball/caribou/pull/210) [`8fbb318`](https://github.com/beatzball/caribou/commit/8fbb3186037511b86f95af495e4cfe1dcf829b7a) Thanks [@beatzball](https://github.com/beatzball)! - The timeline and profile stores keep the page's opaque cursor and page by it, never by the last status id. The profile store takes the server's first cursor, and both stores expose `nextCursor`. No behavior change.
+
+- [#208](https://github.com/beatzball/caribou/pull/208) [`ba34c91`](https://github.com/beatzball/caribou/commit/ba34c911318dcd81f6484b1fd181e2878c957400) Thanks [@beatzball](https://github.com/beatzball)! - Status actions and relationship writes send refs. A status action commits the record ref its result carries (Bluesky's like or repost record), and a failure puts the old one back. A queued relationship write builds its ref when it starts, so an unfollow after a follow names the follow's record. No behavior change for Mastodon.
+
+- Updated dependencies [[`a789261`](https://github.com/beatzball/caribou/commit/a789261653998910ec7d5ae03cb328e4bf180f45), [`c553d3f`](https://github.com/beatzball/caribou/commit/c553d3f98db40ee718aeb0ba3df9826a1b37c796), [`8fbb318`](https://github.com/beatzball/caribou/commit/8fbb3186037511b86f95af495e4cfe1dcf829b7a), [`ba34c91`](https://github.com/beatzball/caribou/commit/ba34c911318dcd81f6484b1fd181e2878c957400)]:
+  - @beatzball/caribou-mastodon-client@0.4.4
+
 ## 0.4.4
 
 ### Patch Changes
