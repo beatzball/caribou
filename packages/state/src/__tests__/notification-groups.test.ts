@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { GroupedNotificationsPage, NotificationGroupData, Account, Notification, Status } from '@beatzball/caribou-mastodon-client'
+import type {
+  GroupedNotificationsPage, NotificationGroupData, Account, Notification,
+  Status,
+} from '@beatzball/caribou-mastodon-client'
 import {
   appendOlderGroups, groupNotifications, groupsFromPage, prependNewerGroups, withoutSilencedAccounts,
   type NotificationGroup,

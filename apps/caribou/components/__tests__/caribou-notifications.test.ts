@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
-import { CaribouError, type GroupedNotificationsPage, type Account, type Notification, type Relationship, type Status } from '@beatzball/caribou-mastodon-client'
+import {
+  CaribouError, type GroupedNotificationsPage, type Account, type Notification,
+  type Relationship, type Status,
+} from '@beatzball/caribou-mastodon-client'
 import {
   activeUserKey, lastSeenNotificationId, resetGroupedSupport, relationshipCache, relationshipKey, statusCache, unreadNotificationCount, users,
 } from '@beatzball/caribou-state'

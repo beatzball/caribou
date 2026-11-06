@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type AccountPage, type CaribouClient, type Account, type Filter, type Relationship } from '@beatzball/caribou-mastodon-client'
+import {
+  CaribouError, type AccountPage, type CaribouClient, type Account,
+  type Filter, type Relationship,
+} from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, relationshipCache, users,
 } from '@beatzball/caribou-state'

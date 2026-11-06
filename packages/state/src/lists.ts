@@ -1,6 +1,8 @@
 import { signal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type CaribouClient, type ListInput, type Account, type List } from '@beatzball/caribou-mastodon-client'
+import {
+  CaribouError, type CaribouClient, type ListInput, type Account, type List,
+} from '@beatzball/caribou-mastodon-client'
 import { activeClient, activeUserKey } from './users.js'
 import { ownerGeneration } from './keep-alive.js'
 

@@ -6,7 +6,9 @@ import {
 import '../caribou-compose-dialog.js'
 import { startShortcuts } from '../_shortcuts.js'
 import type { CaribouComposeDialog } from '../caribou-compose-dialog.js'
-import { MediaProcessingTimeout, type Instance, type MediaAttachment, type Status } from '@beatzball/caribou-mastodon-client'
+import {
+  MediaProcessingTimeout, type Instance, type MediaAttachment, type Status,
+} from '@beatzball/caribou-mastodon-client'
 
 const ME = { id: 'a1', username: 'alice', acct: 'alice', displayName: 'Alice' }
 const KEY = 'alice@example.social'

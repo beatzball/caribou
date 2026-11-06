@@ -7,7 +7,10 @@ import {
   pollOptions,
   type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
-import { MediaProcessingTimeout, type CaribouClient, type AccountCredentials, type Status, type StatusSource, type StatusVisibility } from '@beatzball/caribou-mastodon-client'
+import {
+  MediaProcessingTimeout, type CaribouClient, type AccountCredentials,
+  type Status, type StatusSource, type StatusVisibility,
+} from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 import './caribou-icon-button.js'

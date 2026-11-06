@@ -1,5 +1,9 @@
 import { createRestAPIClient, type mastodon } from 'masto'
-import type { Account, AccountCredentials, Filter, Instance, List, ListRepliesPolicy, MediaAttachment, Notification, NotificationType, Poll, Relationship, Search, Status, StatusEdit, StatusSource, StatusVisibility, Tag } from './types.js'
+import type {
+  Account, AccountCredentials, Filter, Instance, List, ListRepliesPolicy,
+  MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
+  Status, StatusEdit, StatusSource, StatusVisibility, Tag,
+} from './types.js'
 import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError } from './caribou-error.js'
 import { normalizeError } from './normalize-error.js'

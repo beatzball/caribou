@@ -1,6 +1,9 @@
 import { computed, effect, signal, type ReadonlySignal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, CaribouError, GroupedNotificationsPage, Notification, NotificationType } from '@beatzball/caribou-mastodon-client'
+import type {
+  CaribouClient, CaribouError, GroupedNotificationsPage, Notification,
+  NotificationType,
+} from '@beatzball/caribou-mastodon-client'
 import { cacheAccount, cacheStatus, statusCache } from './caches.js'
 import {
   appendOlderGroups, compareNotificationIds, groupNotifications, groupsFromPage, prependNewerGroups,

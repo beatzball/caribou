@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as MastodonClient from '@beatzball/caribou-mastodon-client'
 import type * as CaribouState from '@beatzball/caribou-state'
-import { CaribouError, type Account, type Relationship, type Search, type Status, type Tag } from '@beatzball/caribou-mastodon-client'
+import {
+  CaribouError, type Account, type Relationship, type Search, type Status,
+  type Tag,
+} from '@beatzball/caribou-mastodon-client'
 import type { CaribouSearch as El } from '../caribou-search.js'
 import {
   activeClient, activeUserKey, addUserSession, relationshipCache, users, type UserSession,
