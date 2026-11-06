@@ -1,5 +1,17 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.4
+
+### Patch Changes
+
+- [#209](https://github.com/beatzball/caribou/pull/209) [`a789261`](https://github.com/beatzball/caribou/commit/a789261653998910ec7d5ae03cb328e4bf180f45) Thanks [@beatzball](https://github.com/beatzball)! - Add `capabilities` and `timelineOrder(kind)` to `CaribouClient`. The Mastodon client fills them with what Mastodon supports today and its usual order: newest first by id, bookmarks in the order the server sends. No behavior change.
+
+- [#204](https://github.com/beatzball/caribou/pull/204) [`c553d3f`](https://github.com/beatzball/caribou/commit/c553d3f98db40ee718aeb0ba3df9826a1b37c796) Thanks [@beatzball](https://github.com/beatzball)! - Define Caribou's own data types (`Status`, `Account`, `Relationship`, `List`, `Notification`, and the types they hold). They keep Mastodon's field names and are recursive. `Status` and `Relationship` get an optional `bluesky` field. Client method signatures name these types. A compile-time check maps masto's types into them, and a test stops other code from naming masto's types. No behavior change.
+
+- [#210](https://github.com/beatzball/caribou/pull/210) [`8fbb318`](https://github.com/beatzball/caribou/commit/8fbb3186037511b86f95af495e4cfe1dcf829b7a) Thanks [@beatzball](https://github.com/beatzball)! - Every page answers with an opaque `nextCursor`, null on the last page, and takes it back as `cursor`. `fetchAccountStatuses` now returns a page too. `nextMaxId` and the `maxId` input are renamed. Type-contract tests lock in the owned-type corrections. No behavior change.
+
+- [#208](https://github.com/beatzball/caribou/pull/208) [`ba34c91`](https://github.com/beatzball/caribou/commit/ba34c911318dcd81f6484b1fd181e2878c957400) Thanks [@beatzball](https://github.com/beatzball)! - Client write methods take a ref, not an id: `favourite`, `unfavourite`, `reblog`, `unreblog`, `bookmark` and `unbookmark` take a `StatusRef`; `follow`, `unfollow`, `mute`, `unmute`, `block` and `unblock` take an `AccountRef`. A ref has room for Bluesky's record URIs. `statusRef()` and `accountRef()` build them. Mastodon sends the same requests as before.
+
 ## 0.4.3
 
 ### Patch Changes
