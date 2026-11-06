@@ -546,3 +546,102 @@ describe('rule 5: network errors change no session', () => {
     }))
   })
 })
+
+// Rule 2: storage decides. Another tab shares `localStorage` but not this
+// tab's memory; writing `caribou.users` directly stands in for it.
+describe('another tab (rule 2: storage decides)', () => {
+  const other = toUserKey('alice', 'example.social')
+  const otherSession = (): UserSession => ({
+    userKey: other, server: 'example.social', token: 'TOKEN-A', generation: 'GA', vapidKey: '',
+    account: null, createdAt: 2,
+  })
+
+  function otherTabWrites(entries: [string, UserSession][]): void {
+    localStorage.setItem('caribou.users', JSON.stringify(entries))
+  }
+  function stored(): [string, UserSession][] {
+    return JSON.parse(localStorage.getItem('caribou.users')!) as [string, UserSession][]
+  }
+
+  it('a new sign-in elsewhere, then an old 401 here: stale, the new sign-in stays', () => {
+    addUserSession(sampleSession())
+    otherTabWrites([[key, { ...sampleSession(), token: 'TOKEN-2', generation: 'G2' }]])
+    expect(removeSession(key, 'G1')).toBe('stale')
+    expect(stored()).toEqual([[key, expect.objectContaining({ generation: 'G2', token: 'TOKEN-2' })]])
+    expect(users.value.get(key)?.generation).toBe('G1')
+    expect(activeUserKey.value).toBe(key)
+  })
+
+  it('a new sign-in elsewhere, then an old expiry here: stale, the new sign-in stays', () => {
+    addUserSession(sampleSession())
+    otherTabWrites([[key, { ...sampleSession(), token: 'TOKEN-2', generation: 'G2' }]])
+    expect(markExpired(key, 'G1')).toBe('stale')
+    expect(stored()).toEqual([[key, expect.objectContaining({ generation: 'G2', token: 'TOKEN-2' })]])
+    expect(stored()[0]![1].expired).toBeUndefined()
+  })
+
+  it('a sign-out elsewhere, then an old expiry or 401 here: no token comes back', () => {
+    addUserSession(sampleSession())
+    otherTabWrites([])
+    expect(markExpired(key, 'G1')).toBe('stale')
+    expect(stored()).toEqual([])
+    expect(removeSession(key, 'G1')).toBe('stale')
+    expect(stored()).toEqual([])
+  })
+
+  it('an account added elsewhere stays when a 401 here removes this one', () => {
+    addUserSession(sampleSession())
+    otherTabWrites([[key, sampleSession()], [other, otherSession()]])
+    expect(removeSession(key, 'G1')).toBe('active')
+    expect(stored()).toEqual([[other, expect.objectContaining({ generation: 'GA' })]])
+    expect([...users.value.keys()]).toEqual([other])
+    expect(activeUserKey.value).toBeNull()
+  })
+
+  it('an account added elsewhere stays when an expiry here marks this one', () => {
+    addUserSession(sampleSession())
+    otherTabWrites([[key, sampleSession()], [other, otherSession()]])
+    expect(markExpired(key, 'G1')).toBe('marked')
+    expect(stored().map(([k, s]) => [k, s.expired ?? false])).toEqual([[key, true], [other, false]])
+    expect([...users.value.keys()]).toEqual([key, other])
+    expect(activeUserKey.value).toBe(key)
+  })
+
+  it('a stored entry without a generation matches its token, as loadFromStorage reads it', () => {
+    addUserSession({ ...sampleSession(), generation: 'TOKEN-1' })
+    const { generation: _, ...legacy } = sampleSession()
+    otherTabWrites([[key, legacy as UserSession]])
+    expect(markExpired(key, 'TOKEN-1')).toBe('marked')
+  })
+
+  it('unreadable storage is stale', () => {
+    addUserSession(sampleSession())
+    localStorage.setItem('caribou.users', '{not-json')
+    expect(removeSession(key, 'G1')).toBe('stale')
+    expect(localStorage.getItem('caribou.users')).toBe('{not-json')
+  })
+})
+
+// Rule 4 with a real draft: a 401 keeps it for the same account only, and a
+// sign-out removes it.
+describe('a draft across a 401', async () => {
+  const { saveDraft, loadDraft, emptyDraft } = await import('../compose.js')
+  const other = toUserKey('alice', 'example.social')
+
+  it('a 401 keeps it, another account cannot load it, a new sign-in restores it, sign-out removes it', () => {
+    addUserSession(sampleSession())
+    saveDraft(key, 'new', emptyDraft({ text: 'half a post' }))
+    expect(removeSession(key, 'G1')).toBe('active')
+    expect(loadDraft(key, 'new')?.text).toBe('half a post')
+
+    addUserSession({ ...sampleSession(), userKey: other, generation: 'GA' })
+    expect(loadDraft(other, 'new')).toBeNull()
+
+    addUserSession({ ...sampleSession(), token: 'TOKEN-2', generation: 'G2' })
+    expect(loadDraft(key, 'new')?.text).toBe('half a post')
+
+    signOutActive()
+    expect(loadDraft(key, 'new')).toBeNull()
+    expect(localStorage.getItem(`caribou.drafts.${key}`)).toBeNull()
+  })
+})

@@ -1,4 +1,4 @@
-import { computed, signal } from '@preact/signals-core'
+import { batch, computed, signal } from '@preact/signals-core'
 import { isUserKey, type UserKey } from '@beatzball/caribou-auth'
 import {
   createCaribouClient,
@@ -193,38 +193,69 @@ export function signOutActive(): UserSession | null {
 }
 
 /**
- * A Mastodon 401 (rule 4). Removes the session `userKey` only while it has
- * `generation` (rule 2): a 401 from an earlier sign-in must not remove the one
- * that replaced it. Its prefs and drafts stay, for the next sign-in. Returns
- * whether the removed session was the active one, or `'stale'` when nothing
- * changed.
+ * A Mastodon 401 (rule 4). Removes the session `userKey` only while the
+ * stored entry, and this tab's, have `generation` (rule 2): a 401 from an
+ * earlier sign-in, here or in another tab, must not remove a later one. Its
+ * prefs and drafts stay, for the next sign-in. Returns whether the removed
+ * session was the active one here, or `'stale'` when nothing changed.
  */
 export function removeSession(userKey: UserKey, generation: string): 'active' | 'inactive' | 'stale' {
-  const current = users.value.get(userKey)
-  if (!current || current.generation !== generation) return 'stale'
-  const next = new Map(users.value)
-  next.delete(userKey)
-  users.value = next
+  const stored = matchingStored(userKey, generation)
+  if (!stored) return 'stale'
+  stored.delete(userKey)
   const wasActive = activeUserKey.value === userKey
-  if (wasActive) activeUserKey.value = null
-  saveToStorage()
+  writeStored(stored)
+  if (readStoredActive() === userKey) localStorage.setItem(K_ACTIVE, JSON.stringify(null))
+  batch(() => {
+    adoptStored(stored)
+    if (wasActive) activeUserKey.value = null
+  })
   return wasActive ? 'active' : 'inactive'
 }
 
 /**
- * Credentials gone (rule 3). Marks the session `userKey` expired only while it
- * has `generation` (rule 2). The session, its prefs, its drafts and the active
- * account all stay. Returns `'stale'` when nothing matched.
+ * Credentials gone (rule 3). Marks the session `userKey` expired only while
+ * the stored entry, and this tab's, have `generation` (rule 2). The session,
+ * its prefs, its drafts and the active account all stay. Returns `'stale'`
+ * when nothing matched.
  */
 export function markExpired(userKey: UserKey, generation: string): 'marked' | 'stale' {
-  const current = users.value.get(userKey)
-  if (!current || current.generation !== generation) return 'stale'
-  if (current.expired) return 'marked'
-  const next = new Map(users.value)
-  next.set(userKey, { ...current, expired: true })
-  users.value = next
-  saveToStorage()
+  const stored = matchingStored(userKey, generation)
+  if (!stored) return 'stale'
+  const entry = stored.get(userKey)!
+  if (!entry.expired) {
+    stored.set(userKey, { ...entry, expired: true })
+    writeStored(stored)
+  }
+  adoptStored(stored)
   return 'marked'
+}
+
+// Rule 2: the stored accounts, read fresh, when both the stored entry for
+// `userKey` and this tab's have `generation`; else null (stale). Another tab
+// may have signed in again, signed out or added an account since this tab
+// last read storage.
+function matchingStored(userKey: UserKey, generation: string): Map<UserKey, UserSession> | null {
+  if (users.value.get(userKey)?.generation !== generation) return null
+  const stored = readStoredUsers()
+  return stored?.get(userKey)?.generation === generation ? stored : null
+}
+
+function writeStored(map: Map<UserKey, UserSession>): void {
+  localStorage.setItem(K_USERS, JSON.stringify(Array.from(map.entries())))
+}
+
+// This tab's accounts become the stored ones. An entry that did not change
+// keeps its object, so the active client is not made again for nothing.
+function adoptStored(stored: Map<UserKey, UserSession>): void {
+  const before = users.value
+  const next = new Map<UserKey, UserSession>()
+  for (const [k, v] of stored) {
+    const had = before.get(k)
+    next.set(k, had && JSON.stringify(had) === JSON.stringify(v) ? had : v)
+  }
+  const same = next.size === before.size && [...next].every(([k, v]) => before.get(k) === v)
+  if (!same) users.value = next
 }
 
 const K_USERS = 'caribou.users'
@@ -235,23 +266,49 @@ export function saveToStorage(): void {
   localStorage.setItem(K_ACTIVE, JSON.stringify(activeUserKey.value))
 }
 
+/**
+ * The stored accounts, as `loadFromStorage` reads them. An empty map when
+ * nothing is stored; null when the stored value cannot be read.
+ */
+function readStoredUsers(): Map<UserKey, UserSession> | null {
+  try {
+    const raw = localStorage.getItem(K_USERS)
+    if (!raw) return new Map()
+    const entries = JSON.parse(raw) as unknown
+    if (!Array.isArray(entries)) return null
+    const map = new Map<UserKey, UserSession>()
+    // Older entries can lack `userKey` or `generation`; a failure event needs
+    // both to find its session again. Take the key from the map key and the
+    // generation from the token: a new sign-in has a new token.
+    for (const [k, v] of entries as [UserKey, UserSession][]) {
+      if (!isUserKey(k)) continue
+      const generation = typeof v.generation === 'string' && v.generation !== ''
+        ? v.generation
+        : typeof v.token === 'string' && v.token !== '' ? v.token : newGeneration()
+      map.set(k, { ...v, userKey: v.userKey ?? k, generation })
+    }
+    return map
+  } catch {
+    return null
+  }
+}
+
+function readStoredActive(): UserKey | null {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(K_ACTIVE) ?? 'null') as unknown
+    return typeof parsed === 'string' && isUserKey(parsed) ? parsed as UserKey : null
+  } catch {
+    return null
+  }
+}
+
 export function loadFromStorage(): void {
   try {
     const rawUsers = localStorage.getItem(K_USERS)
     const rawActive = localStorage.getItem(K_ACTIVE)
     if (rawUsers) {
-      const entries = JSON.parse(rawUsers) as [UserKey, UserSession][]
-      const map = new Map<UserKey, UserSession>()
-      // Older entries can lack `userKey` or `generation`; a failure event needs
-      // both to find its session again. Take the key from the map key and the
-      // generation from the token: a new sign-in has a new token.
-      for (const [k, v] of entries) {
-        if (!isUserKey(k)) continue
-        const generation = typeof v.generation === 'string' && v.generation !== ''
-          ? v.generation
-          : typeof v.token === 'string' && v.token !== '' ? v.token : newGeneration()
-        map.set(k, { ...v, userKey: v.userKey ?? k, generation })
-      }
+      const map = readStoredUsers()
+      if (!map) throw new Error('unreadable caribou.users')
       users.value = map
     }
     if (rawActive) {

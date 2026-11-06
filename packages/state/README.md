@@ -59,11 +59,19 @@ session's `generation`.
 
 1. **A sign-in always wins.** It writes a new entry under the key, with a new
    `generation` and no `expired`. It replaces whatever was there.
-2. **A failure names its sign-in.** Every failure event carries the
-   `userKey` and the `generation` of the client that saw it. It changes the
-   store only while the stored entry has that same `generation`. Otherwise it
-   is stale and changes nothing. No other check decides a race: a late
-   failure from an earlier sign-in never touches a later one.
+2. **A failure names its sign-in, and storage decides.** Every failure event
+   carries the `userKey` and the `generation` of the client that saw it.
+   Another tab can sign in, sign out or add an account at any time, and this
+   tab's memory does not see it. So a failure reads `caribou.users` from
+   `localStorage` first. It changes anything only when the **stored** entry
+   for that `userKey` has that `generation` (and this tab's entry has it
+   too). With no stored entry (signed out elsewhere) or another `generation`
+   (signed in again elsewhere), it is `'stale'`: nothing changes, in storage
+   or in memory. When it matches, it writes the stored map with only that one
+   entry changed; every other stored account stays as storage has it. This
+   tab's account list then becomes that map. A late failure from an earlier
+   sign-in never touches a later one, in this tab or another. (Other writes,
+   such as a switch or a sign-out, still write this tab's map.)
 3. **Credentials gone: `caribou:session-expired`** `{ userKey, generation }`.
    The entry gets `expired: true` and stays. Its prefs, its drafts, the
    active account and the page all stay. Only a sign-in (rule 1) clears

@@ -135,3 +135,44 @@ test('an expiry keeps the session, its drafts and the page; an old one is ignore
   await expect(page.getByText('bob was here')).toBeVisible()
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
+
+// Session rule 2: storage decides. Two pages in one context share
+// localStorage, not memory. Page B stands in for another tab that signs in
+// again, then signs out, the way the sign-in page and sign-out write storage.
+test('another tab: an old 401 or expiry never undoes its sign-in or sign-out', async ({ page, context }) => {
+  const other = await context.newPage()
+  await other.goto('/home')
+  await other.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+
+  // Page B signs bob in again: a new generation and token.
+  await other.evaluate((bob) => {
+    const users = JSON.parse(localStorage.getItem('caribou.users')!) as [string, Record<string, unknown>][]
+    localStorage.setItem('caribou.users', JSON.stringify(users.map(([k, s]) =>
+      [k, k === bob ? { ...s, token: 'TOKEN-B2', generation: 'GEN-B2' } : s])))
+  }, BOB)
+  const tokens = () => page.evaluate(() =>
+    (JSON.parse(localStorage.getItem('caribou.users') ?? '[]') as [string, { token: string }][])
+      .map(([k, s]) => [k, s.token]))
+
+  let navigated = false
+  page.on('framenavigated', (f) => { if (f === page.mainFrame()) navigated = true })
+  // Page A still has bob's old sign-in in memory. Its 401 and expiry are stale.
+  await unauthorized(page, BOB, 'GEN-B')
+  await unauthorized(page, BOB, 'GEN-B', 'caribou:session-expired')
+  expect(await stored(page)).toEqual({
+    keys: [ALICE, BOB], active: BOB, expired: [], aliceDrafts: '[]', bobDrafts: '[]',
+  })
+  expect(await tokens()).toEqual([[ALICE, 'TOKEN-A'], [BOB, 'TOKEN-B2']])
+
+  // Page B signs out of bob. An old expiry on page A must not bring bob's token back.
+  await other.evaluate((bob) => {
+    const users = JSON.parse(localStorage.getItem('caribou.users')!) as [string, unknown][]
+    localStorage.setItem('caribou.users', JSON.stringify(users.filter(([k]) => k !== bob)))
+    localStorage.removeItem(`caribou.drafts.${bob}`)
+  }, BOB)
+  await unauthorized(page, BOB, 'GEN-B', 'caribou:session-expired')
+  await unauthorized(page, BOB, 'GEN-B')
+  expect(await tokens()).toEqual([[ALICE, 'TOKEN-A']])
+  expect(navigated).toBe(false)
+  await other.close()
+})

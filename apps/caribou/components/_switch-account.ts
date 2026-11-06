@@ -85,7 +85,7 @@ async function setInstanceCookie(server: string, doFetch: typeof fetch): Promise
 // (a sign-out, a 401 for the account it landed as) starts a fresh landing,
 // which writes the cookie for the new state and navigates again; the second
 // navigation wins. A request with no state change since then (a repeat 401
-// already dropped by the token check, a repeat call) joins the finished one
+// already dropped by the generation check, a repeat call) joins the finished one
 // and does nothing.
 interface Landing {
   run: Promise<void> | null
