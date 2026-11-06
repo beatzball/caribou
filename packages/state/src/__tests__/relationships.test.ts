@@ -25,8 +25,8 @@ function fakeClient(over: Partial<CaribouClient> = {}): CaribouClient {
   return {
     userKey: ME,
     fetchRelationships: vi.fn(async (ids: readonly string[]) => ids.map((id) => rel(id))),
-    follow: vi.fn(async (id: string) => rel(id, { following: true })),
-    unfollow: vi.fn(async (id: string) => rel(id)),
+    follow: vi.fn(async ({ id }: { id: string }) => rel(id, { following: true })),
+    unfollow: vi.fn(async ({ id }: { id: string }) => rel(id)),
     ...over,
   } as unknown as CaribouClient
 }
@@ -139,7 +139,7 @@ describe('toggleFollow', () => {
     const p = toggleFollow(BOB, { clientSource: () => client })
     expect(cached('7')).toMatchObject({ following: false, followedBy: true })
     await p
-    expect(client.unfollow).toHaveBeenCalledWith('7')
+    expect(client.unfollow).toHaveBeenCalledWith({ id: '7' })
     expect(cached('7')?.following).toBe(false)
   })
 
@@ -166,7 +166,7 @@ describe('toggleFollow', () => {
   })
 
   it('shows a request for a locked account', async () => {
-    const client = fakeClient({ follow: vi.fn(async (id: string) => rel(id, { requested: true })) })
+    const client = fakeClient({ follow: vi.fn(async ({ id }: { id: string }) => rel(id, { requested: true })) })
     const p = toggleFollow(LOCKED, { clientSource: () => client })
     expect(cached('8')).toMatchObject({ following: false, requested: true })
     await p
@@ -179,7 +179,7 @@ describe('toggleFollow', () => {
     const p = toggleFollow(LOCKED, { clientSource: () => client })
     expect(cached('8')).toMatchObject({ following: false, requested: false })
     await p
-    expect(client.unfollow).toHaveBeenCalledWith('8')
+    expect(client.unfollow).toHaveBeenCalledWith({ id: '8' })
     expect(client.follow).not.toHaveBeenCalled()
   })
 

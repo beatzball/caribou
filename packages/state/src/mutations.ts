@@ -1,4 +1,4 @@
-import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import { statusRef, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
 import { statusCache } from './caches.js'
 import { inflight } from './inflight.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -6,6 +6,8 @@ import { activeClient } from './users.js'
 
 type Flag = 'favourited' | 'reblogged' | 'bookmarked'
 type Count = 'favouritesCount' | 'reblogsCount'
+// The record an action makes on Bluesky, which its undo deletes.
+type RecordRef = 'likeUri' | 'repostUri'
 type Method = 'favourite' | 'unfavourite' | 'reblog' | 'unreblog' | 'bookmark' | 'unbookmark'
 
 export type StatusAction = 'favourite' | 'reblog' | 'bookmark'
@@ -13,14 +15,15 @@ export type StatusAction = 'favourite' | 'reblog' | 'bookmark'
 interface ActionSpec {
   flag: Flag
   count: Count | null
+  record: RecordRef | null
   on: Method
   off: Method
 }
 
 const SPECS: Record<StatusAction, ActionSpec> = {
-  favourite: { flag: 'favourited', count: 'favouritesCount', on: 'favourite', off: 'unfavourite' },
-  reblog:    { flag: 'reblogged',  count: 'reblogsCount',    on: 'reblog',    off: 'unreblog' },
-  bookmark:  { flag: 'bookmarked', count: null,              on: 'bookmark',  off: 'unbookmark' },
+  favourite: { flag: 'favourited', count: 'favouritesCount', record: 'likeUri',   on: 'favourite', off: 'unfavourite' },
+  reblog:    { flag: 'reblogged',  count: 'reblogsCount',    record: 'repostUri', on: 'reblog',    off: 'unreblog' },
+  bookmark:  { flag: 'bookmarked', count: null,              record: null,        on: 'bookmark',  off: 'unbookmark' },
 }
 
 const VERBS: Record<Method, string> = {
@@ -65,13 +68,17 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   const client = (opts.clientSource ?? (() => activeClient.value))()
   if (!client) return
 
-  const { flag, count } = SPECS[action]
+  const { flag, count, record } = SPECS[action]
   const before = statusCache.value.get(id) ?? findWrapped(id) ?? target
   const wasOn = before[flag] === true
+  // The ref carries the record an undo deletes, as the cache knows it now.
+  const ref = statusRef(before)
+  const oldRecord = record ? before.bluesky?.[record] ?? null : null
   const method = wasOn ? SPECS[action].off : SPECS[action].on
   const delta = wasOn ? -1 : 1
 
-  // Every write below changes only this action's flag and count, and each
+  // Every write below changes only this action's flag, count and record
+  // ref (Bluesky), and each
   // starts from the post as the cache holds it at that moment. A poll, a
   // page load or another action may write the same post while the request
   // is out; their fields must survive this one finishing.
@@ -82,20 +89,24 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   // optimistic flag (`forgetReaderFields`).
   const generation = ownerGeneration()
   inflight.add(key)
-  writePost(id, (post) => shift(post, flag, !wasOn, count, delta))
+  // An undo removes the record at once, with the flag; a new record is
+  // known only once the server answers.
+  writePost(id, (post) => withRecord(shift(post, flag, !wasOn, count, delta), record, wasOn ? null : undefined))
   try {
-    const fresh = await client[method](id)
+    const fresh = await client[method](ref)
     if (generation !== ownerGeneration()) return
-    writePost(id, (post) => ({
+    writePost(id, (post) => withRecord({
       ...post,
       [flag]: fresh[flag],
       ...(count ? { [count]: fresh[count] } : {}),
-    }))
+    }, record, record ? fresh.bluesky?.[record] : undefined))
   } catch {
     if (generation !== ownerGeneration()) return
     // Undo only what this click did. If the flag no longer holds the
     // optimistic value, a newer write already set it from the server.
-    writePost(id, (post) => post[flag] === !wasOn ? shift(post, flag, wasOn, count, -delta) : post)
+    writePost(id, (post) => post[flag] === !wasOn
+      ? withRecord(shift(post, flag, wasOn, count, -delta), record, oldRecord)
+      : post)
     toast(`Could not ${VERBS[method]} this post. Try again.`)
   } finally {
     inflight.delete(key)
@@ -106,6 +117,13 @@ function shift(post: Status, flag: Flag, on: boolean, count: Count | null, delta
   const next = { ...post, [flag]: on }
   if (count) next[count] = Math.max(0, (post[count] ?? 0) + delta)
   return next
+}
+
+// Sets the action's record ref on a Bluesky post. `undefined` leaves it as
+// it is; a Mastodon post has no refs and is returned unchanged.
+function withRecord(post: Status, record: RecordRef | null, value: string | null | undefined): Status {
+  if (!record || value === undefined || !post.bluesky) return post
+  return { ...post, bluesky: { ...post.bluesky, [record]: value } }
 }
 
 function findWrapped(id: string): Status | undefined {

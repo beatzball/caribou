@@ -1,6 +1,8 @@
 import { signal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, Account, Relationship } from '@beatzball/caribou-mastodon-client'
+import {
+  accountRef, type AccountRef, type CaribouClient, type Account, type Relationship,
+} from '@beatzball/caribou-mastodon-client'
 import { activeClient, activeUserKey } from './users.js'
 import { ownerGeneration } from './keep-alive.js'
 
@@ -31,6 +33,11 @@ const defaultSource = () => activeClient.value
 // answered, so answers cannot arrive out of order. What the cache shows is
 // the last answer with every write still waiting laid on top. A write that
 // fails just leaves the queue, so the others keep their effect.
+//
+// The server's answer is kept whole, record refs included (a Bluesky follow
+// or block record), so a rollback puts the old refs back too. A write builds
+// its ref when it starts, from the last answer: an unfollow queued behind a
+// follow names the record that follow made.
 type RelationshipFlags = Partial<Pick<Relationship,
   'muting' | 'mutingNotifications' | 'blocking' | 'following' | 'requested'>>
 
@@ -67,7 +74,7 @@ function shown(q: Queue, id: string): Relationship | undefined {
 
 function enqueue(
   client: CaribouClient, accountId: string, patch: RelationshipFlags,
-  call: (client: CaribouClient) => Promise<Relationship>, failure: string,
+  call: (client: CaribouClient, ref: AccountRef) => Promise<Relationship>, failure: string,
 ): Promise<boolean> {
   const key = relationshipKey(client.userKey, accountId)
   let q = queues.get(key)
@@ -86,7 +93,7 @@ function enqueue(
   const start = async () => {
     let ok = true
     try {
-      queue.confirmed = await call(client)
+      queue.confirmed = await call(client, accountRef(accountId, queue.confirmed))
     } catch {
       ok = false
       // The reader moved to another account meanwhile: this account's
@@ -189,10 +196,10 @@ export async function toggleFollow(
   try {
     await (undo
       ? enqueue(client, account.id, { following: false, requested: false },
-          (c) => c.unfollow(account.id), `Couldn't unfollow @${account.acct}.`)
+          (c, ref) => c.unfollow(ref), `Couldn't unfollow @${account.acct}.`)
       // A locked account takes a request, not a follow.
       : enqueue(client, account.id, { following: !account.locked, requested: !!account.locked },
-          (c) => c.follow(account.id), `Couldn't follow @${account.acct}.`))
+          (c, ref) => c.follow(ref), `Couldn't follow @${account.acct}.`))
   } finally {
     following.delete(key)
   }
@@ -204,7 +211,7 @@ type AccountHandle = Pick<Account, 'id' | 'acct'>
 // the cache already shows (a second Mute) sends nothing.
 function writeFlags(
   account: AccountHandle, flag: 'muting' | 'blocking', on: boolean, patch: RelationshipFlags,
-  call: (client: CaribouClient) => Promise<Relationship>,
+  call: (client: CaribouClient, ref: AccountRef) => Promise<Relationship>,
   failure: string, opts: RelationshipOpts,
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
@@ -226,9 +233,9 @@ function writeFlags(
 export function setMute(account: AccountHandle, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
   return on
     ? writeFlags(account, 'muting', true, { muting: true, mutingNotifications: true },
-        (c) => c.mute(account.id), `Couldn't mute @${account.acct}.`, opts)
+        (c, ref) => c.mute(ref), `Couldn't mute @${account.acct}.`, opts)
     : writeFlags(account, 'muting', false, { muting: false, mutingNotifications: false },
-        (c) => c.unmute(account.id), `Couldn't unmute @${account.acct}.`, opts)
+        (c, ref) => c.unmute(ref), `Couldn't unmute @${account.acct}.`, opts)
 }
 
 /**
@@ -239,7 +246,7 @@ export function setMute(account: AccountHandle, on: boolean, opts: RelationshipO
 export function setBlock(account: AccountHandle, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
   return on
     ? writeFlags(account, 'blocking', true, { blocking: true, following: false, requested: false },
-        (c) => c.block(account.id), `Couldn't block @${account.acct}.`, opts)
+        (c, ref) => c.block(ref), `Couldn't block @${account.acct}.`, opts)
     : writeFlags(account, 'blocking', false, { blocking: false },
-        (c) => c.unblock(account.id), `Couldn't unblock @${account.acct}.`, opts)
+        (c, ref) => c.unblock(ref), `Couldn't unblock @${account.acct}.`, opts)
 }
