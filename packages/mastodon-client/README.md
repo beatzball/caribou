@@ -39,6 +39,18 @@ of Caribou never names masto's types.
 - `SessionSource` — interface for credential supply + 401 callback
 - `Status`, `Account`, `Relationship`, `List`, `Notification`, and the types
   they hold — Caribou's own data types (see below)
+- `CaribouClient.capabilities` — what the client's network can do
+  (`Capabilities`). The Mastodon client has `MASTODON_CAPABILITIES`. A
+  screen hides a control the network lacks; it does not show it broken.
+  Capabilities need the active account, which the server does not know:
+  read them in `firstUpdated()` or later, never in the first render.
+- `CaribouClient.timelineOrder(kind)` — how the timeline store orders
+  new posts: a compare function, or null to keep the order the feed sent.
+  Mastodon (`mastodonTimelineOrder`) sorts by id, newest first, except
+  bookmarks. With null, a check (`sinceId`: the top shown post) must
+  answer every entry above that post, paging from the top until it meets
+  it, and end with it. An answer that never meets it becomes the store's
+  `gap`, which replaces the list when applied.
 
 Subpath export: `@beatzball/caribou-mastodon-client/sanitize-opts` →
 `PURIFY_OPTS` (DOMPurify config shared by client and server sanitizers).

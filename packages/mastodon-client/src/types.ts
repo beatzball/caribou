@@ -555,3 +555,37 @@ export interface Instance {
     }
   }
 }
+
+// ----------------------------------------------------------- capabilities
+
+export type Network = 'mastodon' | 'bluesky'
+
+/**
+ * What a network can do. Each client has one (`CaribouClient.capabilities`).
+ * A control for a feature the network lacks is hidden, never shown broken.
+ * It describes the network, not one post: a post's own limits (Bluesky's
+ * `replyDisabled`) are on the post.
+ */
+export interface Capabilities {
+  network: Network
+  localTimeline: boolean
+  publicTimeline: boolean
+  /** Who may see a post: public, unlisted, followers only, direct. */
+  visibility: boolean
+  /** A content warning with its own text. */
+  contentWarningText: boolean
+  polls: boolean
+  /** Edit a post after it is sent, and see its history. */
+  edit: boolean
+  customEmoji: boolean
+  followTags: boolean
+  privateLists: boolean
+  serverFilters: boolean
+  /** Graphemes per post. Mastodon's server can say a different number. */
+  maxChars: number
+  /** UTF-8 bytes per post, or null for no byte limit. */
+  maxBytes: number | null
+  maxImages: number
+  /** Bytes per image, or null when the server does not say. */
+  maxImageBytes: number | null
+}

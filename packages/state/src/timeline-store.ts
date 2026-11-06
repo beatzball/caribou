@@ -1,7 +1,8 @@
 import { batch, computed, signal, type ReadonlySignal } from '@preact/signals-core'
-import type {
-  CaribouClient, CaribouError, TimelineKind, TimelinePage,
-  Status,
+import {
+  mastodonTimelineOrder,
+  type CaribouClient, type CaribouError, type TimelineKind, type TimelineOrder, type TimelinePage,
+  type Status,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, mergeStatus, statusCache } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -29,6 +30,14 @@ export interface TimelineStore {
   syncedAt:      ReadonlySignal<number>
   newPosts:      ReadonlySignal<Status[]>
   newPostsCount: ReadonlySignal<number>
+  /**
+   * In a timeline kept in feed order (`timelineOrder()` is null): true when
+   * the last check's answer did not reach the top post the list shows, so
+   * nothing joins it to the list. `newPosts` then holds that answer, and
+   * `applyNewPosts()` replaces the list with it instead of adding it on
+   * top. Never true for a sorted timeline. No view shows it yet.
+   */
+  gap:           ReadonlySignal<boolean>
 
   load(): Promise<void>
   loadMore(): Promise<void>
@@ -60,13 +69,6 @@ export interface TimelineStore {
 
 export type TimelineOp = 'load' | 'loadMore' | 'poll'
 
-// Mastodon ids are numbers too large for a double, sent as strings. A longer
-// id is a larger number; ids of one length compare as text.
-function newerFirst(a: string, b: string): number {
-  if (a.length !== b.length) return b.length - a.length
-  return a < b ? 1 : a > b ? -1 : 0
-}
-
 export interface CreateTimelineStoreOpts {
   clientSource: () => CaribouClient | null
   pollIntervalMs?: number
@@ -86,6 +88,9 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   // because `activeClient` is a new client whenever `users` changes. It is
   // never derived from a status id: on another network it is not one.
   const cursor     = signal<string | null>(null)
+  const gap        = signal(false)
+  // Where the page after the gap answer starts, for when it becomes the list.
+  let gapCursor: string | null = null
 
   const statuses = computed<Status[]>(() => {
     const cache = statusCache.value
@@ -124,10 +129,27 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     syncedAt.value = Date.now()
   }
 
+  // Counts each time the list starts again from a new top: a load, a page
+  // into an empty list, a gap applied. A fetch that started before then
+  // asked about a list that is gone, and is dropped.
+  let listEpoch = 0
+  // The check in flight, if any. A check while one is in flight joins it,
+  // so the last check to finish is always the last one started.
+  let inFlightPoll: Promise<void> | null = null
+
+  // The client says how this timeline is ordered: Mastodon sorts by post
+  // id, newest first, except bookmarks; a feed whose ids say nothing of age
+  // keeps the order it was sent in. With no client the page came from a
+  // Mastodon server's public API.
+  function order(): TimelineOrder {
+    const client = opts.clientSource()
+    return client ? client.timelineOrder(kind) : mastodonTimelineOrder(kind)
+  }
+
   async function runFetch(
     params: { sinceId?: string; cursor?: string; limit?: number } | undefined,
+    client = opts.clientSource(),
   ): Promise<TimelinePage> {
-    const client = opts.clientSource()
     if (!client) return Object.assign([], { nextCursor: null })
     return client.fetchTimeline(kind, params)
   }
@@ -168,15 +190,40 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   let retryingOlder = false
   const olderPagePending = () => failedOp.value === 'loadMore' || retryingOlder
 
-  // Posts go to the buffer only when the list does not show them yet; a
-  // post can come back from the page data and from a check at once. A page
-  // can also bring posts older than one a check already found, so the
-  // buffer is kept newest first. Bookmarks run in the order they were made,
-  // not by post id, and keep the order they came in.
-  function buffer(ids: string[]) {
+  // A sorted timeline. Posts go to the buffer only when the list does not
+  // show them yet; a post can come back from the page data and from a check
+  // at once. A page can also bring posts older than one a check already
+  // found, so the buffer is kept in the client's order.
+  function buffer(ids: string[], compare: NonNullable<TimelineOrder>) {
     const shown = new Set(statusIds.value)
     const next = Array.from(new Set([...ids, ...newPostIds.value])).filter((id) => !shown.has(id))
-    newPostIds.value = kind === 'bookmarks' ? next : next.sort(newerFirst)
+    newPostIds.value = next.sort(compare)
+  }
+
+  // A timeline in feed order. Ids say nothing of age, so two pages cannot
+  // be put in order by their posts, nor by when they arrived. So there is
+  // one source and one answer: each check asks from the top post the list
+  // shows, its answer is every new entry, and the newest answer replaces the
+  // last (spec 6.3, seam 7). An answer that reaches the top shown post puts
+  // the entries above it in the buffer. One that does not is a gap: nothing
+  // joins it to the list, so applying it replaces the list.
+  function answer(page: TimelinePage, ids: string[]) {
+    const top = statusIds.value[0]
+    const unique = Array.from(new Set(ids))
+    const at = top === undefined ? -1 : unique.indexOf(top)
+    if (at !== -1 || unique.length === 0) {
+      newPostIds.value = at === -1 ? [] : unique.slice(0, at)
+      clearGap()
+      return
+    }
+    newPostIds.value = unique
+    gapCursor = page.nextCursor ?? null
+    gap.value = true
+  }
+
+  function clearGap() {
+    gapCursor = null
+    gap.value = false
   }
 
   // Each fetch reads the owner generation before its request and checks it
@@ -189,6 +236,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       return
     }
     const generation = ownerGeneration()
+    listEpoch += 1
     loading.value = true
     succeed()
     try {
@@ -199,6 +247,11 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
         setPaging(page)
         syncedAt.value = Date.now()
         succeed()
+        // A gap answer belonged to the old list's top.
+        if (gap.value) {
+          newPostIds.value = []
+          clearGap()
+        }
       })
     } catch (err) {
       if (generation === ownerGeneration()) fail(err, 'load')
@@ -212,17 +265,20 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     const anchor = cursor.value
     if (!anchor) return
     const generation = ownerGeneration()
+    const epoch = listEpoch
     loading.value = true
     try {
       const page = await runFetch({ cursor: anchor })
-      if (generation !== ownerGeneration()) return
+      // The list started again from a new top while this page was out: it
+      // belongs to the old list.
+      if (generation !== ownerGeneration() || epoch !== listEpoch) return
       batch(() => {
         statusIds.value = [...statusIds.value, ...ingest(page)]
         setPaging(page)
         succeed()
       })
     } catch (err) {
-      if (generation !== ownerGeneration()) return
+      if (generation !== ownerGeneration() || epoch !== listEpoch) return
       // The cursor is unchanged: the next try asks from the same place.
       fail(err, 'loadMore')
     } finally {
@@ -230,23 +286,39 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     }
   }
 
-  async function poll() {
-    // The buffer holds posts newer than the list, so ask from its top.
-    const first = newPostIds.value[0] ?? statusIds.value[0]
+  function poll(): Promise<void> {
+    if (inFlightPoll) return inFlightPoll
+    const run = checkOnce().finally(() => { if (inFlightPoll === run) inFlightPoll = null })
+    inFlightPoll = run
+    return run
+  }
+
+  async function checkOnce() {
+    const compare = order()
+    // A sorted buffer holds posts newer than the list, so ask from its top.
+    // A feed asks from the top shown post: its answer is every new entry.
+    const first = compare ? newPostIds.value[0] ?? statusIds.value[0] : statusIds.value[0]
     if (!first) return
     const generation = ownerGeneration()
+    const epoch = listEpoch
+    const client = opts.clientSource()
+    // A check that lands for another account, or for a list that started
+    // again since it went out, is dropped; the next check asks again.
+    const stale = () => generation !== ownerGeneration() || epoch !== listEpoch
+      || opts.clientSource()?.userKey !== client?.userKey
     try {
-      const page = await runFetch({ sinceId: first })
-      if (generation !== ownerGeneration()) return
+      const page = await runFetch({ sinceId: first }, client)
+      if (stale()) return
       batch(() => {
         syncedAt.value = Date.now()
         // A failed check earlier left an error; this one worked.
         if (!olderPagePending()) succeed()
         const ids = ingest(page)
-        if (ids.length > 0) buffer(ids)
+        if (!compare) answer(page, ids)
+        else if (ids.length > 0) buffer(ids, compare)
       })
     } catch (err) {
-      if (generation === ownerGeneration() && !olderPagePending()) fail(err, 'poll')
+      if (!stale() && !olderPagePending()) fail(err, 'poll')
     }
   }
 
@@ -287,6 +359,8 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
       const ids = page.map((s) => mergeStatus(s).id)
       syncedAt.value = Date.now()
       if (statusIds.value.length === 0) {
+        listEpoch += 1
+        clearGap()
         statusIds.value = ids
         // The page names where the next one starts.
         hasMore.value = nextCursor != null
@@ -294,17 +368,34 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
         firstLoadConsumed = false
         return
       }
+      // A feed takes new entries from its checks only. Page data is fetched
+      // on its own, so nothing says whether it is newer or older than the
+      // last check's answer; the next check sees the same entries anyway.
+      const compare = order()
+      if (!compare) return
       // The page is newest first, so everything above the first post the
       // list already shows is new to the reader, including posts below one
       // a check has already put in the buffer.
       const shown = new Set(statusIds.value)
       const cut = ids.findIndex((id) => shown.has(id))
       const fresh = cut === -1 ? ids : ids.slice(0, cut)
-      if (fresh.length > 0) buffer(fresh)
+      if (fresh.length > 0) buffer(fresh, compare)
     })
   }
 
   function applyNewPosts() {
+    if (gap.value) {
+      // Nothing joins the answer to the list, so it becomes the list.
+      batch(() => {
+        listEpoch += 1
+        statusIds.value = newPostIds.value
+        newPostIds.value = []
+        cursor.value = gapCursor
+        hasMore.value = gapCursor !== null
+        clearGap()
+      })
+      return
+    }
     if (newPostIds.value.length === 0) return
     statusIds.value = Array.from(new Set([...newPostIds.value, ...statusIds.value]))
     newPostIds.value = []
@@ -312,12 +403,15 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
 
   // test-only — do not use in production code
   function _testOnlyPrepend(xs: Status[]): void {
-    buffer(ingest(xs))
+    const ids = ingest(xs)
+    const compare = order()
+    if (compare) buffer(ids, compare)
+    else newPostIds.value = Array.from(new Set([...ids, ...newPostIds.value]))
   }
 
   return {
     statusIds, statuses, loading, error, failedOp, hasMore, nextCursor: cursor, refreshing, syncedAt,
-    newPosts, newPostsCount,
+    newPosts, newPostsCount, gap,
     load, loadMore, poll, applyNewPosts, refresh, retry, offer, _testOnlyPrepend,
   }
 }

@@ -324,6 +324,9 @@ export class CaribouStatusCard extends LitElement {
   // The post is the active account's own, by account id (never by handle):
   // its menu offers Edit and Delete instead of Mute and Block.
   @state() private mine = false
+  // The active account's network can edit posts (`capabilities.edit`):
+  // Edit and the edit history are shown only then. False on the server.
+  @state() private canEdit = false
   // A newer edit of the post than `status` carries, from the cache.
   @state() private liveEdit: Status | null = null
   // The reader deleted this post (or the post this boosts).
@@ -438,6 +441,8 @@ export class CaribouStatusCard extends LitElement {
       this.ownPost = this.canAct && post !== null && post !== undefined && user !== null && isOwnAccount(user, post.account)
       const mine = this.canAct && !!post && !!user?.account && user.account.id === post.account.id
       if (mine !== this.mine) this.mine = mine
+      const canEdit = this.canAct && client !== null && client.capabilities.edit
+      if (canEdit !== this.canEdit) this.canEdit = canEdit
       const cache = statusCache.value
       const cached = post ? cache.get(post.id) ?? (s?.reblog ? cache.get(s.id)?.reblog : undefined) : undefined
       const next = cached ? actionFields(cached) : null
@@ -657,7 +662,7 @@ export class CaribouStatusCard extends LitElement {
   private onEdit = async () => {
     const post = this.shownPost()
     const owner = currentOwner()
-    if (!this.mine || !post || !owner) return
+    if (!this.mine || !this.canEdit || !post || !owner) return
     if (post.poll) {
       toast('error', POLL_EDIT_REFUSED)
       return
@@ -759,7 +764,7 @@ export class CaribouStatusCard extends LitElement {
   private onHistory = () => {
     const post = this.status?.reblog ?? this.status
     const owner = currentOwner()
-    if (!this.canAct || !post || !owner) return
+    if (!this.canEdit || !post || !owner) return
     void showStatusHistory(owner.client, post.id)
   }
 
@@ -849,7 +854,7 @@ export class CaribouStatusCard extends LitElement {
   // who can ask the server for the history gets a button after mount.
   private renderEdited(editedAt: string) {
     const when = this.relativeTime ? formatRelativeTime(editedAt) : absoluteLabel(editedAt)
-    return this.canAct
+    return this.canEdit
       ? html`<caribou-button class="edited" data-action="history" hint=${`Edited ${when}`}
           label=${`Edited ${when}. Show edit history`} @click=${this.onHistory}>edited</caribou-button>`
       : html`<span class="edited" title=${`Edited ${when}`}>edited</span>`
@@ -858,7 +863,7 @@ export class CaribouStatusCard extends LitElement {
   private renderOwnMenu() {
     // Native: items in a <caribou-menu> (README, "Shared controls").
     return html`<caribou-menu class="more" anchored icon="ellipsis" label="More actions for your post">
-      <button type="button" class="menu-item" data-action="edit" @click=${this.onEdit}>Edit</button>
+      ${this.canEdit ? html`<button type="button" class="menu-item" data-action="edit" @click=${this.onEdit}>Edit</button>` : nothing}
       <button type="button" class="menu-item danger" data-action="delete" @click=${this.onDelete}>Delete</button>
       <button type="button" class="menu-item danger" data-action="redraft" @click=${this.onRedraft}>Delete &amp; redraft</button>
     </caribou-menu>`

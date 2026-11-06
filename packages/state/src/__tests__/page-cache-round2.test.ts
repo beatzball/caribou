@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import { mastodonTimelineOrder, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { accountCache, cacheStatus, mergeStatus, statusCache } from '../caches.js'
 import { _testOnlyResetMutations, toggleFavourite } from '../mutations.js'
@@ -34,6 +34,7 @@ function clientWith(fetchTimeline: (kind: string, params?: { sinceId?: string; c
         ? Object.assign(page, { nextCursor: page[page.length - 1]?.id ?? null })
         : page
     },
+    timelineOrder: mastodonTimelineOrder,
   } as unknown as CaribouClient
 }
 

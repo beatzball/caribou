@@ -53,6 +53,9 @@ The server never runs `connectedCallback`, `firstUpdated` or `updated`, and has
 no `window`. So `render()` must not read `window`, `location`, `localStorage`,
 the clock, or any state the server did not have. Read those in `firstUpdated()`
 (or later) into a `@state()` field and let the element render again.
+The active client's `capabilities` follow the same rule: the server does not
+know the account, so read them in `firstUpdated()` or later
+(`packages/mastodon-client/README.md`, "Public API").
 
 **`app.ts` stays a two-line bootstrap.** LitElement looks for Lit's hydration
 support once, when its own module runs. Importing the support on the first

@@ -50,6 +50,16 @@ Sources of truth — see file for full signatures.
 
 - `createTimelineStore(kind, opts)` — `home` / `local` / `public`. Supports
   SSR seeding (`opts.initial`) and visibility-aware polling.
+  The new-posts buffer keeps the order the client gives
+  (`client.timelineOrder(kind)`); with no client, Mastodon's.
+  In feed order (`timelineOrder` null) only checks fill the buffer, never
+  page data. Each check asks from the top shown post, and its answer
+  replaces the buffer. An answer that does not reach that post is a gap:
+  `gap` turns true, and `applyNewPosts()` replaces the list with it. No
+  view shows `gap` yet. One check runs at a time.
+  Bookmarks take the feed-order path too; the real client answers a
+  bookmarks check with an empty page, so bookmarks never fill the
+  new-posts banner.
 - `createThreadStore(client, statusId, opts)` — focused status + ancestors
   + descendants, fetched in parallel via `Promise.allSettled`.
 - `createProfileStore(accountId, tab, opts)` — `posts` / `replies` / `media`
