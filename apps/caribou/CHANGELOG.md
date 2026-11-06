@@ -1,5 +1,21 @@
 # caribou-app
 
+## 0.10.6
+
+### Patch Changes
+
+- [#209](https://github.com/beatzball/caribou/pull/209) [`a789261`](https://github.com/beatzball/caribou/commit/a789261653998910ec7d5ae03cb328e4bf180f45) Thanks [@beatzball](https://github.com/beatzball)! - The nav rail, compose dialog and status card read the active client's capabilities. A control the network does not have is hidden. No behavior change for Mastodon.
+
+- [#204](https://github.com/beatzball/caribou/pull/204) [`c553d3f`](https://github.com/beatzball/caribou/commit/c553d3f98db40ee718aeb0ba3df9826a1b37c796) Thanks [@beatzball](https://github.com/beatzball)! - Components and tests name Caribou's own data types from the client package instead of masto's types. No behavior change.
+
+- [#210](https://github.com/beatzball/caribou/pull/210) [`8fbb318`](https://github.com/beatzball/caribou/commit/8fbb3186037511b86f95af495e4cfe1dcf829b7a) Thanks [@beatzball](https://github.com/beatzball)! - Page data carries `nextCursor`. Timelines and profiles hand the server's first cursor to the client, and the "Older posts" link carries the cursor. On `/bookmarks` that link now carries the bookmark id from the Link header, not a status id; this is more correct, and `/bookmarks` does not read `?max_id=`. No other behavior change.
+
+- [#208](https://github.com/beatzball/caribou/pull/208) [`ba34c91`](https://github.com/beatzball/caribou/commit/ba34c911318dcd81f6484b1fd181e2878c957400) Thanks [@beatzball](https://github.com/beatzball)! - Component tests check that client writes get a ref instead of a bare id. No behavior change.
+
+- Updated dependencies [[`a789261`](https://github.com/beatzball/caribou/commit/a789261653998910ec7d5ae03cb328e4bf180f45), [`a789261`](https://github.com/beatzball/caribou/commit/a789261653998910ec7d5ae03cb328e4bf180f45), [`c553d3f`](https://github.com/beatzball/caribou/commit/c553d3f98db40ee718aeb0ba3df9826a1b37c796), [`c553d3f`](https://github.com/beatzball/caribou/commit/c553d3f98db40ee718aeb0ba3df9826a1b37c796), [`8fbb318`](https://github.com/beatzball/caribou/commit/8fbb3186037511b86f95af495e4cfe1dcf829b7a), [`8fbb318`](https://github.com/beatzball/caribou/commit/8fbb3186037511b86f95af495e4cfe1dcf829b7a), [`ba34c91`](https://github.com/beatzball/caribou/commit/ba34c911318dcd81f6484b1fd181e2878c957400), [`ba34c91`](https://github.com/beatzball/caribou/commit/ba34c911318dcd81f6484b1fd181e2878c957400)]:
+  - @beatzball/caribou-mastodon-client@0.4.4
+  - @beatzball/caribou-state@0.4.5
+
 ## 0.10.5
 
 ### Patch Changes
