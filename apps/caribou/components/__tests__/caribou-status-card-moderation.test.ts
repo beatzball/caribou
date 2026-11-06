@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Relationship, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   _testOnlyResetRelationships, activeClient, activeUserKey, addUserSession, relationshipCache, relationshipKey,
@@ -9,8 +9,6 @@ import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 import type { CaribouConfirmDialog } from '../caribou-confirm-dialog.js'
 
-type Status = mastodon.v1.Status
-type Relationship = mastodon.v1.Relationship
 
 const ME = toUserKey('alice', 'example.social')
 const bob = { id: '42', acct: 'bob', username: 'bob', displayName: 'Bob', avatar: '', avatarStatic: '' }
@@ -33,7 +31,7 @@ function deferred<T>() {
 function signIn() {
   addUserSession({
     userKey: ME, server: 'example.social', token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
   })
 }
 
@@ -238,7 +236,7 @@ describe('<caribou-status-card> post menu', () => {
     expect(dialog()).not.toBeNull()
     addUserSession({
       userKey: toUserKey('carol', 'other.example'), server: 'other.example', token: 't2', vapidKey: '', createdAt: 0,
-      account: { id: 'c', acct: 'carol', username: 'carol' } as mastodon.v1.Account,
+      account: { id: 'c', acct: 'carol', username: 'carol' } as Account,
     })
     await settle(el)
     expect(dialog()).toBeNull()
@@ -297,7 +295,7 @@ describe('<caribou-status-card> post menu', () => {
     expect($(el, '#moderated-msg')).not.toBeNull()
     addUserSession({
       userKey: toUserKey('carol', 'other.example'), server: 'other.example', token: 't2', vapidKey: '', createdAt: 0,
-      account: { id: 'c', acct: 'carol', username: 'carol' } as mastodon.v1.Account,
+      account: { id: 'c', acct: 'carol', username: 'carol' } as Account,
     })
     await settle(el)
     expect($(el, '#moderated-msg')).toBeNull()
@@ -320,7 +318,7 @@ describe('<caribou-status-card> post menu', () => {
     d.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
     addUserSession({
       userKey: toUserKey('carol', 'other.example'), server: 'other.example', token: 't2', vapidKey: '', createdAt: 0,
-      account: { id: 'c', acct: 'carol', username: 'carol' } as mastodon.v1.Account,
+      account: { id: 'c', acct: 'carol', username: 'carol' } as Account,
     })
     const newBlock = vi.spyOn(activeClient.value!, 'block')
     await settle(el)

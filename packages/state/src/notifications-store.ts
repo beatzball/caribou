@@ -1,7 +1,9 @@
 import { computed, effect, signal, type ReadonlySignal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, CaribouError, GroupedNotificationsPage } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import type {
+  CaribouClient, CaribouError, GroupedNotificationsPage, Notification,
+  NotificationType,
+} from '@beatzball/caribou-mastodon-client'
 import { cacheAccount, cacheStatus, statusCache } from './caches.js'
 import {
   appendOlderGroups, compareNotificationIds, groupNotifications, groupsFromPage, prependNewerGroups,
@@ -15,7 +17,7 @@ import { activeClient, activeUser } from './users.js'
 export type NotificationFilter = 'all' | 'mentions'
 
 /** `types[]` for each filter; empty asks the server for every type. */
-export const NOTIFICATION_FILTER_TYPES: Record<NotificationFilter, readonly mastodon.v1.NotificationType[]> = {
+export const NOTIFICATION_FILTER_TYPES: Record<NotificationFilter, readonly NotificationType[]> = {
   all: [],
   mentions: ['mention'],
 }
@@ -28,7 +30,7 @@ export { compareNotificationIds }
 
 export interface NotificationsStore {
   /** The single notifications, from a server without grouping. Empty otherwise. */
-  notifications: ReadonlySignal<mastodon.v1.Notification[]>
+  notifications: ReadonlySignal<Notification[]>
   /** The rows to show, newest first, from the server's groups or grouped here. */
   groups:        ReadonlySignal<NotificationGroup[]>
   loading:       ReadonlySignal<boolean>
@@ -82,7 +84,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   // A list holds either single notifications (an older server) or the
   // server's groups. load() picks which, and the list keeps it until the
   // next load().
-  const items   = signal<mastodon.v1.Notification[]>([])
+  const items   = signal<Notification[]>([])
   const serverGroups = signal<NotificationGroup[] | null>(null)
   const loading = signal(false)
   const error   = signal<CaribouError | null>(null)
@@ -96,11 +98,11 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 
   // The post inside a notification comes from the status cache, so a
   // favourite or boost from its card shows here as in every timeline.
-  const notifications = computed<mastodon.v1.Notification[]>(() => {
+  const notifications = computed<Notification[]>(() => {
     const cache = statusCache.value
     return items.value.map((n) => {
       const cached = n.status ? cache.get(n.status.id) : undefined
-      return cached && cached !== n.status ? { ...n, status: cached } as mastodon.v1.Notification : n
+      return cached && cached !== n.status ? { ...n, status: cached } as Notification : n
     })
   })
 
@@ -114,7 +116,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     })
   })
 
-  function ingest(page: mastodon.v1.Notification[]): mastodon.v1.Notification[] {
+  function ingest(page: Notification[]): Notification[] {
     for (const n of page) {
       if (n.status) cacheStatus(n.status)
       if (n.account) cacheAccount(n.account)
@@ -130,7 +132,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 
   // A poll that returns after the list was extended must not put back what
   // is already there.
-  function withoutKnown(page: mastodon.v1.Notification[]): mastodon.v1.Notification[] {
+  function withoutKnown(page: Notification[]): Notification[] {
     const known = new Set(items.value.map((n) => n.id))
     return page.filter((n) => !known.has(n.id))
   }
@@ -147,7 +149,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 
   // The first page, from the grouped endpoint when the server has it.
   // Nothing is cached here: the caller checks the reply is still wanted.
-  async function fetchFirst(): Promise<{ grouped: GroupedNotificationsPage | null; page: mastodon.v1.Notification[] }> {
+  async function fetchFirst(): Promise<{ grouped: GroupedNotificationsPage | null; page: Notification[] }> {
     const client = opts.clientSource()
     if (!client) return { grouped: null, page: [] }
     if (usesGrouped(client)) {
@@ -279,7 +281,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
       }
       // Page forward from the newest one shown. `since_id` would give the
       // newest page and leave a hole under it when more than a page came in.
-      const fresh = new Map<string, mastodon.v1.Notification>()
+      const fresh = new Map<string, Notification>()
       let cursor = first
       for (let i = 0; i < NOTIFICATIONS_POLL_MAX_PAGES; i++) {
         const page = await fetchPage({ minId: cursor, limit: NOTIFICATIONS_PAGE })
@@ -383,7 +385,7 @@ export function startUnreadNotifications(opts: StartUnreadNotificationsOpts = {}
       const client = activeClient.peek()
       if (!client) return
       const since = lastSeenNotificationId(user.userKey)
-      let page: mastodon.v1.Notification[]
+      let page: Notification[]
       try {
         page = await client.fetchNotifications({ ...(since ? { sinceId: since } : {}), limit: UNREAD_CAP })
       } catch {

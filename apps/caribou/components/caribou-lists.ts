@@ -2,8 +2,7 @@ import { LitElement, html, css } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, List } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, deleteList, listsCache, loadLists,
 } from '@beatzball/caribou-state'
@@ -44,7 +43,7 @@ export class CaribouLists extends LitElement {
     }
   `]
 
-  @state() private lists: mastodon.v1.List[] | undefined = undefined
+  @state() private lists: List[] | undefined = undefined
   @state() private error: string | null = null
   @state() private retrying = false
 
@@ -108,7 +107,7 @@ export class CaribouLists extends LitElement {
     row?.querySelector<HTMLElement>('a.title')?.focus()
   }
 
-  private onDelete = async (list: mastodon.v1.List, e: Event) => {
+  private onDelete = async (list: List, e: Event) => {
     const button = e.currentTarget as HTMLElement
     const client = activeClient.peek()
     if (!client) return

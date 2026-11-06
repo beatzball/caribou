@@ -1,8 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { ListInput } from '@beatzball/caribou-mastodon-client'
+import type { ListInput, List, ListRepliesPolicy } from '@beatzball/caribou-mastodon-client'
 import { activeUserKey } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
@@ -13,12 +12,12 @@ export interface ListDialogOptions {
   /** The submit button's text: "Create" or "Save". */
   submitLabel: string
   /** The list as it is now, when editing one. */
-  initial?: Pick<mastodon.v1.List, 'title' | 'repliesPolicy'> & { exclusive?: boolean }
+  initial?: Pick<List, 'title' | 'repliesPolicy'> & { exclusive?: boolean }
   /** Whether to offer `exclusive` (the server sends it on its lists: 4.2+). */
   exclusive: boolean
 }
 
-const POLICIES: { value: mastodon.v1.ListRepliesPolicy; label: string }[] = [
+const POLICIES: { value: ListRepliesPolicy; label: string }[] = [
   { value: 'list', label: 'Members of the list' },
   { value: 'followed', label: 'Any account you follow' },
   { value: 'none', label: 'No one' },
@@ -60,7 +59,7 @@ export class CaribouListDialog extends LitElement {
   @property({ attribute: false }) initial: ListDialogOptions['initial'] | null = null
 
   @state() private titleText = ''
-  @state() private policy: mastodon.v1.ListRepliesPolicy = 'list'
+  @state() private policy: ListRepliesPolicy = 'list'
   @state() private exclusive = false
   @state() private empty = false
 

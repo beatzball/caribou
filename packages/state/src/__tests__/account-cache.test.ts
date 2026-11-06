@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account } from '@beatzball/caribou-mastodon-client'
 import { accountCache } from '../caches.js'
 import { createAccountCache } from '../account-cache.js'
 
@@ -8,7 +7,7 @@ const ALICE = {
   id: '42',
   acct: 'alice@example.social',
   username: 'alice',
-} as unknown as mastodon.v1.Account
+} as unknown as Account
 
 beforeEach(() => {
   accountCache.value = new Map()
@@ -32,9 +31,9 @@ describe('createAccountCache', () => {
   })
 
   it('dedupes concurrent in-flight requests for the same handle', async () => {
-    let resolve!: (a: mastodon.v1.Account) => void
+    let resolve!: (a: Account) => void
     const lookupAccount = vi.fn(
-      () => new Promise<mastodon.v1.Account>((r) => { resolve = r }),
+      () => new Promise<Account>((r) => { resolve = r }),
     )
     const client = { lookupAccount } as unknown as CaribouClient
     const cache = createAccountCache(() => client)
@@ -48,7 +47,7 @@ describe('createAccountCache', () => {
   })
 
   it('re-fetches when the handle is unknown but cached on a different key', async () => {
-    const BOB = { id: '43', acct: 'bob@example.social', username: 'bob' } as unknown as mastodon.v1.Account
+    const BOB = { id: '43', acct: 'bob@example.social', username: 'bob' } as unknown as Account
     const lookupAccount = vi.fn(async (h: string) =>
       h === 'alice@example.social' ? ALICE : BOB,
     )

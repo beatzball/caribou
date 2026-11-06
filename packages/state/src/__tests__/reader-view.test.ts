@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, postRecords, statusCache } from '../caches.js'
 import { loadReaderView, readerCheckFor, readerChecks } from '../reader-view.js'
 import { createThreadStore } from '../thread-store.js'
@@ -8,7 +7,6 @@ import { createProfileStore } from '../profile-store.js'
 import { createTimelineStore } from '../timeline-store.js'
 import { activeUserKey } from '../users.js'
 
-type Status = mastodon.v1.Status
 
 const HIDE = [{ filter: { id: 'f', title: 'Spoilers', context: ['public', 'thread', 'account'], filterAction: 'hide' } }]
 

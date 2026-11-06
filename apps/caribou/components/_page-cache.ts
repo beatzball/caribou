@@ -3,7 +3,7 @@ import type { LitroLocation } from '@beatzball/litro/runtime'
 import {
   activeUserKey, createKeepAlive, mergeStatus, ownerGeneration, statusCache,
 } from '@beatzball/caribou-state'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 
 /**
  * A cached page older than this still paints at once, but the reader is told
@@ -97,20 +97,20 @@ function worthKeeping(next: unknown, kept: Snapshot | undefined): boolean {
   return !(kindOf(kept?.data) === 'ok' && kindOf(next) !== 'ok')
 }
 
-function statusesIn(data: unknown): mastodon.v1.Status[] {
+function statusesIn(data: unknown): Status[] {
   if (!data || typeof data !== 'object') return []
   const d = data as Record<string, unknown>
-  const out: mastodon.v1.Status[] = []
+  const out: Status[] = []
   for (const key of ['statuses', 'ancestors', 'descendants']) {
     const list = d[key]
-    if (Array.isArray(list)) out.push(...(list as mastodon.v1.Status[]))
+    if (Array.isArray(list)) out.push(...(list as Status[]))
   }
-  const focused = d.focused as mastodon.v1.Status | undefined
+  const focused = d.focused as Status | undefined
   if (focused && typeof focused === 'object' && 'id' in focused) out.push(focused)
   return out
 }
 
-function current(status: mastodon.v1.Status): mastodon.v1.Status {
+function current(status: Status): Status {
   return statusCache.peek().get(status.id) ?? status
 }
 
@@ -122,9 +122,9 @@ function withCachedStatuses(data: unknown): unknown {
   const out: Record<string, unknown> = { ...(data as Record<string, unknown>) }
   for (const key of ['statuses', 'ancestors', 'descendants']) {
     const list = out[key]
-    if (Array.isArray(list)) out[key] = (list as mastodon.v1.Status[]).map(current)
+    if (Array.isArray(list)) out[key] = (list as Status[]).map(current)
   }
-  const focused = out.focused as mastodon.v1.Status | undefined
+  const focused = out.focused as Status | undefined
   if (focused && typeof focused === 'object' && 'id' in focused) out.focused = current(focused)
   return out
 }

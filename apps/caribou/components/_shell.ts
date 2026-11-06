@@ -1,5 +1,5 @@
 import { activeClient, activeUser, loadReaderView } from '@beatzball/caribou-state'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 
 // The page sets the instance its data came from on the shell, and a list or
 // card sits inside other elements' shadow roots, so walk up through each
@@ -21,7 +21,7 @@ export function findShell(from: Element): Element | null {
  * when the posts came from the reader's server (`instance`, a bare host):
  * status ids mean nothing on another one. Client only; no session, no-op.
  */
-export function loadReaderViewFrom(instance: string, statuses: readonly mastodon.v1.Status[]): void {
+export function loadReaderViewFrom(instance: string, statuses: readonly Status[]): void {
   const client = activeClient.peek()
   const server = activeUser.peek()?.server
   if (!client || !server || !instance || instance.toLowerCase() !== server.toLowerCase()) return

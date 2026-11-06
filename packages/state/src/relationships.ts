@@ -1,14 +1,13 @@
 import { signal } from '@preact/signals-core'
-import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account, Relationship } from '@beatzball/caribou-mastodon-client'
 import { activeClient, activeUserKey } from './users.js'
 import { ownerGeneration } from './keep-alive.js'
 
 // Keyed by the signed-in user as well as the account: account ids are minted
 // per instance, and what one user follows says nothing about another.
 // Treat it as read-only, like the caches — write through the functions here.
-export const relationshipCache = signal<Map<string, mastodon.v1.Relationship>>(new Map())
+export const relationshipCache = signal<Map<string, Relationship>>(new Map())
 
 export function relationshipKey(userKey: UserKey, accountId: string): string {
   return `${userKey} ${accountId}`
@@ -17,7 +16,7 @@ export function relationshipKey(userKey: UserKey, accountId: string): string {
 export function relationshipFor(
   accountId: string,
   userKey: UserKey | null = activeUserKey.value,
-): mastodon.v1.Relationship | undefined {
+): Relationship | undefined {
   return userKey ? relationshipCache.value.get(relationshipKey(userKey, accountId)) : undefined
 }
 
@@ -32,13 +31,13 @@ const defaultSource = () => activeClient.value
 // answered, so answers cannot arrive out of order. What the cache shows is
 // the last answer with every write still waiting laid on top. A write that
 // fails just leaves the queue, so the others keep their effect.
-type RelationshipFlags = Partial<Pick<mastodon.v1.Relationship,
+type RelationshipFlags = Partial<Pick<Relationship,
   'muting' | 'mutingNotifications' | 'blocking' | 'following' | 'requested'>>
 
 interface Queue {
   // The relationship as the server last said, or as cached when the first
   // write started.
-  confirmed: mastodon.v1.Relationship | undefined
+  confirmed: Relationship | undefined
   pending: RelationshipFlags[]
   tail: Promise<unknown>
 }
@@ -59,16 +58,16 @@ export function _testOnlyResetRelationships(): void {
   revisions.clear()
 }
 
-function shown(q: Queue, id: string): mastodon.v1.Relationship | undefined {
+function shown(q: Queue, id: string): Relationship | undefined {
   if (!q.confirmed && q.pending.length === 0) return undefined
-  let rel = q.confirmed ?? ({ id } as mastodon.v1.Relationship)
+  let rel = q.confirmed ?? ({ id } as Relationship)
   for (const patch of q.pending) rel = { ...rel, ...patch }
   return rel
 }
 
 function enqueue(
   client: CaribouClient, accountId: string, patch: RelationshipFlags,
-  call: (client: CaribouClient) => Promise<mastodon.v1.Relationship>, failure: string,
+  call: (client: CaribouClient) => Promise<Relationship>, failure: string,
 ): Promise<boolean> {
   const key = relationshipKey(client.userKey, accountId)
   let q = queues.get(key)
@@ -105,11 +104,11 @@ function enqueue(
 }
 
 /** The relationship the cache shows, waiting writes included. */
-function current(client: CaribouClient, accountId: string): mastodon.v1.Relationship | undefined {
+function current(client: CaribouClient, accountId: string): Relationship | undefined {
   return relationshipCache.value.get(relationshipKey(client.userKey, accountId))
 }
 
-function put(key: string, rel: mastodon.v1.Relationship | undefined): void {
+function put(key: string, rel: Relationship | undefined): void {
   const next = new Map(relationshipCache.value)
   if (rel) next.set(key, rel)
   else next.delete(key)
@@ -123,7 +122,7 @@ function toast(message: string): void {
 
 export async function loadRelationship(
   accountId: string, opts: RelationshipOpts = {},
-): Promise<mastodon.v1.Relationship | null> {
+): Promise<Relationship | null> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return null
   const key = relationshipKey(client.userKey, accountId)
@@ -153,7 +152,7 @@ export async function loadRelationships(
   for (let i = 0; i < accountIds.length; i += 40) chunks.push(accountIds.slice(i, i + 40))
   await Promise.all(chunks.map(async (ids) => {
     const before = new Map(ids.map((id) => [id, revisions.get(relationshipKey(client.userKey, id)) ?? 0]))
-    let rels: mastodon.v1.Relationship[]
+    let rels: Relationship[]
     try {
       rels = await client.fetchRelationships(ids)
     } catch {
@@ -178,7 +177,7 @@ export async function loadRelationships(
 // request is pending (unfollow also withdraws a request). The button changes
 // at once; a failed request puts the old state back and says so.
 export async function toggleFollow(
-  account: Pick<mastodon.v1.Account, 'id' | 'acct' | 'locked'>, opts: RelationshipOpts = {},
+  account: Pick<Account, 'id' | 'acct' | 'locked'>, opts: RelationshipOpts = {},
 ): Promise<void> {
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return
@@ -199,13 +198,13 @@ export async function toggleFollow(
   }
 }
 
-type Account = Pick<mastodon.v1.Account, 'id' | 'acct'>
+type AccountHandle = Pick<Account, 'id' | 'acct'>
 
 // Writes the change at once, then asks the server in turn. Asking for what
 // the cache already shows (a second Mute) sends nothing.
 function writeFlags(
-  account: Account, flag: 'muting' | 'blocking', on: boolean, patch: RelationshipFlags,
-  call: (client: CaribouClient) => Promise<mastodon.v1.Relationship>,
+  account: AccountHandle, flag: 'muting' | 'blocking', on: boolean, patch: RelationshipFlags,
+  call: (client: CaribouClient) => Promise<Relationship>,
   failure: string, opts: RelationshipOpts,
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()
@@ -224,7 +223,7 @@ function writeFlags(
  * on its way runs after it, so the account ends unmuted. Resolves true when
  * the server took the change.
  */
-export function setMute(account: Account, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
+export function setMute(account: AccountHandle, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
   return on
     ? writeFlags(account, 'muting', true, { muting: true, mutingNotifications: true },
         (c) => c.mute(account.id), `Couldn't mute @${account.acct}.`, opts)
@@ -237,7 +236,7 @@ export function setMute(account: Account, on: boolean, opts: RelationshipOpts = 
  * way, so the follow flags drop with it. Ask the reader first: a block
  * removes the reader as a follower too.
  */
-export function setBlock(account: Account, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
+export function setBlock(account: AccountHandle, on: boolean, opts: RelationshipOpts = {}): Promise<boolean> {
   return on
     ? writeFlags(account, 'blocking', true, { blocking: true, following: false, requested: false },
         (c) => c.block(account.id), `Couldn't block @${account.acct}.`, opts)

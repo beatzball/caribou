@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   _testOnlyResetMutations, activeClient, activeUserKey, addUserSession, cacheStatus,
@@ -10,8 +10,6 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 import { shares, timeLeft } from '../caribou-status-poll.js'
 import type { CaribouStatusPoll } from '../caribou-status-poll.js'
 
-type Status = mastodon.v1.Status
-type Poll = mastodon.v1.Poll
 
 const FUTURE = '2099-01-01T00:00:00.000Z'
 
@@ -19,7 +17,7 @@ function makePoll(over: Partial<Poll> = {}): Poll {
   return {
     id: 'p1', expiresAt: FUTURE, expired: false, multiple: false,
     votesCount: 4, votersCount: 4,
-    options: [{ title: 'Tea 🍵', votesCount: 3, emojis: [] }, { title: '<b>Coffee</b>', votesCount: 1, emojis: [] }],
+    options: [{ title: 'Tea 🍵', votesCount: 3 }, { title: '<b>Coffee</b>', votesCount: 1 }],
     emojis: [],
     ...over,
   } as Poll
@@ -38,7 +36,7 @@ function post(over: Record<string, unknown> = {}): Status {
 function signIn(server = 'example.social') {
   addUserSession({
     userKey: toUserKey('alice', server), server, token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
   })
 }
 
@@ -82,12 +80,12 @@ describe('shares and timeLeft', () => {
   it('divides by votes for one choice and by voters for several', () => {
     expect(shares(makePoll())).toEqual([75, 25])
     expect(shares(makePoll({ multiple: true, votesCount: 6, votersCount: 4, options: [
-      { title: 'a', votesCount: 4, emojis: [] }, { title: 'b', votesCount: 2, emojis: [] }] as Poll['options'] }))).toEqual([100, 50])
-    expect(shares(makePoll({ votesCount: 0, options: [{ title: 'a', votesCount: 0, emojis: [] }] as Poll['options'] }))).toEqual([0])
+      { title: 'a', votesCount: 4 }, { title: 'b', votesCount: 2 }] as Poll['options'] }))).toEqual([100, 50])
+    expect(shares(makePoll({ votesCount: 0, options: [{ title: 'a', votesCount: 0 }] as Poll['options'] }))).toEqual([0])
   })
 
   it('is null when the server hides the counts', () => {
-    expect(shares(makePoll({ options: [{ title: 'a', emojis: [] }] as Poll['options'] }))).toBeNull()
+    expect(shares(makePoll({ options: [{ title: 'a' }] as Poll['options'] }))).toBeNull()
   })
 
   it('says how long is left', () => {
@@ -129,7 +127,7 @@ describe('<caribou-status-poll> in a card', () => {
 
   it('hidden totals show no shares, with a note', async () => {
     const { poll } = await mount(post({ poll: makePoll({ options: [
-      { title: 'a', votesCount: null, emojis: [] }, { title: 'b', votesCount: null, emojis: [] }] as unknown as Poll['options'] }) }))
+      { title: 'a', votesCount: null }, { title: 'b', votesCount: null }] as unknown as Poll['options'] }) }))
     expect(root(poll).querySelectorAll('.share')).toHaveLength(0)
     expect(root(poll).textContent).toContain('Results show when the poll ends.')
   })

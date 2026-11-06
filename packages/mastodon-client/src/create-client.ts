@@ -1,4 +1,11 @@
 import { createRestAPIClient, type mastodon } from 'masto'
+import type {
+  Account, AccountCredentials, Filter, Instance, List, ListRepliesPolicy,
+  MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
+  Status, StatusEdit, StatusSource, StatusVisibility, Tag,
+} from './types.js'
+// Loads masto-mapping's correction to masto's declarations (see there).
+import type {} from './masto-mapping.js'
 import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError } from './caribou-error.js'
 import { normalizeError } from './normalize-error.js'
@@ -16,99 +23,99 @@ export interface CaribouClient {
     maxId?: string
     limit?: number
   }): Promise<TimelinePage>
-  fetchStatus(statusId: string): Promise<mastodon.v1.Status>
+  fetchStatus(statusId: string): Promise<Status>
   /**
    * Several statuses in one request (`GET /api/v1/statuses?id[]=`,
    * Mastodon 4.3+), at most 20 ids. Unknown or hidden ids are left out. An
    * older server answers 404.
    */
-  fetchStatuses(statusIds: readonly string[]): Promise<mastodon.v1.Status[]>
+  fetchStatuses(statusIds: readonly string[]): Promise<Status[]>
   fetchThread(statusId: string): Promise<{
-    ancestors: mastodon.v1.Status[]
-    descendants: mastodon.v1.Status[]
+    ancestors: Status[]
+    descendants: Status[]
   }>
-  lookupAccount(handle: string): Promise<mastodon.v1.Account>
-  verifyCredentials(): Promise<mastodon.v1.AccountCredentials>
+  lookupAccount(handle: string): Promise<Account>
+  verifyCredentials(): Promise<AccountCredentials>
   fetchAccountStatuses(
     accountId: string,
     params: { tab: 'posts' | 'replies' | 'media'; maxId?: string; limit?: number },
-  ): Promise<mastodon.v1.Status[]>
+  ): Promise<Status[]>
 
   // Status actions. Each resolves to the post itself as the server now has
   // it, never the reblog wrapper `reblog` creates.
-  favourite(statusId: string): Promise<mastodon.v1.Status>
-  unfavourite(statusId: string): Promise<mastodon.v1.Status>
-  reblog(statusId: string): Promise<mastodon.v1.Status>
-  unreblog(statusId: string): Promise<mastodon.v1.Status>
-  bookmark(statusId: string): Promise<mastodon.v1.Status>
-  unbookmark(statusId: string): Promise<mastodon.v1.Status>
+  favourite(statusId: string): Promise<Status>
+  unfavourite(statusId: string): Promise<Status>
+  reblog(statusId: string): Promise<Status>
+  unreblog(statusId: string): Promise<Status>
+  bookmark(statusId: string): Promise<Status>
+  unbookmark(statusId: string): Promise<Status>
 
   // Relationships (follow / unfollow).
-  fetchRelationships(accountIds: readonly string[]): Promise<mastodon.v1.Relationship[]>
-  follow(accountId: string): Promise<mastodon.v1.Relationship>
-  unfollow(accountId: string): Promise<mastodon.v1.Relationship>
+  fetchRelationships(accountIds: readonly string[]): Promise<Relationship[]>
+  follow(accountId: string): Promise<Relationship>
+  unfollow(accountId: string): Promise<Relationship>
   // Mute and block. Each resolves to the relationship as the server now has
   // it. A mute hides the account's notifications too.
-  mute(accountId: string): Promise<mastodon.v1.Relationship>
-  unmute(accountId: string): Promise<mastodon.v1.Relationship>
-  block(accountId: string): Promise<mastodon.v1.Relationship>
-  unblock(accountId: string): Promise<mastodon.v1.Relationship>
+  mute(accountId: string): Promise<Relationship>
+  unmute(accountId: string): Promise<Relationship>
+  block(accountId: string): Promise<Relationship>
+  unblock(accountId: string): Promise<Relationship>
   /** The muted accounts, newest first. Pages by the cursor in `nextMaxId`. */
   fetchMutes(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
   /** The blocked accounts, newest first. Pages by the cursor in `nextMaxId`. */
   fetchBlocks(params?: { maxId?: string; limit?: number }): Promise<AccountPage>
   /** The reader's filters (filters v2). An older server answers 404. */
-  fetchFilters(): Promise<mastodon.v2.Filter[]>
+  fetchFilters(): Promise<Filter[]>
 
   // Hashtags. `following` on the result says whether the reader follows it.
-  fetchTag(name: string): Promise<mastodon.v1.Tag>
-  followTag(name: string): Promise<mastodon.v1.Tag>
-  unfollowTag(name: string): Promise<mastodon.v1.Tag>
+  fetchTag(name: string): Promise<Tag>
+  followTag(name: string): Promise<Tag>
+  unfollowTag(name: string): Promise<Tag>
 
   // Lists. Only the reader's own lists; an account must be one the reader
   // follows before the server lets it join a list.
-  fetchLists(): Promise<mastodon.v1.List[]>
-  fetchList(id: string): Promise<mastodon.v1.List>
-  createList(input: ListInput): Promise<mastodon.v1.List>
-  updateList(id: string, input: ListInput): Promise<mastodon.v1.List>
+  fetchLists(): Promise<List[]>
+  fetchList(id: string): Promise<List>
+  createList(input: ListInput): Promise<List>
+  updateList(id: string, input: ListInput): Promise<List>
   deleteList(id: string): Promise<void>
   /** Every member of the list: the pages the Link header names, in order. */
-  fetchListAccounts(id: string): Promise<mastodon.v1.Account[]>
+  fetchListAccounts(id: string): Promise<Account[]>
   addListAccounts(id: string, accountIds: readonly string[]): Promise<void>
   removeListAccounts(id: string, accountIds: readonly string[]): Promise<void>
   /** The reader's lists that hold the account. */
-  fetchAccountLists(accountId: string): Promise<mastodon.v1.List[]>
+  fetchAccountLists(accountId: string): Promise<List[]>
 
   // Compose. Writes bypass dedup: two posts with the same text are two posts.
-  createStatus(params: CreateStatusInput, opts?: { idempotencyKey?: string }): Promise<mastodon.v1.Status>
+  createStatus(params: CreateStatusInput, opts?: { idempotencyKey?: string }): Promise<Status>
   /** Resolves once the server has processed the file and it has a `url`. */
-  uploadMedia(file: Blob, opts?: UploadMediaOpts): Promise<mastodon.v1.MediaAttachment>
-  fetchMedia(id: string): Promise<mastodon.v1.MediaAttachment>
+  uploadMedia(file: Blob, opts?: UploadMediaOpts): Promise<MediaAttachment>
+  fetchMedia(id: string): Promise<MediaAttachment>
   /** Polls an uploaded attachment until it has a `url`. */
-  waitForMedia(id: string, opts?: WaitForMediaOpts): Promise<mastodon.v1.MediaAttachment>
-  updateMedia(id: string, params: { description: string }): Promise<mastodon.v1.MediaAttachment>
-  fetchInstance(): Promise<mastodon.v2.Instance>
+  waitForMedia(id: string, opts?: WaitForMediaOpts): Promise<MediaAttachment>
+  updateMedia(id: string, params: { description: string }): Promise<MediaAttachment>
+  fetchInstance(): Promise<Instance>
 
   // Polls. A vote answers with the poll as the server now has it.
   /** Votes on a poll with the indexes of the chosen options. */
-  votePoll(pollId: string, choices: readonly number[]): Promise<mastodon.v1.Poll>
-  fetchPoll(pollId: string): Promise<mastodon.v1.Poll>
+  votePoll(pollId: string, choices: readonly number[]): Promise<Poll>
+  fetchPoll(pollId: string): Promise<Poll>
 
   // Edit and delete the reader's own posts.
   /** The post's plain text and content warning, as the author wrote them. */
-  fetchStatusSource(statusId: string): Promise<mastodon.v1.StatusSource>
+  fetchStatusSource(statusId: string): Promise<StatusSource>
   /**
    * Replaces the post's text. Mastodon drops every attachment an edit does
    * not list, so pass the ids of the media to keep. Visibility cannot change.
    */
-  editStatus(statusId: string, params: EditStatusInput): Promise<mastodon.v1.Status>
+  editStatus(statusId: string, params: EditStatusInput): Promise<Status>
   /** Deletes the post. The answer carries `text`, the source to redraft from. */
-  deleteStatus(statusId: string): Promise<mastodon.v1.Status>
+  deleteStatus(statusId: string): Promise<Status>
   /** Every version of the post, oldest first, the current one last. */
-  fetchStatusHistory(statusId: string): Promise<mastodon.v1.StatusEdit[]>
+  fetchStatusHistory(statusId: string): Promise<StatusEdit[]>
 
   // Notifications.
-  fetchNotifications(params?: FetchNotificationsParams): Promise<mastodon.v1.Notification[]>
+  fetchNotifications(params?: FetchNotificationsParams): Promise<Notification[]>
   /**
    * Grouped notifications (`GET /api/v2/notifications`, Mastodon 4.3+).
    * Favourites, boosts and follows are grouped; every other type comes as
@@ -116,14 +123,14 @@ export interface CaribouClient {
    */
   fetchGroupedNotifications(params?: FetchGroupedNotificationsParams): Promise<GroupedNotificationsPage>
   /** Every account in one notification group (`GET /api/v2/notifications/:group_key/accounts`). */
-  fetchNotificationGroupAccounts(groupKey: string): Promise<mastodon.v1.Account[]>
+  fetchNotificationGroupAccounts(groupKey: string): Promise<Account[]>
 
   /**
    * Accounts, hashtags and posts that match `q` (`GET /api/v2/search`).
    * `resolve` asks the server to fetch a remote URL or handle it does not
    * know yet.
    */
-  search(params: SearchInput): Promise<mastodon.v2.Search>
+  search(params: SearchInput): Promise<Search>
 }
 
 export type FetchGroupedNotificationsParams = Omit<FetchNotificationsParams, 'sinceId'>
@@ -153,8 +160,8 @@ export interface NotificationGroupData {
 }
 
 export interface GroupedNotificationsPage {
-  accounts: mastodon.v1.Account[]
-  statuses: mastodon.v1.Status[]
+  accounts: Account[]
+  statuses: Status[]
   notificationGroups: NotificationGroupData[]
 }
 
@@ -186,7 +193,7 @@ function searchQuery(params: SearchInput, signedIn: boolean) {
  */
 export async function searchPublic(
   server: string, params: Omit<SearchInput, 'resolve'>,
-): Promise<mastodon.v2.Search> {
+): Promise<Search> {
   try {
     const c = createRestAPIClient({ url: `https://${server}` })
     return await c.v2.search.list(searchQuery(params, false))
@@ -197,7 +204,7 @@ export async function searchPublic(
 
 export interface FetchNotificationsParams {
   /** Only these types. Omitted or empty means every type. */
-  types?: readonly mastodon.v1.NotificationType[]
+  types?: readonly NotificationType[]
   sinceId?: string
   /** The page just newer than this id; use it to page forward without a gap. */
   minId?: string
@@ -209,18 +216,18 @@ export interface FetchNotificationsParams {
 // not the cursor for the next page (bookmarks): the `max_id` to ask for next,
 // or null when there is no next page. Undefined means "page by the last
 // status id", as every other timeline does.
-export type TimelinePage = mastodon.v1.Status[] & { nextMaxId?: string | null }
+export type TimelinePage = Status[] & { nextMaxId?: string | null }
 
 // A page of accounts. Mastodon pages mutes and blocks by the mute or block
 // id, not the account id, and names the next page only in the Link header:
 // `nextMaxId` is that cursor, or null on the last page.
-export type AccountPage = mastodon.v1.Account[] & { nextMaxId: string | null }
+export type AccountPage = Account[] & { nextMaxId: string | null }
 
 // A list's fields. `exclusive` (Mastodon 4.2+) keeps the members' posts out
 // of the home timeline; an older server ignores it. Unset fields are not sent.
 export interface ListInput {
   title: string
-  repliesPolicy?: mastodon.v1.ListRepliesPolicy
+  repliesPolicy?: ListRepliesPolicy
   exclusive?: boolean
 }
 
@@ -249,7 +256,7 @@ export class MediaProcessingTimeout extends CaribouError {
 export interface CreateStatusInput {
   status: string
   spoilerText?: string
-  visibility: mastodon.v1.StatusVisibility
+  visibility: StatusVisibility
   inReplyToId?: string
   mediaIds?: string[]
   sensitive?: boolean
@@ -308,7 +315,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
   // Video can take minutes to transcode on a busy server.
   async function waitForMedia(
     id: string, { pollIntervalMs = 1000, timeoutMs = 5 * 60_000 }: WaitForMediaOpts = {},
-  ): Promise<mastodon.v1.MediaAttachment> {
+  ): Promise<MediaAttachment> {
     const deadline = Date.now() + timeoutMs
     for (;;) {
       if (Date.now() >= deadline) throw new MediaProcessingTimeout(id)
@@ -374,9 +381,9 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
       // masto 7 has no typed method for this endpoint; its client builds
       // the path from the property names, so `statuses.list` is
       // `GET /api/v1/statuses`, with the query and the answer camel-cased.
-      type List = { list(params: { id: string[] }): Promise<mastodon.v1.Status[]> }
+      type StatusList = { list(params: { id: string[] }): Promise<Status[]> }
       return run(`statuses:${statusIds.join(',')}`, async (c) =>
-        (c.v1.statuses as unknown as List).list({ id: [...statusIds] }))
+        (c.v1.statuses as unknown as StatusList).list({ id: [...statusIds] }))
     },
     async fetchThread(statusId) {
       return run(`thread:${statusId}`, (c) => c.v1.statuses.$select(statusId).context.fetch())
@@ -491,7 +498,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     },
     async fetchListAccounts(id) {
       return run(`list-accounts:${id}`, async (c) => {
-        const all: mastodon.v1.Account[] = []
+        const all: Account[] = []
         let maxId: string | null = null
         for (let i = 0; i < MAX_LIST_ACCOUNT_PAGES; i++) {
           const res = await c.v1.lists.$select(encodeURIComponent(id)).accounts.list.$raw({

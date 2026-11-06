@@ -1,11 +1,9 @@
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { statusCache } from './caches.js'
 import { inflight } from './inflight.js'
 import { ownerGeneration } from './keep-alive.js'
 import { activeClient } from './users.js'
 
-type Status = mastodon.v1.Status
 type Flag = 'favourited' | 'reblogged' | 'bookmarked'
 type Count = 'favouritesCount' | 'reblogsCount'
 type Method = 'favourite' | 'unfavourite' | 'reblog' | 'unreblog' | 'bookmark' | 'unbookmark'

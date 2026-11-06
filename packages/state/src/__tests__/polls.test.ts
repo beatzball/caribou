@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account, Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { cacheStatus, forgetReaderFields, mergeStatus, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
@@ -9,14 +8,12 @@ import { _testOnlyResetMutations } from '../mutations.js'
 import { inflight } from '../inflight.js'
 import { optimisticVote, refreshPoll, votePoll } from '../polls.js'
 
-type Status = mastodon.v1.Status
-type Poll = mastodon.v1.Poll
 
 function makePoll(over: Partial<Poll> = {}): Poll {
   return {
     id: 'p1', expiresAt: '2030-01-01T00:00:00.000Z', expired: false, multiple: false,
     votesCount: 4, votersCount: 4,
-    options: [{ title: 'yes', votesCount: 3, emojis: [] }, { title: 'no', votesCount: 1, emojis: [] }],
+    options: [{ title: 'yes', votesCount: 3 }, { title: 'no', votesCount: 1 }],
     emojis: [],
     ...over,
   } as Poll
@@ -31,7 +28,7 @@ function makeStatus(id: string, over: Partial<Status> = {}): Status {
 }
 
 function wrapper(id: string, post: Status): Status {
-  return makeStatus(id, { poll: null, reblog: post, account: { id: 'c1', username: 'carol', acct: 'carol' } as mastodon.v1.Account })
+  return makeStatus(id, { poll: null, reblog: post, account: { id: 'c1', username: 'carol', acct: 'carol' } as Account })
 }
 
 function deferred<T>() {
@@ -68,7 +65,7 @@ describe('optimisticVote', () => {
   })
 
   it('leaves hidden counts hidden', () => {
-    const hidden = makePoll({ options: [{ title: 'a', emojis: [] }, { title: 'b', emojis: [] }] as Poll['options'], votersCount: null })
+    const hidden = makePoll({ options: [{ title: 'a' }, { title: 'b' }] as Poll['options'], votersCount: null })
     const p = optimisticVote(hidden, [1])
     expect(p.options.map((o) => o.votesCount)).toEqual([undefined, undefined])
     expect(p.votersCount).toBeNull()
@@ -88,7 +85,7 @@ describe('votePoll', () => {
     expect(get('w1')?.reblog?.poll?.ownVotes).toEqual([1])
     expect(get('1')?.poll?.options[1]?.votesCount).toBe(2)
     d.resolve(makePoll({ voted: true, ownVotes: [1], votesCount: 9, options: [
-      { title: 'yes', votesCount: 6, emojis: [] }, { title: 'no', votesCount: 3, emojis: [] }] as Poll['options'] }))
+      { title: 'yes', votesCount: 6 }, { title: 'no', votesCount: 3 }] as Poll['options'] }))
     expect(await p).toBe(true)
     expect(get('1')?.poll?.votesCount).toBe(9)
     expect(get('w1')?.reblog?.poll?.votesCount).toBe(9)

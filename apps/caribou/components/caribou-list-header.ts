@@ -2,8 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account, List } from '@beatzball/caribou-mastodon-client'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
   activeClient, activeUser, activeUserKey, listKey, listMembersCache, listsCache, loadList, loadListMembers,
@@ -15,7 +14,7 @@ import { spaClick } from './_spa-link.js'
 import { editListFlow, toastRemoved } from './_list-flows.js'
 import './caribou-button.js'
 
-type Members = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; items: mastodon.v1.Account[] }
+type Members = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; items: Account[] }
 
 // The top of a list's timeline: its title, Edit and Members. Members opens
 // a panel below the header with each account and a Remove button. New
@@ -65,8 +64,8 @@ export class CaribouListHeader extends LitElement {
   /** The list's id. */
   @property() list = ''
 
-  @state() private known: mastodon.v1.List | undefined = undefined
-  @state() private lists: mastodon.v1.List[] | undefined = undefined
+  @state() private known: List | undefined = undefined
+  @state() private lists: List[] | undefined = undefined
   @state() private missing = false
   @state() private titleError: string | null = null
   @state() private open = false
@@ -159,7 +158,7 @@ export class CaribouListHeader extends LitElement {
     if (this.known) void editListFlow(this.known, this.lists)
   }
 
-  private onRemove = async (account: mastodon.v1.Account, e: Event) => {
+  private onRemove = async (account: Account, e: Event) => {
     const client = activeClient.peek()
     if (!client || client.userKey !== this.membersOwner || this.members.status !== 'ready') return
     const button = e.currentTarget as HTMLElement

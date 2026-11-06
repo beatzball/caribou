@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
-import type { mastodon } from 'masto'
+import type { MediaAttachment, Status } from '@beatzball/caribou-mastodon-client'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
@@ -21,7 +21,6 @@ import { mastodonLinkText } from './_shared-styles.js'
 // The same hooks as the server's sanitizer, so the two agree on every string.
 if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
 
-type Status = mastodon.v1.Status
 type Quote = NonNullable<Status['quote']>
 
 // The post a quote shows, when the server sent it. A shallow quote (the
@@ -68,7 +67,7 @@ const MEDIA_WORDS: Record<string, [string, string]> = {
 
 // "2 images, 1 video, a poll". The quote shows no media itself, so nothing
 // loads.
-function mediaSummary(media: readonly mastodon.v1.MediaAttachment[], poll: boolean): string {
+function mediaSummary(media: readonly MediaAttachment[], poll: boolean): string {
   const counts = new Map<string, number>()
   for (const m of media) {
     const kind = MEDIA_WORDS[m.type] ? m.type : 'other'

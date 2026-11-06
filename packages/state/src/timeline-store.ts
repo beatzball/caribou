@@ -1,14 +1,14 @@
 import { batch, computed, signal, type ReadonlySignal } from '@preact/signals-core'
 import type {
   CaribouClient, CaribouError, TimelineKind, TimelinePage,
+  Status,
 } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
 import { cacheStatus, mergeStatus, statusCache } from './caches.js'
 import { ownerGeneration } from './keep-alive.js'
 
 export interface TimelineStore {
   statusIds:     ReadonlySignal<string[]>
-  statuses:      ReadonlySignal<mastodon.v1.Status[]>
+  statuses:      ReadonlySignal<Status[]>
   loading:       ReadonlySignal<boolean>
   error:         ReadonlySignal<CaribouError | null>
   /**
@@ -21,7 +21,7 @@ export interface TimelineStore {
   refreshing:    ReadonlySignal<boolean>
   /** When the list was last fetched or seeded (epoch ms), or 0 before. */
   syncedAt:      ReadonlySignal<number>
-  newPosts:      ReadonlySignal<mastodon.v1.Status[]>
+  newPosts:      ReadonlySignal<Status[]>
   newPostsCount: ReadonlySignal<number>
 
   load(): Promise<void>
@@ -42,14 +42,14 @@ export interface TimelineStore {
    * page goes as the list itself, and `nextMaxId` says where the next page
    * starts (its last post when not given).
    */
-  offer(page: mastodon.v1.Status[], nextMaxId?: string | null): void
+  offer(page: Status[], nextMaxId?: string | null): void
   /** Runs the last fetch that failed again, if any. */
   retry(): Promise<void>
 
   /** Test-only — do not use in production code. Injects statuses directly
    *  into the new-posts buffer so integration tests can drive applyNewPosts
    *  without a real Mastodon client. */
-  _testOnlyPrepend(xs: mastodon.v1.Status[]): void
+  _testOnlyPrepend(xs: Status[]): void
 }
 
 export type TimelineOp = 'load' | 'loadMore' | 'poll'
@@ -64,7 +64,7 @@ function newerFirst(a: string, b: string): number {
 export interface CreateTimelineStoreOpts {
   clientSource: () => CaribouClient | null
   pollIntervalMs?: number
-  initial?: { statuses: mastodon.v1.Status[]; nextMaxId: string | null }
+  initial?: { statuses: Status[]; nextMaxId: string | null }
 }
 
 export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStoreOpts): TimelineStore {
@@ -77,21 +77,21 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   const refreshing = signal(false)
   const syncedAt   = signal(0)
 
-  const statuses = computed<mastodon.v1.Status[]>(() => {
+  const statuses = computed<Status[]>(() => {
     const cache = statusCache.value
     return statusIds.value
       .map((id) => cache.get(id))
-      .filter((s): s is mastodon.v1.Status => !!s)
+      .filter((s): s is Status => !!s)
   })
-  const newPosts = computed<mastodon.v1.Status[]>(() => {
+  const newPosts = computed<Status[]>(() => {
     const cache = statusCache.value
     return newPostIds.value
       .map((id) => cache.get(id))
-      .filter((s): s is mastodon.v1.Status => !!s)
+      .filter((s): s is Status => !!s)
   })
   const newPostsCount = computed(() => newPostIds.value.length)
 
-  function ingest(page: mastodon.v1.Status[]): string[] {
+  function ingest(page: Status[]): string[] {
     batch(() => { for (const s of page) cacheStatus(s) })
     return page.map((s) => s.id)
   }
@@ -279,7 +279,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
     }
   }
 
-  function offer(page: mastodon.v1.Status[], nextMaxId?: string | null) {
+  function offer(page: Status[], nextMaxId?: string | null) {
     batch(() => {
       // Page data comes from the public API, which knows nothing of the
       // reader: its copy of a post the reader favourited says it is not.
@@ -313,7 +313,7 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   }
 
   // test-only — do not use in production code
-  function _testOnlyPrepend(xs: mastodon.v1.Status[]): void {
+  function _testOnlyPrepend(xs: Status[]): void {
     buffer(ingest(xs))
   }
 

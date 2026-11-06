@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import { toUserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type CaribouClient, type Account, type List } from '@beatzball/caribou-mastodon-client'
 import {
   accountListsCache, activeClient, activeUserKey, addUserSession, listMembersCache, listsCache, users,
 } from '@beatzball/caribou-state'
@@ -13,15 +12,15 @@ import { listDialog, type CaribouListDialog } from '../caribou-list-dialog.js'
 import { openListPicker, type CaribouListPicker } from '../caribou-list-picker.js'
 import { listPath, parseListId } from '../_list-path.js'
 
-const list = (id: string, title: string, patch: Partial<mastodon.v1.List> = {}) =>
-  ({ id, title, repliesPolicy: 'list', exclusive: false, ...patch }) as mastodon.v1.List
+const list = (id: string, title: string, patch: Partial<List> = {}) =>
+  ({ id, title, repliesPolicy: 'list', exclusive: false, ...patch }) as List
 const account = (id: string, acct: string) =>
-  ({ id, acct, username: acct, displayName: acct.toUpperCase(), avatar: '', avatarStatic: '' }) as mastodon.v1.Account
+  ({ id, acct, username: acct, displayName: acct.toUpperCase(), avatar: '', avatarStatic: '' }) as Account
 
 function signIn(name = 'alice'): CaribouClient {
   addUserSession({
     userKey: toUserKey(name, 'example.social'), server: 'example.social', token: 't', vapidKey: '', createdAt: 0,
-    account: { id: 'me', acct: name, username: name } as mastodon.v1.Account,
+    account: { id: 'me', acct: name, username: name } as Account,
   })
   return activeClient.value!
 }
@@ -375,7 +374,7 @@ describe('review round 1', () => {
 
   it('New list on a first visit, before the lists arrive, shows and focuses it (codex 5)', async () => {
     const client = signIn()
-    let release!: (v: mastodon.v1.List[]) => void
+    let release!: (v: List[]) => void
     let reads = 0
     vi.spyOn(client, 'fetchLists').mockImplementation(() => (++reads === 1
       ? new Promise((r) => { release = r })

@@ -1,14 +1,12 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
-import type { mastodon } from 'masto'
+import type { Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { effect } from '@preact/signals-core'
 import { cachedPoll, refreshPoll, votePoll } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 import './caribou-icon.js'
 
-type Status = mastodon.v1.Status
-type Poll = mastodon.v1.Poll
 
 // The end as the server prints it, and the first client render repeats:
 // one fixed locale and UTC, so it reads the same whatever machine renders

@@ -1,11 +1,11 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
-import type { mastodon } from 'masto'
+import type { PreviewCard } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import { httpUrl } from './_http-url.js'
 
 // Mastodon 4 sends `image_description`; masto.js does not type it yet.
-export type LinkCard = mastodon.v1.PreviewCard & { imageDescription?: string | null }
+export type LinkCard = PreviewCard & { imageDescription?: string | null }
 
 export type LinkCardLayout = 'large' | 'compact' | 'text'
 

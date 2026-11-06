@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Account, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { cacheStatus, deletedStatusIds, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
 import { ownerGeneration } from '../keep-alive.js'
 import { deleteOwnStatus, editOwnStatus, isDeletedStatus } from '../own-posts.js'
 
-type Status = mastodon.v1.Status
 
 function makeStatus(id: string, over: Partial<Status> = {}): Status {
   return {
@@ -19,7 +17,7 @@ function makeStatus(id: string, over: Partial<Status> = {}): Status {
 }
 
 function wrapper(id: string, post: Status): Status {
-  return makeStatus(id, { reblog: post, account: { id: 'b', username: 'bob', acct: 'bob' } as mastodon.v1.Account })
+  return makeStatus(id, { reblog: post, account: { id: 'b', username: 'bob', acct: 'bob' } as Account })
 }
 
 function deferred<T>() {

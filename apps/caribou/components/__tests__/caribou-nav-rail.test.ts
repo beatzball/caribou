@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { activeUserKey, unreadNotificationCount, users, type UserSession } from '@beatzball/caribou-state'
 import { toUserKey, type UserKey } from '@beatzball/caribou-auth'
-import type { mastodon } from 'masto'
+import type { Account } from '@beatzball/caribou-mastodon-client'
 import { LitroRouter } from '@beatzball/litro-router'
 import '../caribou-nav-rail.js'
 import { CaribouNavRail } from '../caribou-nav-rail.js'
@@ -380,10 +380,10 @@ describe('caribou-nav-rail', () => {
     const ALICE = toUserKey('alice', 'one.example')
     const BOB = toUserKey('bob', 'two.example')
 
-    function session(userKey: UserKey, account: Partial<mastodon.v1.Account> | null = null): UserSession {
+    function session(userKey: UserKey, account: Partial<Account> | null = null): UserSession {
       return {
         userKey, server: userKey.slice(userKey.indexOf('@') + 1), token: `T-${userKey}`, vapidKey: '',
-        account: account as mastodon.v1.Account | null, createdAt: 0,
+        account: account as Account | null, createdAt: 0,
       }
     }
 

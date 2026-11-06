@@ -1,13 +1,11 @@
 import { batch } from '@preact/signals-core'
-import type { mastodon } from 'masto'
+import type { Poll, Status } from '@beatzball/caribou-mastodon-client'
 import { mergeStatus, statusCache } from './caches.js'
 import { inflight } from './inflight.js'
 import { ownerGeneration } from './keep-alive.js'
 import type { MutationOpts } from './mutations.js'
 import { activeClient } from './users.js'
 
-type Status = mastodon.v1.Status
-type Poll = mastodon.v1.Poll
 
 /**
  * The poll as it looks once the reader's vote is in: their choices marked,

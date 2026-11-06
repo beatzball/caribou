@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { mastodon } from 'masto'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { accountCache, cacheStatus, mergeStatus, statusCache } from '../caches.js'
 import { _testOnlyResetMutations, toggleFavourite } from '../mutations.js'
@@ -11,7 +10,6 @@ import { activeUserKey } from '../users.js'
 
 // Review findings on the second round of #104. Each case failed before its fix.
 
-type Status = mastodon.v1.Status
 const st = (id: string, over: Partial<Status> = {}) => ({
   id, content: `<p>${id}</p>`, favourited: false, favouritesCount: 0,
   reblogged: false, reblogsCount: 0, bookmarked: false,

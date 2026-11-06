@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import type * as MastodonClient from '@beatzball/caribou-mastodon-client'
 import type * as CaribouState from '@beatzball/caribou-state'
-import { CaribouError } from '@beatzball/caribou-mastodon-client'
+import {
+  CaribouError, type Account, type Relationship, type Search, type Status,
+  type Tag,
+} from '@beatzball/caribou-mastodon-client'
 import type { CaribouSearch as El } from '../caribou-search.js'
 import {
   activeClient, activeUserKey, addUserSession, relationshipCache, users, type UserSession,
@@ -27,16 +29,16 @@ await import('../caribou-search.js')
 const account = (id: string, acct: string) => ({
   id, acct, username: acct.split('@')[0], displayName: acct.toUpperCase(),
   avatar: '', avatarStatic: '', url: `https://other.social/@${acct}`, uri: `https://other.social/users/${acct}`,
-}) as unknown as mastodon.v1.Account
+}) as unknown as Account
 
 const status = (id: string) => ({
   id, uri: `https://other.social/users/bob/statuses/${id}`, url: `https://other.social/@bob/${id}`,
   content: `<p>post ${id}</p>`, account: account('2', 'bob@other.social'), createdAt: '2024-01-01T00:00:00.000Z',
   mediaAttachments: [], mentions: [], tags: [], emojis: [], spoilerText: '',
   reblogsCount: 0, favouritesCount: 0, repliesCount: 0,
-}) as unknown as mastodon.v1.Status
+}) as unknown as Status
 
-const result = (over: Partial<mastodon.v2.Search> = {}): mastodon.v2.Search =>
+const result = (over: Partial<Search> = {}): Search =>
   ({ accounts: [], statuses: [], hashtags: [], ...over })
 
 function signIn() {
@@ -143,7 +145,7 @@ describe('<caribou-search>', () => {
   it('shows a Follow button once the relationship is known', async () => {
     const client = signIn()
     vi.spyOn(client, 'search').mockResolvedValue(result({ accounts: [account('2', 'bob@other.social')] }))
-    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([{ id: '2', following: true } as mastodon.v1.Relationship])
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([{ id: '2', following: true } as Relationship])
     const el = await mount({ q: 'bob' })
     await flush()
     await el.updateComplete
@@ -154,7 +156,7 @@ describe('<caribou-search>', () => {
   it('never lets a slower earlier answer replace a newer one', async () => {
     const client = signIn()
     vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])
-    const slow = deferred<mastodon.v2.Search>()
+    const slow = deferred<Search>()
     const search = vi.spyOn(client, 'search')
       .mockImplementationOnce(() => slow.promise)
       .mockResolvedValueOnce(result({ accounts: [account('3', 'carol')] }))
@@ -174,7 +176,7 @@ describe('<caribou-search>', () => {
 
   it('drops an answer that arrives after the account changed', async () => {
     const client = signIn()
-    const slow = deferred<mastodon.v2.Search>()
+    const slow = deferred<Search>()
     vi.spyOn(client, 'search').mockImplementationOnce(() => slow.promise)
     const el = await mount({ q: 'bob' })
     activeUserKey.value = null
@@ -205,7 +207,7 @@ describe('<caribou-search>', () => {
   it('signed out, searches the public instance with no token', async () => {
     searchPublic.mockResolvedValue(result({
       accounts: [account('2', 'bob')],
-      hashtags: [{ name: 'cats', url: '', history: [{ day: '1', uses: '3', accounts: '2' }, { day: '2', uses: '2', accounts: '1' }] } as mastodon.v1.Tag],
+      hashtags: [{ name: 'cats', url: '', history: [{ day: '1', uses: '3', accounts: '2' }, { day: '2', uses: '2', accounts: '1' }] } as Tag],
     }))
     const el = await mount({ q: 'bob', instance: 'pub.social' })
     expect(searchPublic).toHaveBeenCalledWith('pub.social', { q: 'bob', limit: 20 })
@@ -288,7 +290,7 @@ describe('<caribou-search>', () => {
 
   // Review round 1 (Codex 5 / Fable F4): the generation alone drops an answer.
   it('drops an answer when the account generation moved, with no newer search', async () => {
-    const slow = deferred<mastodon.v2.Search>()
+    const slow = deferred<Search>()
     searchPublic.mockImplementationOnce(() => slow.promise)
     const el = await mount({ q: 'bob', instance: 'pub.social' })
     generation.offset = 1
@@ -344,7 +346,7 @@ describe('<caribou-search>', () => {
     history.replaceState(null, '', `/search?q=${encodeURIComponent(q)}`)
     const client = signIn()
     vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])
-    const broken = { ...status('5'), account: undefined } as unknown as mastodon.v1.Status
+    const broken = { ...status('5'), account: undefined } as unknown as Status
     vi.spyOn(client, 'search').mockResolvedValue(result({ statuses: [broken] }))
     const el = await mount({ q })
     expect(location.pathname).toBe('/search')
@@ -389,9 +391,9 @@ describe('<caribou-search>', () => {
   it('a null post and a post with no account leave the Posts tab usable', async () => {
     const client = signIn()
     vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])
-    const noAccount = { ...status('6'), account: undefined } as unknown as mastodon.v1.Status
+    const noAccount = { ...status('6'), account: undefined } as unknown as Status
     vi.spyOn(client, 'search').mockResolvedValue(result({
-      statuses: [null as unknown as mastodon.v1.Status, noAccount, status('7')],
+      statuses: [null as unknown as Status, noAccount, status('7')],
     }))
     const errors: unknown[] = []
     const onError = (e: ErrorEvent) => errors.push(e.error)
@@ -399,7 +401,7 @@ describe('<caribou-search>', () => {
     const el = await mount({ q: 'bob', type: 'statuses' })
     window.removeEventListener('error', onError)
     const cards = [...el.shadowRoot!.querySelectorAll('caribou-status-card')]
-    expect(cards.map((c) => (c as unknown as { status: mastodon.v1.Status }).status.id)).toEqual(['7'])
+    expect(cards.map((c) => (c as unknown as { status: Status }).status.id)).toEqual(['7'])
     expect(text(el)).not.toContain('Searching…')
     expect(errors).toEqual([])
   })

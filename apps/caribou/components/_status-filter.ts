@@ -1,4 +1,4 @@
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 
 // The places a server filter can apply to (Mastodon's filter `context`).
 export type FilterContext = 'home' | 'notifications' | 'public' | 'thread' | 'account'
@@ -18,7 +18,7 @@ export interface FilterVerdict {
 // `blur` (Mastodon 4.4) and any action this build does not know count as
 // warn: the reader asked for the post to be kept out of sight.
 export function filterVerdict(
-  status: mastodon.v1.Status, context: FilterContext | null,
+  status: Status, context: FilterContext | null,
 ): FilterVerdict | null {
   if (!context) return null
   const results = [...(status.filtered ?? []), ...(status.reblog?.filtered ?? [])]

@@ -3,8 +3,8 @@ import { isUserKey, type UserKey } from '@beatzball/caribou-auth'
 import {
   createCaribouClient,
   type CaribouClient, type SessionSource,
+  type Account,
 } from '@beatzball/caribou-mastodon-client'
-import type { mastodon } from 'masto'
 import { prefsKey } from './prefs.js'
 
 export interface UserSession {
@@ -15,7 +15,7 @@ export interface UserSession {
   // Null until it is loaded: sign-in stores the session before the app has
   // the account (`server/lib/signin-complete-page.ts`). `loadActiveAccount`
   // fills it in. Code that needs the user's handle uses `userName()`.
-  account: mastodon.v1.Account | null
+  account: Account | null
   createdAt: number
 }
 
@@ -70,7 +70,7 @@ export function userName(user: Pick<UserSession, 'userKey' | 'account'>): string
  * bare username.
  */
 export function isOwnAccount(
-  user: Pick<UserSession, 'userKey' | 'account'>, account: Pick<mastodon.v1.Account, 'id' | 'acct'>,
+  user: Pick<UserSession, 'userKey' | 'account'>, account: Pick<Account, 'id' | 'acct'>,
 ): boolean {
   return user.account ? user.account.id === account.id : account.acct === userName(user)
 }
@@ -83,7 +83,7 @@ export async function loadActiveAccount(): Promise<void> {
   const user = activeUser.value
   const client = activeClient.value
   if (!user || !client || user.account) return
-  let account: mastodon.v1.Account
+  let account: Account
   try {
     account = await client.verifyCredentials()
   } catch {

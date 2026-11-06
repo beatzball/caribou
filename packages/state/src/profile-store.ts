@@ -1,13 +1,12 @@
 import { computed, signal, type ReadonlySignal } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { CaribouClient, CaribouError } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, CaribouError, Status } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, mergeStatus, statusCache } from './caches.js'
 
 export type ProfileTab = 'posts' | 'replies' | 'media'
 
 export interface ProfileStore {
   statusIds: ReadonlySignal<string[]>
-  statuses:  ReadonlySignal<mastodon.v1.Status[]>
+  statuses:  ReadonlySignal<Status[]>
   loading:   ReadonlySignal<boolean>
   error:     ReadonlySignal<CaribouError | null>
   hasMore:   ReadonlySignal<boolean>
@@ -17,7 +16,7 @@ export interface ProfileStore {
 
 export interface CreateProfileStoreOpts {
   clientSource: () => CaribouClient | null
-  initial?: { statuses: mastodon.v1.Status[]; nextMaxId: string | null }
+  initial?: { statuses: Status[]; nextMaxId: string | null }
 }
 
 export function createProfileStore(
@@ -30,11 +29,11 @@ export function createProfileStore(
   const error     = signal<CaribouError | null>(null)
   const hasMore   = signal(true)
 
-  const statuses = computed<mastodon.v1.Status[]>(() => {
+  const statuses = computed<Status[]>(() => {
     const cache = statusCache.value
     return statusIds.value
       .map((id) => cache.get(id))
-      .filter((s): s is mastodon.v1.Status => !!s)
+      .filter((s): s is Status => !!s)
   })
 
   let firstLoadConsumed = false
@@ -47,7 +46,7 @@ export function createProfileStore(
     firstLoadConsumed = true
   }
 
-  async function runFetch(maxId?: string): Promise<mastodon.v1.Status[]> {
+  async function runFetch(maxId?: string): Promise<Status[]> {
     const client = opts.clientSource()
     if (!client) return []
     return client.fetchAccountStatuses(accountId, { tab, maxId })

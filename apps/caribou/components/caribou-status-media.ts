@@ -1,12 +1,12 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, query, state } from 'lit/decorators.js'
 import { ifDefined } from 'lit/directives/if-defined.js'
-import type { mastodon } from 'masto'
+import type { MediaAttachment } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import { httpUrl } from './_http-url.js'
 import './caribou-button.js'
 
-type Media = mastodon.v1.MediaAttachment
+type Media = MediaAttachment
 
 // Mastodon shows at most four attachments on a post.
 const MAX_ITEMS = 4

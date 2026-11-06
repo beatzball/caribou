@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, createKeepAlive, createTimelineStore, normalizeTagName, startPolling, type TimelineStore,
 } from '@beatzball/caribou-state'
@@ -20,7 +20,7 @@ import { settleSplash } from './_splash.js'
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag' | 'list'
 
 export interface TimelineInitial {
-  statuses: mastodon.v1.Status[]
+  statuses: Status[]
   nextMaxId: string | null
 }
 
@@ -79,7 +79,7 @@ export class CaribouTimeline extends LitElement {
   // the first client render equals the server render and no fetch runs.
   @property({ attribute: false }) initial: TimelineInitial | null = null
 
-  @state() private statuses: mastodon.v1.Status[] = []
+  @state() private statuses: Status[] = []
   @state() private loading = false
   @state() private errorMsg: string | null = null
   // A failed older page shows at the bottom, where the reader is looking.
@@ -174,7 +174,7 @@ export class CaribouTimeline extends LitElement {
 
   // The server fetched `initial` without the reader's token, so it has none
   // of the reader's filters; ask again for the reader's copy.
-  private loadReaderView(statuses: readonly mastodon.v1.Status[]) {
+  private loadReaderView(statuses: readonly Status[]) {
     loadReaderViewFrom(findShell(this)?.getAttribute('instance') ?? '', statuses)
   }
 

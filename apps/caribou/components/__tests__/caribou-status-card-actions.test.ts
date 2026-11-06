@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { html, render } from 'lit'
-import type { mastodon } from 'masto'
+import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
   _testOnlyResetMutations, activeClient, activeUserKey, addUserSession, cacheStatus,
@@ -10,7 +10,6 @@ import '../caribou-status-card.js'
 import '../caribou-app-shell.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
-type Status = mastodon.v1.Status
 
 function post(over: Record<string, unknown> = {}): Status {
   return {
@@ -30,7 +29,7 @@ function signIn(server = 'example.social', accountId = 'me') {
   addUserSession({
     userKey: toUserKey('alice', server),
     server, token: 't', vapidKey: '', createdAt: 0,
-    account: { id: accountId, acct: 'alice', username: 'alice' } as mastodon.v1.Account,
+    account: { id: accountId, acct: 'alice', username: 'alice' } as Account,
   })
 }
 

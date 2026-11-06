@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type CaribouClient, type Account, type List } from '@beatzball/caribou-mastodon-client'
 import {
   accountListIds, accountListsCache, createList, deleteList, listById, listMembers, listMembersCache,
   listsCache, loadAccountLists, loadList, loadListMembers, loadLists, setListMember, updateList, userLists,
@@ -13,9 +12,9 @@ import { activeUserKey } from '../users.js'
 const ME = 'alice@example.social' as UserKey
 const OTHER = 'bob@example.social' as UserKey
 
-const list = (id: string, title: string, patch: Partial<mastodon.v1.List> = {}) =>
-  ({ id, title, repliesPolicy: 'list', exclusive: false, ...patch }) as mastodon.v1.List
-const account = (id: string) => ({ id, acct: `user${id}`, username: `user${id}` }) as mastodon.v1.Account
+const list = (id: string, title: string, patch: Partial<List> = {}) =>
+  ({ id, title, repliesPolicy: 'list', exclusive: false, ...patch }) as List
+const account = (id: string) => ({ id, acct: `user${id}`, username: `user${id}` }) as Account
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -77,7 +76,7 @@ describe('loadLists', () => {
   })
 
   it('drops an answer that arrives after the account changed', async () => {
-    const d = deferred<mastodon.v1.List[]>()
+    const d = deferred<List[]>()
     const client = fakeClient({ fetchLists: vi.fn(() => d.promise) })
     const p = loadLists({ clientSource: () => client })
     activeUserKey.value = OTHER
@@ -87,7 +86,7 @@ describe('loadLists', () => {
   })
 
   it('drops a failure after the account changed: no throw', async () => {
-    const d = deferred<mastodon.v1.List[]>()
+    const d = deferred<List[]>()
     const client = fakeClient({ fetchLists: vi.fn(() => d.promise) })
     const p = loadLists({ clientSource: () => client })
     activeUserKey.value = OTHER
@@ -98,7 +97,7 @@ describe('loadLists', () => {
   it('drops a read that overlapped a write', async () => {
     const client = fakeClient()
     await loadLists({ clientSource: () => client })
-    const read = deferred<mastodon.v1.List[]>()
+    const read = deferred<List[]>()
     // The first answer left before the save; a read after it sees the save.
     let reads = 0
     const slow = fakeClient({
@@ -141,7 +140,7 @@ describe('createList', () => {
   })
 
   it('a list made for an earlier account does not land in the new one', async () => {
-    const d = deferred<mastodon.v1.List>()
+    const d = deferred<List>()
     const client = fakeClient({ createList: vi.fn(() => d.promise) })
     const p = createList({ title: 'Cats' }, { clientSource: () => client })
     activeUserKey.value = OTHER
@@ -154,7 +153,7 @@ describe('createList', () => {
 
 describe('updateList', () => {
   it('renames at once and takes the server\'s copy', async () => {
-    const d = deferred<mastodon.v1.List>()
+    const d = deferred<List>()
     const client = fakeClient({ updateList: vi.fn(() => d.promise) })
     await loadLists({ clientSource: () => fakeClient() })
     const p = updateList('1', { title: 'Family', repliesPolicy: 'none' }, { clientSource: () => client })
@@ -246,7 +245,7 @@ describe('members', () => {
   })
 
   it('a member list read for an earlier account is dropped', async () => {
-    const d = deferred<mastodon.v1.Account[]>()
+    const d = deferred<Account[]>()
     const p = loadListMembers('1', { clientSource: () => fakeClient({ fetchListAccounts: vi.fn(() => d.promise) }) })
     activeUserKey.value = OTHER
     d.resolve([account('7')])
@@ -318,7 +317,7 @@ describe('review round 1: races', () => {
 
   it('an older failed edit does not overwrite a newer saved one (codex 4)', async () => {
     await loadLists({ clientSource: () => fakeClient() })
-    const first = deferred<mastodon.v1.List>()
+    const first = deferred<List>()
     let calls = 0
     const client = fakeClient({
       updateList: vi.fn(async (id: string, input: { title: string }) => (++calls === 1 ? first.promise : list(id, input.title))),
@@ -332,7 +331,7 @@ describe('review round 1: races', () => {
   })
 
   it('a list made during the first read shows up with the others (codex 5, fable 1)', async () => {
-    const first = deferred<mastodon.v1.List[]>()
+    const first = deferred<List[]>()
     let reads = 0
     const client = fakeClient({
       fetchLists: vi.fn(() => (++reads === 1 ? first.promise : Promise.resolve([list('1', 'Friends'), list('9', 'Cats')]))),
@@ -347,7 +346,7 @@ describe('review round 1: races', () => {
   it('a member read that overlaps a delete does not bring the list back (fable 2)', async () => {
     await loadLists({ clientSource: () => fakeClient() })
     await loadAccountLists('7', { clientSource: () => fakeClient() })
-    const read = deferred<mastodon.v1.List[]>()
+    const read = deferred<List[]>()
     let reads = 0
     const reader = fakeClient({
       fetchAccountLists: vi.fn(() => (++reads === 1 ? read.promise : Promise.resolve([]))),
@@ -402,7 +401,7 @@ describe('review round 2', () => {
 
   it('only the last of several writes puts its answer in the cache (fable 4)', async () => {
     await loadLists({ clientSource: () => fakeClient() })
-    const second = deferred<mastodon.v1.List>()
+    const second = deferred<List>()
     let calls = 0
     const client = fakeClient({
       updateList: vi.fn(async (id: string, input: { title: string }) =>

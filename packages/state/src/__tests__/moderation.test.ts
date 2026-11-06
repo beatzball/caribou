@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   _testOnlyResetRelationships, relationshipCache, relationshipKey, setBlock, setMute,
   toggleFollow,
@@ -11,8 +10,8 @@ import { activeUserKey } from '../users.js'
 const ME = 'alice@example.social' as UserKey
 const BOB = { id: '7', acct: 'bob', locked: false }
 
-function rel(id: string, patch: Partial<mastodon.v1.Relationship> = {}): mastodon.v1.Relationship {
-  return { id, following: false, requested: false, muting: false, blocking: false, ...patch } as mastodon.v1.Relationship
+function rel(id: string, patch: Partial<Relationship> = {}): Relationship {
+  return { id, following: false, requested: false, muting: false, blocking: false, ...patch } as Relationship
 }
 
 function deferred<T>() {
@@ -35,7 +34,7 @@ function fakeClient(over: Partial<CaribouClient> = {}): CaribouClient {
 }
 
 const cached = (id: string) => relationshipCache.value.get(relationshipKey(ME, id))
-const seed = (r: mastodon.v1.Relationship) => {
+const seed = (r: Relationship) => {
   relationshipCache.value = new Map([[relationshipKey(ME, r.id), r]])
 }
 
@@ -55,7 +54,7 @@ afterEach(() => {
 
 describe('setMute', () => {
   it('marks the account muted at once, then keeps the server answer', async () => {
-    const d = deferred<mastodon.v1.Relationship>()
+    const d = deferred<Relationship>()
     const client = fakeClient({ mute: vi.fn(() => d.promise) })
     const done = setMute(BOB, true, { clientSource: () => client })
     expect(cached('7')?.muting).toBe(true)
@@ -82,7 +81,7 @@ describe('setMute', () => {
   })
 
   it('a second mute while the first is out sends nothing more', async () => {
-    const d = deferred<mastodon.v1.Relationship>()
+    const d = deferred<Relationship>()
     const client = fakeClient({ mute: vi.fn(() => d.promise) })
     const first = setMute(BOB, true, { clientSource: () => client })
     expect(await setMute(BOB, true, { clientSource: () => client })).toBe(true)
@@ -94,7 +93,7 @@ describe('setMute', () => {
   // Undo is focused the moment Mute is chosen, so it is often pressed
   // before the mute has answered.
   it('an unmute while the mute is out runs after it, and the account ends unmuted', async () => {
-    const d = deferred<mastodon.v1.Relationship>()
+    const d = deferred<Relationship>()
     const client = fakeClient({ mute: vi.fn(() => d.promise) })
     const muting = setMute(BOB, true, { clientSource: () => client })
     const unmuting = setMute(BOB, false, { clientSource: () => client })
@@ -110,7 +109,7 @@ describe('setMute', () => {
   })
 
   it('writes to one account go one at a time, so an older answer cannot undo a newer one', async () => {
-    const m = deferred<mastodon.v1.Relationship>()
+    const m = deferred<Relationship>()
     const client = fakeClient({
       mute: vi.fn(() => m.promise),
       block: vi.fn(async (id: string) => rel(id, { muting: true, blocking: true })),
@@ -128,7 +127,7 @@ describe('setMute', () => {
   })
 
   it('a failed mute keeps a follow queued behind it', async () => {
-    const m = deferred<mastodon.v1.Relationship>()
+    const m = deferred<Relationship>()
     const client = fakeClient({
       mute: vi.fn(() => m.promise),
       follow: vi.fn(async (id: string) => rel(id, { following: true })),
@@ -149,7 +148,7 @@ describe('setMute', () => {
 
   it('a failure after the reader moved to another account rolls back without a toast', async () => {
     activeUserKey.value = ME
-    const m = deferred<mastodon.v1.Relationship>()
+    const m = deferred<Relationship>()
     const client = fakeClient({ mute: vi.fn(() => m.promise) })
     const muting = setMute(BOB, true, { clientSource: () => client })
     activeUserKey.value = 'carol@other.example' as UserKey
@@ -168,7 +167,7 @@ describe('setMute', () => {
 describe('setBlock', () => {
   it('blocks at once and drops the follow with it', async () => {
     seed(rel('7', { following: true }))
-    const d = deferred<mastodon.v1.Relationship>()
+    const d = deferred<Relationship>()
     const client = fakeClient({ block: vi.fn(() => d.promise) })
     const done = setBlock(BOB, true, { clientSource: () => client })
     expect(cached('7')).toMatchObject({ blocking: true, following: false })

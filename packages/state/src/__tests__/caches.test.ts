@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { mastodon } from 'masto'
+import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import {
   statusCache, accountCache, cacheStatus, cacheAccount, deletedStatusIds, forgetReaderFields, mergeStatus, postRecords, readerQuote,
   readerFiltered, updateStatus,
 } from '../caches.js'
 
-function makeStatus(id: string, fav = false): mastodon.v1.Status {
+function makeStatus(id: string, fav = false): Status {
   return {
     id, content: `<p>${id}</p>`, favourited: fav, favouritesCount: fav ? 1 : 0,
     account: { id: 'a1', username: 'beatzball', acct: 'beatzball' },
-  } as unknown as mastodon.v1.Status
+  } as unknown as Status
 }
 
 beforeEach(() => {
@@ -38,16 +38,16 @@ describe('statusCache', () => {
   })
 
   it('cacheAccount upserts', () => {
-    cacheAccount({ id: 'a2', acct: 'b' } as mastodon.v1.Account)
+    cacheAccount({ id: 'a2', acct: 'b' } as Account)
     expect(accountCache.value.get('a2')?.acct).toBe('b')
   })
 })
 
 describe('mergeStatus', () => {
   it('takes content and counts from the fresh copy and keeps the reader flags', () => {
-    cacheStatus({ ...makeStatus('1', true), bookmarked: true } as mastodon.v1.Status)
+    cacheStatus({ ...makeStatus('1', true), bookmarked: true } as Status)
     const fresh = { ...makeStatus('1'), content: '<p>edited</p>', favouritesCount: 7, bookmarked: false }
-    const merged = mergeStatus(fresh as mastodon.v1.Status)
+    const merged = mergeStatus(fresh as Status)
     expect([merged.content, merged.favouritesCount, merged.favourited, merged.bookmarked])
       .toEqual(['<p>edited</p>', 7, true, true])
     expect(statusCache.value.get('1')).toBe(merged)
@@ -61,7 +61,7 @@ describe('mergeStatus', () => {
   it('keeps the reader flags on the post inside a boost', () => {
     cacheStatus(makeStatus('p', true))
     const wrapper = { ...makeStatus('w'), reblog: { ...makeStatus('p'), content: '<p>edited</p>' } }
-    const merged = mergeStatus(wrapper as unknown as mastodon.v1.Status)
+    const merged = mergeStatus(wrapper as unknown as Status)
     expect(merged.reblog!.favourited).toBe(true)
     expect(statusCache.value.get('p')!.content).toBe('<p>edited</p>')
     expect(statusCache.value.get('p')!.favourited).toBe(true)
@@ -72,20 +72,20 @@ describe('mergeStatus', () => {
   // reader added or removed since must show.
   it('takes `filtered` from a fresh copy that has it, and keeps it from one that does not', () => {
     const match = [{ filter: { id: 'f', title: 'Spoilers', context: ['home'], filterAction: 'hide' } }]
-    cacheStatus({ ...makeStatus('3'), filtered: match } as unknown as mastodon.v1.Status)
+    cacheStatus({ ...makeStatus('3'), filtered: match } as unknown as Status)
     expect(mergeStatus(makeStatus('3')).filtered).toEqual(match)
-    expect(mergeStatus({ ...makeStatus('3'), filtered: [] } as mastodon.v1.Status).filtered).toEqual([])
+    expect(mergeStatus({ ...makeStatus('3'), filtered: [] } as Status).filtered).toEqual([])
     const again = [{ filter: { id: 'g', title: 'Sports', context: ['home'], filterAction: 'warn' } }]
-    expect(mergeStatus({ ...makeStatus('3'), filtered: again } as unknown as mastodon.v1.Status).filtered)
+    expect(mergeStatus({ ...makeStatus('3'), filtered: again } as unknown as Status).filtered)
       .toEqual(again)
   })
 })
 
 describe('quoted posts', () => {
-  const quoting = (id: string, quoted: mastodon.v1.Status) =>
-    ({ ...makeStatus(id), quote: { state: 'accepted', quotedStatus: quoted } }) as unknown as mastodon.v1.Status
-  const quotedIn = (s: mastodon.v1.Status | undefined) =>
-    (s?.quote as { quotedStatus?: mastodon.v1.Status } | undefined)?.quotedStatus
+  const quoting = (id: string, quoted: Status) =>
+    ({ ...makeStatus(id), quote: { state: 'accepted', quotedStatus: quoted } }) as unknown as Status
+  const quotedIn = (s: Status | undefined) =>
+    (s?.quote as { quotedStatus?: Status } | undefined)?.quotedStatus
 
   it('mergeStatus and cacheStatus cache the quoted post under its own id', () => {
     mergeStatus(quoting('p', makeStatus('q')))
@@ -95,13 +95,13 @@ describe('quoted posts', () => {
   })
 
   it('caches the post quoted inside a boost', () => {
-    const boost = { ...makeStatus('b'), reblog: quoting('p', makeStatus('q')) } as mastodon.v1.Status
+    const boost = { ...makeStatus('b'), reblog: quoting('p', makeStatus('q')) } as Status
     mergeStatus(boost)
     expect(statusCache.value.get('q')?.id).toBe('q')
   })
 
   it('an older copy of a quote does not undo a newer edit of the quoted post', () => {
-    const edited = { ...makeStatus('q'), content: '<p>new</p>', editedAt: '2026-05-02T00:00:00Z' } as mastodon.v1.Status
+    const edited = { ...makeStatus('q'), content: '<p>new</p>', editedAt: '2026-05-02T00:00:00Z' } as Status
     cacheStatus(edited)
     const out = mergeStatus(quoting('p', makeStatus('q')))
     expect(statusCache.value.get('q')?.content).toBe('<p>new</p>')
@@ -110,7 +110,7 @@ describe('quoted posts', () => {
 
   it('keeps the reader filters of a quoted post', () => {
     const hide = [{ filter: { id: 'f', title: 'x', context: ['home'], filterAction: 'hide' }, keywordMatches: [] }]
-    cacheStatus(quoting('p', { ...makeStatus('q'), filtered: hide } as unknown as mastodon.v1.Status))
+    cacheStatus(quoting('p', { ...makeStatus('q'), filtered: hide } as unknown as Status))
     expect(readerFiltered('q')).toEqual(hide)
   })
 
@@ -122,7 +122,7 @@ describe('quoted posts', () => {
 
   it('forgetReaderFields turns a quote of a deleted post into a deleted quote', () => {
     cacheStatus(quoting('p', makeStatus('q')))
-    cacheStatus({ ...makeStatus('b'), reblog: quoting('p2', makeStatus('q')) } as mastodon.v1.Status)
+    cacheStatus({ ...makeStatus('b'), reblog: quoting('p2', makeStatus('q')) } as Status)
     deletedStatusIds.value = new Set(['q'])
     forgetReaderFields()
     expect(statusCache.value.get('p')?.quote).toEqual({ state: 'deleted', quotedStatus: null })
@@ -130,8 +130,8 @@ describe('quoted posts', () => {
   })
 
   // Mastodon embeds a quoted post's own quote shallow (an id only).
-  const shallowOf = (s: mastodon.v1.Status, quotedId: string) =>
-    ({ ...s, quote: { state: 'accepted', quotedStatusId: quotedId } }) as unknown as mastodon.v1.Status
+  const shallowOf = (s: Status, quotedId: string) =>
+    ({ ...s, quote: { state: 'accepted', quotedStatusId: quotedId } }) as unknown as Status
 
   it('a shallow copy of a quote never replaces the full one of the same post', () => {
     const b = quoting('b', makeStatus('a'))
@@ -141,7 +141,7 @@ describe('quoted posts', () => {
     cacheStatus(quoting('c2', shallowOf(b, 'a')))
     expect(quotedIn(statusCache.value.get('b'))?.id).toBe('a')
     // Inside a boost too.
-    mergeStatus({ ...makeStatus('boost'), reblog: shallowOf(b, 'a') } as mastodon.v1.Status)
+    mergeStatus({ ...makeStatus('boost'), reblog: shallowOf(b, 'a') } as Status)
     expect(quotedIn(statusCache.value.get('b'))?.id).toBe('a')
     expect(quotedIn(statusCache.value.get('boost')?.reblog ?? undefined)?.id).toBe('a')
   })
@@ -149,37 +149,37 @@ describe('quoted posts', () => {
   it('a shallow copy that says something else about the quote is taken', () => {
     const b = quoting('b', makeStatus('a'))
     mergeStatus(b)
-    mergeStatus({ ...b, filtered: [], quote: { state: 'revoked', quotedStatusId: null } } as unknown as mastodon.v1.Status)
+    mergeStatus({ ...b, filtered: [], quote: { state: 'revoked', quotedStatusId: null } } as unknown as Status)
     expect(statusCache.value.get('b')?.quote).toEqual({ state: 'revoked', quotedStatusId: null })
   })
 
   // The reader's copy (it has `filtered`, as every copy fetched with a
   // token from Mastodon 4.0 on does) says what this reader may see.
   it('a copy without a token never undoes the reader\'s quote state', () => {
-    const reader = { ...makeStatus('p'), filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as mastodon.v1.Status
+    const reader = { ...makeStatus('p'), filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as Status
     mergeStatus(reader)
     mergeStatus(quoting('p', makeStatus('q')))
     expect(statusCache.value.get('p')?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
     cacheStatus(quoting('p', makeStatus('q')))
     expect(statusCache.value.get('p')?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
     // Inside a boost too.
-    mergeStatus({ ...makeStatus('boost'), reblog: quoting('p', makeStatus('q')) } as mastodon.v1.Status)
+    mergeStatus({ ...makeStatus('boost'), reblog: quoting('p', makeStatus('q')) } as Status)
     expect(statusCache.value.get('p')?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
     expect(statusCache.value.get('boost')?.reblog?.quote).toEqual({ state: 'muted_account', quotedStatus: null })
     // A newer reader copy wins.
-    mergeStatus({ ...quoting('p', makeStatus('q')), filtered: [] } as unknown as mastodon.v1.Status)
+    mergeStatus({ ...quoting('p', makeStatus('q')), filtered: [] } as unknown as Status)
     expect(quotedIn(statusCache.value.get('p'))?.id).toBe('q')
   })
 
   it('after an account change, a copy without a token is taken again', () => {
-    mergeStatus({ ...makeStatus('p'), filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as mastodon.v1.Status)
+    mergeStatus({ ...makeStatus('p'), filtered: [], quote: { state: 'muted_account', quotedStatus: null } } as unknown as Status)
     forgetReaderFields()
     mergeStatus(quoting('p', makeStatus('q')))
     expect(quotedIn(statusCache.value.get('p'))?.id).toBe('q')
   })
 
   const hideQ = [{ filter: { id: 'f', title: 'x', context: ['home'], filterAction: 'hide' }, keywordMatches: [] }]
-  const withF = (st: mastodon.v1.Status, f: unknown) => ({ ...st, filtered: f }) as unknown as mastodon.v1.Status
+  const withF = (st: Status, f: unknown) => ({ ...st, filtered: f }) as unknown as Status
 
   // A kept quote carries an old copy of the quoted post. It is not news, so
   // it must not overwrite a newer reader copy of that post.
@@ -194,8 +194,8 @@ describe('quoted posts', () => {
 
   // The reader's copy of a post may be cached only inside a boost.
   const muted = (id: string) =>
-    ({ ...makeStatus(id), filtered: [], quote: { state: 'muted_account', quotedStatus: null } }) as unknown as mastodon.v1.Status
-  const boostOf = (id: string, inner: mastodon.v1.Status) => ({ ...makeStatus(id), reblog: inner }) as mastodon.v1.Status
+    ({ ...makeStatus(id), filtered: [], quote: { state: 'muted_account', quotedStatus: null } }) as unknown as Status
+  const boostOf = (id: string, inner: Status) => ({ ...makeStatus(id), reblog: inner }) as Status
 
   it.each(['mergeStatus', 'cacheStatus'] as const)('finds the reader\'s quote inside another boost (%s)', (entry) => {
     const put = entry === 'mergeStatus' ? mergeStatus : cacheStatus
@@ -210,7 +210,7 @@ describe('quoted posts', () => {
   it.each(['mergeStatus', 'cacheStatus'] as const)('a full quote known only inside a boost beats a shallow copy (%s)', (entry) => {
     const put = entry === 'mergeStatus' ? mergeStatus : cacheStatus
     put(boostOf('b1', quoting('p', makeStatus('a'))))
-    put(boostOf('b2', { ...quoting('p', makeStatus('a')), quote: { state: 'accepted', quotedStatusId: 'a' } } as unknown as mastodon.v1.Status))
+    put(boostOf('b2', { ...quoting('p', makeStatus('a')), quote: { state: 'accepted', quotedStatusId: 'a' } } as unknown as Status))
     expect(quotedIn(statusCache.value.get('b2')?.reblog ?? undefined)?.id).toBe('a')
   })
 
@@ -219,9 +219,9 @@ describe('quoted posts', () => {
   const reader = (id: string, state: string) => ({
     ...makeStatus(id), filtered: [],
     quote: state === 'accepted' ? { state, quotedStatus: makeStatus('q') } : { state, quotedStatus: null },
-  }) as unknown as mastodon.v1.Status
+  }) as unknown as Status
   const publicP = () => quoting('p', makeStatus('q'))
-  const stateIn = (s: mastodon.v1.Status | null | undefined) => s?.quote?.state
+  const stateIn = (s: Status | null | undefined) => s?.quote?.state
 
   it.each(['mergeStatus', 'cacheStatus'] as const)(
     'accepted in boost 1, then muted in boost 2: a public boost 3 stays muted (%s)', (entry) => {
@@ -272,7 +272,7 @@ describe('quoted posts', () => {
   })
 
   it('a shallow quote changes nothing', () => {
-    const s = { ...makeStatus('p'), quote: { state: 'accepted', quotedStatusId: 'q' } } as unknown as mastodon.v1.Status
+    const s = { ...makeStatus('p'), quote: { state: 'accepted', quotedStatusId: 'q' } } as unknown as Status
     mergeStatus(s)
     expect(statusCache.value.has('q')).toBe(false)
   })
@@ -280,13 +280,13 @@ describe('quoted posts', () => {
 
 describe('readerFiltered', () => {
   const hide = [{ filter: { id: 'f', title: 'Spoilers', context: ['home'], filterAction: 'hide' } }]
-  const boost = (inner: unknown) => ({ ...makeStatus('w'), reblog: inner }) as unknown as mastodon.v1.Status
+  const boost = (inner: unknown) => ({ ...makeStatus('w'), reblog: inner }) as unknown as Status
 
   it('the last copy to arrive wins, alone or inside a boost, in either order', () => {
-    cacheStatus({ ...makeStatus('p'), filtered: [] } as mastodon.v1.Status)
+    cacheStatus({ ...makeStatus('p'), filtered: [] } as Status)
     cacheStatus(boost({ ...makeStatus('p'), filtered: hide }))
     expect(readerFiltered('p')).toEqual(hide)
-    mergeStatus({ ...makeStatus('p'), filtered: [] } as mastodon.v1.Status)
+    mergeStatus({ ...makeStatus('p'), filtered: [] } as Status)
     expect(readerFiltered('p')).toEqual([])
     mergeStatus(boost({ ...makeStatus('p'), filtered: hide }))
     expect(readerFiltered('p')).toEqual(hide)
@@ -294,14 +294,14 @@ describe('readerFiltered', () => {
 
   it('a copy without `filtered` does not count, and a merge does not renew a kept value', () => {
     cacheStatus(boost({ ...makeStatus('p'), filtered: hide }))
-    cacheStatus({ ...makeStatus('p'), filtered: [] } as mastodon.v1.Status)
+    cacheStatus({ ...makeStatus('p'), filtered: [] } as Status)
     // A token-less copy of the boost keeps the cached inner `filtered: hide`.
     mergeStatus(boost(makeStatus('p')))
     expect(readerFiltered('p')).toEqual([])
   })
 
   it('forgets everything on an account change', () => {
-    cacheStatus({ ...makeStatus('p'), filtered: hide } as unknown as mastodon.v1.Status)
+    cacheStatus({ ...makeStatus('p'), filtered: hide } as unknown as Status)
     forgetReaderFields()
     expect(readerFiltered('p')).toBeUndefined()
   })

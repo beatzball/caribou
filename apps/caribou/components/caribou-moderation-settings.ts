@@ -2,8 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import type { AccountPage, CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { AccountPage, CaribouClient, Account, Filter } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, activeUserKey, relationshipCache, relationshipKey, setBlock, setMute,
 } from '@beatzball/caribou-state'
@@ -13,8 +12,6 @@ import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import './caribou-button.js'
 
-type Account = mastodon.v1.Account
-type Filter = mastodon.v2.Filter
 
 interface AccountList {
   items: Account[]

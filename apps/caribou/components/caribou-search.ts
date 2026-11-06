@@ -2,8 +2,7 @@ import { LitElement, html, css, nothing, type TemplateResult } from 'lit'
 import { customElement, property, query, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { batch, effect } from '@preact/signals-core'
-import type { mastodon } from 'masto'
-import { searchPublic, type SearchType } from '@beatzball/caribou-mastodon-client'
+import { searchPublic, type SearchType, type Account, type Search, type Tag } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, isOwnAccount, loadRelationships, mergeStatus, ownerGeneration,
   relationshipCache, relationshipFor, toggleFollow,
@@ -21,8 +20,6 @@ import './caribou-icon.js'
 import './caribou-status-card.js'
 import './caribou-tabs.js'
 
-type Search = mastodon.v2.Search
-type Account = mastodon.v1.Account
 
 // What the results area shows. `pending` is the server's render and the
 // first client one: neither knows yet who is reading, so both say
@@ -54,7 +51,7 @@ function fullAcct(acct: string, host: string): string {
 }
 
 // Uses in the days the server counts (a week), from the tag's history.
-function weeklyUses(tag: mastodon.v1.Tag): number | null {
+function weeklyUses(tag: Tag): number | null {
   if (!tag.history || tag.history.length === 0) return null
   return tag.history.reduce((n, day) => n + (Number(day.uses) || 0), 0)
 }

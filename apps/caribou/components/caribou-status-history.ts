@@ -2,10 +2,9 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
 import DOMPurify from 'dompurify'
-import type { mastodon } from 'masto'
 import { effect } from '@preact/signals-core'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
-import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, StatusEdit } from '@beatzball/caribou-mastodon-client'
 import { activeUserKey, ownerGeneration } from '@beatzball/caribou-state'
 import { boxReset, mastodonLinkText } from './_shared-styles.js'
 import './caribou-button.js'
@@ -14,7 +13,7 @@ import './caribou-button.js'
 // card, so a version reads the same as the post.
 if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
 
-type Edit = mastodon.v1.StatusEdit
+type Edit = StatusEdit
 
 function when(iso: string): string {
   const d = new Date(iso)

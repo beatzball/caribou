@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { mastodon } from 'masto'
 import type { UserKey } from '@beatzball/caribou-auth'
-import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type CaribouClient, type Tag } from '@beatzball/caribou-mastodon-client'
 import { loadTag, normalizeTagName, tagCache, tagFollowing, tagKey, toggleTagFollow } from '../tags.js'
 import { activeUserKey } from '../users.js'
 
@@ -9,7 +8,7 @@ const ME = 'alice@example.social' as UserKey
 const OTHER = 'bob@example.social' as UserKey
 
 const tag = (name: string, following: boolean) =>
-  ({ id: '1', name, url: `https://example.social/tags/${name}`, following }) as mastodon.v1.Tag
+  ({ id: '1', name, url: `https://example.social/tags/${name}`, following }) as Tag
 
 function deferred<T>() {
   let resolve!: (v: T) => void
@@ -121,7 +120,7 @@ describe('loadTag', () => {
   })
 
   it('does not overwrite a follow that started while it was loading', async () => {
-    const read = deferred<mastodon.v1.Tag>()
+    const read = deferred<Tag>()
     const client = fakeClient({ fetchTag: vi.fn(() => read.promise) })
     const loading = loadTag('ai', { clientSource: () => client })
     await toggleTagFollow('ai', { clientSource: () => client })
@@ -131,8 +130,8 @@ describe('loadTag', () => {
   })
 
   it('does not overwrite a follow with a read that started while the follow was on its way', async () => {
-    const write = deferred<mastodon.v1.Tag>()
-    const read = deferred<mastodon.v1.Tag>()
+    const write = deferred<Tag>()
+    const read = deferred<Tag>()
     const client = fakeClient({ followTag: vi.fn(() => write.promise), fetchTag: vi.fn(() => read.promise) })
     const following = toggleTagFollow('ai', { clientSource: () => client })
     const loading = loadTag('ai', { clientSource: () => client })
@@ -145,7 +144,7 @@ describe('loadTag', () => {
 
   it('drops a read that lands after the account changed', async () => {
     activeUserKey.value = ME
-    const read = deferred<mastodon.v1.Tag>()
+    const read = deferred<Tag>()
     const client = fakeClient({ fetchTag: vi.fn(() => read.promise) })
     const loading = loadTag('ai', { clientSource: () => client })
     activeUserKey.value = OTHER
@@ -157,7 +156,7 @@ describe('loadTag', () => {
 
 describe('toggleTagFollow', () => {
   it('shows the follow at once, before the server answers', async () => {
-    const write = deferred<mastodon.v1.Tag>()
+    const write = deferred<Tag>()
     const client = fakeClient({ followTag: vi.fn(() => write.promise) })
     const done = toggleTagFollow('ai', { clientSource: () => client })
     expect(tagCache.value.get(tagKey(ME, 'ai'))).toBe(true)
@@ -190,7 +189,7 @@ describe('toggleTagFollow', () => {
   })
 
   it('drops a second click while the first is on its way', async () => {
-    const write = deferred<mastodon.v1.Tag>()
+    const write = deferred<Tag>()
     const client = fakeClient({ followTag: vi.fn(() => write.promise) })
     const first = toggleTagFollow('ai', { clientSource: () => client })
     await toggleTagFollow('AI', { clientSource: () => client })
@@ -206,7 +205,7 @@ describe('toggleTagFollow across an account change', () => {
   async function switchDuring(outcome: 'resolve' | 'reject', switches: UserKey[]): Promise<void> {
     activeUserKey.value = ME
     tagCache.value = new Map([[tagKey(ME, 'ai'), true]])
-    const write = deferred<mastodon.v1.Tag>()
+    const write = deferred<Tag>()
     const client = fakeClient({ unfollowTag: vi.fn(() => write.promise) })
     const done = toggleTagFollow('ai', { clientSource: () => client })
     for (const key of switches) activeUserKey.value = key
