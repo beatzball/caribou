@@ -112,7 +112,13 @@ export default defineConfig({
         // hydration support, which app.ts guarantees by importing the app
         // dynamically.
         codeSplitting: {
-          groups: [{ name: 'boot', test: /lit-element-hydrate-support|[\\/]lit-html[\\/]|vite\/preload-helper/ }],
+          groups: [
+            { name: 'boot', test: /lit-element-hydrate-support|[\\/]lit-html[\\/]|vite\/preload-helper/ },
+            // Spike (#170): without this group, rolldown puts its runtime helpers
+            // inside the atproto lazy chunk, and app-main then imports that
+            // chunk statically, so every page downloads it.
+            { name: 'bsky', test: /[\\/]node_modules[\\/]\.pnpm[\\/]@atproto/ },
+          ],
         },
       },
     },

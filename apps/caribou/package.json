@@ -22,6 +22,8 @@
     "test:e2e": "pnpm build-meta && playwright test"
   },
   "dependencies": {
+    "@atproto/api": "^0.30.3",
+    "@atproto/oauth-client-browser": "^0.5.14",
     "@beatzball/caribou-auth": "workspace:*",
     "@beatzball/caribou-design-tokens": "workspace:*",
     "@beatzball/caribou-mastodon-client": "workspace:*",
