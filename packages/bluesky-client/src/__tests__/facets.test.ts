@@ -293,6 +293,16 @@ describe('renderFacets: links', () => {
       ['a soft hyphen inside the host', 'bank­.example.com'],
       ['a right-to-left override', '‮moc.elpmaxe.knab'],
       ['an invisible character in a single word', 'ba​nk'],
+      // Each Unicode full stop in ADDRESS, on a bare host with no ASCII . / :
+      ['a bare host with U+3002 ideographic full stops', 'bank\u3002example\u3002com'],
+      ['a bare host with U+06D4 Arabic full stops', 'bank\u06d4example\u06d4com'],
+      ['a bare host with U+0701 Syriac supralinear full stops', 'bank\u0701example\u0701com'],
+      ['a bare host with U+0702 Syriac sublinear full stops', 'bank\u0702example\u0702com'],
+      ['a bare host with U+1362 Ethiopic full stops', 'bank\u1362example\u1362com'],
+      ['a bare host with U+2E3C stenographic full stops', 'bank\u2e3cexample\u2e3ccom'],
+      // U+2028 and U+2029 alone in otherwise plain words.
+      ['U+2028 in plain words', 'read\u2028this'],
+      ['U+2029 in plain words', 'read\u2029this'],
       // The allow-list's accepted cost: address characters in prose.
       ['a version number', 'v1.2'],
       ['a decimal', '3.14'],
