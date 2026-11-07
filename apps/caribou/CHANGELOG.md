@@ -1,5 +1,22 @@
 # caribou-app
 
+## 0.10.8
+
+### Patch Changes
+
+- [#217](https://github.com/beatzball/caribou/pull/217) [`33f4f1e`](https://github.com/beatzball/caribou/commit/33f4f1eaf98d28970411ca2bef5c54462a236426) Thanks [@beatzball](https://github.com/beatzball)! - The Bluesky libraries now build into their own lazy chunk, `bsky`. A Mastodon page never requests it. A developer flag, `caribou.flag.bluesky` in localStorage, loads it; readers see no change.
+
+- [#221](https://github.com/beatzball/caribou/pull/221) [`fc22415`](https://github.com/beatzball/caribou/commit/fc2241503a9ba90152367ac592e23387bd22062e) Thanks [@beatzball](https://github.com/beatzball)! - `caribou-status-media` gets a no-override mode. With `no-override` set,
+  sensitive media stays hidden and has no Show button. Nothing sets it yet,
+  so Mastodon posts do not change.
+
+- [#220](https://github.com/beatzball/caribou/pull/220) [`ed5753a`](https://github.com/beatzball/caribou/commit/ed5753ad296d6901607cc59576624bfcfe3a645c) Thanks [@beatzball](https://github.com/beatzball)! - The status card shows a Bluesky post's record card (a feed, list, starter pack or labeler) under its media, and puts a play mark on a Bluesky video card. A Bluesky quote whose author asked to be hidden from signed-out readers shows "This account asked to be seen only by signed-in readers." Mastodon posts are unchanged.
+
+- Updated dependencies [[`ed5753a`](https://github.com/beatzball/caribou/commit/ed5753ad296d6901607cc59576624bfcfe3a645c), [`8bd7867`](https://github.com/beatzball/caribou/commit/8bd7867f1b6179379259278a263ae4e30180fcf9), [`33f4f1e`](https://github.com/beatzball/caribou/commit/33f4f1eaf98d28970411ca2bef5c54462a236426), [`ca653e1`](https://github.com/beatzball/caribou/commit/ca653e14ca39e4586095e94b2e4c11b9fda40338), [`fc22415`](https://github.com/beatzball/caribou/commit/fc2241503a9ba90152367ac592e23387bd22062e), [`33f4f1e`](https://github.com/beatzball/caribou/commit/33f4f1eaf98d28970411ca2bef5c54462a236426), [`ed5753a`](https://github.com/beatzball/caribou/commit/ed5753ad296d6901607cc59576624bfcfe3a645c), [`8bd7867`](https://github.com/beatzball/caribou/commit/8bd7867f1b6179379259278a263ae4e30180fcf9)]:
+  - @beatzball/caribou-bluesky-client@0.1.0
+  - @beatzball/caribou-mastodon-client@0.4.6
+  - @beatzball/caribou-state@0.4.7
+
 ## 0.10.7
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.6
+
+### Patch Changes
+
+- [#217](https://github.com/beatzball/caribou/pull/217) [`33f4f1e`](https://github.com/beatzball/caribou/commit/33f4f1eaf98d28970411ca2bef5c54462a236426) Thanks [@beatzball](https://github.com/beatzball)! - The Bluesky part of an account can now carry its labels and a moderation result. The per-context moderation entry has its own type, `BlueskyModerationUi`, with `BlueskyModerationReason` for each reason. Nothing changes for Mastodon.
+
+- [#220](https://github.com/beatzball/caribou/pull/220) [`ed5753a`](https://github.com/beatzball/caribou/commit/ed5753ad296d6901607cc59576624bfcfe3a645c) Thanks [@beatzball](https://github.com/beatzball)! - `StatusBluesky` gains an optional `recordCard`: the feed, list, starter pack or labeler a Bluesky post embeds, as a card. It is apart from `card`, which comes from the media, so a post can show both. `Quote` gains an optional `bluesky.hidden` for a Bluesky quote left out by spec 8.3 (`no-unauthenticated`).
+
 ## 0.4.5
 
 ### Patch Changes
