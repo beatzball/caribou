@@ -133,7 +133,13 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}
     const code = `code-${codes.size + 1}`
     codes.set(code, par)
     const back = new URLSearchParams({ state: par.get('state') ?? '', iss: ISSUER, code })
-    return route.fulfill({ status: 302, headers: { location: `${par.get('redirect_uri')}#${back}` } })
+    // A page that sends the browser back, not a 302: Playwright's WebKit
+    // cannot fulfill a request with a redirect status.
+    const target = JSON.stringify(`${par.get('redirect_uri')}#${back}`)
+    return route.fulfill({
+      status: 200, contentType: 'text/html',
+      body: `<!doctype html><title>Approve</title><script>location.replace(${target})</script>`,
+    })
   })
 
   await page.route(`${ISSUER}/oauth/token`, (route) => {
