@@ -12,7 +12,7 @@ import '@beatzball/litro/runtime/LitroLink.js'
 import {
   activeUserKey, loadActiveAccount, loadFromStorage, startUnreadNotifications,
 } from '@beatzball/caribou-state'
-import { installUnauthorizedHandler } from './components/_unauthorized.js'
+import { installSessionExpiredHandler, installUnauthorizedHandler } from './components/_unauthorized.js'
 import {
   healInstanceCookie, installRestoreHandler, land, readShellInfo,
 } from './components/_switch-account.js'
@@ -41,6 +41,9 @@ if (typeof window !== 'undefined') {
   // A client that gets a 401 fires `caribou:unauthorized` with its session.
   // Land as the next stored account, or on `/` when none is left.
   installUnauthorizedHandler(window, (req) => { void land(req) })
+  // A client whose credentials are gone fires `caribou:session-expired`: the
+  // session is marked expired and stays, with its drafts and the page.
+  installSessionExpiredHandler(window)
   // A page restored from the back-forward cache forgets its landing and
   // reads the accounts again.
   installRestoreHandler(window)

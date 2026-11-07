@@ -216,7 +216,8 @@ test('two accounts on two servers: add, switch, reload, sign out, 401', async ({
   // 401 stands in for the request (as in `unauthorized.spec.ts`).
   loads.length = 0
   await page.evaluate((userKey) => {
-    window.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey, token: `TOKEN-${userKey}` } }))
+    // Carol was stored without a `generation`, so it is her token.
+    window.dispatchEvent(new CustomEvent('caribou:unauthorized', { detail: { userKey, generation: `TOKEN-${userKey}` } }))
   }, CAROL)
   await expect.poll(() => stored(page)).toEqual([BOB])
   expect(await active(page)).toBe(BOB)

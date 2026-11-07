@@ -382,7 +382,7 @@ describe('caribou-nav-rail', () => {
 
     function session(userKey: UserKey, account: Partial<Account> | null = null): UserSession {
       return {
-        userKey, server: userKey.slice(userKey.indexOf('@') + 1), token: `T-${userKey}`, vapidKey: '',
+        userKey, server: userKey.slice(userKey.indexOf('@') + 1), token: `T-${userKey}`, generation: `G-${userKey}`, vapidKey: '',
         account: account as Account | null, createdAt: 0,
       }
     }

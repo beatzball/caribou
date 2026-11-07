@@ -45,6 +45,60 @@ Sources of truth — see file for full signatures.
 - `addUserSession(s)`, `removeActiveUser()` — mutators that also persist
   to `localStorage`.
 - `loadFromStorage()`, `saveToStorage()` — explicit hydration boundary.
+- `markExpired(userKey, generation)`, `removeSession(userKey, generation)` —
+  what a failure may do to a session. The rules are below.
+- `emitSessionExpired(detail)` — the event a client sends when the network
+  says its credentials are gone.
+
+**Session rules** (`users.ts`; the handlers are in
+`apps/caribou/components/_unauthorized.ts`)
+
+A session has a `generation`: a random id made at each sign-in. It names that
+sign-in, not a token. A client is made for one session and keeps that
+session's `generation`.
+
+1. **A sign-in always wins.** It writes a new entry under the key, with a new
+   `generation` and no `expired`. It replaces whatever was there.
+2. **A failure names its sign-in, and storage decides.** Every failure event
+   carries the `userKey` and the `generation` of the client that saw it.
+   Another tab can sign in, sign out or add an account at any time, and this
+   tab's memory does not see it. So a failure reads `caribou.users` from
+   `localStorage` first. It changes anything only when the **stored** entry
+   for that `userKey` has that `generation` (and this tab's entry has it
+   too). With no stored entry (signed out elsewhere) or another `generation`
+   (signed in again elsewhere), it is `'stale'`: nothing changes, in storage
+   or in memory. When it matches, it writes the stored map with only that one
+   entry changed; every other stored account stays as storage has it. This
+   tab's account list then becomes that map. If the account active here is
+   not in that map (another tab signed out of it), the active key becomes the
+   stored one when it is in the map, else null. A late failure from an
+   earlier sign-in never touches a later one, in this tab or another.
+
+   **Limits.** This holds when the other tab's write finished before this
+   tab reads storage. The read and the write are not one step across tabs: a
+   write from another tab between them can be lost. Other writes (a switch,
+   a sign-in in the app, a sign-out, `loadActiveAccount`) still write this
+   tab's whole map. Cross-tab coordination for every writer is issue #214.
+3. **Credentials gone: `caribou:session-expired`** `{ userKey, generation }`.
+   The entry gets `expired: true` and stays. Its prefs, its drafts, the
+   active account and the page all stay. Only a sign-in (rule 1) clears
+   `expired`. Marking it twice is the same as marking it once. No client
+   sends this event yet; the Bluesky client will.
+4. **A Mastodon 401: `caribou:unauthorized`** `{ userKey, generation }`. The
+   entry is removed (rule 2 guards it). Its prefs and drafts stay in
+   `localStorage`, so a new sign-in to the same account finds them. When it
+   was the active entry, the app moves to the next account, or to `/`.
+   Whether Mastodon should use rule 3 instead is a separate issue (spec 5.6).
+5. **Network errors, timeouts and 5xx change no session.** They send no
+   event. The request fails like any other.
+6. **Only a sign-out deletes local data.** `signOutActive` and
+   `removeActiveUser` remove the entry, its prefs and its drafts.
+7. **A late result writes only to its own sign-in.** `loadActiveAccount`
+   stores the account only while the entry has the `generation` it started
+   with. It keeps `expired` as it is.
+
+`loadFromStorage` fills a missing `generation` from the token. So an entry
+stored before these rules keeps its guard: a new sign-in has a new token.
 
 **Stores**
 

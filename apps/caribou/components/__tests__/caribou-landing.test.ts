@@ -15,7 +15,7 @@ async function mount(add = false): Promise<CaribouLanding> {
 
 function session(name: string, server: string): UserSession {
   return {
-    userKey: toUserKey(name, server), server, token: `T-${name}`, vapidKey: '', account: null, createdAt: 0,
+    userKey: toUserKey(name, server), server, token: `T-${name}`, generation: `G-${name}`, vapidKey: '', account: null, createdAt: 0,
   }
 }
 

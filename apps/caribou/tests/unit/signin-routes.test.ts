@@ -100,6 +100,35 @@ describe('GET /api/signin/callback', () => {
     expect(store.get('caribou.activeUserKey')).toBe(JSON.stringify(SESSION.userKey))
   })
 
+  // Session rule 1 (packages/state/README.md): each sign-in stores a new
+  // generation and no `expired`, over whatever was stored under the key.
+  it('each sign-in stores a new generation and clears expired', async () => {
+    complete.mockResolvedValue({ kind: 'ok', server: 'two.example', session: SESSION })
+    const html = await (await callback()).text()
+    const script = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).find((s) => s !== THEME_SCRIPT)!
+    const json = html.match(/<script type="application\/json" id="session">([^<]*)<\/script>/)![1]!
+    const old = { ...SESSION, generation: 'OLD', expired: true, account: null, createdAt: 1 }
+    const store = new Map<string, string>([['caribou.users', JSON.stringify([[SESSION.userKey, old]])]])
+    const localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v) },
+    }
+    const document = { getElementById: () => ({ textContent: json, hidden: false }) }
+    const run = () => {
+      new Function('localStorage', 'document', 'location', 'history', script)(
+        localStorage, document, { replace: () => {} }, { replaceState: () => {} })
+      const users = JSON.parse(store.get('caribou.users')!) as [string, Record<string, unknown>][]
+      expect(users).toHaveLength(1)
+      return users[0]![1]
+    }
+    const first = run()
+    expect(first.generation).toMatch(/^[0-9a-f]{32}$/)
+    expect(first).not.toHaveProperty('expired')
+    const second = run()
+    expect(second.generation).toMatch(/^[0-9a-f]{32}$/)
+    expect(second.generation).not.toBe(first.generation)
+  })
+
   it('on success sets the instance cookie and clears the sign-in cookie', async () => {
     complete.mockResolvedValue({ kind: 'ok', server: 'two.example', session: SESSION })
     const cookies = (await callback()).headers.getSetCookie()
