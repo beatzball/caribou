@@ -48,6 +48,10 @@ How they fit:
 - `mapEmbed` maps a quoted post with the same `ctx`.
 - `mapAccount` leaves `bluesky.moderation` unset. A screen treats a missing
   result as "not checked yet" and keeps the profile covered (fail closed).
+- Who fills `Account.bluesky.moderation`: the profile page's caller (#177,
+  the read methods). It calls `moderate({ kind: 'profile', view })` and sets
+  the field. A feed card does not: it uses its post's result, which already
+  counts the author's labels (its `avatar` context).
 - `BlueskyModerationResult` is plain data, one entry per context
   (`contentList`, `contentView`, `contentMedia`, `avatar`, `banner`,
   `profileList`, `profileView`). The SDK's `ModerationDecision` instance never
@@ -82,7 +86,9 @@ are pure functions.
 The client loads both lazily.
 
 `src/__tests__/server-safe.test.ts` fails on a runtime `@atproto` import in
-any module other than those two.
+any module other than those two: a value import, a side-effect import, or a
+dynamic `import()`. A lazy load of the SDK belongs in a door too, so the
+server-safe modules stay pure and the chunk rule has one place to look.
 
 ## The flag
 

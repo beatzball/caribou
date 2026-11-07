@@ -63,8 +63,9 @@ if (typeof window !== 'undefined') {
   // One "Updating…" live region for the whole tab, outside every page.
   document.body.append(document.createElement('caribou-update-notice'))
   // Bluesky is behind a flag (`components/_bluesky.ts`). With it on, warm the
-  // lazy chunk; nothing reads it yet.
-  if (blueskyEnabled(window)) void loadBluesky()
+  // lazy chunk; nothing reads it yet. A failed load is the stale-build
+  // reload's job (`vite:preloadError`), so the rejection is dropped here.
+  if (blueskyEnabled(window)) loadBluesky().catch(() => {})
 }
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null

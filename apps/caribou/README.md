@@ -451,6 +451,9 @@ layout with no Latin letters uses the key's place (`event.code`).
 shortcut there and in `onKey` together. `n` belongs here too: it sends
 `caribou:compose`, which the compose dialog answers.
 
+**Bluesky is behind a flag.** `localStorage['caribou.flag.bluesky'] = '1'` turns it on for a developer.
+`components/_bluesky.ts` is the only door to the atproto libraries (`loadBluesky()`, a dynamic `import()`); they build into the `bsky` chunk group in `vite.config.ts`, which a Mastodon page never requests (`packages/bluesky-client/README.md`).
+
 ## Accounts
 
 A reader can be signed in to several accounts, on several servers, with one
