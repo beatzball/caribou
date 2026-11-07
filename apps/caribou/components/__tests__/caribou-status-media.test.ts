@@ -185,6 +185,32 @@ describe('<caribou-status-media>', () => {
     expect($(el, 'caribou-button.reveal')).not.toBeNull()
   })
 
+  it('no-override: sensitive media stays hidden with no Show button, even when revealed', async () => {
+    const el = document.createElement('caribou-status-media')
+    el.media = [media('a')]
+    el.sensitive = true
+    el.noOverride = true
+    el.revealed = true
+    document.body.appendChild(el)
+    await el.updateComplete
+    expect($(el, 'img')).toBeNull()
+    expect($(el, 'caribou-button')).toBeNull()
+    expect($(el, 'button')).toBeNull()
+    expect($(el, '.locked')!.textContent!.trim()).toBe('Media hidden by a content label')
+    // The box keeps its size.
+    expect($$(el, '.item')).toHaveLength(1)
+  })
+
+  it('no-override reflects from the attribute and does nothing without sensitive', async () => {
+    document.body.innerHTML = '<caribou-status-media no-override></caribou-status-media>'
+    const el = document.querySelector('caribou-status-media')!
+    expect(el.noOverride).toBe(true)
+    el.media = [media('a')]
+    await el.updateComplete
+    expect($(el, 'img')).not.toBeNull()
+    expect($(el, '.locked')).toBeNull()
+  })
+
   it('aspectOf falls back from small to original to 16:9', () => {
     expect(aspectOf(media('a', { meta: { original: { width: 100, height: 200, size: '', aspect: 0 } } }))).toBe(0.5)
     expect(aspectOf(media('a', { meta: null }))).toBe(16 / 9)
