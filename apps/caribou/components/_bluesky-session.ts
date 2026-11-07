@@ -12,10 +12,11 @@ import { CaribouError } from '@beatzball/caribou-mastodon-client'
 import { BLUESKY_CAPABILITIES } from '@beatzball/caribou-bluesky-client'
 import type { BlueskyReader } from '@beatzball/caribou-bluesky-client/moderation'
 import {
-  activeUserKey, addUserSession, blueskyUserKey, setBlueskyDriver, BlueskySessionGone,
+  activeUserKey, addUserSession, blueskyUserKey, isBlueskySession, renewSession, setBlueskyDriver, users,
+  BlueskySessionGone,
   type BlueskyDriver,
 } from '@beatzball/caribou-state'
-import { blueskyOAuthConfig, loadBluesky, type BlueskyBrowser } from './_bluesky.js'
+import { BLUESKY_CALLBACK_PATH, blueskyOAuthConfig, loadBluesky, type BlueskyBrowser } from './_bluesky.js'
 
 /**
  * The active Bluesky reader's moderation inputs, for the reader veil and the
@@ -47,6 +48,8 @@ export const blueskyDriver: BlueskyDriver = {
       const oauth = await oauthClient(mod)
       const restored = await mod.restoreClient(oauth, session.did, {
         userKey: session.userKey,
+        // One deleted listener per sign-in (state rule 9).
+        key: session.generation,
         onExpired: hooks.onExpired,
       })
       if (activeUserKey.peek() === session.userKey) {
@@ -69,6 +72,14 @@ export const blueskyDriver: BlueskyDriver = {
   },
 }
 
+/**
+ * Whether the page loads the active account (`loadActiveAccount`). Not on
+ * the callback page: it leaves for `/home` at once, which loads it.
+ */
+export function loadsAccountOn(pathname: string): boolean {
+  return pathname !== BLUESKY_CALLBACK_PATH
+}
+
 /** Sets the driver. The app entry calls it once, before any client is made. */
 export function installBlueskyDriver(): void {
   setBlueskyDriver(blueskyDriver)
@@ -84,6 +95,13 @@ export function signInErrorMessage(err: unknown, mod?: BlueskyBrowser): string {
     return 'Bluesky sign-in needs site storage. Allow site data for Caribou, or leave private browsing, and try again.'
   }
   if (mod && err instanceof mod.InvalidSignInInput) return 'Enter a Bluesky handle, a DID or a server address.'
+  if (mod && err instanceof mod.SignInCancelled) return 'Sign-in was cancelled.'
+  if (mod && err instanceof mod.NoCallbackParams) {
+    return 'This sign-in link was already used or has expired. Start again.'
+  }
+  if (mod && err instanceof mod.SignInRejected && err.kept) {
+    return 'You approved an account you already use here, not the one you entered. Nothing was added. Try again.'
+  }
   if (mod && err instanceof mod.SignInMismatch) {
     return 'You signed in to another account than the one you entered. Nothing was saved. Try again.'
   }
@@ -102,8 +120,8 @@ export async function startBlueskySignIn(input: string): Promise<string> {
   let mod: BlueskyBrowser | undefined
   try {
     // The loopback client's redirect goes to 127.0.0.1, and site storage is
-    // per origin: a sign-in started on `localhost` could not finish.
-    if (location.hostname === 'localhost') {
+    // per origin: a sign-in started on `localhost` or `[::1]` could not finish.
+    if (location.hostname === 'localhost' || location.hostname === '[::1]') {
       throw new LoopbackHostError(`Open Caribou at http://127.0.0.1${location.port ? `:${location.port}` : ''} to sign in to Bluesky.`)
     }
     mod = await load()
@@ -141,7 +159,19 @@ async function finish(): Promise<UserKey> {
   let mod: BlueskyBrowser | undefined
   try {
     mod = await load()
-    const done = await mod.completeSignIn(await oauthClient(mod))
+    const known = (did: string) => {
+      const entry = users.peek().get(blueskyUserKey(did))
+      return !!entry && isBlueskySession(entry)
+    }
+    let done
+    try {
+      done = await mod.completeSignIn(await oauthClient(mod), { isKnown: known })
+    } catch (err) {
+      // State rule 11: the account that signed in is already here; its new
+      // session stays and its entry is renewed. Nothing is added.
+      if (err instanceof mod.SignInRejected && err.kept) renewSession(blueskyUserKey(err.actual))
+      throw err
+    }
     const userKey = blueskyUserKey(done.did)
     addUserSession({
       network: 'bluesky',

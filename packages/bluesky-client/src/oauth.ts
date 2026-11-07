@@ -21,7 +21,8 @@ export interface BlueskyOAuthConfig {
 }
 
 /** The parts of the SDK client this module calls. Tests pass a fake. */
-export type OAuthLike = Pick<BrowserOAuthClient, 'signIn' | 'initCallback' | 'restore'>
+export type OAuthLike = Pick<BrowserOAuthClient, 'signIn' | 'initCallback' | 'restore' | 'revoke'>
+  & Partial<Pick<BrowserOAuthClient, 'readCallbackParams'>>
 
 /** IndexedDB cannot be opened (some private windows). */
 export class StorageUnavailable extends Error {
@@ -39,11 +40,47 @@ export class InvalidSignInInput extends Error {
   }
 }
 
+/**
+ * A callback the app refuses after the SDK stored its session. `actual` is
+ * the DID that signed in. `kept`: that DID is already a Caribou account and
+ * its new session stays (state rule 11); else the new session was revoked.
+ */
+export class SignInRejected extends Error {
+  constructor(message: string, readonly actual: string, readonly kept: boolean) {
+    super(message)
+    this.name = 'SignInRejected'
+  }
+}
+
 /** The account that signed in is not the one the handle or DID named. */
-export class SignInMismatch extends Error {
-  constructor(readonly expected: string, readonly actual: string) {
-    super('You signed in to another account than the one you entered')
+export class SignInMismatch extends SignInRejected {
+  constructor(readonly expected: string, actual: string, kept: boolean) {
+    super('You signed in to another account than the one you entered', actual, kept)
     this.name = 'SignInMismatch'
+  }
+}
+
+/** A callback whose state Caribou did not make. */
+export class ForeignCallback extends SignInRejected {
+  constructor(actual: string, kept: boolean) {
+    super('This sign-in did not start in Caribou', actual, kept)
+    this.name = 'ForeignCallback'
+  }
+}
+
+/** The callback URL has no parameters: a bookmark, or a reload after it was used. */
+export class NoCallbackParams extends Error {
+  constructor() {
+    super('This sign-in link was already used or has expired')
+    this.name = 'NoCallbackParams'
+  }
+}
+
+/** The reader came back from the authorization page without approving. */
+export class SignInCancelled extends Error {
+  constructor() {
+    super('Sign-in was cancelled')
+    this.name = 'SignInCancelled'
   }
 }
 
@@ -57,7 +94,26 @@ export class SessionGone extends Error {
 
 // One client per page, keyed by its config.
 let shared: { key: string; client: Promise<BrowserOAuthClient> } | null = null
-const deletedListeners = new Map<string, Set<() => void>>()
+// The deleted listeners: one per DID and sign-in (`RestoreOptions.key`).
+const deletedListeners = new Map<string, Map<string, () => void>>()
+
+/** How long a sign-out lets any SDK request run (README: "Sign-out"). */
+export const SIGN_OUT_TIMEOUT_MS = 5000
+
+// While a sign-out runs, the time after which every SDK request is cut off.
+let cutOffAt: number | null = null
+
+/**
+ * The fetch the SDK uses. Outside a sign-out it is plain `fetch`. During one
+ * every request is aborted at the cut-off, so a revoke that hangs still ends
+ * and the SDK deletes the stored tokens in its `finally`.
+ */
+export function sdkFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (cutOffAt === null) return fetch(input, init)
+  const timeout = AbortSignal.timeout(Math.max(0, cutOffAt - Date.now()))
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+  return fetch(input, { ...init, signal })
+}
 
 /** The page's SDK client (README: "One OAuth client per page"). */
 export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAuthClient> {
@@ -67,6 +123,7 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
     clientId: config.clientId,
     handleResolver: config.handleResolver,
     responseMode: 'fragment',
+    fetch: sdkFetch,
     onSessionDeleted: (sub: string) => { notifySessionDeleted(sub) },
   })
   shared = { key, client }
@@ -76,7 +133,7 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
 
 /** The SDK's deleted event for `sub` (here or in another tab). */
 export function notifySessionDeleted(sub: string): void {
-  for (const fn of [...deletedListeners.get(sub) ?? []]) fn()
+  for (const fn of [...deletedListeners.get(sub)?.values() ?? []]) fn()
 }
 
 export type SignInInput =
@@ -155,7 +212,14 @@ export async function beginSignIn(
   if (input.kind === 'did') expected = input.value
   else if (input.kind === 'handle') expected = await resolveHandle(opts.handleResolver, input.value, opts.fetch)
   const state: SignInState = { input: input.value, ...(expected ? { expected } : {}) }
-  await oauth.signIn(expected ?? input.value, { scope: BLUESKY_SCOPE, state: JSON.stringify(state) })
+  try {
+    await oauth.signIn(expected ?? input.value, { scope: BLUESKY_SCOPE, state: JSON.stringify(state) })
+  } catch (err) {
+    // The SDK's redirect rejects with this when the page is still there 5 s
+    // later: the reader came back without approving.
+    if (err instanceof Error && err.message === 'User navigated back') throw new SignInCancelled()
+    throw err
+  }
 }
 
 export interface CompletedSignIn {
@@ -182,20 +246,29 @@ function readState(raw: string | null): SignInState | null {
  * session for another account.
  */
 export async function completeSignIn(
-  oauth: Pick<OAuthLike, 'initCallback'>,
-  opts: { agent?: (s: OAuthSession) => Pick<Agent, 'getProfile'> } = {},
+  oauth: Pick<OAuthLike, 'initCallback' | 'revoke' | 'readCallbackParams'>,
+  opts: {
+    agent?: (s: OAuthSession) => Pick<Agent, 'getProfile'>
+    /** Whether `did` is already a Caribou account. */
+    isKnown?: (did: string) => boolean
+  } = {},
 ): Promise<CompletedSignIn> {
+  // Asked first, so a bookmark or a reload gets its own message.
+  if (oauth.readCallbackParams && !oauth.readCallbackParams()) throw new NoCallbackParams()
   const { session, state: rawState } = await oauth.initCallback()
   const state = readState(rawState)
+  // A failed attempt never changes another account's session. The SDK has
+  // already revoked this DID's earlier session and stored the new one; for a
+  // Caribou account, that one is now its session and stays.
+  const refuse = async (make: (kept: boolean) => SignInRejected): Promise<never> => {
+    const kept = opts.isKnown?.(session.did) ?? false
+    if (!kept) await oauth.revoke(session.did).catch(() => {})
+    throw make(kept)
+  }
   // A callback without our state did not start here: store nothing.
-  if (!state) {
-    await session.signOut().catch(() => {})
-    throw new Error('This sign-in did not start in Caribou')
-  }
-  if (state.expected && state.expected !== session.did) {
-    await session.signOut().catch(() => {})
-    throw new SignInMismatch(state.expected, session.did)
-  }
+  if (!state) return refuse((kept) => new ForeignCallback(session.did, kept))
+  const expected = state.expected
+  if (expected && expected !== session.did) return refuse((kept) => new SignInMismatch(expected, session.did, kept))
   const info = await session.getTokenInfo(false)
   // The token's audience is the PDS. Keep its origin: no trailing slash.
   const pds = new URL(String(info.aud)).origin
@@ -230,6 +303,8 @@ export interface RestoredClient {
 
 export interface RestoreOptions {
   userKey: UserKey
+  /** Names the sign-in (its `generation`). A new key drops the earlier listeners. */
+  key: string
   /** The SDK said later that this session is gone (its deleted event). */
   onExpired: () => void
   onMapError?: (err: unknown, uri: string) => void
@@ -255,7 +330,8 @@ export async function restoreClient(
   // this one gone. A failed check that is not "gone" (offline) changes
   // nothing (rule 5). The check's own failure reports "deleted" again; it
   // is ignored while the check runs.
-  const listeners = deletedListeners.get(did) ?? new Set()
+  // One listener per DID and sign-in: a new sign-in supersedes the others.
+  const listeners = new Map([...deletedListeners.get(did) ?? []].filter(([k]) => k === opts.key))
   let checking = false
   const onDeleted = () => {
     if (checking) return
@@ -265,12 +341,12 @@ export async function restoreClient(
       (err: unknown) => {
         checking = false
         if (!isGone(err)) return
-        listeners.delete(onDeleted)
+        if (listeners.get(opts.key) === onDeleted) listeners.delete(opts.key)
         opts.onExpired()
       },
     )
   }
-  listeners.add(onDeleted)
+  listeners.set(opts.key, onDeleted)
   deletedListeners.set(did, listeners)
 
   const agent = new Agent(session)
@@ -287,19 +363,27 @@ export async function restoreClient(
       post: (view) => moderate({ kind: 'post', view }, did, prefs, labelDefs),
       profile: (view) => moderate({ kind: 'profile', view }, did, prefs, labelDefs),
     },
+    // Any 401 ends the session (README: "401"), not only the challenged
+    // one the SDK deletes the session for.
+    onUnauthorized: opts.onExpired,
     ...(opts.onMapError ? { onMapError: opts.onMapError } : {}),
   })
   return { client, agent, prefs, labelDefs }
 }
 
-/** Revokes the session for `did` and deletes its tokens. No stored session: nothing to do. */
-export async function signOut(oauth: Pick<OAuthLike, 'restore'>, did: string): Promise<void> {
-  let session: OAuthSession
+/**
+ * Revokes the session for `did` and deletes its stored tokens (README:
+ * "Sign-out"). The SDK's `revoke` deletes them in a `finally`, also when the
+ * issuer cannot be reached; while it runs, SDK requests are cut off after
+ * `timeoutMs`. No stored session: nothing to do.
+ */
+export async function signOut(
+  oauth: Pick<OAuthLike, 'revoke'>, did: string, opts: { timeoutMs?: number } = {},
+): Promise<void> {
+  cutOffAt = Date.now() + (opts.timeoutMs ?? SIGN_OUT_TIMEOUT_MS)
   try {
-    session = await oauth.restore(did, false)
-  } catch (err) {
-    if (isGone(err)) return
-    throw err
+    await oauth.revoke(did)
+  } finally {
+    cutOffAt = null
   }
-  await session.signOut()
 }

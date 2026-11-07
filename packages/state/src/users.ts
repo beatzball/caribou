@@ -56,6 +56,9 @@ type New<S extends SessionBase> = Omit<S, 'generation' | 'expired'> & { generati
 /** A session as a sign-in hands it over: its `generation` is made if absent. */
 export type NewUserSession = New<MastodonSession> | New<BlueskySession>
 
+/** How long a Bluesky sign-out waits for the revoke (rule 12). */
+export const SIGN_OUT_WAIT_MS = 8000
+
 /** A new sign-in id: 128 random bits as hex. */
 export function newGeneration(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
@@ -123,7 +126,7 @@ export function addUserSession(session: NewUserSession): void {
 
 /** The user's own handle on their server, with or without the account. */
 export function userName(user: Pick<UserSession, 'userKey' | 'account'> & { network?: string; handle?: string }): string {
-  if (user.network === 'bluesky' && user.handle) return user.handle
+  if (user.network === 'bluesky') return user.account?.acct || user.handle || user.userKey.slice(0, user.userKey.lastIndexOf('@'))
   return user.account?.acct ?? user.userKey.slice(0, user.userKey.lastIndexOf('@'))
 }
 
@@ -145,7 +148,9 @@ export function isOwnAccount(
 export async function loadActiveAccount(): Promise<void> {
   const user = activeUser.value
   const client = activeClient.value
-  if (!user || !client || user.account) return
+  // Rule 7: a Bluesky account loads on every page load, for its handle.
+  const bluesky = !!user && isBlueskySession(user)
+  if (!user || !client || (user.account && !bluesky)) return
   let account: Account
   try {
     account = await client.verifyCredentials()
@@ -155,9 +160,9 @@ export async function loadActiveAccount(): Promise<void> {
   // Store it only on the sign-in that asked (rule 7): after a sign-out and a
   // new sign-in under the same key, the entry has a new generation.
   const current = users.value.get(user.userKey)
-  if (!current || current.account || current.generation !== user.generation) return
+  if (!current || (current.account && !bluesky) || current.generation !== user.generation) return
   const next = new Map(users.value)
-  next.set(user.userKey, { ...current, account })
+  next.set(user.userKey, isBlueskySession(current) ? { ...current, account, handle: account.acct } : { ...current, account })
   users.value = next
   saveToStorage()
 }
@@ -180,12 +185,16 @@ function dropSession(key: UserKey): void {
  */
 export async function signOutBluesky(userKey: UserKey, generation: string): Promise<UserSession | null> {
   const entry = users.value.get(userKey)
-  if (entry && isBlueskySession(entry) && entry.generation === generation) {
-    try {
-      await blueskyDriver()?.signOut(entry.did)
-    } catch {
-      // Offline or refused: the reader asked to sign out, so the entry goes.
-    }
+  const d = blueskyDriver()
+  if (entry && isBlueskySession(entry) && entry.generation === generation && d) {
+    // Offline, refused or hung: the reader asked to sign out, so the entry
+    // goes. The wait is bounded (rule 12).
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      d.signOut(entry.did).catch(() => {}),
+      new Promise<void>((r) => { timer = setTimeout(r, SIGN_OUT_WAIT_MS) }),
+    ])
+    clearTimeout(timer)
   }
   const current = users.value.get(userKey)
   if (current?.generation === generation) {
@@ -196,6 +205,23 @@ export async function signOutBluesky(userKey: UserKey, generation: string): Prom
     saveToStorage()
   }
   return activeUser.value
+}
+
+/**
+ * Rule 11: a sign-in for an account that is already stored kept its new
+ * session after a mismatch. The entry gets a new `generation` and no
+ * `expired`, as a sign-in gives it (rule 1); the active account stays.
+ * Returns false, and changes nothing, when there is no such entry.
+ */
+export function renewSession(userKey: UserKey): boolean {
+  const current = users.value.get(userKey)
+  if (!current) return false
+  const { expired: _, ...rest } = current
+  const next = new Map(users.value)
+  next.set(userKey, { ...rest, generation: newGeneration() } as UserSession)
+  users.value = next
+  saveToStorage()
+  return true
 }
 
 export function removeActiveUser(): void {

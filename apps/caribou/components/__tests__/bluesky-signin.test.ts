@@ -61,6 +61,11 @@ describe('blueskyOAuthConfig: the client id comes from one place', () => {
     expect(c.handleResolver).toBe('http://localhost:3182')
   })
 
+  it('[::1] is a loopback host too', () => {
+    expect(new URL(blueskyOAuthConfig('http://[::1]:3182').clientId).searchParams.get('redirect_uri'))
+      .toBe('http://127.0.0.1:3182/signin/bluesky')
+  })
+
   it('a public host uses the client metadata document on its own origin', () => {
     expect(blueskyOAuthConfig('https://caribou.example.com')).toEqual({
       clientId: 'https://caribou.example.com/oauth/client-metadata.json',
@@ -89,6 +94,8 @@ describe('caribou-signin-panels: the ARIA tabs pattern', () => {
     expect(tabs.map((t) => t.getAttribute('aria-selected'))).toEqual(['true', 'false'])
     expect(tabs.map((t) => t.getAttribute('tabindex'))).toEqual(['0', '-1'])
     expect(panels.map((p) => p.hidden)).toEqual([false, true])
+    // Each panel holds a form, so the panel itself is not a tab stop.
+    expect(panels.map((p) => p.hasAttribute('tabindex'))).toEqual([false, false])
   })
 
   it('arrow keys move, wrap and select; Home and End go to the ends', async () => {
@@ -223,5 +230,25 @@ describe('caribou-signout-form with a Bluesky account', () => {
     expect(urls).not.toContain('/api/signout')
     expect(urls.some((u) => u.endsWith('/api/signout'))).toBe(false)
     expect(fetchSpy.mock.calls.find(([u]) => String(u) === '/api/instance')?.[1]).toMatchObject({ body: '{"server":"example.social"}' })
+  })
+})
+
+describe('loopback hosts other than 127.0.0.1', () => {
+  const happyDOM = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM
+  afterEach(() => { happyDOM.setURL('http://localhost:3000/') })
+
+  it.each(['http://localhost:3182/', 'http://[::1]:3182/'])('%s: says to open 127.0.0.1, sends nothing', async (url) => {
+    happyDOM.setURL(url)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(await session.startBlueskySignIn('alice.example.com')).toBe('Open Caribou at http://127.0.0.1:3182 to sign in to Bluesky.')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('the callback page does not load an account while it leaves', () => {
+  it('loadsAccountOn', () => {
+    expect(session.loadsAccountOn('/signin/bluesky')).toBe(false)
+    expect(session.loadsAccountOn('/home')).toBe(true)
   })
 })

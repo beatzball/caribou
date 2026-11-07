@@ -47,9 +47,29 @@ function isCurrent(it: NavItem, active: string): boolean {
 
 const PROFILE: NavItem = { label: 'Profile', icon: 'user', href: '/@me' }
 
-/** `@name@server`: the handle that names the account on any server. */
-export function fullHandle(user: Pick<UserSession, 'userKey' | 'account' | 'server'>): string {
-  return `@${userName(user)}@${user.server}`
+/**
+ * The handle that names the account anywhere: `@name@server` on Mastodon,
+ * `@handle` on Bluesky.
+ */
+export function fullHandle(user: Pick<UserSession, 'userKey' | 'account' | 'server'> & { network?: string; handle?: string }): string {
+  return user.network === 'bluesky' ? `@${userName(user)}` : `@${userName(user)}@${user.server}`
+}
+
+// "Sign out of @…". A Mastodon account keeps the plain text; a Bluesky one
+// adds its network (in an element: happy-dom misplaces a binding at the top
+// level of a nested template).
+function signOutLabel(user: UserSession) {
+  if (user.network !== 'bluesky') return `Sign out of ${fullHandle(user)}`
+  return html`<span>Sign out of ${fullHandle(user)}${networkLabel(user)}</span>`
+}
+
+/**
+ * ", Bluesky" for a Bluesky account, read by assistive technology only: the
+ * network icon is hidden from it, and `alice@example.social` and
+ * `alice.example.social` look alike (spec 5.6). Nothing for Mastodon.
+ */
+export function networkLabel(user: { network?: string } | null | undefined) {
+  return user?.network === 'bluesky' ? html`<span class="sr-only">, Bluesky</span>` : nothing
 }
 
 /** The stored accounts, the active one first, the rest in stored order. */
@@ -386,7 +406,7 @@ export class CaribouNavRail extends LitElement {
     const name = user ? user.account?.displayName || userName(user) : ''
     return [this.renderAvatar(user), html`<span class="who-text">${before
       ? html`<span class="sr-only">${before} </span>` : nothing}<span class="who-name">${name}</span>
-      <span class="who-acct">${user ? fullHandle(user) : ''}</span></span>`]
+      <span class="who-acct">${user ? fullHandle(user) : ''}${networkLabel(user)}</span></span>`]
   }
 
   // The account list, Add account and Sign out: the account menu's items,
@@ -417,7 +437,7 @@ export class CaribouNavRail extends LitElement {
         <form action="/api/signout" method="post" class="signout-form">
           <button type="submit" class="signout-btn menu-item">
             <caribou-icon class="icon" name="logOut"></caribou-icon>${current
-              ? `Sign out of ${fullHandle(current)}` : 'Sign out'}
+              ? signOutLabel(current) : 'Sign out'}
           </button>
         </form>
       </caribou-signout-form>`,

@@ -21,7 +21,7 @@ import { startTheme } from './components/_theme.js'
 import { startChangelogSeen } from './components/_changelog-seen.js'
 import { startShortcuts } from './components/_shortcuts.js'
 import { blueskyEnabled, loadBluesky } from './components/_bluesky.js'
-import { installBlueskyDriver } from './components/_bluesky-session.js'
+import { installBlueskyDriver, loadsAccountOn } from './components/_bluesky-session.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
@@ -42,7 +42,8 @@ if (typeof window !== 'undefined') {
   startTheme(window, document)
   // A session from sign-in has no account yet. Load it in the background,
   // now and whenever the active user changes.
-  activeUserKey.subscribe(() => { void loadActiveAccount() })
+  // Not on the Bluesky callback page, which leaves for /home at once.
+  if (loadsAccountOn(location.pathname)) activeUserKey.subscribe(() => { void loadActiveAccount() })
   // A client that gets a 401 fires `caribou:unauthorized` with its session.
   // Land as the next stored account, or on `/` when none is left.
   installUnauthorizedHandler(window, (req) => { void land(req) })

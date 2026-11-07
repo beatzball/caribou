@@ -17,7 +17,7 @@ const ISSUER = 'https://auth.example.test'
 const OTHER_PDS = 'https://other-pds.example.test'
 const OTHER_ISSUER = 'https://other-auth.example.test'
 
-const HANDLES: Record<string, string> = { 'alice.example.com': ALICE }
+const HANDLES: Record<string, string> = { 'alice.example.com': ALICE, 'bob.example.com': BOB }
 
 // Each DID's PDS. Mallory's PDS trusts another authorization server, so a
 // token from ours naming Mallory fails the SDK's issuer check.
@@ -96,6 +96,7 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}
   const state: FixtureAuth = { sub: opts.sub ?? null, tokenRequests: [], revoked: [], pdsCalls: [], revokedAtServer: false }
   const pars = new Map<string, URLSearchParams>()
   const codes = new Map<string, URLSearchParams>()
+  let issued = 0
 
   // Caribou's own handle resolver (#181 serves it; the test answers for it).
   await page.route('**/xrpc/com.atproto.identity.resolveHandle?*', (route) => {
@@ -143,9 +144,11 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}
     if (body.get('grant_type') !== 'authorization_code' || !par) return json(route, { error: 'invalid_grant' }, 400)
     const hint = par.get('login_hint') ?? ''
     const sub = state.sub ?? (hint.startsWith('did:') ? hint : HANDLES[hint] ?? ALICE)
+    // Each swap gives new tokens, so a test can tell an old one from a new one.
+    issued++
     return json(route, {
-      access_token: `access-${sub}`, token_type: 'DPoP', expires_in: 3600,
-      refresh_token: `refresh-${sub}`, scope: 'atproto transition:generic', sub,
+      access_token: `access-${sub}-${issued}`, token_type: 'DPoP', expires_in: 3600,
+      refresh_token: `refresh-${sub}-${issued}`, scope: 'atproto transition:generic', sub,
     })
   })
 

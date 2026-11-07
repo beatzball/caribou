@@ -3,7 +3,8 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import { CaribouError, type CaribouClient, type Capabilities } from '@beatzball/caribou-mastodon-client'
 import {
   users, activeUserKey, activeUser, activeClient,
-  addUserSession, markExpired, userName, loadFromStorage, signOutBluesky,
+  addUserSession, markExpired, userName, loadFromStorage, signOutBluesky, renewSession, loadActiveAccount,
+  SIGN_OUT_WAIT_MS,
   type UserSession, type BlueskySession,
 } from '../users.js'
 import {
@@ -83,9 +84,9 @@ describe('Bluesky session shape', () => {
     expect(isBlueskySession(masto())).toBe(false)
   })
 
-  it('userName is the handle', () => {
+  it('userName is the loaded account handle, else the stored handle', () => {
     expect(userName(bsky())).toBe('alice.example.com')
-    expect(userName(bsky({ account: { acct: 'new.example.com' } as never }))).toBe('alice.example.com')
+    expect(userName(bsky({ account: { acct: 'new.example.com' } as never }))).toBe('new.example.com')
   })
 
   it('survives a reload from storage, with its generation', () => {
@@ -121,6 +122,26 @@ describe('activeClient for Bluesky (rules 8 to 10)', () => {
     expect(d.restore).toHaveBeenCalledTimes(1)
     expect(d.restore.mock.calls[0]![0]).toMatchObject({ did: 'did:plc:alice', generation: 'B1' })
     expect(blueskyRestore.value).toBe('ready')
+  })
+
+  it('one restore per sign-in: a new client object for the same sign-in shares it', async () => {
+    const d = driver()
+    setBlueskyDriver(d)
+    addUserSession(bsky())
+    await activeClient.value!.fetchStatus('x')
+    // The entry object changes (its account loaded): a new client object.
+    users.value = new Map(users.value).set(bskyKey, { ...bsky(), account: { acct: 'alice.example.com' } as never })
+    const second = activeClient.value!
+    const seen: string[] = []
+    const stop = blueskyRestore.subscribe((v) => { seen.push(v) })
+    await second.fetchStatus('y')
+    stop()
+    expect(d.restore).toHaveBeenCalledTimes(1)
+    expect(seen).not.toContain('pending')
+    // A new sign-in (new generation) restores again.
+    addUserSession(bsky({ generation: 'B2' }))
+    await activeClient.value!.fetchStatus('z')
+    expect(d.restore).toHaveBeenCalledTimes(2)
   })
 
   it('shows pending while the restore runs', async () => {
@@ -230,6 +251,22 @@ describe('signOutBluesky (rule 12)', () => {
     expect(fetchCalls()).toEqual([])
   })
 
+  it('a revoke that hangs: the entry is dropped after the bounded wait', async () => {
+    vi.useFakeTimers()
+    try {
+      setBlueskyDriver(driver({ signOut: vi.fn(() => new Promise<void>(() => {})) }))
+      addUserSession(bsky())
+      const done = signOutBluesky(bskyKey, 'B1')
+      await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS - 1)
+      expect(users.value.has(bskyKey)).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+      await done
+      expect(users.value.has(bskyKey)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a failed revoke still drops the entry', async () => {
     setBlueskyDriver(driver({ signOut: vi.fn(async () => { throw new Error('offline') }) }))
     addUserSession(bsky())
@@ -254,3 +291,48 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchSpy)
 })
 afterEach(() => { vi.unstubAllGlobals() })
+
+describe('renewSession (rule 11: a kept session after a mismatch)', () => {
+  it('new generation, no expired, the active account stays', () => {
+    addUserSession(bsky())
+    addUserSession(masto())
+    markExpired(bskyKey, 'B1')
+    expect(renewSession(bskyKey)).toBe(true)
+    const e = users.value.get(bskyKey)!
+    expect(e.generation).not.toBe('B1')
+    expect(e.expired).toBeUndefined()
+    expect(activeUserKey.value).toBe(mastoKey)
+    expect(JSON.parse(localStorage.getItem('caribou.users')!)[0][1].generation).toBe(e.generation)
+  })
+
+  it('no such entry: false, nothing changes', () => {
+    addUserSession(masto())
+    expect(renewSession(bskyKey)).toBe(false)
+    expect(users.value.size).toBe(1)
+  })
+})
+
+describe('loadActiveAccount for Bluesky (rule 7)', () => {
+  it('loads on every page load and writes the handle', async () => {
+    const real = fakeClient()
+    ;(real.verifyCredentials as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'did:plc:alice', acct: 'alice.renamed.example.com' })
+    setBlueskyDriver(driver({ restore: vi.fn(async () => real) }))
+    addUserSession(bsky({ account: { id: 'did:plc:alice', acct: 'alice.example.com' } as never }))
+    await loadActiveAccount()
+    expect(users.value.get(bskyKey)).toMatchObject({ handle: 'alice.renamed.example.com', account: { acct: 'alice.renamed.example.com' } })
+  })
+
+  it('a late answer for an older sign-in writes nothing', async () => {
+    let answer!: (v: unknown) => void
+    const real = fakeClient()
+    ;(real.verifyCredentials as ReturnType<typeof vi.fn>).mockReturnValue(new Promise((r) => { answer = r }))
+    setBlueskyDriver(driver({ restore: vi.fn(async () => real) }))
+    addUserSession(bsky())
+    const loading = loadActiveAccount()
+    await Promise.resolve()
+    addUserSession(bsky({ generation: 'B2' }))
+    answer({ id: 'did:plc:alice', acct: 'stale.example.com' })
+    await loading
+    expect(users.value.get(bskyKey)).toMatchObject({ generation: 'B2', handle: 'alice.example.com', account: null })
+  })
+})

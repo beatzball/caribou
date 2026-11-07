@@ -352,6 +352,12 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   resolves it through Caribou's resolver (the same one the SDK uses). For a
   PDS host there is none. It goes into the SDK's `state`, which comes back
   on the callback.
+- **A callback with no parameters** (a bookmark, a reload after a used
+  callback) throws `NoCallbackParams` before the SDK is asked: "This
+  sign-in link was already used or has expired."
+- **Back from the authorization page.** The SDK's redirect rejects with
+  "User navigated back" when the page is still there after 5 s.
+  `beginSignIn` throws `SignInCancelled` for it: "Sign-in was cancelled."
 - **The callback calls `initCallback()` once** and acts on its result. That
   is what `init()` does on a callback URL; `init()` is not used, because on a
   URL without callback parameters it restores the SDK's last session, which
@@ -360,12 +366,22 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   code, checks that the issuer is the DID's own authorization server, and
   removes the fragment.
 - **The `sub` check.** When there is an expected DID and the session's DID
-  differs, `completeSignIn` calls `session.signOut()` (revoke, and delete the
-  stored tokens) and throws `SignInMismatch`. The app stores nothing.
+  differs, `completeSignIn` throws `SignInMismatch`. A failed attempt never
+  changes another account's session. The SDK cannot be made to check
+  before it stores: its callback revokes the DID's earlier session and
+  stores the new one before it returns. So `completeSignIn` takes
+  `isKnown(did)`. When the DID is not a Caribou account, it revokes the new
+  session (`oauth.revoke(did)`); `SignInMismatch.kept` is false. When it
+  is one, the new session stays as that account's session and `kept` is
+  true; the app renews that entry (state rule 11).
 - **After the swap.** `completeSignIn` reads the profile with `getProfile`
   and the PDS from the token's audience, and answers `{ did, handle, pds,
   profile }`. A failed profile read does not fail the sign-in: the handle
   is then the one typed, or the DID.
+- **401.** The client's `onUnauthorized` is wired to `onExpired`. The SDK
+  deletes a session only on a 401 with a `DPoP`/`Bearer` challenge naming
+  `invalid_token`; any other 401 is also the end of the session for
+  Caribou. Transport errors are not 401s.
 - **Restore.** `restoreClient(oauth, did, opts)` calls `oauth.restore(did)`
   (by Caribou's stored DID, never the SDK's own last-session pointer),
   makes an `Agent`, loads the reader's moderation prefs and label
@@ -379,15 +395,20 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   `getLabelerServices` for every subscribed labeler plus Bluesky's. Either
   that fails is `null`, which `moderate()` treats as missing (fail closed).
   `restoreClient` answers them with the client, for the reader veil.
-- **The deleted event.** The SDK's `onSessionDeleted` (here or in another
-  tab) makes every restored client for that DID check: it calls
+- **The deleted event.** One listener per DID and sign-in (`opts.key`): a
+  restore for a new sign-in drops the listeners of earlier ones. The SDK's
+  `onSessionDeleted` (here or in another tab) makes the client check: it calls
   `oauth.restore(did, false)`, and only when that says the session is gone
   does it call `onExpired`. The event can be late: a restore that started
   before a new sign-in to the same DID stored its tokens reports the
   session deleted, and the new sign-in must not be marked expired. A 401 on
   a request never sends `caribou:unauthorized`.
-- **Sign-out.** `signOut(oauth, did)` restores the session and calls
-  `session.signOut()`; with no stored session it does nothing.
+- **Sign-out.** `signOut(oauth, did)` calls the SDK's `revoke(did)`, not
+  `restore` and `signOut`: `revoke` deletes the stored tokens in a
+  `finally`, also when the issuer cannot be reached. With no stored
+  session it does nothing. While it runs, every SDK request is cut off
+  after `SIGN_OUT_TIMEOUT_MS` (5 s), through the SDK's `fetch` option, so a
+  revoke that hangs still ends and the tokens are deleted.
 
 ## Embeds (`mapEmbed`, spec 7.3)
 

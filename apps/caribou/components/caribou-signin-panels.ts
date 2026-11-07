@@ -17,7 +17,8 @@ const TABS: readonly { id: SigninNetwork; label: string }[] = [
  * the ARIA tabs pattern, with automatic activation: Left and Right move to
  * the previous and next tab and wrap, Home and End go to the first and last.
  * Only the selected tab is in the tab order (roving tabindex); Tab from it
- * goes into its panel.
+ * goes to the panel's first field (a panel holds a form, so it is not a
+ * tab stop itself).
  */
 @customElement('caribou-signin-panels')
 export class CaribouSigninPanels extends LitElement {
@@ -34,7 +35,6 @@ export class CaribouSigninPanels extends LitElement {
     }
     [role="tab"][aria-selected="true"] { color: var(--fg-0); border-bottom-color: var(--accent); font-weight: 600; }
     [role="tab"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    [role="tabpanel"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
     [hidden] { display: none; }
   `]
 
@@ -77,11 +77,11 @@ export class CaribouSigninPanels extends LitElement {
             @click=${() => this.select(t.id, false)}>${t.label}</button>
         `)}
       </div>
-      <div role="tabpanel" id="panel-mastodon" aria-labelledby="tab-mastodon" tabindex="0"
+      <div role="tabpanel" id="panel-mastodon" aria-labelledby="tab-mastodon"
         ?hidden=${this.selected !== 'mastodon'}>
         <caribou-instance-picker ?add=${this.add}></caribou-instance-picker>
       </div>
-      <div role="tabpanel" id="panel-bluesky" aria-labelledby="tab-bluesky" tabindex="0"
+      <div role="tabpanel" id="panel-bluesky" aria-labelledby="tab-bluesky"
         ?hidden=${this.selected !== 'bluesky'}>
         <caribou-bluesky-signin></caribou-bluesky-signin>
       </div>

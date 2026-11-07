@@ -57,10 +57,18 @@ export interface BlueskyDriver {
 
 let driver: BlueskyDriver | null = null
 
-/** Sets the driver the Bluesky clients use. `null` removes it (tests). */
+/** Sets the driver the Bluesky clients use. `null` removes it (tests). Forgets every restore. */
 export function setBlueskyDriver(d: BlueskyDriver | null): void {
   driver = d
+  restores.clear()
 }
+
+// Rule 9: one restore per sign-in, kept by `userKey` and `generation`.
+interface Restore {
+  ready: Promise<CaribouClient> | null
+  gone: boolean
+}
+const restores = new Map<string, Restore>()
 
 export function blueskyDriver(): BlueskyDriver | null {
   return driver
@@ -79,17 +87,26 @@ const SYNC = new Set<PropertyKey>(['userKey', 'capabilities', 'timelineOrder'])
  */
 export function deferredBlueskyClient(session: BlueskySession, emitExpired: () => void): CaribouClient {
   const d = driver
-  let ready: Promise<CaribouClient> | null = null
-  let gone = false
+  const id = `${session.userKey} ${session.generation}`
+  let r = restores.get(id)
+  if (!r) {
+    r = { ready: null, gone: false }
+    restores.set(id, r)
+  }
+  const restore = r
   const hooks: BlueskyRestoreHooks = {
-    onExpired: () => { gone = true; emitExpired() },
+    onExpired: () => {
+      if (restore.gone) return
+      restore.gone = true
+      emitExpired()
+    },
   }
   const unauthorized = () => new CaribouError('unauthorized', 'Bluesky session ended')
 
   function client(): Promise<CaribouClient> {
     if (!d) return Promise.reject(new CaribouError('unauthorized', 'Bluesky is not available'))
-    if (gone) return Promise.reject(unauthorized())
-    if (!ready) {
+    if (restore.gone) return Promise.reject(unauthorized())
+    if (!restore.ready) {
       blueskyRestore.value = 'pending'
       const run = d.restore(session, hooks).then(
         (c) => {
@@ -103,13 +120,13 @@ export function deferredBlueskyClient(session: BlueskySession, emitExpired: () =
             throw unauthorized()
           }
           // Rule 9: a failed restore that is not "gone" is tried again.
-          ready = null
+          restore.ready = null
           throw err
         },
       )
-      ready = run
+      restore.ready = run
     }
-    return ready
+    return restore.ready
   }
 
   const base = {
@@ -123,7 +140,7 @@ export function deferredBlueskyClient(session: BlueskySession, emitExpired: () =
       // Not a thenable: `await client` must give the client.
       if (prop === 'then' || typeof prop === 'symbol') return undefined
       return (...args: unknown[]) => client().then((c) => {
-        if (gone) throw unauthorized()
+        if (restore.gone) throw unauthorized()
         const fn = (c as unknown as Record<string, unknown>)[prop]
         if (typeof fn !== 'function') throw new TypeError(`Bluesky client has no method ${prop}`)
         return (fn as (...a: unknown[]) => unknown).apply(c, args)

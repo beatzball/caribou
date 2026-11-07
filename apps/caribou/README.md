@@ -474,7 +474,17 @@ state at once and then call `land()` in `components/_switch-account.ts`. That
 one coordinated landing points the instance cookie at the new active
 account's server, then does one full navigation: the same page when it means
 the same for any account (`pathAfterSwitch`), else `/home`; `/` when no account
-is left. Requests that arrive while a landing runs join it. A 401 on an
+is left. When the new active account is Bluesky, `/local` and `/public` go to
+`/home` (Bluesky has neither). A Bluesky profile or post path (`/@did:…`,
+`/@<dotted handle>`, either with `/<rkey>`; spec 8.4) is kept for any
+account: a DID and an AT URI are global. A Bluesky account has no server, so
+no cookie is written for it.
+
+**Account names.** `fullHandle` is `@name@server` for Mastodon and `@handle`
+for Bluesky. A Bluesky account row, in the rail's account menu and on
+/settings, says "Bluesky" in its accessible name (`networkLabel`): the
+network icon is hidden from assistive technology, and `alice@example.social`
+and `alice.example.social` look alike. Mastodon rows do not change. Requests that arrive while a landing runs join it. A 401 on an
 account that is not active removes only that account, with no reload.
 A 401 for an earlier sign-in of an account (`generation`) changes nothing.
 `caribou:session-expired` marks the account expired and changes nothing on
