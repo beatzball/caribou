@@ -63,8 +63,10 @@ jobs:
 
   # One job per Playwright project (see apps/caribou/playwright.config.ts),
   # all in parallel. Before this split, one job ran the four projects one
-  # after another: about 13-15 min (Nov 2026). Now the wall time is about the
-  # slowest project. The `e2e` job below gathers the results.
+  # after another: about 13-15 min (Nov 2026). Now the wall time is the
+  # slowest job, webkit, at about 7.5 min. The others take about 5 min
+  # (firefox), 3.5 min (chromium) and 2 min (mobile-webkit). The `e2e` job
+  # below gathers the results.
   e2e-browser:
     # The release PR only bumps versions and changelogs. Its merge to main
     # runs e2e again before deploy, so running it on the PR too buys nothing.
@@ -73,7 +75,7 @@ jobs:
     if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
     name: e2e (${{ matrix.project }})
     runs-on: ubuntu-latest
-    # One project takes about 3-5 min of tests, plus about 2 min of setup.
+    # The slowest job (webkit) takes about 7.5 min, setup included.
     timeout-minutes: 15
     needs: checks
     strategy:
