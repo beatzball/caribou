@@ -106,6 +106,14 @@ export class CaribouStatusMedia extends LitElement {
       border: 0; border-radius: var(--radius-sm);
     }
     caribou-button.reveal::part(button) { block-size: 100%; }
+    /* No-override: the same place as Show, but text, not a control. */
+    .locked {
+      position: absolute; inset: 0; margin: 0;
+      display: flex; align-items: center; justify-content: center;
+      padding: var(--space-2); text-align: center; font-weight: 600;
+      color: var(--fg-1); background: var(--bg-2);
+      border-radius: var(--radius-sm);
+    }
     caribou-button.hide::part(button) { padding: var(--space-1) var(--space-2); }
     /* Drawn over the media, so the ring goes inside the box. */
     caribou-button:is(.reveal, .hide)::part(button):focus-visible { outline-offset: -2px; }
@@ -125,6 +133,11 @@ export class CaribouStatusMedia extends LitElement {
   // The reader opened the post's content warning, so sensitive media starts
   // shown. The Hide button still hides it.
   @property({ type: Boolean }) revealed = false
+  // A Bluesky label the reader may not override (spec 7.4: an adult label
+  // with adult content off, a no-override label, or one Caribou could not
+  // check). Sensitive media then stays hidden: no Show button, and
+  // `revealed` does not open it.
+  @property({ type: Boolean, attribute: 'no-override' }) noOverride = false
 
   // The reader's own click on Show or Hide; null follows `revealed`.
   @state() private shown: boolean | null = null
@@ -318,7 +331,8 @@ export class CaribouStatusMedia extends LitElement {
   override render() {
     const items = this.media.slice(0, MAX_ITEMS)
     if (items.length === 0) return nothing
-    const hidden = this.sensitive && !(this.shown ?? this.revealed)
+    const locked = this.sensitive && this.noOverride
+    const hidden = locked || (this.sensitive && !(this.shown ?? this.revealed))
     return html`
       <div class="media">
         <div class="grid" data-count=${items.length}>
@@ -330,6 +344,8 @@ export class CaribouStatusMedia extends LitElement {
         </div>
         ${!this.sensitive
           ? nothing
+          : locked
+            ? html`<p class="locked">Media hidden by a content label</p>`
           : hidden
             ? html`<caribou-button class="reveal" @click=${() => this.setShown(true)}>Show sensitive media</caribou-button>`
             : html`<caribou-button class="hide" @click=${() => this.setShown(false)}>Hide</caribou-button>`}
