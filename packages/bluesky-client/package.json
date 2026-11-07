@@ -25,8 +25,11 @@
     "@beatzball/caribou-eslint-config": "workspace:*",
     "@beatzball/caribou-state": "workspace:*",
     "@beatzball/caribou-tsconfig": "workspace:*",
+    "@types/jsdom": "^21.1.7",
     "@vitest/coverage-v8": "^2.1.0",
+    "dompurify": "^3.4.1",
     "eslint": "^9.0.0",
+    "jsdom": "^25.0.1",
     "typescript": "^5.7.3",
     "vitest": "^2.1.0"
   }
