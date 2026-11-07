@@ -118,10 +118,11 @@ function signIn(server = 'example.social'): NonNullable<typeof activeClient.valu
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0))
 
-async function mountWith(account: Account, instance = 'example.social'): Promise<CaribouProfileHeader> {
+async function mountWith(account: Account, instance = 'example.social', viewerOf: string | null = null): Promise<CaribouProfileHeader> {
   const el = document.createElement('caribou-profile-header') as CaribouProfileHeader
   el.account = account
   el.instance = instance
+  el.viewerOf = viewerOf
   document.body.appendChild(el)
   await el.updateComplete
   await flush()
@@ -417,7 +418,15 @@ describe('<caribou-profile-header> mute and block', () => {
 describe('<caribou-profile-header> across networks', () => {
   const BSKY = {
     ...ACCOUNT, id: 'did:plc:bob', acct: 'bob.example.com',
-    bluesky: { did: 'did:plc:bob', handleInvalid: false },
+    // A clean decision, made for the reader that looked the account up.
+    bluesky: {
+      did: 'did:plc:bob', handleInvalid: false,
+      moderation: {
+        contexts: Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView']
+          .map((c) => [c, { filter: false, blur: false, alert: false, inform: false, noOverride: false, reasons: [] }])),
+        labelersCovered: [],
+      },
+    },
   } as unknown as Account
   const asBluesky = (client: NonNullable<typeof activeClient.value>) => {
     (client as { capabilities: typeof client.capabilities }).capabilities =
@@ -448,7 +457,7 @@ describe('<caribou-profile-header> across networks', () => {
     asBluesky(client)
     const lookup = vi.spyOn(client, 'lookupAccount')
     const fetchRel = vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ id: 'did:plc:bob' })])
-    const el = await mountWith(BSKY, '')
+    const el = await mountWith(BSKY, '', client.userKey)
     expect(lookup).not.toHaveBeenCalled()
     expect(fetchRel).toHaveBeenCalledWith(['did:plc:bob'])
     expect(button(el)?.textContent).toBe('Follow')

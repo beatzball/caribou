@@ -30,13 +30,15 @@ function mastodonPost(over: Record<string, unknown> = {}): Status {
   } as unknown as Status
 }
 
-function blueskyPost(handleInvalid = false): Status {
+// `viewerOf`: whose decision the copy carries (README, "A decision belongs
+// to one reader"). A Mastodon or signed-out reader gets the public copy.
+function blueskyPost(handleInvalid = false, viewerOf: StatusBluesky['viewerOf'] = null): Status {
   const bluesky: StatusBluesky = {
     uri: POST_URI, cid: 'bafy1', likeUri: null, repostUri: null, replyRef: null,
     replyDisabled: false, embeddingDisabled: false, labels: [],
     // A clean result: every context present, nothing covered.
     moderation: { contexts: Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView'].map((c) => [c, { filter: false, blur: false, alert: false, inform: false, noOverride: false, reasons: [] }])), labelersCovered: [BSKY_LABELER] } as unknown as StatusBluesky['moderation'],
-    viewerOf: ME,
+    viewerOf,
   }
   return mastodonPost({
     id: POST_URI,
@@ -183,10 +185,10 @@ describe('Mastodon reader, Bluesky post', () => {
 describe('Bluesky reader', () => {
   it('Bluesky post: live buttons on any page, and the click goes to the active client with the post\'s ref', async () => {
     signIn('bluesky')
-    const favourite = vi.spyOn(activeClient.value!, 'favourite').mockResolvedValue(blueskyPost())
-    cacheStatus(blueskyPost())
+    const favourite = vi.spyOn(activeClient.value!, 'favourite').mockResolvedValue(blueskyPost(false, ME))
+    cacheStatus(blueskyPost(false, ME))
     // The page's instance is a Mastodon host; a Bluesky post has none.
-    const el = await mount(blueskyPost(), 'other.example')
+    const el = await mount(blueskyPost(false, ME), 'other.example')
     expect(soft(button(el, 'favourite'))).toBe(false)
     button(el, 'favourite').click()
     expect(favourite).toHaveBeenCalledWith(expect.objectContaining({

@@ -7,8 +7,9 @@ import { vi } from 'vitest'
 import type { CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { createBlueskyClient, type BlueskyAgent } from '@beatzball/caribou-bluesky-client/browser'
 import {
-  labelDefsFromServices, moderate, type BlueskyReader, type LabelDefs,
+  LOGGED_OUT_PREFS, labelDefsFromServices, moderate, type BlueskyReader, type LabelDefs,
 } from '@beatzball/caribou-bluesky-client/moderation'
+import { mapPost } from '@beatzball/caribou-bluesky-client'
 import { addUserSession } from '@beatzball/caribou-state'
 import {
   BSKY_LABELER, BSKY_SERVICE, LABELER, LABELER_SERVICE,
@@ -120,5 +121,17 @@ export function asPostView<T extends object>(view: T): T {
 export async function mappedPost(view: object, mod: ModerationOptions = {}): Promise<Status> {
   const agent = fakeAgent({ getPosts: vi.fn(async () => ({ data: { posts: [asPostView(view)] } })) })
   const status = await blueskyClient(agent, mod).fetchStatus((view as { uri: string }).uri)
+  return JSON.parse(JSON.stringify(status)) as Status
+}
+
+/**
+ * One post as a signed-out reader gets it (the server's copy): mapped with
+ * no viewer and moderated with the logged-out defaults, then through JSON.
+ */
+export function publicPost(view: object): Status {
+  const status = mapPost(asPostView(view) as never, {
+    viewerOf: null,
+    moderatePost: (v) => moderate({ kind: 'post', view: v }, undefined, LOGGED_OUT_PREFS, DEFS, { labelersCovered: [BSKY_LABELER] }),
+  })
   return JSON.parse(JSON.stringify(status)) as Status
 }

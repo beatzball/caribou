@@ -55,7 +55,7 @@ export const BLUESKY_RETRY_EVENT = 'caribou:bluesky-moderation-retry'
 
 // A result with a context missing is not one Caribou can trust: covered,
 // no Show, with Retry (fail closed, as `moderate()` does when the SDK throws).
-const UNREADABLE: BlueskyModerationUi = Object.freeze({
+export const UNREADABLE: BlueskyModerationUi = Object.freeze({
   filter: false, blur: true, alert: false, inform: false, noOverride: true,
   reasons: [{ label: '', source: '', name: 'Content warning (moderation failed)' }],
 })
@@ -125,4 +125,30 @@ export function _testOnlyResetBlueskyVeil(): void {
 /** Tests only: wait for the lazy load of the check. */
 export function _testOnlyVeilLoaded(): Promise<void> {
   return loading ?? Promise.resolve()
+}
+
+/**
+ * The reader a Bluesky decision must be made for: the active Bluesky
+ * account's user key, or null with no Bluesky account active (signed out,
+ * or a Mastodon account). README, "A decision belongs to one reader".
+ */
+export function currentBlueskyReader(client: Pick<CaribouClient, 'userKey' | 'capabilities'> | null): string | null {
+  return client?.capabilities.network === 'bluesky' ? client.userKey : null
+}
+
+/** The note that takes the place of an author who asked not to be seen signed out (spec 8.3). */
+export const NO_UNAUTHENTICATED_NOTE = 'This account asked to be seen only by signed-in readers.'
+
+/**
+ * True when the account self-labels `!no-unauthenticated` (not negated).
+ * The same rule as `isNoUnauthenticated` in the bluesky package (a test
+ * keeps them equal), over the account's mapped labels.
+ */
+export function asksNoUnauthenticated(account: { bluesky?: { labels?: readonly { val: string; neg?: boolean }[] } | null }): boolean {
+  return (account.bluesky?.labels ?? []).some((l) => l.val === '!no-unauthenticated' && !l.neg)
+}
+
+/** A copy's decision fits the current reader only when it was made for that reader. */
+export function decisionFits(viewerOf: string | null | undefined, reader: string | null): boolean {
+  return (viewerOf ?? null) === reader
 }

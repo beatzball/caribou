@@ -74,6 +74,10 @@ export class CaribouProfile extends LitElement {
   // instance the page came from. In both cases the store cannot fetch a
   // valid page in place.
   @state() private canFetch = false
+  // Whose decision a Bluesky account's moderation is: the reader whose
+  // client looked it up, or null for the server's copy (README, "A decision
+  // belongs to one reader").
+  @state() private accountViewerOf: string | null = null
 
   private store: ProfileStore | null = null
   private dispose: (() => void) | null = null
@@ -127,6 +131,7 @@ export class CaribouProfile extends LitElement {
     } else {
       const server = activeUser.value?.server ?? ''
       const cache = createAccountCache(clientSource)
+      this.accountViewerOf = clientSource()?.userKey ?? null
       account = await cache.lookup(this.handle.replace(/^@/, ''))
       this.accountServer = server
       if (account) {
@@ -254,7 +259,7 @@ export class CaribouProfile extends LitElement {
     // happy-dom's parser drops a child binding that has no parent element,
     // and the component tests would never see the link.
     return html`
-      <caribou-profile-header .account=${account} instance=${this.instance || this.accountServer}></caribou-profile-header>
+      <caribou-profile-header .account=${account} .viewerOf=${this.accountViewerOf} instance=${this.instance || this.accountServer}></caribou-profile-header>
       <caribou-profile-tabs handle=${linkHandle} tab=${this.tab}></caribou-profile-tabs>
       <div class="posts">
         <ul>

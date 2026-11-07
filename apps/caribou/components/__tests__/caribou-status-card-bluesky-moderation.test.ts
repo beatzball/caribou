@@ -3,7 +3,7 @@ import type { Account, Status, StatusBluesky } from '@beatzball/caribou-mastodon
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  LABELER_UNAVAILABLE, MODERATION_FAILED, UNKNOWN_LABEL,
+  LABELER_UNAVAILABLE, MODERATION_FAILED, UNKNOWN_LABEL, isNoUnauthenticated,
 } from '@beatzball/caribou-bluesky-client/moderation'
 import {
   activeUserKey, addUserSession, statusCache, users,
@@ -16,12 +16,12 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 import type { CaribouStatusMedia } from '../caribou-status-media.js'
 import type { CaribouStatusLinkCard } from '../caribou-status-link-card.js'
 import {
-  _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, isFailClosed, setBlueskyReader,
+  _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, asksNoUnauthenticated, isFailClosed, setBlueskyReader,
 } from '../_bluesky-moderation.js'
 import { blueskyClients } from './_bluesky-clients.js'
 import {
   ALICE, BSKY_LABELER, LABELER, READER_DID, asPostView, author, blueskyClient, fakeAgent, label,
-  mappedPost, post, prefs, quoting, readerOf, signInBluesky, type FakeAgent,
+  mappedPost, post, prefs, publicPost, quoting, readerOf, signInBluesky, type FakeAgent,
 } from './_bluesky-helpers.js'
 
 // Moderation wired into the card (#184; spec 7.4; rules in the app README,
@@ -92,6 +92,17 @@ describe('fail-closed reason names', () => {
       expect(isFailClosed({ label: 'x', source: 'y', name })).toBe(true)
     }
     expect(isFailClosed({ label: 'spoiler', source: LABELER, name: 'Spoiler' })).toBe(false)
+  })
+
+  it('the !no-unauthenticated check matches the moderation module', () => {
+    const cases = [
+      [], [label('!no-unauthenticated', ALICE)], [label('!no-unauthenticated', ALICE, undefined, { neg: true })],
+      [label('porn', ALICE)],
+    ]
+    for (const labels of cases) {
+      expect(asksNoUnauthenticated({ bluesky: { labels } })).toBe(isNoUnauthenticated({ labels }))
+    }
+    expect(asksNoUnauthenticated({})).toBe(false)
   })
 })
 
@@ -333,12 +344,13 @@ describe('the reader veil', () => {
       userKey: toUserKey('alice', 'example.social'), server: 'example.social', token: 't', vapidKey: '', createdAt: 0,
       account: { id: 'me', acct: 'alice', username: 'alice' } as Account,
     })
-    const el = await mount(await mappedPost(post()))
+    // The copy a reader with no Bluesky account gets: decided for no reader.
+    const el = await mount(publicPost(post()))
     expect($(el, '.status-content')).not.toBeNull()
   })
 
   it('signed out, a Bluesky post settles at once', async () => {
-    const el = await mount(await mappedPost(post()))
+    const el = await mount(publicPost(post()))
     expect($(el, '.status-content')).not.toBeNull()
   })
 })

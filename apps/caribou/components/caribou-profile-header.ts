@@ -14,7 +14,9 @@ import { confirmBlock } from './caribou-confirm-dialog.js'
 import { openListPicker } from './caribou-list-picker.js'
 import './caribou-button.js'
 import './caribou-menu.js'
-import { uiOf } from './_bluesky-moderation.js'
+import {
+  NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, coverNote, currentBlueskyReader, decisionFits, uiOf,
+} from './_bluesky-moderation.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -31,6 +33,16 @@ export class CaribouProfileHeader extends LitElement {
     /* A Bluesky avatar or banner label (README, "Bluesky views"). */
     .banner.blurred, img.avatar.blurred { filter: blur(12px); }
     .banner.blurred { clip-path: inset(0); }
+    .profile-cover .notice { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--fg-muted); }
+    .profile-cover .notice p { margin: 0; }
+    p.profile-cover { padding: var(--space-3); margin: 0; color: var(--fg-muted); }
+    .filter-toggle {
+      padding: var(--space-1) var(--space-3); font: inherit; font-size: 0.875rem; font-weight: 600;
+      cursor: pointer; color: var(--fg-0); background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+    }
+    .filter-toggle:hover { background: var(--bg-1); }
+    .filter-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .name   { color: var(--fg-0); font-weight: 600; font-size: 1.25rem; }
     .handle { color: var(--fg-muted); }
     .bio    { color: var(--fg-1); padding: 0 var(--space-3) var(--space-3); }
@@ -65,6 +77,16 @@ export class CaribouProfileHeader extends LitElement {
   // has to look the account up on their own server before they can follow
   // it. Without it the header cannot tell, and shows no button.
   @property() instance = ''
+  // Whose decision a Bluesky account's `moderation` is: the user key of the
+  // reader that looked it up, or null for no reader (the server's copy).
+  // README, "A decision belongs to one reader".
+  @property({ attribute: false }) viewerOf: string | null = null
+
+  // The reader a Bluesky decision must be made for. Null until mount, as on
+  // the server, which knows no reader.
+  @state() private blueskyReaderKey: string | null = null
+  // The reader chose Show on a profile covered by a label.
+  @state() private profileShown = false
 
   // What the follow button needs, known only after mount: the server has no
   // session. Both stay empty until then, so the first client render equals
@@ -125,6 +147,7 @@ export class CaribouProfileHeader extends LitElement {
   // the first update bind() has not run, and its effect does the first
   // resolve itself.
   protected override willUpdate(changed: PropertyValues<this>) {
+    if (changed.has('account') && changed.get('account') !== undefined) this.profileShown = false
     if (this.hasUpdated && (changed.has('account') || changed.has('instance'))) {
       void this.resolveTarget(activeUser.value)
     }
@@ -133,6 +156,7 @@ export class CaribouProfileHeader extends LitElement {
   private bind() {
     const disposeResolve = effect(() => { void this.resolveTarget(activeUser.value) })
     const disposeRead = effect(() => {
+      this.blueskyReaderKey = currentBlueskyReader(activeClient.value)
       const user = activeUser.value
       const target = this.targetSignal.value
       this.target = target
@@ -279,12 +303,45 @@ export class CaribouProfileHeader extends LitElement {
     const banner = headerImg
       ? `background-image:url(${JSON.stringify(headerImg)});background-size:cover;`
       : nothing
-    // A Bluesky account's own moderation blurs its pictures. No result yet
-    // is not a clean result: blurred (fail closed). A Mastodon account has
-    // no `bluesky` field.
-    const mod = a.bluesky?.moderation
-    const blurAvatar = !!a.bluesky && (!mod || uiOf(mod, 'avatar')!.blur)
-    const blurBanner = !!a.bluesky && (!mod || uiOf(mod, 'banner')!.blur)
+    // A Bluesky account: covers compose and the strictest wins (README,
+    // "Bluesky views"). Only a decision made for the current reader counts;
+    // no fitting decision blurs the pictures and covers the profile. A
+    // Mastodon account has no `bluesky` field.
+    const bsky = a.bluesky
+    const reader = this.blueskyReaderKey
+    if (bsky && reader === null && asksNoUnauthenticated(a)) {
+      return html`<div class="banner blurred"></div>
+        <p class="profile-cover notice">${NO_UNAUTHENTICATED_NOTE}</p>`
+    }
+    const mod = bsky && decisionFits(this.viewerOf, reader) ? bsky.moderation : undefined
+    const blurAvatar = !!bsky && (!mod || uiOf(mod, 'avatar')!.blur)
+    const blurBanner = !!bsky && (!mod || uiOf(mod, 'banner')!.blur)
+    const view = bsky ? (mod ? uiOf(mod, 'profileView')! : UNREADABLE) : null
+    if (view && (view.blur || view.filter)) {
+      const note = mod ? coverNote(view) : 'Checking this profile against your moderation settings…'
+      const canShow = !!mod && !view.noOverride
+      const shown = canShow && this.profileShown
+      return html`
+        <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
+        <div class="profile-cover">
+          <div class="row">
+            <img class=${blurAvatar ? 'avatar blurred' : 'avatar'} src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
+            <div class="notice">
+              <p>${note}</p>
+              ${canShow
+                ? html`<button type="button" class="filter-toggle" aria-controls="profile-covered"
+                    aria-expanded=${shown ? 'true' : 'false'}
+                    aria-label=${`${shown ? 'Hide' : 'Show'} profile with a label: ${note}`}
+                    @click=${this.onToggleProfile}>${shown ? 'Hide' : 'Show'}</button>`
+                : nothing}
+            </div>
+          </div>
+          ${canShow
+            ? html`<div id="profile-covered" ?hidden=${!shown}>${shown ? this.renderIdentity(a) : nothing}</div>`
+            : nothing}
+        </div>
+      `
+    }
     return html`
       <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
       <div class="row">
@@ -303,5 +360,29 @@ export class CaribouProfileHeader extends LitElement {
         <span><strong>${a.followersCount}</strong> Followers</span>
       </div>
     `
+  }
+
+  private onToggleProfile = () => { this.profileShown = !this.profileShown }
+
+  // What a profile cover hides: name, handle, badges, follow, bio, counts.
+  // One element around it all: happy-dom drops a child binding at the top
+  // level of a template (README, Tests).
+  private renderIdentity(a: Account) {
+    return html`<div class="identity">
+      <div class="row">
+        <div>
+          <div class="name">${a.displayName || a.username}</div>
+          <div class="handle">@${a.acct}</div>
+          ${this.renderBadges()}
+        </div>
+        ${this.renderFollow()}
+      </div>
+      <div class="bio">${unsafeHTML(this.safeNote(a.note ?? ''))}</div>
+      <div class="counts">
+        <span><strong>${a.statusesCount}</strong> Posts</span>
+        <span><strong>${a.followingCount}</strong> Following</span>
+        <span><strong>${a.followersCount}</strong> Followers</span>
+      </div>
+    </div>`
   }
 }
