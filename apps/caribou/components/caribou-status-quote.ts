@@ -17,6 +17,7 @@ import { hashtagOf, sameUrl } from './_post-links.js'
 import { tagPath } from './_tag-path.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import { mastodonLinkText } from './_shared-styles.js'
+import { coverNote, uiOf } from './_bluesky-moderation.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 if (typeof window !== 'undefined') installPurifyHooks(DOMPurify)
@@ -144,6 +145,8 @@ export class CaribouStatusQuote extends LitElement {
     .filter-toggle { margin-top: 0; }
     .cw-toggle:hover, .filter-toggle:hover { background: var(--bg-1); }
     .filtered-post:not([hidden]) { margin-top: var(--space-3); }
+    /* A Bluesky avatar label. */
+    .author img.blurred { filter: blur(4px); }
   `]
 
   @property({ attribute: false }) quote: Quote | null = null
@@ -162,6 +165,8 @@ export class CaribouStatusQuote extends LitElement {
   @state() private relWhy: { verb: 'muted' | 'blocked'; acct: string } | null = null
   @state() private warningOpen = false
   @state() private filterShown = false
+  // The reader chose Show on a quoted Bluesky post covered by a label.
+  @state() private labelShown = false
 
   private adoptedServerRender = false
   private dispose: (() => void) | null = null
@@ -277,6 +282,7 @@ export class CaribouStatusQuote extends LitElement {
 
   private onToggleWarning = () => { this.warningOpen = !this.warningOpen }
   private onToggleFiltered = () => { this.filterShown = !this.filterShown }
+  private onToggleLabel = () => { this.labelShown = !this.labelShown }
 
   override render() {
     const quote = this.quote
@@ -294,6 +300,29 @@ export class CaribouStatusQuote extends LitElement {
     const verdict = this.liveVerdict !== undefined ? this.liveVerdict : filterVerdict(q, this.filterContext || null)
     if (verdict?.action === 'hide') {
       return html`<p class="quote-note">The quoted post is hidden by a filter.</p>`
+    }
+    // A quoted Bluesky post, by its own moderation (it was moderated on its
+    // own, README "Bluesky views"): a filter or a blur covers it, with Show
+    // unless the label forbids it.
+    const label = uiOf(q.bluesky?.moderation, 'contentList')
+    if (label && (label.filter || label.blur)) {
+      const note = coverNote(label)
+      const canShow = !label.noOverride
+      const shown = canShow && this.labelShown
+      return html`<div class="quote-note">
+        <div class="notice">
+          <p>Quoted post: <strong>${note}</strong></p>
+          ${canShow
+            ? html`<button type="button" class="filter-toggle" aria-controls="quote-labeled"
+                aria-expanded=${shown ? 'true' : 'false'}
+                aria-label=${`${shown ? 'Hide' : 'Show'} quoted post with a label: ${note}`}
+                @click=${this.onToggleLabel}>${shown ? 'Hide' : 'Show'}</button>`
+            : nothing}
+        </div>
+        ${canShow
+          ? html`<div class="filtered-post" id="quote-labeled" ?hidden=${!shown}>${shown ? this.renderQuoted(q) : nothing}</div>`
+          : nothing}
+      </div>`
     }
     if (verdict) {
       const titles = verdict.titles.join(', ')
@@ -327,7 +356,7 @@ export class CaribouStatusQuote extends LitElement {
     return html`<div class="quote" role="group" aria-label=${`Quoted post by ${name}`} @click=${this.onCardClick}>
       <header>
         <a class="author" href=${this.profileHref(display.account)} @click=${spaClick}>
-          <img class="avatar" src=${display.account.avatarStatic || display.account.avatar}
+          <img class=${uiOf(display.bluesky?.moderation, 'avatar')?.blur ? 'avatar blurred' : 'avatar'} src=${display.account.avatarStatic || display.account.avatar}
                alt="" width="20" height="20" loading="lazy" decoding="async" />
           <strong>${name}</strong>
           <span class="acct">@${display.account.acct}</span>
@@ -344,7 +373,7 @@ export class CaribouStatusQuote extends LitElement {
       <div class="quote-body" id="quote-body" ?hidden=${!bodyShown}>
         ${bodyShown ? html`<div class="quote-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
         ${bodyShown && (media.length || display.poll)
-          ? html`<span class="media-summary">${mediaSummary(media, !!display.poll)}${media.length && display.sensitive ? ' (marked sensitive)' : ''}</span>`
+          ? html`<span class="media-summary">${mediaSummary(media, !!display.poll)}${media.length && (display.sensitive || uiOf(display.bluesky?.moderation, 'contentMedia')?.blur) ? ' (marked sensitive)' : ''}</span>`
           : nothing}
         ${bodyShown && display.quote?.state === 'accepted'
           ? html`<a class="nested" href=${thread} @click=${spaClick}>This post quotes another post. Open it to see the quote.</a>`

@@ -7,6 +7,7 @@ import {
   _testOnlyResetMutations, activeClient, activeUserKey, addUserSession, cacheStatus, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
+import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
 // Spec section 11: a card acts only through a client on the post's own
@@ -15,6 +16,8 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 
 const ME = toUserKey('alice', 'example.social')
 const POST_URI = 'at://did:plc:bob/app.bsky.feed.post/3k1'
+// Bluesky's own labeler, the one every reader subscribes to.
+const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
 
 function mastodonPost(over: Record<string, unknown> = {}): Status {
   return {
@@ -31,7 +34,8 @@ function blueskyPost(handleInvalid = false): Status {
   const bluesky: StatusBluesky = {
     uri: POST_URI, cid: 'bafy1', likeUri: null, repostUri: null, replyRef: null,
     replyDisabled: false, embeddingDisabled: false, labels: [],
-    moderation: { contexts: {}, labelersCovered: [] } as unknown as StatusBluesky['moderation'],
+    // A clean result: every context present, nothing covered.
+    moderation: { contexts: Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView'].map((c) => [c, { filter: false, blur: false, alert: false, inform: false, noOverride: false, reasons: [] }])), labelersCovered: [BSKY_LABELER] } as unknown as StatusBluesky['moderation'],
     viewerOf: ME,
   }
   return mastodonPost({
@@ -55,6 +59,13 @@ function signIn(network: 'mastodon' | 'bluesky' = 'mastodon') {
   if (network === 'bluesky') {
     (activeClient.value as { capabilities: CaribouClient['capabilities'] }).capabilities =
       { ...MASTODON_CAPABILITIES, network: 'bluesky', readLagMs: 60_000 }
+    // The reader veil's inputs, loaded: the post was fetched as this reader
+    // with Bluesky's labeler covered, so the card settles (README, "Bluesky views").
+    setBlueskyReader({
+      userKey: ME,
+      prefs: { adultContentEnabled: false, labels: {}, labelers: [], mutedWords: [], hiddenPosts: [] },
+      labelDefs: { [BSKY_LABELER]: [] },
+    })
   }
 }
 
@@ -63,6 +74,12 @@ async function mount(status: Status, instance?: string): Promise<CaribouStatusCa
   el.status = status
   if (instance !== undefined) el.instance = instance
   document.body.appendChild(el)
+  // A Bluesky card loads the veil's check lazily after mount.
+  for (let i = 0; i < 3; i++) {
+    while (!(await el.updateComplete)) { /* settle */ }
+    await _testOnlyVeilLoaded()
+    await new Promise((r) => setTimeout(r, 0))
+  }
   while (!(await el.updateComplete)) { /* settle */ }
   return el
 }
@@ -90,6 +107,7 @@ beforeEach(() => {
   activeUserKey.value = null
   localStorage.clear()
   _testOnlyResetMutations()
+  _testOnlyResetBlueskyVeil()
 })
 afterEach(() => { vi.restoreAllMocks() })
 

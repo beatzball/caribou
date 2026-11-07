@@ -14,6 +14,7 @@ import { confirmBlock } from './caribou-confirm-dialog.js'
 import { openListPicker } from './caribou-list-picker.js'
 import './caribou-button.js'
 import './caribou-menu.js'
+import { uiOf } from './_bluesky-moderation.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -27,6 +28,9 @@ export class CaribouProfileHeader extends LitElement {
     .banner { aspect-ratio: 3/1; background: var(--bg-2); }
     .row    { display: flex; gap: var(--space-3); padding: var(--space-3); }
     img.avatar { width: 80px; height: 80px; border-radius: var(--radius-md); flex-shrink: 0; }
+    /* A Bluesky avatar or banner label (README, "Bluesky views"). */
+    .banner.blurred, img.avatar.blurred { filter: blur(12px); }
+    .banner.blurred { clip-path: inset(0); }
     .name   { color: var(--fg-0); font-weight: 600; font-size: 1.25rem; }
     .handle { color: var(--fg-muted); }
     .bio    { color: var(--fg-1); padding: 0 var(--space-3) var(--space-3); }
@@ -275,10 +279,16 @@ export class CaribouProfileHeader extends LitElement {
     const banner = headerImg
       ? `background-image:url(${JSON.stringify(headerImg)});background-size:cover;`
       : nothing
+    // A Bluesky account's own moderation blurs its pictures. No result yet
+    // is not a clean result: blurred (fail closed). A Mastodon account has
+    // no `bluesky` field.
+    const mod = a.bluesky?.moderation
+    const blurAvatar = !!a.bluesky && (!mod || uiOf(mod, 'avatar')!.blur)
+    const blurBanner = !!a.bluesky && (!mod || uiOf(mod, 'banner')!.blur)
     return html`
-      <div class="banner" style=${banner}></div>
+      <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
       <div class="row">
-        <img class="avatar" src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
+        <img class=${blurAvatar ? 'avatar blurred' : 'avatar'} src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
         <div>
           <div class="name">${a.displayName || a.username}</div>
           <div class="handle">@${a.acct}</div>

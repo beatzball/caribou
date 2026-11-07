@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import type { Capabilities } from '@beatzball/caribou-mastodon-client'
+import type { Capabilities, Network } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, UNREAD_CAP, unreadNotificationCount, userName, users, type UserSession,
 } from '@beatzball/caribou-state'
@@ -18,9 +18,13 @@ import './caribou-signout-form.js'
 // `dot`: the item carries the changelog's unread dot (`<caribou-changelog-dot>`).
 // `signedIn`: the item shows only while an account is signed in.
 // `needs`: the item shows only when the active account's network has it.
+// `notOn`: the item hides while an account on that network is active, for a
+// feature not built for it yet (spec 2.1: Search and Lists for Bluesky
+// until phase 5).
 interface NavItem {
   label: string; icon: IconName; href: string; more?: boolean; dot?: boolean; signedIn?: boolean
   needs?: 'localTimeline' | 'publicTimeline'
+  notOn?: Network
 }
 
 // The items above New post. DOM order is the visual order at every width,
@@ -30,10 +34,10 @@ const ITEMS: NavItem[] = [
   { label: 'Home',    icon: 'home',  href: '/home' },
   { label: 'Local',   icon: 'users', href: '/local', needs: 'localTimeline' },
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
-  { label: 'Search',  icon: 'search', href: '/search', more: true },
+  { label: 'Search',  icon: 'search', href: '/search', more: true, notOn: 'bluesky' },
   { label: 'Public',  icon: 'globe', href: '/public', more: true, needs: 'publicTimeline' },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
-  { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true },
+  { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true, notOn: 'bluesky' },
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
 ]
 
@@ -320,7 +324,7 @@ export class CaribouNavRail extends LitElement {
   // The items the active account's network has; all of them before mount.
   private shown(items: NavItem[]): NavItem[] {
     const caps = this.caps
-    return caps ? items.filter((it) => !it.needs || caps[it.needs]) : items
+    return caps ? items.filter((it) => (!it.needs || caps[it.needs]) && it.notOn !== caps.network) : items
   }
 
   private readAccounts(all: Map<string, UserSession>, key: string | null) {

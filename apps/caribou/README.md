@@ -454,6 +454,65 @@ shortcut there and in `onKey` together. `n` belongs here too: it sends
 **Bluesky is behind a flag.** `localStorage['caribou.flag.bluesky'] = '1'` turns it on for a developer.
 `components/_bluesky.ts` is the only door to the atproto libraries (`loadBluesky()`, a dynamic `import()`); they build into the `bsky` chunk group in `vite.config.ts`, which a Mastodon page never requests (`packages/bluesky-client/README.md`).
 
+### Bluesky views (#184)
+
+Phase 2b: client render only. Every rule here applies only to a Bluesky
+post or account (one with a `bluesky` field) or to a Bluesky client. A
+Mastodon post, account or client renders as before.
+
+**Home, profile and thread.**
+
+- Home for a Bluesky account is the Following feed: `<caribou-timeline
+  kind="home">` with the Bluesky client. It polls every 30 s like Mastodon.
+  The store keeps feed order (`timelineOrder()` is `null`). When a catch-up
+  does not meet the top post (`gap`), the banner says "Many new posts", and
+  applying it replaces the list.
+- Profile tabs are posts, replies and media (`getAuthorFeed` filters, in the
+  client). The thread is `getPostThread`.
+- The profile and thread pages render on the server as today. After
+  hydration, with the flag on and a Bluesky account active, a Bluesky route
+  (`/@did:…`, or `/@name` with a dot and no second `@`, spec 8.4) swaps in
+  a client-rendered `<caribou-profile>` or `<caribou-thread>`. The thread's
+  id is `at://<handle or did>/app.bsky.feed.post/<rkey>`. `/@me` looks the
+  account up by its DID. SSR for these routes is phase 3.
+
+**Nav.** With a Bluesky account active the rail hides Local and Public (by
+`capabilities`), and Search and Lists until phase 5 (by network).
+
+**A list that is empty but not ended.** A list ends only on a null cursor
+(`packages/state` README). A page can be empty with more behind it (five
+pages of unavailable bookmarks; a page where no post could be mapped). So
+the timeline and the profile render the "Older posts" anchor while the list
+is empty and has a cursor, and the empty notice only at the real end. With a
+client, the anchor loads the next page in place until a post arrives or the
+list ends. The server and the first client render agree: both read the
+cursor.
+
+**Moderation on the card** (spec 7.4, `packages/bluesky-client` README).
+The card reads the newest copy's `bluesky.moderation` (status cache first,
+so a refetch after Retry shows). The surface is `contentView` on the focused
+post of a thread and `contentList` everywhere else.
+
+| what | rule |
+|---|---|
+| `contentList.filter` | The card is hidden, like a filter's `hide`. Never on the focused post. |
+| surface `blur` | The post is covered: "Content warning: <reason names>". A Show button unless `noOverride`. |
+| a fail-closed reason (labeler unavailable, unknown label, moderation failed) | The cover also offers Retry: it fires `caribou:bluesky-moderation-retry` (the session glue reloads definitions) and refetches the post through the active Bluesky client. |
+| `contentMedia.blur` | `caribou-status-media` gets `sensitive`; `contentMedia.noOverride` sets its `no-override`. The link card, the video card and `bluesky.recordCard` lose their image, and one line says "Media hidden by a content label", with Show unless `noOverride`. |
+| `avatar.blur` (the post's result) | The author's avatar is blurred. |
+| a quoted post | The same rules with its own `bluesky.moderation`, inside the quote card: filter and blur cover the quote with its reasons; Show unless `noOverride`; the avatar blurs. |
+| profile header | `avatar` and `banner` from the account's `bluesky.moderation`. A Bluesky account with no result yet is blurred (fail closed). |
+
+**The reader veil for Bluesky cards.** With a Bluesky account active, a
+Bluesky card shows its post only when `blueskyCheckSettled(post, reader)`
+says so. Until then it is covered with "Checking this post against your
+moderation settings…" and a Retry, and never a Show button. The check is
+in `./moderation`, so `_bluesky.ts` loads it lazily, the first time a
+Bluesky account is active; until it loads, the card is covered. The reader
+(prefs and label definitions) comes from `setBlueskyReader()`, which the
+session glue (#182) calls; a reader for another account counts as none.
+With a Mastodon account active, or none, a Bluesky card settles at once.
+
 ## Accounts
 
 A reader can be signed in to several accounts, on several servers, with one

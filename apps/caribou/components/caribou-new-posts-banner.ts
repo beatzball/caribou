@@ -23,6 +23,10 @@ export class CaribouNewPostsBanner extends LitElement {
   `
 
   @property({ type: Number }) count = 0
+  // A catch-up that did not meet the list's top post (a Bluesky feed, spec
+  // 6.3 seam 7): the count is not all there is, and applying replaces the
+  // list.
+  @property({ type: Boolean }) many = false
 
   private onClick = () => {
     this.dispatchEvent(new CustomEvent('apply-new-posts', { bubbles: true, composed: true }))
@@ -32,7 +36,7 @@ export class CaribouNewPostsBanner extends LitElement {
     if (!this.count || this.count < 1) return nothing
     return html`
       <caribou-button variant="primary" data-action="apply-new-posts" @click=${this.onClick}>
-        ${this.count} new ${this.count === 1 ? 'post' : 'posts'}
+        ${this.many ? 'Many new posts' : `${this.count} new ${this.count === 1 ? 'post' : 'posts'}`}
       </caribou-button>
     `
   }

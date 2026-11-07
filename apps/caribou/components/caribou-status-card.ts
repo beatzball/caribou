@@ -1,19 +1,25 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
+import { ifDefined } from 'lit/directives/if-defined.js'
 import DOMPurify from 'dompurify'
-import { resourceNetwork, type Network, type Status, type StatusSource } from '@beatzball/caribou-mastodon-client'
+import {
+  resourceNetwork, type BlueskyModerationResult, type BlueskyModerationUi, type Network, type PreviewCard, type Status, type StatusSource,
+} from '@beatzball/caribou-mastodon-client'
 import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-client/sanitize-opts'
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, activeUserKey, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
+  activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
 import { accountPath, postPath } from './_profile-path.js'
 import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
+import {
+  BLUESKY_RETRY_EVENT, blueskyVeilSettled, coverNote, isFailClosed, surfaceOf, uiOf,
+} from './_bluesky-moderation.js'
 import { confirmBlock, confirmDialog } from './caribou-confirm-dialog.js'
 import { POLL_EDIT_REFUSED, redraftOf } from './_redraft.js'
 import { showStatusHistory } from './caribou-status-history.js'
@@ -245,15 +251,15 @@ export class CaribouStatusCard extends LitElement {
     .spoiler {
       margin: 0; color: var(--fg-0); white-space: pre-wrap; overflow-wrap: anywhere;
     }
-    .cw-toggle, .notice button {
+    .cw-toggle, .notice button, .media-toggle {
       margin-top: var(--space-2); padding: var(--space-1) var(--space-3);
       font: inherit; font-size: 0.875rem; font-weight: 600; cursor: pointer;
       color: var(--fg-0); background: var(--bg-2);
       border: 1px solid var(--border); border-radius: var(--radius-sm);
     }
     .notice button { margin-top: 0; }
-    .cw-toggle:hover, .notice button:hover { background: var(--bg-1); }
-    .cw-toggle:focus-visible, .notice button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .cw-toggle:hover, .notice button:hover, .media-toggle:hover { background: var(--bg-1); }
+    .cw-toggle:focus-visible, .notice button:focus-visible, .media-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .edited {
       color: var(--fg-muted); font: inherit; font-size: 0.875rem;
       background: none; border: 0; padding: 0;
@@ -296,6 +302,13 @@ export class CaribouStatusCard extends LitElement {
     .notice p { margin: 0; flex: 1; overflow-wrap: anywhere; }
     .notice strong { color: var(--fg-0); }
     .filtered-post:not([hidden]) { margin-top: var(--space-3); }
+    /* A Bluesky avatar label: the picture stays, blurred past knowing. */
+    .author img.blurred { filter: blur(8px); }
+    .media-label .media-toggle { margin-top: 0; }
+    .media-label {
+      display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;
+      margin: var(--space-2) 0 0; color: var(--fg-muted); font-size: 0.875rem;
+    }
     .boost-attribution {
       display: flex; gap: var(--space-2); align-items: center;
       padding: 0 0 var(--space-2) var(--space-2);
@@ -364,6 +377,19 @@ export class CaribouStatusCard extends LitElement {
   @state() private uncheckedShown = false
   // A Retry of a failed check is out.
   @state() private retrying = false
+  // A Bluesky post's moderation, from the newest copy (the status cache
+  // first, so a refetch after Retry shows). Undefined until mount: render()
+  // then reads `status` itself, as the server did.
+  @state() private blueskyMod: BlueskyModerationResult | null | undefined = undefined
+  // The reader veil for a Bluesky post (`blueskyVeilSettled`). True until
+  // mount, as on the server.
+  @state() private blueskySettled = true
+  // The reader chose Show on a post covered by a label.
+  @state() private labelShown = false
+  // The reader chose Show on the link and record cards' images.
+  @state() private mediaShown = false
+  // A Retry of a Bluesky post's moderation is out.
+  @state() private moderationRetrying = false
   // Set by render(): the cover shown is the unchecked one.
   private coverIsUnchecked = false
   // Set by render(), read by updated(): the post itself is on screen.
@@ -456,6 +482,12 @@ export class CaribouStatusCard extends LitElement {
       const cache = statusCache.value
       const cached = post ? cache.get(post.id) ?? (s?.reblog ? cache.get(s.id)?.reblog : undefined) : undefined
       const next = cached ? actionFields(cached) : null
+      // A Bluesky post: its moderation and its veil, from the newest copy.
+      const bluesky = post?.bluesky ? (cached?.bluesky ?? post.bluesky) : undefined
+      const mod = bluesky?.moderation ?? null
+      if (mod !== this.blueskyMod) this.blueskyMod = mod
+      const settled = bluesky ? blueskyVeilSettled(bluesky, client) : true
+      if (settled !== this.blueskySettled) this.blueskySettled = settled
       const prev = this.liveFields
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
       const edit = post && this.canAct ? newerEdit(cached ?? undefined, post) : null
@@ -530,6 +562,8 @@ export class CaribouStatusCard extends LitElement {
       this.warningOpen = key !== null && openedWarnings.get(key) === true
       this.filterShown = key !== null && shownFiltered.get(key) === true
       this.uncheckedShown = false
+      this.labelShown = false
+      this.mediaShown = false
       this.moderated = null
     }
   }
@@ -571,6 +605,31 @@ export class CaribouStatusCard extends LitElement {
     const key = this.warningKey()
     this.filterShown = !this.filterShown
     if (key !== null) shownFiltered.set(key, this.filterShown)
+  }
+
+  private onToggleLabel = () => { this.labelShown = !this.labelShown }
+  private onToggleMedia = () => { this.mediaShown = !this.mediaShown }
+
+  // A Bluesky post covered because Caribou could not judge it (a labeler's
+  // definitions did not load, or the reader's check is not settled). The
+  // session glue hears the event and loads the definitions again; the card
+  // asks for the reader's copy of the post, which lands in the status cache.
+  private onRetryModeration = async () => {
+    const post = this.status?.reblog ?? this.status
+    if (!post || this.moderationRetrying) return
+    window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: post.id } }))
+    const owner = currentOwner()
+    if (!owner || owner.client.capabilities.network !== 'bluesky') return
+    this.moderationRetrying = true
+    try {
+      const source = readSource(owner.client.userKey)
+      const fresh = await owner.client.fetchStatus(post.id)
+      if (stillOwner(owner)) cacheStatus(fresh, source)
+    } catch {
+      // Still covered, with Retry.
+    } finally {
+      this.moderationRetrying = false
+    }
   }
 
   // One rule for a post the server rendered without the reader's token: it
@@ -1009,6 +1068,18 @@ export class CaribouStatusCard extends LitElement {
       return nothing
     }
     const why = focused && this.relHidden ? this.relWhy : null
+    // A Bluesky post's labels (README, "Bluesky views"). A filter hides a
+    // row, never the post the reader opened; the veil and a blur cover it.
+    const mod = this.blueskyMod !== undefined ? this.blueskyMod : (s.reblog ?? s).bluesky?.moderation ?? null
+    if (mod) {
+      if (!focused && uiOf(mod, 'contentList')!.filter) {
+        this.hiddenNow = true
+        return nothing
+      }
+      if (!this.blueskySettled) return this.renderLabelCover(s, null)
+      const ui = uiOf(mod, surfaceOf(focused))!
+      if (ui.blur && !verdict && !why) return this.renderLabelCover(s, ui)
+    }
     // The reader's filters for this post are not known yet, or could not be
     // learned: cover it.
     const checking = this.readerCheck === 'pending' || this.readerCheck === 'failed'
@@ -1049,6 +1120,33 @@ export class CaribouStatusCard extends LitElement {
     return html`<article data-variant=${this.variant}>${this.renderPostShown(s)}</article>`
   }
 
+  // The cover of a Bluesky post: its labels' names, or (`ui` null) the
+  // reader veil's note. Show only when the label allows it; Retry when
+  // Caribou could not judge the post.
+  private renderLabelCover(s: Status, ui: BlueskyModerationUi | null) {
+    const canShow = ui !== null && !ui.noOverride
+    const shown = canShow && this.labelShown
+    const retry = ui === null || ui.reasons.some(isFailClosed)
+    const note = ui === null ? 'Checking this post against your moderation settings…' : coverNote(ui)
+    return html`<article data-variant=${this.variant} class="filtered labeled">
+      <div class="notice">
+        <p>${note}</p>
+        ${canShow
+          ? html`<button type="button" class="filter-toggle" aria-controls="filtered-post"
+              aria-expanded=${shown ? 'true' : 'false'} aria-label=${`${shown ? 'Hide' : 'Show'} post with a label: ${note}`}
+              @click=${this.onToggleLabel}>${shown ? 'Hide' : 'Show'}</button>`
+          : nothing}
+        ${retry
+          ? html`<caribou-button class="retry" variant="secondary" ?loading=${this.moderationRetrying}
+              @click=${this.onRetryModeration}>Retry<span class="vh"> checking this post</span></caribou-button>`
+          : nothing}
+      </div>
+      ${canShow
+        ? html`<div class="filtered-post" id="filtered-post" ?hidden=${!shown}>${shown ? this.renderPostShown(s) : nothing}</div>`
+        : nothing}
+    </article>`
+  }
+
   private renderPostShown(s: Status) {
     this.renderedPost = true
     return this.renderPost(s)
@@ -1071,6 +1169,20 @@ export class CaribouStatusCard extends LitElement {
     // card loads.
     const warning = display.spoilerText ?? ''
     const bodyShown = warning === '' || this.warningOpen
+    // A Bluesky post's media labels cover its media, its cards and their
+    // images; its avatar label blurs the author's avatar (README, "Bluesky
+    // views"). A Mastodon post has no `bluesky` field: none of this applies.
+    const mod = display.bluesky
+      ? (this.blueskyMod !== undefined && display.id === (s.reblog ?? s).id ? this.blueskyMod : display.bluesky.moderation)
+      : null
+    const mediaUi = uiOf(mod, 'contentMedia')
+    const mediaCovered = mediaUi?.blur === true
+    const mediaLocked = mediaCovered && mediaUi!.noOverride
+    const imagesHidden = mediaCovered && (mediaLocked || !this.mediaShown)
+    const cardOf = (c: PreviewCard): PreviewCard => imagesHidden && c.image ? { ...c, image: null } : c
+    const linkCard = bodyShown && display.card && !display.mediaAttachments?.length ? display.card : null
+    const recordCard = bodyShown ? display.bluesky?.recordCard ?? null : null
+    const avatarBlurred = uiOf(mod, 'avatar')?.blur === true
     // Permalink: anchor on the timestamp, not the whole article — wrapping the
     // <article> would put the post-content links (hashtags, mentions, external
     // urls) inside an <a>, and the HTML parser closes the outer anchor when
@@ -1097,6 +1209,7 @@ export class CaribouStatusCard extends LitElement {
             <header>
               <a class="author" href=${this.profileHref(display.account)} @click=${spaClick}>
                 <img src=${display.account.avatarStatic || display.account.avatar}
+                     class=${ifDefined(avatarBlurred ? 'blurred' : undefined)}
                      alt=""
                      width="48" height="48"
                      loading="lazy"
@@ -1121,9 +1234,14 @@ export class CaribouStatusCard extends LitElement {
             <div class="status-body" id="status-body" ?hidden=${!bodyShown}>
               ${bodyShown ? html`<div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
               ${bodyShown && display.poll ? html`<caribou-status-poll .status=${display} ?interactive=${this.canAct}></caribou-status-poll>` : nothing}
-              ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
-              ${bodyShown && display.card && !display.mediaAttachments?.length ? html`<caribou-status-link-card .card=${display.card} ?play=${!!display.bluesky && display.card.type === 'video'}></caribou-status-link-card>` : nothing}
-              ${bodyShown && display.bluesky?.recordCard ? html`<caribou-status-link-card .card=${display.bluesky.recordCard}></caribou-status-link-card>` : nothing}
+              ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true || mediaCovered} ?no-override=${mediaLocked} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
+              ${linkCard ? html`<caribou-status-link-card .card=${cardOf(linkCard)} ?play=${!!display.bluesky && linkCard.type === 'video'}></caribou-status-link-card>` : nothing}
+              ${recordCard ? html`<caribou-status-link-card .card=${cardOf(recordCard)}></caribou-status-link-card>` : nothing}
+              ${mediaCovered && (linkCard?.image || recordCard?.image)
+                ? html`<p class="media-label">${imagesHidden ? 'Media hidden by a content label' : 'Media with a content label'}
+                    ${mediaLocked ? nothing : html`<button type="button" class="media-toggle"
+                      @click=${this.onToggleMedia}>${this.mediaShown ? 'Hide' : 'Show'}<span class="vh"> media</span></button>`}</p>`
+                : nothing}
               ${bodyShown && quote ? html`<caribou-status-quote .quote=${quote} instance=${this.instance} filter-context=${this.filterContext}></caribou-status-quote>` : nothing}
             </div>
             ${this.renderActions(display)}

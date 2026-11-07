@@ -1,5 +1,6 @@
 import { html, css } from 'lit'
-import { customElement } from 'lit/decorators.js'
+import { customElement, state } from 'lit/decorators.js'
+import { activeClient } from '@beatzball/caribou-state'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getRouterParams } from 'h3'
@@ -13,6 +14,7 @@ import '../../components/caribou-app-shell.js'
 import '../../components/caribou-auth-required.js'
 import '../../components/caribou-thread.js'
 import { enterWithCache } from '../../components/_page-cache.js'
+import { blueskyActor, blueskyPostUri, rendersBluesky } from '../../components/_bluesky-route.js'
 
 export type StatusPageData = ThreadPageData & {
   shell: ShellInfo
@@ -74,6 +76,18 @@ export class HandleStatusPage extends LitroPage {
     article { padding: 1rem; color: var(--fg-muted); }
   `]
 
+  // A Bluesky thread, rendered on the client (phase 2b; README, "Bluesky
+  // views"): the focused post's AT URI. Set after the first render.
+  @state() private blueskyUri: string | null = null
+
+  protected override firstUpdated() {
+    const data = this.serverData as StatusPageData | null
+    const actor = blueskyActor(data?.handle ?? '')
+    if (actor && data?.statusId && rendersBluesky(window, activeClient.value)) {
+      this.blueskyUri = blueskyPostUri(actor, data.statusId)
+    }
+  }
+
   // A revisit paints from the last copy at once. The fresh thread that
   // follows updates the posts in place and adds new replies at the end
   // (`enterWithCache`, `ThreadStore.offer`).
@@ -88,6 +102,13 @@ export class HandleStatusPage extends LitroPage {
       kind: 'auth-required', shell: { instance: null }, statusId: '', handle: '',
     }) as StatusPageData
     const inst = data.shell.instance ?? ''
+    if (this.blueskyUri) {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <caribou-thread statusid=${this.blueskyUri}></caribou-thread>
+        </caribou-app-shell>
+      `
+    }
     if (data.kind === 'auth-required') {
       return html`
         <caribou-app-shell instance=${inst}>

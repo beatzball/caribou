@@ -241,7 +241,9 @@ export class CaribouProfile extends LitElement {
     const nextCursor = this.live ? this.nextCursor : (this.initial?.nextCursor ?? null)
     const hasMore = this.live ? this.hasMore : nextCursor != null
     const linkHandle = (this.linkHandle || this.handle).replace(/^@/, '')
-    const nextHref = statuses.length > 0 && hasMore && nextCursor != null
+    // An empty page can have more behind it: a list ends only on a null
+    // cursor (README, "Bluesky views"). So the link does not wait for posts.
+    const nextHref = hasMore && nextCursor != null
       ? `/@${linkHandle}?tab=${this.tab}&max_id=${encodeURIComponent(nextCursor)}`
       : null
     // `repeat` keys each row by status id, so a new page or a reordered list
