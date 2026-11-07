@@ -171,12 +171,21 @@ importers:
       '@beatzball/caribou-tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/jsdom':
+        specifier: ^21.1.7
+        version: 21.1.7
       '@vitest/coverage-v8':
         specifier: ^2.1.0
         version: 2.1.9(vitest@2.1.9(@types/node@22.19.17)(happy-dom@15.11.7)(jsdom@25.0.1)(lightningcss@1.33.0)(msw@2.13.5(@types/node@22.19.17)(typescript@5.9.3))(terser@5.46.1))
+      dompurify:
+        specifier: ^3.4.1
+        version: 3.4.1
       eslint:
         specifier: ^9.0.0
         version: 9.39.4(jiti@2.6.1)
+      jsdom:
+        specifier: ^25.0.1
+        version: 25.0.1
       typescript:
         specifier: ^5.7.3
         version: 5.9.3

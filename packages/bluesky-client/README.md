@@ -58,6 +58,56 @@ How they fit:
   leaves `moderate()`: page data goes through JSON, and JSON drops its
   `ui()` method (spec 7.4).
 
+## Facets to HTML (`renderFacets`)
+
+A Bluesky post is plain text plus facets. `renderFacets(text, facets)`
+turns them into HTML (spec 7.1). It is pure and server-safe, and it never
+throws. The caller still runs the shared `PURIFY_OPTS` over the result, on
+the server and in the browser, as for Mastodon content.
+
+The rules:
+
+- **Byte ranges.** A facet's `byteStart` (inclusive) and `byteEnd`
+  (exclusive) count UTF-8 bytes, not JavaScript characters. The renderer
+  encodes the text with `TextEncoder` and cuts the bytes.
+- **Bad facets drop.** A facet is skipped, and its bytes show as plain
+  text, when its range is not whole numbers, is empty, falls outside the
+  text, cuts a character in half, or overlaps a facet before it (facets
+  are sorted by `byteStart` first). A facet with no `index` or no
+  `features` is skipped too.
+- **The first known feature wins.** One facet can carry several features.
+  The first one of type `#link`, `#mention` or `#tag` decides. An unknown
+  type is passed over. If the deciding feature is not safe (below), the
+  segment is plain text.
+- **`#link`** → `<a href="<uri>" rel="nofollow noopener noreferrer"
+  target="_blank">`. Only `http:` and `https:`. Any other scheme, or a URI
+  that does not parse, renders as plain text. The `href` is the parsed
+  URL (`new URL(uri).href`).
+- **A link does not hide its host.** If the visible text looks like a URL
+  and names a different host than the URI, the link shows the real URI
+  instead. "Looks like a URL" means one word, an optional `http(s)://`, and
+  a host whose last label has a letter and two or more characters
+  (`example.com`, not `v1.2` or `e.g.`). Hosts compare after the URL parser
+  lowercases them and turns them into punycode, and after one leading
+  `www.` drops from each. Text with an `@` before the path
+  (`bank.example.com@evil.example`), or a host the parser refuses, fails
+  closed: the link shows the real URI. Text that does not look like a URL
+  ("read this") stays.
+- **`#mention`** → `<a href="/@<did>">`, built from the facet's DID. The
+  visible text stays as written; it can be stale, and the profile page shows
+  the current handle. A DID that is not `did:<method>:<id>` renders as
+  plain text.
+- **`#tag`** → `<a href="/tags/<tag>?net=bsky">`, the tag URL-encoded. The
+  href is the same for every reader, so the server render and the first
+  client render agree. An empty tag renders as plain text.
+- **Text.** Each segment is decoded and HTML-escaped (`&`, `<`, `>`, and a
+  no-break space as `&nbsp;`, the way the DOM writes text back). A line
+  break (`\n`, `\r\n` or `\r`) becomes `<br>`.
+- **Wrap.** The whole text goes in one `<p>`. Empty text, or a `text` that
+  is not a string, gives `''`.
+- **Stable through DOMPurify.** The output uses only tags and attributes in
+  `PURIFY_OPTS`, so sanitizing returns the same string. A test checks this.
+
 ## The chunk rule
 
 The atproto libraries are 181 KB gzipped. Only Bluesky pages and Bluesky

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { feedEntryId, mapAccount, mapEmbed, mapFeedEntry, mapPost, mapRelationship, renderFacets } from '../index.js'
+import { feedEntryId, mapAccount, mapEmbed, mapFeedEntry, mapPost, mapRelationship } from '../index.js'
 import { moderate } from '../moderation.js'
 
 // The scaffold (#177) fixes each module's signature. Each owner deletes its
@@ -13,7 +13,6 @@ describe('scaffold stubs', () => {
     ['#177', () => mapRelationship(post.author)],
     ['#177', () => feedEntryId({ post })],
     ['#177', () => mapFeedEntry({ post }, ctx)],
-    ['#178', () => renderFacets('hi', undefined)],
     ['#179', () => mapEmbed(undefined, ctx)],
     ['#180', () => moderate({ kind: 'post', view: post }, undefined, { adultContentEnabled: false, labels: {}, labelers: [], mutedWords: [], hiddenPosts: [] }, {})],
   ]
