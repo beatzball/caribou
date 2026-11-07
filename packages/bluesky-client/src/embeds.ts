@@ -51,9 +51,16 @@ function httpUrl(v: unknown): string | null {
   }
 }
 
-// One path segment of a bsky.app link. A DID keeps its colons.
-function seg(v: string): string {
-  return encodeURIComponent(v).replace(/%3A/gi, ':')
+// A bsky.app link from its path parts, each URL-encoded (a DID keeps its
+// colons). Building a link never throws: a part that cannot be encoded
+// (a lone surrogate is valid JSON, and `encodeURIComponent` throws on it)
+// gives the bsky.app root.
+function bskyLink(...parts: string[]): string {
+  try {
+    return `${BSKY}/${parts.map((p) => encodeURIComponent(p).replace(/%3A/gi, ':')).join('/')}`
+  } catch {
+    return BSKY
+  }
 }
 
 // `at://<did>/<collection>/<rkey>` → its parts, or null.
@@ -64,7 +71,7 @@ function atUri(v: unknown): { did: string; collection: string; rkey: string } | 
 
 function postUrl(postUri: string | undefined): string {
   const at = atUri(postUri)
-  return at ? `${BSKY}/profile/${seg(at.did)}/post/${seg(at.rkey)}` : BSKY
+  return at ? bskyLink('profile', at.did, 'post', at.rkey) : BSKY
 }
 
 function card(fields: Pick<PreviewCard, 'url' | 'title' | 'description'> & Partial<PreviewCard>): PreviewCard {
@@ -205,7 +212,7 @@ function recordCard(type: string, record: Obj): PreviewCard {
     case 'app.bsky.feed.defs#generatorView':
       if (!at || !did) throw new BadShape()
       return card({
-        url: `${BSKY}/profile/${seg(did)}/feed/${seg(at.rkey)}`,
+        url: bskyLink('profile', did, 'feed', at.rkey),
         title: str(record.displayName) || at.rkey,
         description: str(record.description),
         image: httpUrl(record.avatar),
@@ -214,7 +221,7 @@ function recordCard(type: string, record: Obj): PreviewCard {
     case 'app.bsky.graph.defs#listView':
       if (!at || !did) throw new BadShape()
       return card({
-        url: `${BSKY}/profile/${seg(did)}/lists/${seg(at.rkey)}`,
+        url: bskyLink('profile', did, 'lists', at.rkey),
         title: str(record.name) || at.rkey,
         description: str(record.description),
         image: httpUrl(record.avatar),
@@ -225,7 +232,7 @@ function recordCard(type: string, record: Obj): PreviewCard {
       if (!at || !who) throw new BadShape()
       const inner = objOrEmpty(record.record)
       return card({
-        url: `${BSKY}/starter-pack/${seg(who)}/${seg(at.rkey)}`,
+        url: bskyLink('starter-pack', who, at.rkey),
         title: str(inner.name) || 'Starter pack',
         description: str(inner.description),
         image: null,
@@ -235,7 +242,7 @@ function recordCard(type: string, record: Obj): PreviewCard {
     case 'app.bsky.labeler.defs#labelerView':
       if (!did) throw new BadShape()
       return card({
-        url: `${BSKY}/profile/${seg(did)}`,
+        url: bskyLink('profile', did),
         title: str(creator.displayName) || str(creator.handle) || did,
         description: str(creator.description),
         image: null,
@@ -312,8 +319,13 @@ export function mapEmbed(embed: AppBskyFeedDefs.PostView['embed'], ctx: MapConte
   switch (view.$type) {
     case 'app.bsky.embed.record#view':
       return { mediaAttachments: [], card: null, ...mapRecord(view, ctx, postUri) }
-    case 'app.bsky.embed.recordWithMedia#view':
-      return { ...mapMedia(view.media, postUri), ...mapRecord(view.record, ctx, postUri) }
+    case 'app.bsky.embed.recordWithMedia#view': {
+      const media = mapMedia(view.media, postUri)
+      const record = mapRecord(view.record, ctx, postUri)
+      // Both halves unknown: one fallback card says it once.
+      const twice = media.card?.title === FALLBACK_TITLE && record.recordCard?.title === FALLBACK_TITLE
+      return { ...media, ...record, ...(twice ? { recordCard: null } : {}) }
+    }
     default:
       return { ...mapMedia(view, postUri), ...NO_RECORD }
   }

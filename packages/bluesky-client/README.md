@@ -67,6 +67,13 @@ post's AT URI. A video and the fallback card link to that post on
 bsky.app, and the embed view does not carry it. Without it they link to
 `https://bsky.app`, and no test here can tell.
 
+**Requirement on moderation (#177, phase 2b):** a post's media moderation
+(`contentMedia`) covers everything its embed shows: `mediaAttachments`,
+`card` and its image, **and `bluesky.recordCard` and its image** (a feed or
+list avatar). The status card draws `recordCard` itself and does not read
+moderation contexts, so whoever wires moderation into the card must cover
+it, with a test.
+
 Two cards, two fields. `card` comes from the media (an external link, a
 video, or the fallback). `recordCard` comes from the record (a feed, list,
 starter pack or labeler, or the fallback for a record this build cannot
@@ -120,7 +127,9 @@ when there is media".
   `accepted` with no post, and the quote card shows it as a link. This
   also ends a chain that quotes itself.
 - **Links:** bsky.app path parts are URL-encoded (a DID keeps its colons).
-  A starter pack links by the creator's handle, else by DID.
+  A starter pack links by the creator's handle, else by DID. Building a
+  link never throws: a part that cannot be encoded (a lone surrogate, which
+  JSON allows) gives the root, `https://bsky.app`.
 - **Fallback:** a card titled "Not supported here — open on bsky.app" that
   links to the post. It is the answer for an unknown `$type` and for a
   shape that does not match its `$type`. `$type` is matched by `switch`
@@ -129,7 +138,8 @@ when there is media".
 
 What fails closed: `mapEmbed` never throws. A bad record and good media
 keep the media and give a fallback `recordCard`; good record and bad media
-keep the quote or record card and give a fallback `card`. If `mapPost`
+keep the quote or record card and give a fallback `card`. Both bad give
+one fallback `card`, not two. If `mapPost`
 throws on a quoted record, the quote is `accepted` with no post, and the
 card says "The quoted post is not available."
 

@@ -342,6 +342,29 @@ describe('mapEmbed', () => {
     expect(view).not.toHaveProperty('likeCount')
   })
 
+  describe('a link part that cannot be encoded', () => {
+    // A lone surrogate is valid JSON (`"\ud800"`) but `encodeURIComponent` throws on it.
+    const BAD_URI = JSON.parse('"at://did:plc:alice/app.bsky.feed.post/3k\\ud800"') as string
+    it.each([
+      ['an unknown embed', { $type: 'x#view' }, 'card'],
+      ['an unknown record', { $type: 'app.bsky.embed.record#view', record: { $type: 'x#view' } }, 'recordCard'],
+      ['a video', fx.videoView, 'card'],
+    ] as const)('gives %s a card that links to the bsky.app root', (_name, embed, field) => {
+      const out = map(embed, BAD_URI)
+      expect(out[field]?.url).toBe('https://bsky.app')
+    })
+
+    it('links a record card with such a part to the bsky.app root', () => {
+      const feed = { ...fx.feedGeneratorView.record, uri: JSON.parse('"at://did:plc:alice/app.bsky.feed.generator/a\\ud800"') }
+      expect(map({ ...fx.feedGeneratorView, record: feed }).recordCard).toMatchObject({ title: 'Caribou pictures', url: 'https://bsky.app' })
+    })
+  })
+
+  it('shows one fallback card when both the record and the media are unknown', () => {
+    const out = map({ $type: 'app.bsky.embed.recordWithMedia#view', record: { $type: 'app.bsky.embed.record#view', record: { $type: 'x#view' } }, media: { $type: 'y#view' } })
+    expect(cards(out)).toEqual([expect.objectContaining({ title: FALLBACK_TITLE })])
+  })
+
   it('links the fallback card to bsky.app when it has no post URI', () => {
     expect(mapEmbed({ $type: 'x#view' } as unknown as Embed, ctx).card?.url).toBe('https://bsky.app')
     expect(map({ $type: 'x#view' }, 'not an at uri').card?.url).toBe('https://bsky.app')
