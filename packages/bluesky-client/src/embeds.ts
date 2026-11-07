@@ -79,8 +79,18 @@ function card(fields: Pick<PreviewCard, 'url' | 'title' | 'description'> & Parti
   return { type: 'link', authors: [], embedUrl: '', ...fields }
 }
 
+// The fallback cards this module built, so a dedupe goes by where a card
+// came from, never by its title: a real feed or link may carry any title.
+const FALLBACKS = new WeakSet<PreviewCard>()
+
 function fallbackCard(postUri: string | undefined): PreviewCard {
-  return card({ url: postUrl(postUri), title: FALLBACK_TITLE, description: '' })
+  const out = card({ url: postUrl(postUri), title: FALLBACK_TITLE, description: '' })
+  FALLBACKS.add(out)
+  return out
+}
+
+function isFallback(c: PreviewCard | null): boolean {
+  return c !== null && FALLBACKS.has(c)
 }
 
 function size(aspectRatio: unknown): MediaAttachmentMetaImage | null {
@@ -187,8 +197,10 @@ function mapQuoted(record: Obj, ctx: MapContext): Quote {
   const postView = toPostView(record)
   // Spec 8.3. A signed-out copy (`viewerOf` null: the server, or a reader
   // with no Bluesky account active) never carries this author's post. The
-  // SDK does not count an embed's author in the outer post's moderation, so
-  // the check is here. The post is never mapped, so none of it is kept.
+  // SDK filters the outer post from signed-out lists (`contentList.filter`)
+  // but leaves its thread view alone, and the quote would still carry the
+  // post. So the quote hides it here. The post is never mapped, so none of
+  // it is kept.
   if (ctx.viewerOf === null && isNoUnauthenticated(postView.author)) {
     return { state: 'unauthorized', quotedStatus: null, bluesky: { hidden: 'no-unauthenticated' } }
   }
@@ -331,7 +343,7 @@ export function mapEmbed(embed: AppBskyFeedDefs.PostView['embed'], ctx: MapConte
       const media = mapMedia(view.media, postUri)
       const record = mapRecord(view.record, ctx, postUri)
       // Both halves unknown: one fallback card says it once.
-      const twice = media.card?.title === FALLBACK_TITLE && record.recordCard?.title === FALLBACK_TITLE
+      const twice = isFallback(media.card) && isFallback(record.recordCard)
       return { ...media, ...record, ...(twice ? { recordCard: null } : {}) }
     }
     default:

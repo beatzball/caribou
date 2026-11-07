@@ -385,6 +385,20 @@ describe('mapEmbed', () => {
     })
   })
 
+  it('keeps a real feed titled like the fallback next to unknown media', () => {
+    const feed = { ...fx.feedGeneratorView, record: { ...fx.feedGeneratorView.record, displayName: FALLBACK_TITLE } }
+    const out = map({ $type: 'app.bsky.embed.recordWithMedia#view', record: feed, media: { $type: 'y#view' } })
+    expect(out.card).toMatchObject({ title: FALLBACK_TITLE, url: fx.POST_URL })
+    expect(out.recordCard).toMatchObject({ title: FALLBACK_TITLE, url: 'https://bsky.app/profile/did:plc:alice/feed/caribous' })
+  })
+
+  it('keeps an unknown record next to a real link titled like the fallback', () => {
+    const external = { ...fx.externalView, external: { ...fx.externalView.external, title: FALLBACK_TITLE } }
+    const out = map({ $type: 'app.bsky.embed.recordWithMedia#view', record: { $type: 'app.bsky.embed.record#view', record: { $type: 'x#view' } }, media: external })
+    expect(out.card).toMatchObject({ title: FALLBACK_TITLE, url: 'https://example.com/article' })
+    expect(out.recordCard).toMatchObject({ title: FALLBACK_TITLE, url: fx.POST_URL })
+  })
+
   it('shows one fallback card when both the record and the media are unknown', () => {
     const out = map({ $type: 'app.bsky.embed.recordWithMedia#view', record: { $type: 'app.bsky.embed.record#view', record: { $type: 'x#view' } }, media: { $type: 'y#view' } })
     expect(cards(out)).toEqual([expect.objectContaining({ title: FALLBACK_TITLE })])

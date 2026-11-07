@@ -397,9 +397,10 @@ when there is media".
   is `null`), a quoted post whose author has this label is never mapped. The
   quote is `unauthorized` with no post and `bluesky.hidden =
   'no-unauthenticated'`, and the quote card says "This account asked to be
-  seen only by signed-in readers." The SDK does not count an embed's author
-  in the outer post's moderation, so `mapEmbed` checks it. A reader with a
-  Bluesky account active sees the quote.
+  seen only by signed-in readers." The SDK filters the outer post from
+  signed-out lists (`contentList.filter`) but leaves its thread view alone,
+  so `mapEmbed` hides the quoted post itself, on every surface. A reader
+  with a Bluesky account active sees the quote.
 - **One level of quote**, as on Bluesky. A quote inside a quoted post is
   `accepted` with no post, and the quote card shows it as a link. This
   also ends a chain that quotes itself.
@@ -416,7 +417,7 @@ when there is media".
 What fails closed: `mapEmbed` never throws. A bad record and good media
 keep the media and give a fallback `recordCard`; good record and bad media
 keep the quote or record card and give a fallback `card`. Both bad give
-one fallback `card`, not two. If `mapPost`
+one fallback `card`, not two (known by how it was built, not by its title). If `mapPost`
 throws on a quoted record, the quote is `accepted` with no post, and the
 card says "The quoted post is not available."
 
