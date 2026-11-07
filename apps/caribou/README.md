@@ -724,9 +724,14 @@ stores anything.
 `server/lib/bluesky-client-metadata.ts`.
 
 - The origin comes from `PUBLIC_BASE_URL` only, never from the `Host`
-  header. When `PUBLIC_BASE_URL` is unset or is not an `http(s)` origin, the
-  route answers 404: a guessed `client_id` is worse than none. Local dev
-  does not need it; the SDK uses its loopback client there.
+  header. It is normalized with `new URL(value).origin`, so case and a
+  default port do not matter. atproto requires an `https` `client_id`
+  with no port. The one exception is a local host (`localhost`,
+  `127.0.0.1`, `[::1]`), which may use `http` and any port, for local
+  tests and the CI smoke job. Any other value (unset, `http` on a real
+  host, a port, a path, a query, credentials) makes the route answer
+  404: a guessed `client_id` is worse than none. Local dev does not need
+  it; the SDK uses its loopback client there.
 - `client_id` is `<origin>/oauth/client-metadata.json`, the exact URL the
   file is served from. `client_uri` is `<origin>`; `redirect_uris` is
   `["<origin>/signin/bluesky"]`.
@@ -756,8 +761,8 @@ The answer has the shape the SDK's `XrpcHandleResolver` reads:
   "no such handle".
 - `400 {"error":"InvalidRequest","message":"Invalid handle"}` for a handle
   that fails the syntax check. No lookup is made.
-- `429` over the rate limit, `503` over the concurrency cap. Every error is
-  `no-store`.
+- `429` over the rate limit, `503` when 16 lookups are already running.
+  Every error is `no-store`.
 
 The rules, in order. Each one has a test in
 `server/lib/__tests__/ssrf-guard.test.ts` or
@@ -772,13 +777,17 @@ The rules, in order. Each one has a test in
 2. **DNS first.** TXT `_atproto.<handle>`. Exactly one distinct
    `did=<did>` value counts; none or two different ones count as no
    answer. A DNS answer wins: HTTPS is tried only when DNS gives none.
-3. **Answer only a DID.** The DNS value and the HTTPS body (trimmed) must be
-   `did:plc:<24 base32 chars>` or `did:web:<host>`; anything else counts as
-   no answer.
+3. **Answer only a DID, by the atproto method rules.** The DNS value and
+   the HTTPS body (trimmed) must be `did:plc:<24 base32 chars>` or
+   `did:web:<host>`. The `did:web` host must pass rule 1 (syntax, no
+   reserved TLD, not an IP address) and has no port: atproto allows a
+   port only for `localhost`, which rule 1 already refuses. Anything else
+   counts as no answer, on both the DNS and the HTTPS path.
 4. **HTTPS only on port 443.** `https://<handle>/.well-known/atproto-did`,
    `GET`, no cookies, no credentials.
-5. **Resolve once, vet every address.** The host is looked up once
-   (`dns.lookup`, all addresses). If **any** address is special, the whole
+5. **Resolve once, vet every address.** The host is looked up once: A and
+   AAAA records through a `dns.promises.Resolver`, which can be cancelled
+   (not `dns.lookup`, which cannot). If **any** address is special, the whole
    lookup is refused; a host that mixes public and private addresses is not
    trusted. Special means, for IPv4: `0.0.0.0/8`, `10.0.0.0/8`,
    `100.64.0.0/10` (CGNAT, and Alibaba's metadata address), `127.0.0.0/8`,
@@ -796,18 +805,32 @@ The rules, in order. Each one has a test in
    literal; the host name is used only for TLS (SNI and certificate check)
    and the `Host` header. There is no second DNS lookup, so a resolver that
    answers a public address to the check and a private one to the connect
-   (DNS rebinding) cannot reach the private one.
+   (DNS rebinding) cannot reach the private one. When the connection to one
+   vetted address fails (refused, unreachable, timed out), the next vetted
+   address is tried. An HTTP answer or a TLS failure is final.
 7. **Redirects are checked like the first hop.** At most 3. Each target must
-   be `https:` on port 443 and goes through rules 5 and 6 again; a host name
-   in a redirect must also pass the hostname part of rule 1.
+   be `https:` on port 443 with no credentials. Its host name must pass all
+   of rule 1 (syntax, no reserved TLD); an IP literal goes straight to the
+   address check. Then rules 5 and 6 run again for it.
 8. **Limits.** 3 s for the whole lookup (DNS, every hop and the body), 2 KB
    body (more is a failure, not a cut), at most 3 redirects, at most 16
    lookups at once (then 503), 30 requests per client IP per minute (then
    429). The client IP is the last `X-Forwarded-For` entry (the one the
    proxy in front of us added), else the socket address.
-9. **Cache.** An answer, or a "no answer", is kept for 5 minutes (under
-   the 10 the spec allows), at most 5,000 handles. The same handle asked
-   twice at once makes one lookup.
+9. **Cache.** An answer is kept for 5 minutes (under the 10 the spec
+   allows). A real "no answer" (no DID in DNS, and HTTPS answered without
+   one or was refused by rules 4–7) is kept for 30 seconds. A null that
+   came from the deadline or a passing error (a DNS server failure, a
+   connection or TLS error) is not kept, so the next request tries again.
+   At most 5,000 handles. The same handle asked twice at once makes one
+   lookup.
+10. **A lookup holds its slot until its work is over.** One of the 16
+    slots is held until every DNS and HTTPS operation the lookup started
+    has settled or been cancelled, not only until the answer is sent. At
+    the deadline every running operation is cancelled (the DNS resolver's
+    `cancel()`, the request's abort signal). The signal is checked before
+    each phase (TXT, then the address lookup, then each connection), so no
+    phase starts after the deadline.
 
 ## Tests
 

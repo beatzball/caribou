@@ -55,7 +55,22 @@ describe('GET /oauth/client-metadata.json', () => {
     })
   })
 
-  it.each([undefined, '', 'caribou.example.com', 'javascript:alert(1)', 'https://caribou.example.com/app'])(
+  it.each([
+    ['https://Caribou.Example.com:443', 'https://caribou.example.com'],
+    ['https://caribou.example.com/', 'https://caribou.example.com'],
+    ['http://localhost:3000', 'http://localhost:3000'],
+    ['http://127.0.0.1:3181', 'http://127.0.0.1:3181'],
+    ['https://localhost:8443', 'https://localhost:8443'],
+  ])('normalizes PUBLIC_BASE_URL %j to %s', async (value, origin) => {
+    process.env.PUBLIC_BASE_URL = value
+    const res = await fetch(`${base}/oauth/client-metadata.json`)
+    expect(res.status).toBe(200)
+    expect((await res.json()).client_id).toBe(`${origin}/oauth/client-metadata.json`)
+  })
+
+  it.each([undefined, '', 'caribou.example.com', 'javascript:alert(1)', 'https://caribou.example.com/app',
+    'http://caribou.example.com', 'https://caribou.example.com:8443', 'https://caribou.example.com/?x=1',
+    'https://caribou.example.com/#x', 'https://user:pw@caribou.example.com', 'http://localhost.example.com'])(
     'answers 404 for PUBLIC_BASE_URL %j, never the Host header', async (value) => {
       if (value !== undefined) process.env.PUBLIC_BASE_URL = value
       const res = await fetch(`${base}/oauth/client-metadata.json`)
@@ -99,6 +114,14 @@ describe('GET /xrpc/com.atproto.identity.resolveHandle', () => {
     const res = await get('?handle=alice.example.com')
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({ error: 'InvalidRequest', message: 'Unable to resolve handle' })
+  })
+
+  it('answers 503 while every lookup slot is busy', async () => {
+    const { ResolverBusy } = await import('../../server/lib/handle-resolver.js')
+    resolve.mockRejectedValue(new ResolverBusy())
+    const res = await get('?handle=alice.example.com')
+    expect(res.status).toBe(503)
+    expect(res.headers.get('cache-control')).toBe('no-store')
   })
 
   it('limits each client IP, taken from the last X-Forwarded-For entry', async () => {

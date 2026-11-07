@@ -1,11 +1,21 @@
 // @vitest-environment node
+import { execFileSync } from 'node:child_process'
+import { createSocket, type Socket as Socket4 } from 'node:dgram'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { createServer, type Server, type Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { TLSSocket } from 'node:tls'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
+  createHttpsTransport,
+  GuardRefusal,
   guardedGet,
   httpsTransport,
+  resolveAddresses,
   isPublicAddress,
   readCapped,
   type LookupFn,
@@ -173,7 +183,8 @@ describe('guardedGet', () => {
 
   it('stops when the signal is aborted (time limit)', async () => {
     const ctrl = new AbortController()
-    const lookup: LookupFn = () => new Promise(() => {})
+    // A lookup that stops on the signal, as resolveAddresses does.
+    const lookup: LookupFn = (_host, sig) => new Promise((_, reject) => sig.addEventListener('abort', () => reject(sig.reason)))
     const p = guardedGet('https://alice.example.com/x', { lookup, transport: okTransport(), signal: ctrl.signal })
     ctrl.abort(new Error('timeout'))
     await expect(p).rejects.toThrow(/timeout/)
@@ -217,5 +228,179 @@ describe('readCapped (rule 8, body size)', () => {
   it('fails on a body over the cap instead of cutting it', async () => {
     const big = Readable.from([Buffer.alloc(1500, 'a'), Buffer.alloc(1500, 'a')])
     await expect(readCapped(big, 2048)).rejects.toThrow(/2048/)
+  })
+})
+
+describe('guardedGet, fix round 1', () => {
+  it('passes the abort signal to the lookup and starts no lookup once it has fired (rule 10)', async () => {
+    const lookup = vi.fn<LookupFn>(async () => [{ address: PUBLIC_A, family: 4 }])
+    const transport = okTransport()
+    const ctrl = new AbortController()
+    await guardedGet('https://alice.example.com/x', { lookup, transport, signal: ctrl.signal })
+    expect(lookup.mock.calls[0]![1]).toBe(ctrl.signal)
+    ctrl.abort(new Error('timeout'))
+    lookup.mockClear()
+    transport.mockClear()
+    await expect(guardedGet('https://alice.example.com/x', { lookup, transport, signal: ctrl.signal })).rejects.toThrow(/timeout/)
+    expect(lookup).not.toHaveBeenCalled()
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('starts no connection when the signal fires during the lookup (rule 10)', async () => {
+    const ctrl = new AbortController()
+    const lookup = vi.fn<LookupFn>(async () => {
+      ctrl.abort(new Error('timeout'))
+      return [{ address: PUBLIC_A, family: 4 }]
+    })
+    const transport = okTransport()
+    await expect(guardedGet('https://alice.example.com/x', { lookup, transport, signal: ctrl.signal })).rejects.toThrow(/timeout/)
+    expect(transport).not.toHaveBeenCalled()
+  })
+
+  it('tries the next vetted address when the connection fails (rule 6)', async () => {
+    const lookup = vi.fn<LookupFn>(async () => [{ address: '2606:4700::1', family: 6 }, { address: PUBLIC_A, family: 4 }])
+    const transport = vi.fn<Transport>(async (req) => {
+      if (req.ip === '2606:4700::1') throw Object.assign(new Error('unreachable'), { code: 'ENETUNREACH' })
+      return { status: 200, location: undefined, body: 'did:plc:alice' }
+    })
+    await expect(guardedGet('https://alice.example.com/x', { lookup, transport, signal: signal() })).resolves.toEqual({ status: 200, body: 'did:plc:alice' })
+    expect(transport.mock.calls.map((c) => c[0].ip)).toEqual(['2606:4700::1', PUBLIC_A])
+  })
+
+  it('does not try the next address after a TLS failure', async () => {
+    const lookup = vi.fn<LookupFn>(async () => [{ address: PUBLIC_B, family: 4 }, { address: PUBLIC_A, family: 4 }])
+    const transport = vi.fn<Transport>(async () => {
+      throw Object.assign(new Error('altname'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' })
+    })
+    await expect(guardedGet('https://alice.example.com/x', { lookup, transport, signal: signal() })).rejects.toThrow(/altname/)
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a redirect to a reserved TLD without a lookup (rule 7)', async () => {
+    const lookup = vi.fn<LookupFn>(async () => [{ address: PUBLIC_A, family: 4 }])
+    const transport = vi.fn<Transport>(async () => ({ status: 302, location: 'https://metadata.google.internal/', body: '' }))
+    await expect(guardedGet('https://alice.example.com/x', { lookup, transport, signal: signal() })).rejects.toBeInstanceOf(GuardRefusal)
+    expect(lookup).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks every policy refusal as a GuardRefusal', async () => {
+    const transport = okTransport()
+    const lookup: LookupFn = async () => [{ address: '10.0.0.1', family: 4 }]
+    await expect(guardedGet('https://alice.example.com/x', { lookup, transport, signal: signal() })).rejects.toBeInstanceOf(GuardRefusal)
+    await expect(guardedGet('http://alice.example.com/x', { lookup, transport, signal: signal() })).rejects.toBeInstanceOf(GuardRefusal)
+  })
+})
+
+describe('resolveAddresses (rule 5 and 10, real DNS client)', () => {
+  let dnsServer: Socket4 | undefined
+  afterEach(() => { dnsServer?.close(); dnsServer = undefined })
+
+  it('is cancelled by the abort signal while the DNS server stays silent', async () => {
+    dnsServer = createSocket('udp4')
+    let queries = 0
+    dnsServer.on('message', () => { queries += 1 })
+    await new Promise<void>((r) => dnsServer!.bind(0, '127.0.0.1', r))
+    const port = dnsServer.address().port
+    const ctrl = new AbortController()
+    const p = resolveAddresses('alice.example.com', ctrl.signal, { servers: [`127.0.0.1:${port}`] })
+    await vi.waitFor(() => expect(queries).toBeGreaterThan(0))
+    const started = Date.now()
+    ctrl.abort(new Error('timeout'))
+    await expect(p).rejects.toThrow()
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+})
+
+// A test CA and a leaf for alice.example.com, made with the openssl CLI.
+function makeCerts(): { ca: string; key: string; cert: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'caribou-tls-'))
+  const run = (args: string[]) => execFileSync('openssl', args, { cwd: dir, stdio: 'pipe' })
+  try {
+    run(['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes',
+      '-keyout', 'ca.key', '-out', 'ca.crt', '-days', '2', '-subj', '/CN=Caribou Test CA',
+      '-addext', 'basicConstraints=critical,CA:TRUE', '-addext', 'keyUsage=critical,keyCertSign'])
+    run(['req', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes',
+      '-keyout', 'leaf.key', '-out', 'leaf.csr', '-subj', '/CN=alice.example.com'])
+    writeFileSync(join(dir, 'ext'), 'subjectAltName=DNS:alice.example.com\nbasicConstraints=CA:FALSE\n')
+    run(['x509', '-req', '-in', 'leaf.csr', '-CA', 'ca.crt', '-CAkey', 'ca.key', '-CAcreateserial',
+      '-out', 'leaf.crt', '-days', '2', '-extfile', 'ext'])
+    return {
+      ca: readFileSync(join(dir, 'ca.crt'), 'utf8'),
+      key: readFileSync(join(dir, 'leaf.key'), 'utf8'),
+      cert: readFileSync(join(dir, 'leaf.crt'), 'utf8'),
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+describe('createHttpsTransport on a real TLS server (rule 6 and 8)', () => {
+  let tls: HttpsServer
+  let port: number
+  let ca: string
+  const seen: Array<{ host: string | undefined; sni: string | undefined }> = []
+
+  beforeAll(async () => {
+    const certs = makeCerts()
+    ca = certs.ca
+    tls = createHttpsServer({ key: certs.key, cert: certs.cert }, (req, res) => {
+      seen.push({ host: req.headers.host, sni: (req.socket as TLSSocket).servername || undefined })
+      if (req.url === '/big-length') {
+        res.writeHead(200, { 'content-length': '5000' })
+        res.write('x')
+        return
+      }
+      if (req.url === '/big-chunked') {
+        res.writeHead(200)
+        res.write(Buffer.alloc(1500, 'a'))
+        res.end(Buffer.alloc(1500, 'a'))
+        return
+      }
+      if (req.url === '/exact') {
+        res.end(Buffer.alloc(2048, 'a'))
+        return
+      }
+      res.end('did:plc:alicealicealicealice2345')
+    })
+    await new Promise<void>((r) => tls.listen(0, '127.0.0.1', r))
+    port = (tls.address() as AddressInfo).port
+  })
+
+  afterAll(() => new Promise<void>((r) => tls.close(() => r())))
+
+  const call = (transport: Transport, host: string, path = '/.well-known/atproto-did') =>
+    transport({ ip: '127.0.0.1', port, host, path, signal: AbortSignal.timeout(3000), maxBytes: 2048 })
+
+  it('answers when the certificate is trusted and names the host, with SNI and Host set to it', async () => {
+    seen.length = 0
+    await expect(call(createHttpsTransport({ ca }), 'alice.example.com')).resolves.toMatchObject({
+      status: 200, body: 'did:plc:alicealicealicealice2345',
+    })
+    expect(seen).toEqual([{ host: 'alice.example.com', sni: 'alice.example.com' }])
+  })
+
+  it('fails on a certificate no trusted CA signed', async () => {
+    await expect(call(createHttpsTransport(), 'alice.example.com')).rejects.toMatchObject({
+      code: expect.stringMatching(/UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|SELF_SIGNED/),
+    })
+  })
+
+  it('fails when the certificate does not name the host', async () => {
+    await expect(call(createHttpsTransport({ ca }), 'rebind.example.com')).rejects.toMatchObject({
+      code: 'ERR_TLS_CERT_ALTNAME_INVALID',
+    })
+  })
+
+  it('reads a body of exactly 2 KB', async () => {
+    const res = await call(createHttpsTransport({ ca }), 'alice.example.com', '/exact')
+    expect(res.body.length).toBe(2048)
+  })
+
+  it('fails on a declared content-length over 2 KB', async () => {
+    await expect(call(createHttpsTransport({ ca }), 'alice.example.com', '/big-length')).rejects.toThrow(/2048/)
+  })
+
+  it('fails on a chunked body over 2 KB', async () => {
+    await expect(call(createHttpsTransport({ ca }), 'alice.example.com', '/big-chunked')).rejects.toThrow(/2048/)
   })
 })

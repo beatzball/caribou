@@ -38,6 +38,10 @@ done.
    names itself as its `client_id`. That second check fails when the app's
    `PUBLIC_BASE_URL` is unset or is not `https://caribou.quest`.
 
+The handle resolver's rate limit trusts the last `X-Forwarded-For` entry. So
+the app must only be reachable through the proxy (Coolify's Traefik), which
+adds that entry; a client that reaches the container directly can set it.
+
 Coolify never builds the app. It only pulls and runs the tested image.
 
 `node --test scripts/ci/` tests the script against a fake Coolify. CI runs

@@ -1,3 +1,4 @@
+import { promises as dns } from 'node:dns'
 import { request } from 'node:https'
 import { isIP } from 'node:net'
 import type { Readable } from 'node:stream'
@@ -7,7 +8,13 @@ import type { Readable } from 'node:stream'
 // that vetted address only. The rules, and the tests for each, are in
 // apps/caribou/README.md, "Bluesky sign-in endpoints" (rules 4–8).
 
-export type LookupFn = (host: string) => Promise<Array<{ address: string; family: number }>>
+/** Looks a host up once. Must stop (reject) soon after `signal` aborts. */
+export type LookupFn = (host: string, signal: AbortSignal) => Promise<Array<{ address: string; family: number }>>
+
+/** A request refused by policy (rules 4–7), as opposed to a network failure. */
+export class GuardRefusal extends Error {
+  override name = 'GuardRefusal'
+}
 
 export interface TransportRequest {
   /** The vetted IP literal to connect to. */
@@ -108,6 +115,8 @@ export function isPublicAddress(ip: string): boolean {
 
 const LABEL = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
 
+const RESERVED_TLDS = new Set(['alt', 'arpa', 'example', 'internal', 'invalid', 'local', 'localhost', 'onion', 'test'])
+
 /** A DNS host name of at least two labels whose last label starts with a letter. */
 export function isHostName(host: string): boolean {
   if (host.length === 0 || host.length > 253) return false
@@ -116,30 +125,86 @@ export function isHostName(host: string): boolean {
   return /^[a-z]/.test(labels[labels.length - 1]!)
 }
 
-// ---- The request -----------------------------------------------------------
+/** A host name that passes rule 1: the syntax above, not an IP, no reserved TLD. */
+export function isPublicHostName(host: string): boolean {
+  if (isIP(host) || !isHostName(host)) return false
+  return !RESERVED_TLDS.has(host.slice(host.lastIndexOf('.') + 1))
+}
 
-function aborted(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
-    const fail = () => reject(signal.reason instanceof Error ? signal.reason : new Error('aborted'))
-    if (signal.aborted) fail()
-    else signal.addEventListener('abort', fail, { once: true })
+// ---- Cancellable DNS (rules 5 and 10) ---------------------------------------
+
+/**
+ * Run `fn` on a fresh `dns.promises.Resolver` and cancel its queries when
+ * `signal` aborts. Unlike `dns.lookup`, these queries do not hold a libuv
+ * thread and stop at once on `cancel()`.
+ */
+export async function withResolver<T>(
+  signal: AbortSignal,
+  servers: string[] | undefined,
+  fn: (r: InstanceType<typeof dns.Resolver>) => Promise<T>,
+): Promise<T> {
+  signal.throwIfAborted()
+  const resolver = new dns.Resolver({ timeout: 2_000, tries: 1 })
+  if (servers) resolver.setServers(servers)
+  const cancel = () => resolver.cancel()
+  signal.addEventListener('abort', cancel, { once: true })
+  try {
+    return await fn(resolver)
+  } finally {
+    signal.removeEventListener('abort', cancel)
+  }
+}
+
+const NOT_FOUND = new Set(['ENOTFOUND', 'ENODATA'])
+
+/** Whether a DNS error means "no such name or record", not a failure. */
+export function isDnsNotFound(err: unknown): boolean {
+  return NOT_FOUND.has((err as { code?: string })?.code ?? '')
+}
+
+/** A and AAAA records of `host`, through a resolver the signal can cancel. */
+export function resolveAddresses(
+  host: string,
+  signal: AbortSignal,
+  opts: { servers?: string[] } = {},
+): Promise<Array<{ address: string; family: number }>> {
+  return withResolver(signal, opts.servers, async (r) => {
+    const [v4, v6] = await Promise.allSettled([r.resolve4(host), r.resolve6(host)])
+    signal.throwIfAborted()
+    const out = [
+      ...(v4.status === 'fulfilled' ? v4.value.map((address) => ({ address, family: 4 })) : []),
+      ...(v6.status === 'fulfilled' ? v6.value.map((address) => ({ address, family: 6 })) : []),
+    ]
+    if (out.length > 0) return out
+    const errors = [v4, v6].map((x) => (x.status === 'rejected' ? x.reason : null)).filter(Boolean)
+    const failure = errors.find((e) => !isDnsNotFound(e))
+    throw failure ?? Object.assign(new Error(`no address for ${host}`), { code: 'ENOTFOUND' })
   })
 }
 
-async function vettedAddress(hostname: string, lookup: LookupFn, signal: AbortSignal): Promise<string> {
+// ---- The request -----------------------------------------------------------
+
+async function vettedAddresses(hostname: string, lookup: LookupFn, signal: AbortSignal): Promise<string[]> {
   // URL keeps the brackets on an IPv6 literal.
   const literal = hostname.startsWith('[') ? hostname.slice(1, -1) : hostname
   if (isIP(literal)) {
-    if (!isPublicAddress(literal)) throw new Error(`refused address ${literal}`)
-    return literal
+    if (!isPublicAddress(literal)) throw new GuardRefusal(`refused address ${literal}`)
+    return [literal]
   }
-  if (!isHostName(hostname)) throw new Error(`refused host ${hostname}`)
-  const addresses = await Promise.race([lookup(hostname), aborted(signal)])
-  if (addresses.length === 0) throw new Error(`no address for ${hostname}`)
+  if (!isPublicHostName(hostname)) throw new GuardRefusal(`refused host ${hostname}`)
+  signal.throwIfAborted()
+  // No race with the signal: the lookup must stop on it, and the caller's
+  // slot stays held until it has (rule 10).
+  const addresses = await lookup(hostname, signal)
+  signal.throwIfAborted()
+  if (addresses.length === 0) throw Object.assign(new Error(`no address for ${hostname}`), { code: 'ENOTFOUND' })
   const bad = addresses.find((a) => !isPublicAddress(a.address))
-  if (bad) throw new Error(`refused address ${bad.address} for ${hostname}`)
-  return addresses[0]!.address
+  if (bad) throw new GuardRefusal(`refused address ${bad.address} for ${hostname}`)
+  return addresses.map((a) => a.address)
 }
+
+// A connection that never reached a server: the next vetted address may work.
+const CONNECT_ERRORS = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ETIMEDOUT', 'EADDRNOTAVAIL', 'EAFNOSUPPORT'])
 
 const REDIRECT = new Set([301, 302, 303, 307, 308])
 
@@ -155,26 +220,33 @@ export async function guardedGet(
   let current = url
   for (let hop = 0; ; hop++) {
     const u = new URL(current)
-    if (u.protocol !== 'https:') throw new Error(`refused scheme ${u.protocol}`)
-    if (u.port !== '' && u.port !== '443') throw new Error(`refused port ${u.port}`)
-    if (u.username || u.password) throw new Error('refused credentials in URL')
+    if (u.protocol !== 'https:') throw new GuardRefusal(`refused scheme ${u.protocol}`)
+    if (u.port !== '' && u.port !== '443') throw new GuardRefusal(`refused port ${u.port}`)
+    if (u.username || u.password) throw new GuardRefusal('refused credentials in URL')
     const host = u.hostname.toLowerCase()
-    const ip = await vettedAddress(host, opts.lookup, opts.signal)
-    const res = await Promise.race([
-      opts.transport({
-        ip,
-        port: 443,
-        host: host.startsWith('[') ? host.slice(1, -1) : host,
-        path: `${u.pathname}${u.search}`,
-        signal: opts.signal,
-        maxBytes: opts.maxBytes ?? MAX_BODY_BYTES,
-      }),
-      aborted(opts.signal),
-    ])
-    if (!REDIRECT.has(res.status)) return { status: res.status, body: res.body }
-    if (!res.location) throw new Error('redirect without a location')
-    if (hop >= maxRedirects) throw new Error(`more than ${maxRedirects} redirects`)
-    current = new URL(res.location, u).toString()
+    const ips = await vettedAddresses(host, opts.lookup, opts.signal)
+    let res: TransportResponse | undefined
+    for (let i = 0; i < ips.length && !res; i++) {
+      opts.signal.throwIfAborted()
+      try {
+        // The transport stops on the signal (https.request's `signal`).
+        res = await opts.transport({
+          ip: ips[i]!,
+          port: 443,
+          host: host.startsWith('[') ? host.slice(1, -1) : host,
+          path: `${u.pathname}${u.search}`,
+          signal: opts.signal,
+          maxBytes: opts.maxBytes ?? MAX_BODY_BYTES,
+        })
+      } catch (err) {
+        const code = (err as { code?: string }).code ?? ''
+        if (i === ips.length - 1 || opts.signal.aborted || !CONNECT_ERRORS.has(code)) throw err
+      }
+    }
+    if (!REDIRECT.has(res!.status)) return { status: res!.status, body: res!.body }
+    if (!res!.location) throw new GuardRefusal('redirect without a location')
+    if (hop >= maxRedirects) throw new GuardRefusal(`more than ${maxRedirects} redirects`)
+    current = new URL(res!.location, u).toString()
   }
 }
 
@@ -205,32 +277,43 @@ function noLookup(): never {
  * The real transport: one HTTPS GET to the IP literal `ip`. The host name is
  * the TLS server name (SNI and the certificate check) and the Host header.
  * Node does not look up an IP literal; `lookup` throws in case it ever does.
+ * `ca` replaces the trusted roots; only tests pass it.
  */
-export const httpsTransport: Transport = (req) =>
-  new Promise<TransportResponse>((resolve, reject) => {
-    const r = request(
-      {
-        host: req.ip,
-        port: req.port,
-        path: req.path,
-        method: 'GET',
-        servername: isIP(req.host) ? undefined : req.host,
-        headers: { host: req.host, accept: 'text/plain', 'user-agent': 'Caribou handle resolver' },
-        agent: false,
-        lookup: noLookup as never,
-        signal: req.signal,
-      },
-      (res) => {
-        const declared = Number(res.headers['content-length'])
-        if (Number.isFinite(declared) && declared > req.maxBytes) {
-          res.destroy()
-          reject(new Error(`body over ${req.maxBytes} bytes`))
-          return
-        }
-        const location = typeof res.headers.location === 'string' ? res.headers.location : undefined
-        readCapped(res, req.maxBytes).then((body) => resolve({ status: res.statusCode ?? 0, location, body }), reject)
-      },
-    )
-    r.on('error', reject)
-    r.end()
-  })
+export function createHttpsTransport(opts: { ca?: string } = {}): Transport {
+  return (req) =>
+    new Promise<TransportResponse>((resolve, reject) => {
+      const family = isIP(req.host)
+      const r = request(
+        {
+          host: req.ip,
+          port: req.port,
+          path: req.path,
+          method: 'GET',
+          servername: family ? undefined : req.host,
+          headers: {
+            host: family === 6 ? `[${req.host}]` : req.host,
+            accept: 'text/plain',
+            'user-agent': 'Caribou handle resolver',
+          },
+          agent: false,
+          lookup: noLookup as never,
+          signal: req.signal,
+          ...(opts.ca ? { ca: opts.ca } : {}),
+        },
+        (res) => {
+          const declared = Number(res.headers['content-length'])
+          if (Number.isFinite(declared) && declared > req.maxBytes) {
+            res.destroy()
+            reject(new Error(`body over ${req.maxBytes} bytes`))
+            return
+          }
+          const location = typeof res.headers.location === 'string' ? res.headers.location : undefined
+          readCapped(res, req.maxBytes).then((body) => resolve({ status: res.statusCode ?? 0, location, body }), reject)
+        },
+      )
+      r.on('error', reject)
+      r.end()
+    })
+}
+
+export const httpsTransport: Transport = createHttpsTransport()
