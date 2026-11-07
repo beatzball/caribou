@@ -1,0 +1,50 @@
+{
+  "cursor": "2026-11-05T09:00:00.000Z::bafyreicursor1",
+  "feed": [
+    {
+      "post": {
+        "uri": "at://did:plc:bob/app.bsky.feed.post/3lbobpost1",
+        "cid": "bafyreibobpost1",
+        "author": { "did": "did:plc:bob", "handle": "bob.example.com", "displayName": "Bob", "labels": [] },
+        "record": { "$type": "app.bsky.feed.post", "createdAt": "2026-11-05T09:30:00.000Z", "text": "plain post" },
+        "replyCount": 0, "repostCount": 0, "likeCount": 0, "quoteCount": 0,
+        "indexedAt": "2026-11-05T09:30:00.500Z",
+        "viewer": {}, "labels": []
+      }
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:carol/app.bsky.feed.post/3lcarolold",
+        "cid": "bafyreicarolold",
+        "author": { "did": "did:plc:carol", "handle": "carol.example.com", "labels": [] },
+        "record": { "$type": "app.bsky.feed.post", "createdAt": "2025-01-01T00:00:00.000Z", "text": "an old post" },
+        "replyCount": 0, "repostCount": 1, "likeCount": 0, "quoteCount": 0,
+        "indexedAt": "2025-01-01T00:00:01.000Z",
+        "viewer": {}, "labels": []
+      },
+      "reason": {
+        "$type": "app.bsky.feed.defs#reasonRepost",
+        "by": { "did": "did:plc:bob", "handle": "bob.example.com", "displayName": "Bob", "labels": [] },
+        "uri": "at://did:plc:bob/app.bsky.feed.repost/3lbobrepost",
+        "cid": "bafyreibobrepost",
+        "indexedAt": "2026-11-05T09:20:00.000Z"
+      }
+    },
+    {
+      "post": {
+        "uri": "at://did:plc:carol/app.bsky.feed.post/3lcarolold",
+        "cid": "bafyreicarolold",
+        "author": { "did": "did:plc:carol", "handle": "carol.example.com", "labels": [] },
+        "record": { "$type": "app.bsky.feed.post", "createdAt": "2025-01-01T00:00:00.000Z", "text": "an old post" },
+        "replyCount": 0, "repostCount": 2, "likeCount": 0, "quoteCount": 0,
+        "indexedAt": "2025-01-01T00:00:01.000Z",
+        "viewer": { "repost": "at://did:plc:reader/app.bsky.feed.repost/3lreaderrepost" }, "labels": []
+      },
+      "reason": {
+        "$type": "app.bsky.feed.defs#reasonRepost",
+        "by": { "did": "did:plc:reader", "handle": "reader.example.com", "labels": [] },
+        "indexedAt": "2026-11-05T09:10:00.000Z"
+      }
+    }
+  ]
+}

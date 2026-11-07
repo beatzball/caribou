@@ -64,10 +64,11 @@ export function createProfileStore(
     return readAs(client, () => client.fetchAccountStatuses(accountId, { tab, cursor }))
   }
 
-  // A page that names no cursor is the last one.
+  // A page that names no cursor is the last one. Only that ends the list:
+  // an empty page with a cursor is not the end (README, "SSR seeding").
   function setPaging(page: TimelinePage) {
     cursor.value = page.nextCursor ?? null
-    hasMore.value = page.length > 0 && cursor.value !== null
+    hasMore.value = cursor.value !== null
   }
 
   async function load() {

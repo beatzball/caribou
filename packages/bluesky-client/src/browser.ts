@@ -4,8 +4,9 @@
  * a Mastodon page never requests them (spec 12.2). Server code and the
  * server-safe modules (`./index.ts`) never import it.
  *
- * The Bluesky `CaribouClient` and the OAuth session code grow here (#177,
- * #182). Until then it hands the SDK classes to the code that needs them.
+ * The OAuth session code grows here (#182).
  */
 export { Agent } from '@atproto/api'
 export { BrowserOAuthClient } from '@atproto/oauth-client-browser'
+export * from './client.js'
+export * from './errors.js'
