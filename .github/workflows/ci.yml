@@ -61,16 +61,28 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: coverage, path: '**/coverage/**' }
 
-  e2e:
+  # One job per Playwright project (see apps/caribou/playwright.config.ts),
+  # all in parallel. Before this split, one job ran the four projects one
+  # after another: about 13-15 min (Nov 2026). Now the wall time is the
+  # slowest job, webkit, at about 7.5 min. The others take about 5 min
+  # (firefox), 3.5 min (chromium) and 2 min (mobile-webkit). The `e2e` job
+  # below gathers the results.
+  e2e-browser:
     # The release PR only bumps versions and changelogs. Its merge to main
     # runs e2e again before deploy, so running it on the PR too buys nothing.
-    # A skipped job still satisfies the required check. The repo check stops
-    # a fork from skipping it by naming its branch the same.
+    # The repo check stops a fork from skipping it by naming its branch the
+    # same. Keep this condition the same as the one in `e2e`.
     if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    name: e2e (${{ matrix.project }})
     runs-on: ubuntu-latest
-    # The suite takes about 13-15 min now (Nov 2026); 15 cut runs off.
-    timeout-minutes: 25
+    # The slowest job (webkit) takes about 7.5 min, setup included.
+    timeout-minutes: 15
     needs: checks
+    strategy:
+      # Let every browser finish, so one red run shows all the failures.
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit, mobile-webkit]
     # The image ships the browsers and their system packages, so the job skips
     # `playwright install --with-deps`. Its apt step once stalled for 36 min
     # on a slow Ubuntu mirror.
@@ -87,10 +99,42 @@ jobs:
       - run: pnpm build
       # Firefox refuses to start as root when HOME belongs to another user.
       # Set it here, not as job env, which the runner's own docker CLI reads too.
-      - run: HOME=/root pnpm test:e2e
+      # No `--` before the flag: pnpm would pass it on to Playwright, which
+      # then reads `--project` as a file filter.
+      - run: HOME=/root pnpm test:e2e --project=${{ matrix.project }}
       - if: failure()
         uses: actions/upload-artifact@v4
-        with: { name: playwright-report, path: apps/caribou/playwright-report }
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: apps/caribou/playwright-report
+
+  # The required status check on main, and what deploy waits for. It passes
+  # only when every browser job passed. A required check that is skipped
+  # counts as passed, so this job always runs and decides by itself.
+  #
+  # The browser jobs are skipped in two cases. On the release PR that is
+  # fine (see above), so `e2e` passes. When `checks` fails they are skipped
+  # too; then `e2e` fails, so a skip can never hide a broken run.
+  e2e:
+    if: always()
+    needs: e2e-browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check every browser passed
+        env:
+          RESULT: ${{ needs.e2e-browser.result }}
+          RELEASE_PR: ${{ github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [[ "$RESULT" == success ]]; then
+            exit 0
+          fi
+          if [[ "$RESULT" == skipped && "$RELEASE_PR" == true ]]; then
+            echo "::notice::e2e is skipped on the release PR."
+            exit 0
+          fi
+          echo "::error::A browser job did not pass (result: $RESULT)."
+          exit 1
 
   changeset-check:
     # Skip on the bot-authored release PR, which legitimately consumes all
@@ -121,7 +165,7 @@ jobs:
   # artifact. publish-image pushes those same bytes to GHCR. This job keeps
   # read-only permissions, so a PR run can never write to the registry.
   #
-  # Skipped on the release PR for the same reason as e2e: main runs it again
+  # Skipped on the release PR for the same reason as e2e-browser: main runs it again
   # before deploy, and deploy needs it.
   smoke-image:
     if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
