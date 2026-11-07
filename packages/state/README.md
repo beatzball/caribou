@@ -164,6 +164,15 @@ fetch on construction; the differences are in pagination handoff:
   opaque: a store never derives it from a status id, because another
   network's cursor is not one. The Mastodon client sets it to the last
   status id (or the Link header's id for bookmarks), and null at the end.
+  **The list ends only when the client says so, with `nextCursor === null`.**
+  An empty page with a cursor is not the end: a Bluesky page can be empty
+  and still have older posts (every post on it deleted, blocked, or
+  unreadable). `hasMore` is `cursor !== null`. The Mastodon client gives
+  an empty page a null cursor (no last id, and Mastodon sends no Link
+  header for an empty page), so Mastodon ends as before. Each
+  `loadMore()` reads one page; the scroll anchor asks again only after the
+  last page has rendered, so a run of empty pages is one request at a
+  time, never a tight loop.
 - `thread-store` — direct seeding. The focused/context signals are
   flipped straight to `{ status: 'ready', data: ... }` from `opts.initial`;
   `load()` is a no-op when both signals are already `ready`. There's no
