@@ -1,16 +1,15 @@
 import type { AppBskyFeedDefs } from '@atproto/api'
 import type { Quote, Status } from '@beatzball/caribou-mastodon-client'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mapPost } from '../map/post.js'
 import type { MapContext } from '../map/context.js'
 import * as fx from '../__fixtures__/embeds.js'
 import { moderationFor } from './_helpers.js'
 
-// Embeds through the real `mapPost`: the post URI reaches the video and
-// fallback cards, the record card reaches `bluesky.recordCard`, and a quoted
-// post is mapped by the same code as the outer one. Only the facet renderer
-// (#178, not merged yet) is a stand-in.
-vi.mock('../facets.js', () => ({ renderFacets: (text: string) => `<p>${text}</p>` }))
+// Embeds through the real `mapPost` and the real facet renderer, no mocks:
+// the post URI reaches the video and fallback cards, the record card
+// reaches `bluesky.recordCard`, and a quoted post is mapped by the same code
+// as the outer one.
 
 const signedOut: MapContext = { viewerOf: null, moderatePost: (view) => moderationFor(view.uri) }
 const signedIn: MapContext = { ...signedOut, viewerOf: 'did:plc:reader@bsky' }

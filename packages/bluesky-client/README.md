@@ -3,8 +3,8 @@
 > Bluesky for Caribou: a `CaribouClient` for Bluesky, and mappers from
 > AppView JSON into Caribou's own types.
 
-**Status:** Phase 2a. The read client and mappers are in (#177); facets,
-embeds and moderation land in #178, #179 and #180.
+**Status:** Phase 2a. The read client and mappers (#177), facets (#178),
+embeds (#179) and moderation (#180) are in.
 Bluesky is behind a flag until phase 4 (see "The flag" below).
 
 ## Purpose
@@ -424,6 +424,79 @@ card says "The quoted post is not available."
 Each card and media URL must be `http:` or `https:`, and is normalized
 (`URL.href`, as the app's `_http-url.ts` does). A `uri` or `thumb` that is
 not is dropped (the link card checks it again).
+
+## Facets to HTML (`renderFacets`)
+
+A Bluesky post is plain text plus facets. `renderFacets(text, facets)`
+turns them into HTML (spec 7.1). It is pure and server-safe, and it never
+throws. The caller still runs the shared `PURIFY_OPTS` over the result, on
+the server and in the browser, as for Mastodon content.
+
+The rules:
+
+- **Byte ranges.** A facet's `byteStart` (inclusive) and `byteEnd`
+  (exclusive) count UTF-8 bytes, not JavaScript characters. The renderer
+  encodes the text with `TextEncoder` and cuts the bytes.
+- **Bad facets drop.** A facet is skipped, and its bytes show as plain
+  text, when its range is not whole numbers, is empty, falls outside the
+  text, or cuts a character in half. A facet with no `index`, or with no
+  feature that can render (below), is skipped too.
+- **Overlaps.** After the skips above, facets are sorted by `byteStart`
+  (equal starts keep the record's order). A facet that overlaps the one
+  kept before it drops. Skipping the facets that would render as text
+  first means a broken facet cannot hide a good one inside its range.
+- **The first known feature wins.** One facet can carry several features.
+  The first one of type `#link`, `#mention` or `#tag` decides. An unknown
+  type is passed over. If the deciding feature is not safe (below), the
+  segment is plain text.
+- **`#link`** → `<a href="<uri>" rel="nofollow noopener noreferrer"
+  target="_blank">`. Only `http:` and `https:`. Any other scheme, or a URI
+  that does not parse, renders as plain text. The `href` is the parsed
+  URL (`new URL(uri).href`).
+- **A link does not hide its host.** An allow-list. The link keeps its
+  visible text only when one of these is true:
+  1. **Same host.** The text, read by the URL parser (with `https://`
+     added when it does not start with `scheme://`, after ASCII whitespace
+     is trimmed), has no user info and gives the link's host. Hosts compare
+     as the parser writes them (lowercase, punycode, `．` and `。` read as
+     `.`), after one leading `www.` drops from each.
+  2. **Plain prose.** After NFKC, the text has no format or invisible
+     character (`\p{Cf}`, which covers U+FEFF, U+200B–U+200F, U+202A–U+202E,
+     U+2060–U+206F and the soft hyphen; also U+2028 and U+2029), and none of
+     `. : / @ [ ] \` or a Unicode full stop (`。`, `۔`, `܁`, `܂`, `።`, `⸼`).
+
+  Otherwise the link shows its real URI (`new URL(uri).href`) as its text.
+  So any text with an invisible character, and any text that looks like an
+  address but names another host, shows where the link really goes.
+
+  The accepted cost: link text such as `e.g.`, `v1.2`, `3.14`, `[1]`,
+  `word…` (NFKC turns `…` into `...`) or `see example.com now` over a link
+  to another host shows the URI instead. So does text with a zero-width
+  joiner, such as a family emoji. Prose like "read this" or "click here"
+  keeps its text. A false alarm only shows more than needed; a missed spoof
+  hides where a link goes.
+- **`#mention`** → `<a href="/@<did>">`, built from the facet's DID. The
+  visible text stays as written; it can be stale, and the profile page shows
+  the current handle. A DID that is not `did:<method>:<id>` renders as
+  plain text.
+- **`#tag`** → `<a href="/tags/<tag>?net=bsky">`, the tag URL-encoded. The
+  href is the same for every reader, so the server render and the first
+  client render agree. An empty tag, or one with a lone UTF-16 surrogate
+  (it cannot be URL-encoded), renders as plain text.
+- **Text.** Each segment is decoded (U+FEFF is kept: it is content, not a
+  byte-order mark) and HTML-escaped (`&`, `<`, `>`, and a
+  no-break space as `&nbsp;`, the way the DOM writes text back). A line
+  break (`\n`, `\r\n` or `\r`) becomes `<br>`.
+- **Wrap.** The whole text goes in one `<p>`. Empty text, or a `text` that
+  is not a string, gives `''`.
+- **Stable through DOMPurify.** The output uses only tags and attributes in
+  `PURIFY_OPTS`, so sanitizing returns the same string. A test checks this.
+- **Hydration.** The output depends only on its input, so the server render
+  equals the first client render. One exception to watch: the host check
+  uses `new URL`, and Node and the browser may ship different IDNA (UTS 46)
+  tables. For an unusual Unicode host in link text they could disagree, and
+  that one post's markup would differ at hydration. If a hydration mismatch
+  shows up on a Bluesky link, look here first.
 
 ## The chunk rule
 
