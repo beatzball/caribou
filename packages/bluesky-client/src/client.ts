@@ -56,6 +56,11 @@ export interface BlueskyClientOptions {
   moderation: BlueskyModerationSource
   /** Called on a 401, before the error is thrown. */
   onUnauthorized?: () => void
+  /**
+   * Called when one post fails to map and is dropped, with the error and the
+   * post's URI. The page still answers without it. For logging; optional.
+   */
+  onMapError?: (err: unknown, uri: string) => void
 }
 
 /** Entries per page when the client pages on its own (catch-up). */
@@ -122,22 +127,23 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
   // One bad post never fails a page: a mapper that throws on one post's data
   // drops that post. A page's end is still read from what the AppView sent.
-  function each<T>(items: readonly T[], map: (item: T) => Status): Status[] {
+  function each<T>(items: readonly T[], uriOf: (item: T) => string, map: (item: T) => Status): Status[] {
     return items.flatMap((item) => {
       try {
         return [map(item)]
-      } catch {
+      } catch (err) {
+        opts.onMapError?.(err, uriOf(item))
         return []
       }
     })
   }
 
   function entries(feed: AppBskyFeedDefs.FeedViewPost[]): Status[] {
-    return each(feed, (e) => mapFeedEntry(e, ctx))
+    return each(feed, (e) => e.post.uri, (e) => mapFeedEntry(e, ctx))
   }
 
   function posts(views: readonly AppBskyFeedDefs.PostView[]): Status[] {
-    return each(views, (v) => mapPost(v, ctx))
+    return each(views, (v) => v.uri, (v) => mapPost(v, ctx))
   }
 
   /** A page of mapped items; the AppView's own page length says whether it is the end. */
@@ -186,9 +192,10 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     // Bookmarks are not polled, as on Mastodon.
     if (params.sinceId) return page([], undefined)
     return run(`bookmarks:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
-      // A page of only deleted or blocked bookmarks would look like the end
-      // to the store, and strand every older one. So read on, a few pages at
-      // most, until a page has a post or the bookmarks end.
+      // A page of only deleted or blocked bookmarks says nothing to show. Read
+      // on, a few pages at most, until a page has a post or the bookmarks
+      // end; at the budget, answer an empty page with the last cursor. That
+      // is not the end: the store ends a list only on a null cursor.
       let cursor = params.cursor
       for (let i = 0; i < BOOKMARK_SKIP_PAGES; i++) {
         const { data } = await agent.app.bsky.bookmark.getBookmarks({
@@ -201,7 +208,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
         if (!data.cursor) return page([], undefined)
         cursor = data.cursor
       }
-      return page([], undefined)
+      return Object.assign([] as Status[], { nextCursor: cursor ?? null })
     })
   }
 

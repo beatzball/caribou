@@ -332,7 +332,7 @@ describe('one bad post never fails a page', () => {
     expect(res.nextCursor).toBe('next')
   })
 
-  it('keeps the cursor when every post on a page is bad', async () => {
+  it('keeps the cursor when every post on a page is bad (the store reads on: bookmarks-store.test.ts)', async () => {
     const { agent, client } = badFor(post(1).uri)
     agent.getTimeline.mockResolvedValue({ data: { feed: [entry(1)], cursor: 'next' } })
     const res = await client.fetchTimeline('home')

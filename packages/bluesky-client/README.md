@@ -173,7 +173,9 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   post's data drops that post, not the page. The page keeps its cursor
   (its end is read from what the AppView sent). In a thread a bad reply is
   left out; a bad post asked for by itself (`fetchStatus`, the focus of
-  `fetchThread`) is `not_found`.
+  `fetchThread`) is `not_found`. `onMapError(err, uri)`, when given, hears of each
+  dropped post. A page whose every post was dropped is empty with its
+  cursor, and the store reads on.
 - **Catch-up (`sinceId`, seam 7):** Bluesky has no `since_id`. The client
   pages from the top, at most 3 pages of 50, until it meets the entry whose
   id is `sinceId` (by entry id, so a bad post above it does not stop it). Met: the answer is every entry above it, then it, and
@@ -181,10 +183,12 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `nextCursor` is the cursor after the last page, or `null` when the feed
   ended (an empty page drops its cursor). The store calls that a gap
   ("Many new posts") and replaces the list when applied.
-- **Bookmarks:** a deleted or blocked bookmark is left out. The store ends
-  at an empty page, so a page of only unavailable bookmarks must not be
-  one: the client reads on (at most 5 pages) until a page has a post or the
-  bookmarks end. After 5 such pages it ends the list there.
+- **Bookmarks:** a deleted or blocked bookmark is left out. To save
+  requests, the client reads past pages of only unavailable bookmarks (at
+  most 5) until a page has a post or the bookmarks end. At that budget it
+  answers an empty page with the last cursor, never `null`: a list ends
+  only on a null cursor (`packages/state` README), so the store asks again
+  and older bookmarks stay in reach.
 - **Reads:** `home` → `getTimeline`; `bookmarks` → `getBookmarks` (a check
   answers an empty page, as on Mastodon); `fetchStatus` and
   `fetchStatuses` → `getPosts` (25 per request); `fetchThread` →
