@@ -34,7 +34,7 @@ own files; ask in your report for a change in another's.
 | `src/map/account.ts` | `mapAccount(view) → Account`, `mapRelationship(view) → Relationship` | #177 |
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
-| `src/embeds.ts` | `mapEmbed(embed, ctx) → { mediaAttachments, card, quote }` | #179 |
+| `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, quote }` | #179 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
 | `src/browser.ts` | the SDK classes; later the Bluesky `CaribouClient` and OAuth | #177, #182 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
@@ -57,6 +57,60 @@ How they fit:
   `profileList`, `profileView`). The SDK's `ModerationDecision` instance never
   leaves `moderate()`: page data goes through JSON, and JSON drops its
   `ui()` method (spec 7.4).
+
+## Embeds (`mapEmbed`, spec 7.3)
+
+`mapPost` calls `mapEmbed(view.embed, ctx, view.uri)`. The third argument
+is the post's AT URI. A video and the fallback card link to that post on
+bsky.app, and the embed view itself does not carry it. Without it they link
+to `https://bsky.app`.
+
+What maps to what:
+
+| `embed.$type` | `mediaAttachments` | `card` | `quote` |
+|---|---|---|---|
+| none | `[]` | `null` | `null` |
+| `app.bsky.embed.images#view` | up to 4, type `image` | `null` | `null` |
+| `app.bsky.embed.external#view` | `[]` | link card | `null` |
+| `app.bsky.embed.video#view` | `[]` | video card | `null` |
+| `app.bsky.embed.record#view` | `[]` | see "Records" | see "Records" |
+| `app.bsky.embed.recordWithMedia#view` | from `media` | from `media`, else from `record` | from `record` |
+| anything else | `[]` | fallback card | `null` |
+
+- **Image:** `id` and `url` = `fullsize`, `previewUrl` = `thumb`,
+  `description` = `alt` (`null` when empty). With an `aspectRatio`,
+  `meta.original` and `meta.small` carry its width, height and aspect.
+- **External:** `url` = `uri`, `title`, `description`, `image` = `thumb`,
+  type `link`. An empty title becomes the link's host, so the link card
+  (which needs a title) still shows. A Tenor GIF is an external embed.
+- **Video:** a card of type `video`. `image` = `thumbnail`, `url` = the
+  post on bsky.app, `title` = `alt` or "Video", description "Play on
+  bsky.app". No `<video>` element: `playlist` is HLS (`.m3u8`), which
+  only Safari plays (spec 7.3, phase 6).
+- **Records** (`app.bsky.embed.record#view`, by `record.$type`):
+
+  | `record.$type` | result |
+  |---|---|
+  | `…#viewRecord` | quote `accepted`, `quotedStatus` = `mapPost` of the record, with the same `ctx` |
+  | `…#viewNotFound` | quote `deleted`, no post ("The quoted post was deleted.") |
+  | `…#viewBlocked` | quote `blocked_account`, no post |
+  | `…#viewDetached` | quote `revoked`, no post ("removed this quote") |
+  | feed (`generatorView`), list (`listView`), starter pack, labeler | a card that links to it on bsky.app |
+  | anything else | fallback card |
+
+  A quoted record becomes a post view (its `value` is the `record`, its
+  first `embeds` entry the `embed`, no `viewer`) and goes through `mapPost`.
+  The states reuse PR #167's quote card notes, so the card needs no change.
+- **Fallback:** a card titled "Not supported here — open on bsky.app" that
+  links to the post. It is the answer for an unknown `$type` and for a
+  shape that does not match its `$type`.
+
+What fails closed: `mapEmbed` never throws. A bad shape gives the fallback
+card. If `mapPost` throws on a quoted record, the quote is `accepted` with
+no post, and the card says "The quoted post is not available."
+
+Each card and media URL must be `http:` or `https:`. A `uri` or `thumb` that is not
+is dropped (the link card checks it again).
 
 ## The chunk rule
 
