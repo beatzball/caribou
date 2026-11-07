@@ -163,3 +163,43 @@ describe('profile store, opaque cursor', () => {
     ])
   })
 })
+
+describe('the list ends only on a null cursor', () => {
+  // Another network can send an empty page that still names older posts.
+  const page = (ids: string[], nextCursor: string | null) =>
+    Object.assign(ids.map((id) => ({ id, content: id, account: { id: 'a' } }) as unknown as Status), { nextCursor })
+  const PAGED: Record<string, ReturnType<typeof page>> = {
+    '': page(['at://p/2'], 'empty'),
+    empty: page([], 'older'),
+    older: page(['at://p/1'], null),
+  }
+
+  it('timeline: an empty page with a cursor does not end it', async () => {
+    const fetchTimeline = vi.fn(async (_k: unknown, params?: { cursor?: string }) => PAGED[params?.cursor ?? '']!)
+    const store = createTimelineStore('home', { clientSource: () => ({ fetchTimeline }) as unknown as CaribouClient })
+    await store.load()
+    await store.loadMore()
+    expect(store.hasMore.value).toBe(true)
+    await store.loadMore()
+    expect(store.statusIds.value).toEqual(['at://p/2', 'at://p/1'])
+    expect(store.hasMore.value).toBe(false)
+  })
+
+  it('profile: an empty page with a cursor does not end it', async () => {
+    const fetchAccountStatuses = vi.fn(async (_id: string, params: { cursor?: string }) => PAGED[params.cursor ?? '']!)
+    const store = createProfileStore('did:plc:alice', 'posts', { clientSource: () => ({ fetchAccountStatuses }) as unknown as CaribouClient })
+    await store.load()
+    await store.loadMore()
+    expect(store.hasMore.value).toBe(true)
+    await store.loadMore()
+    expect(store.statusIds.value).toEqual(['at://p/2', 'at://p/1'])
+    expect(store.hasMore.value).toBe(false)
+  })
+
+  it('an empty page with no cursor still ends it', async () => {
+    const fetchAccountStatuses = vi.fn(async () => page([], null))
+    const store = createProfileStore('did:plc:alice', 'posts', { clientSource: () => ({ fetchAccountStatuses }) as unknown as CaribouClient })
+    await store.load()
+    expect(store.hasMore.value).toBe(false)
+  })
+})

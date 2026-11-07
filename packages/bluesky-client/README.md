@@ -3,7 +3,8 @@
 > Bluesky for Caribou: a `CaribouClient` for Bluesky, and mappers from
 > AppView JSON into Caribou's own types.
 
-**Status:** Scaffold (#177). Module signatures are fixed; bodies are TODO.
+**Status:** Phase 2a. The read client and mappers are in (#177); facets,
+embeds and moderation land in #178, #179 and #180.
 Bluesky is behind a flag until phase 4 (see "The flag" below).
 
 ## Purpose
@@ -36,6 +37,9 @@ own files; ask in your report for a change in another's.
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
 | `src/embeds.ts` | `mapEmbed(embed, ctx) → { mediaAttachments, card, quote }` | #179 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
+| `src/map/labels.ts` | `mapLabels(labels) → BlueskyLabel[]` | #177 |
+| `src/client.ts` | `createBlueskyClient(opts) → CaribouClient` (read methods), `BLUESKY_CAPABILITIES` | #177 |
+| `src/errors.ts` | `normalizeXrpcError(err) → CaribouError` | #177 |
 | `src/browser.ts` | the SDK classes; later the Bluesky `CaribouClient` and OAuth | #177, #182 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
@@ -173,6 +177,154 @@ labeler the reader subscribes to is not on that post yet.
      `moderatePost`, so 2 implies it).
 - A new subscription later breaks rule 3, and the card is covered again
   until a refetch.
+
+## Mapping rules (#177)
+
+Spec 6.5. What maps to what, and what shows when data is missing.
+
+**Post (`mapPost`)**
+
+| `Status` field | from the post view | when missing or unknown |
+|---|---|---|
+| `id`, `uri` | `uri` (the AT URI) | — |
+| `url` | `https://bsky.app/profile/<author did>/post/<rkey>` | — |
+| `createdAt` | `record.createdAt` | `indexedAt` when absent or not a date |
+| `content` | `renderFacets(record.text, record.facets)` | a record that is not an `app.bsky.feed.post` maps as empty text |
+| `account` | `mapAccount(author)` | — |
+| `inReplyToId` | `record.reply.parent.uri` | `null` |
+| `inReplyToAccountId` | the DID in that URI | `null` |
+| `mediaAttachments`, `card`, `quote` | `mapEmbed(embed, ctx)` | — |
+| `mentions` | mention facets: `id` = the facet's DID, `acct` = the visible text without `@` (display only, see below) | `[]` |
+| `tags` | tag facets, `url` = `https://bsky.app/hashtag/<tag>` | `[]` |
+| counts | `likeCount`, `repostCount`, `replyCount`, `quoteCount` | `0` |
+| `favourited`, `reblogged` | `viewer.like != null`, `viewer.repost != null` | `false` |
+| `bookmarked`, `muted`, `pinned` | `viewer.bookmarked`, `viewer.threadMuted`, `viewer.pinned` | `false` |
+| `visibility` | always `public` | — |
+| `sensitive`, `spoilerText` | `false`, `''` (moderation is separate, 7.4) | — |
+| `poll`, `editedAt`, `emojis`, `language` | `null`, `null`, `[]`, `record.langs[0]` | `language` `null` |
+| `bluesky.likeUri`, `repostUri` | `viewer.like`, `viewer.repost` | `null` |
+| `bluesky.replyRef` | `record.reply` (root and parent strong refs) | `null` |
+| `bluesky.replyDisabled`, `embeddingDisabled` | `viewer.replyDisabled`, `viewer.embeddingDisabled` | `false` |
+| `bluesky.labels` | `mapLabels(labels)` | `[]` |
+| `bluesky.moderation` | `ctx.moderatePost(view)` | — (the caller always gives one) |
+| `bluesky.viewerOf` | `ctx.viewerOf` | — |
+
+- **Bad facets.** A record is author-written, so its facets can be
+  anything. A facet that is not an object, has no whole-number byte index,
+  or has no feature object is dropped; so is a feature that is not an
+  object. The post stays readable, and `renderFacets` gets only the good
+  facets.
+- **`mentions[].acct` is display text.** It is what the author typed, and it
+  can be stale or point the wrong way (spec 7.1). Only `id` (the DID) says
+  who is mentioned. Compose (#189) must address a reply's mentions by `id`,
+  never by `acct`.
+- **Authors have no moderation of their own.** A post's `account` and a
+  repost's reposter come from `mapAccount`, so their `bluesky.moderation`
+  is unset. A card reads the avatar and banner decision from the post's
+  `bluesky.moderation` (`avatar`, `banner`): the SDK's `moderatePost` already
+  counts the author's labels.
+
+`mapLabels` keeps `src`, `uri`, `cid`, `val`, `neg`, `cts` and drops the
+rest. The signature (`sig`) is bytes; it would not survive JSON, and the
+SSR page data must equal the first client render.
+
+**Account (`mapAccount`)**
+
+| `Account` field | from the profile view | when missing |
+|---|---|---|
+| `id` | `did` | — |
+| `acct`, `username` | `handle` | — |
+| `url` | `https://bsky.app/profile/<handle>`; the DID when the handle is `handle.invalid` | — |
+| `displayName` | `displayName` | `''` (screens fall back to the handle) |
+| `note` | `renderFacets(description, [])`: escaped text, line breaks, no links yet (7.1 asks #178 for link detection) | `''` |
+| `avatar`, `avatarStatic` | `avatar` | `''` |
+| `header`, `headerStatic` | `banner` | `''` |
+| counts | `postsCount`, `followersCount`, `followsCount` | `0` |
+| `createdAt` | `createdAt` | `indexedAt`, then `''` |
+| `locked`, `bot`, `group`, `fields`, `emojis`, `roles` | `false`, `false`, `false`, `[]`, `[]`, `[]` | — |
+| `bluesky` | `{ did, handleInvalid, labels }`; `moderation` stays unset | — |
+
+**Relationship (`mapRelationship`)**: `following` = `viewer.following != null`,
+`followedBy` = `viewer.followedBy != null`, `blocking` = a block record **or**
+a block list, `blockedBy`, `muting` = `viewer.muted` (a mute list counts),
+`mutingNotifications` = `muting`, `showingReblogs` = `!viewer.mutedOnlyReposts`.
+`bluesky.followUri` and `blockUri` are the reader's own records; a block by
+list has no `blockUri` (the reader undoes it on the list).
+`requested`, `requestedBy`, `notifying`, `domainBlocking`, `endorsed` are `false`.
+
+**Feed entry (`feedEntryId`, `mapFeedEntry`, seam 8)**
+
+- A plain entry is its post: id = the post URI.
+- A repost (`reasonRepost`) becomes a wrapper `Status` whose `reblog` is the
+  post. Its id is `reason.uri`. The lexicon makes `uri` optional; without
+  it the id is `repost:<by.did>:<post.uri>:<reason.indexedAt>`. That
+  fallback never equals the post's id or any record URI, the reader's own
+  repost record included.
+- The wrapper's `account` is `reason.by`, its `createdAt` is
+  `reason.indexedAt`, its counts are `0`, its content is empty, and its
+  `bluesky` names the repost record (`uri`, `cid` from `reason`) with the
+  post's moderation, so the wrapper reads as a Bluesky resource.
+- A repost's id can change between reads: if the AppView sends `reason.uri`
+  on one read and leaves it out on the next, the same repost has two ids.
+  A catch-up then does not meet it and answers a gap (seam 7), which
+  replaces the list. That is the intended result, not a duplicate; do not
+  "fix" it by guessing.
+- Any other reason (`reasonPin`, an unknown one) maps as a plain entry.
+  Profile feeds ask for no pins (`includePins: false`), so a pinned post
+  never shows twice.
+
+## The client (#177)
+
+`createBlueskyClient({ userKey, agent, moderation, onUnauthorized })` is the
+Bluesky `CaribouClient`. It takes a signed-in `Agent` (#182 makes it) and a
+moderation source (#180 builds it from the reader's prefs and label
+definitions). It imports the SDK for types only; `./browser` exports it.
+
+- **Order:** `timelineOrder()` is `null` for every kind: the store keeps
+  feed order (seam 6).
+- **Paging:** `nextCursor` is the AppView's `cursor`, passed back as it
+  came. An empty AppView page ends the feed (`nextCursor` `null`), even
+  when it sends a cursor.
+- **One bad post never fails a page.** A mapper that still throws on one
+  post's data drops that post, not the page. The page keeps its cursor
+  (its end is read from what the AppView sent). In a thread a bad reply is
+  left out; a bad post asked for by itself (`fetchStatus`, the focus of
+  `fetchThread`) is `not_found`. `onMapError(err, uri)`, when given, hears of each
+  dropped post. A page whose every post was dropped is empty with its
+  cursor, and the store reads on.
+- **Catch-up (`sinceId`, seam 7):** Bluesky has no `since_id`. The client
+  pages from the top, at most 3 pages of 50, until it meets the entry whose
+  id is `sinceId` (by entry id, so a bad post above it does not stop it). Met: the answer is every entry above it, then it, and
+  `nextCursor` is `null`. Not met: the answer is every entry it read, and
+  `nextCursor` is the cursor after the last page, or `null` when the feed
+  ended (an empty page drops its cursor). The store calls that a gap
+  ("Many new posts") and replaces the list when applied.
+- **Bookmarks:** a deleted or blocked bookmark is left out. To save
+  requests, the client reads past pages of only unavailable bookmarks (at
+  most 5) until a page has a post or the bookmarks end. At that budget it
+  answers an empty page with the last cursor, never `null`: a list ends
+  only on a null cursor (`packages/state` README), so the store asks again
+  and older bookmarks stay in reach.
+- **Reads:** `home` → `getTimeline`; `bookmarks` → `getBookmarks` (a check
+  answers an empty page, as on Mastodon); `fetchStatus` and
+  `fetchStatuses` → `getPosts` (25 per request); `fetchThread` →
+  `getPostThread`, ancestors oldest first, descendants depth first, a
+  not-found or blocked post left out; `lookupAccount` and
+  `verifyCredentials` → `getProfile`; `fetchAccountStatuses` →
+  `getAuthorFeed` (`posts` = `posts_no_replies`, `replies` =
+  `posts_with_replies`, `media` = `posts_with_media`);
+  `fetchRelationships` → `getProfiles` (25 per request, in the order
+  asked); `fetchMutes`, `fetchBlocks` → `getMutes`, `getBlocks`;
+  `fetchFilters` → `[]` (Bluesky has no server filters).
+- **Not here yet:** `local`, `public`, hashtag and list timelines, every
+  write, compose, polls, edit, notifications, search, lists and tags throw
+  `CaribouError('not_found')` naming the issue that adds them. A screen
+  hides those by `capabilities`.
+- **Errors (`normalizeXrpcError`):** 401 → `unauthorized` (and
+  `onUnauthorized()`), 404 or an XRPC `NotFound` / "not found" 400 →
+  `not_found`, 429 → `rate_limited` with `retryAfter` from
+  `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
+- **Dedup:** two equal reads in flight share one request.
 
 ## The chunk rule
 
