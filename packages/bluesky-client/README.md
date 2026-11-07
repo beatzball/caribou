@@ -111,7 +111,7 @@ Fail-closed rules:
 | gap | what Caribou does |
 |---|---|
 | `prefs` is `null` | Strict prefs: adult content off, every built-in and every value on the subject `hide`, and every labeler named on the subject counts as subscribed. Every cover then has `noOverride`, except on the reader's own post or profile. |
-| `labelDefs` is `null`, or has no entry for a subscribed labeler | A label from that labeler covers its target. Reason name: "Content warning (labeler unavailable)". |
+| `labelDefs` is `null`, or has no entry for a subscribed labeler | A label from that labeler that the SDK cannot define covers its target. Reason name: "Content warning (labeler unavailable)". |
 | The labeler's definitions loaded, but do not define this value | The same cover. Reason name: "Content warning (unknown label)". |
 | A self-label the SDK does not define | The same cover, "Content warning (unknown label)". |
 | The SDK throws | Every context covered (step 2). |

@@ -217,6 +217,7 @@ describe('moderate: hostile and negated input (fix round 1)', () => {
   it('a prototype-named labeler DID with a built-in value does not throw', () => {
     const r = moderate({ kind: 'post', view: post({ labels: [label('porn', 'constructor')] }) }, READER, null, DEFS)
     expect(r.contexts.contentMedia).toMatchObject({ blur: true, noOverride: true })
+    expect(r.contexts.contentMedia.reasons).toEqual([{ label: 'porn', source: 'constructor', name: 'Adult content' }])
   })
 
   it('prototype-named author labels cover the account, never throw', () => {
