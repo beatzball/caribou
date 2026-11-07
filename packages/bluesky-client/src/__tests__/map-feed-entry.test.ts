@@ -76,6 +76,6 @@ describe('mapFeedEntry', () => {
 
   it('is plain data', () => {
     const s = mapFeedEntry(feed()[1]!, ctx)
-    expect(JSON.parse(JSON.stringify(s))).toEqual(s)
+    expect(JSON.parse(JSON.stringify(s))).toStrictEqual(s)
   })
 })

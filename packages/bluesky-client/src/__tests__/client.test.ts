@@ -146,6 +146,16 @@ describe('catch-up without since_id (seam 7)', () => {
     expect(res.nextCursor).toBeNull()
   })
 
+  it('ends a gap at an empty page, dropping the cursor it carried', async () => {
+    const getTimeline = vi.fn()
+      .mockResolvedValueOnce({ data: { feed: [entry(1)], cursor: '1' } })
+      .mockResolvedValueOnce({ data: { feed: [], cursor: 'ghost' } })
+    const { client } = setup({ getTimeline })
+    const res = await client.fetchTimeline('home', { sinceId: 'at://did:plc:bob/app.bsky.feed.post/gone' })
+    expect(res.map((s) => s.id)).toEqual([post(1).uri])
+    expect(res.nextCursor).toBeNull()
+  })
+
   it('answers an empty page for an empty feed', async () => {
     const { client } = setup({ getTimeline: pagedFeed(0) })
     const res = await client.fetchTimeline('home', { sinceId: 'x' })
@@ -299,6 +309,61 @@ describe('accounts', () => {
 
   it('has no server filters', async () => {
     expect(await setup().client.fetchFilters()).toEqual([])
+  })
+})
+
+describe('one bad post never fails a page', () => {
+  // The moderation source throwing for one post stands in for any mapper
+  // that still throws on one post's data.
+  function badFor(uri: string) {
+    const { agent, client } = setup()
+    const c = createBlueskyClient({
+      userKey: READER, agent: agent as unknown as BlueskyAgent,
+      moderation: { post: (v) => { if (v.uri === uri) throw new Error('bad post'); return moderationFor(v.uri) }, profile: (v) => moderationFor(v.did) },
+    })
+    return { agent, client: c, bare: client }
+  }
+
+  it('drops the post from a timeline page and keeps the rest and the cursor', async () => {
+    const { agent, client } = badFor(post(2).uri)
+    agent.getTimeline.mockResolvedValue({ data: { feed: [entry(1), entry(2), entry(3)], cursor: 'next' } })
+    const res = await client.fetchTimeline('home')
+    expect(res.map((s) => s.id)).toEqual([post(1).uri, post(3).uri])
+    expect(res.nextCursor).toBe('next')
+  })
+
+  it('keeps the cursor when every post on a page is bad', async () => {
+    const { agent, client } = badFor(post(1).uri)
+    agent.getTimeline.mockResolvedValue({ data: { feed: [entry(1)], cursor: 'next' } })
+    const res = await client.fetchTimeline('home')
+    expect(res).toHaveLength(0)
+    expect(res.nextCursor).toBe('next')
+  })
+
+  it('still meets the known top in a catch-up when a post above it is bad', async () => {
+    const { client } = (() => { const r = badFor(post(1).uri); r.agent.getTimeline = pagedFeed(2) as never; return r })()
+    const res = await client.fetchTimeline('home', { sinceId: post(3).uri })
+    expect(res.map((s) => s.id)).toEqual([0, 2, 3].map((n) => post(n).uri))
+    expect(res.nextCursor).toBeNull()
+  })
+
+  it('drops a bad reply from a thread, and a bad post from fetchStatuses', async () => {
+    const tvp = (n: string, extra: object = {}) => ({ $type: 'app.bsky.feed.defs#threadViewPost', post: post(n), ...extra })
+    const { agent, client } = badFor(post('bad').uri)
+    agent.getPostThread.mockResolvedValue({ data: { thread: tvp('focus', { parent: tvp('bad'), replies: [tvp('bad'), tvp('ok')] }) } })
+    const t = await client.fetchThread(post('focus').uri)
+    expect(t.ancestors).toEqual([])
+    expect(t.descendants.map((s) => s.id)).toEqual([post('ok').uri])
+    agent.getPosts.mockResolvedValue({ data: { posts: [post('bad'), post('ok')] } })
+    expect((await client.fetchStatuses([post('bad').uri, post('ok').uri])).map((s) => s.id)).toEqual([post('ok').uri])
+  })
+
+  it('says not found when the one post asked for is bad', async () => {
+    const { agent, client } = badFor(post('bad').uri)
+    agent.getPosts.mockResolvedValue({ data: { posts: [post('bad')] } })
+    await expect(client.fetchStatus(post('bad').uri)).rejects.toMatchObject({ code: 'not_found' })
+    agent.getPostThread.mockResolvedValue({ data: { thread: { $type: 'app.bsky.feed.defs#threadViewPost', post: post('bad') } } })
+    await expect(client.fetchThread(post('bad').uri)).rejects.toMatchObject({ code: 'not_found' })
   })
 })
 

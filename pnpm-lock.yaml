@@ -168,6 +168,9 @@ importers:
       '@beatzball/caribou-eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
+      '@beatzball/caribou-state':
+        specifier: workspace:*
+        version: link:../state
       '@beatzball/caribou-tsconfig':
         specifier: workspace:*
         version: link:../tsconfig

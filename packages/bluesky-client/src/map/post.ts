@@ -23,6 +23,25 @@ function isStrongRef(v: unknown): v is { uri: string; cid: string } {
   return isObject(v) && typeof v.uri === 'string' && typeof v.cid === 'string'
 }
 
+function isByteIndex(v: unknown): v is { byteStart: number; byteEnd: number } {
+  return isObject(v) && Number.isInteger(v.byteStart) && Number.isInteger(v.byteEnd)
+}
+
+/**
+ * The facets a record really has. A record is author-written and reaches the
+ * AppView as written, so a facet can be anything. One that is not an object,
+ * has no numeric byte index, or has no feature object is dropped (spec 7.1);
+ * so are features that are not objects. The post stays readable.
+ */
+export function validFacets(facets: readonly unknown[]): AppBskyRichtextFacet.Main[] {
+  return facets.flatMap((f): AppBskyRichtextFacet.Main[] => {
+    if (!isObject(f) || !isByteIndex(f.index) || !Array.isArray(f.features)) return []
+    const features = f.features.filter((x): x is { $type: string } => isObject(x) && typeof x.$type === 'string')
+    if (features.length === 0) return []
+    return [{ ...f, index: { byteStart: f.index.byteStart, byteEnd: f.index.byteEnd }, features } as AppBskyRichtextFacet.Main]
+  })
+}
+
 /** The record as a post, or an empty post when it is not one. */
 export function postRecord(record: unknown): PostRecord {
   if (!isObject(record) || record.$type !== 'app.bsky.feed.post' || typeof record.text !== 'string') {
@@ -33,7 +52,7 @@ export function postRecord(record: unknown): PostRecord {
     : undefined
   return {
     text: record.text,
-    ...(Array.isArray(record.facets) ? { facets: record.facets as AppBskyRichtextFacet.Main[] } : {}),
+    ...(Array.isArray(record.facets) ? { facets: validFacets(record.facets) } : {}),
     ...(typeof record.createdAt === 'string' ? { createdAt: record.createdAt } : {}),
     ...(Array.isArray(record.langs) ? { langs: record.langs.filter((l): l is string => typeof l === 'string') } : {}),
     ...(reply ? { reply } : {}),
@@ -74,7 +93,7 @@ function mentionsAndTags(rec: PostRecord): { mentions: StatusMention[]; tags: Ta
   const seenDids = new Set<string>()
   const seenTags = new Set<string>()
   for (const facet of rec.facets) {
-    for (const feature of facet.features ?? []) {
+    for (const feature of facet.features) {
       const f = feature as { $type: string; did?: unknown; tag?: unknown }
       if (f.$type === MENTION && typeof f.did === 'string' && !seenDids.has(f.did)) {
         seenDids.add(f.did)

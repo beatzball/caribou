@@ -105,7 +105,7 @@ describe('mapPost', () => {
 
   it('is plain data: JSON gives back the same post', () => {
     const s = mapPost(view(), ctx)
-    expect(JSON.parse(JSON.stringify(s))).toEqual(s)
+    expect(JSON.parse(JSON.stringify(s))).toStrictEqual(s)
   })
 
   it('falls back to indexedAt when createdAt is missing or not a date', () => {
@@ -121,6 +121,31 @@ describe('mapPost', () => {
     expect(s.content).toBe('<p>[0]</p>')
     expect(s.inReplyToId).toBeNull()
     expect(s.language).toBeNull()
+  })
+
+  it.each([
+    ['a null facet', [null]],
+    ['a facet without index', [{ features: [{ $type: 'app.bsky.richtext.facet#mention', did: 'did:plc:bob' }] }]],
+    ['an index that is not numbers', [{ index: { byteStart: '0', byteEnd: 4 }, features: [{ $type: 'app.bsky.richtext.facet#tag', tag: 'x' }] }]],
+    ['null features', [{ index: { byteStart: 0, byteEnd: 4 }, features: null }]],
+    ['features that are not an array', [{ index: { byteStart: 0, byteEnd: 4 }, features: { $type: 'app.bsky.richtext.facet#tag', tag: 'x' } }]],
+    ['a null feature', [{ index: { byteStart: 0, byteEnd: 4 }, features: [null] }]],
+  ])('skips %s, and the post stays readable', (_name, facets) => {
+    const v = view()
+    ;(v.record as { facets: unknown }).facets = facets
+    const s = mapPost(v, ctx)
+    expect(s.mentions).toEqual([])
+    expect(s.tags).toEqual([])
+    expect(renderFacets).toHaveBeenLastCalledWith('héllo 🌷 @bob.example.com #Caribou', [])
+  })
+
+  it('keeps the good facets next to a bad one', () => {
+    const v = view()
+    const rec = v.record as { facets: unknown[] }
+    rec.facets = [null, ...rec.facets]
+    const s = mapPost(v, ctx)
+    expect(s.mentions.map((m) => m.id)).toEqual(['did:plc:bob'])
+    expect(s.tags.map((t) => t.name)).toEqual(['Caribou'])
   })
 
   it('drops a malformed reply ref', () => {

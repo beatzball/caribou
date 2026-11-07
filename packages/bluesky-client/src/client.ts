@@ -62,6 +62,8 @@ export interface BlueskyClientOptions {
 export const CATCH_UP_PAGE_SIZE = 50
 /** Pages a catch-up reads before it calls the answer a gap (spec 6.3, seam 7). */
 export const CATCH_UP_MAX_PAGES = 3
+/** Pages of only unavailable bookmarks the client reads past before it stops. */
+export const BOOKMARK_SKIP_PAGES = 5
 /** The AppView's limit for `getPosts` and `getProfiles`. */
 const BATCH = 25
 
@@ -118,8 +120,29 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return { ...a, bluesky: { ...a.bluesky!, moderation: moderation.profile(view) } }
   }
 
+  // One bad post never fails a page: a mapper that throws on one post's data
+  // drops that post. A page's end is still read from what the AppView sent.
+  function each<T>(items: readonly T[], map: (item: T) => Status): Status[] {
+    return items.flatMap((item) => {
+      try {
+        return [map(item)]
+      } catch {
+        return []
+      }
+    })
+  }
+
   function entries(feed: AppBskyFeedDefs.FeedViewPost[]): Status[] {
-    return feed.map((e) => mapFeedEntry(e, ctx))
+    return each(feed, (e) => mapFeedEntry(e, ctx))
+  }
+
+  function posts(views: readonly AppBskyFeedDefs.PostView[]): Status[] {
+    return each(views, (v) => mapPost(v, ctx))
+  }
+
+  /** A page of mapped items; the AppView's own page length says whether it is the end. */
+  function feedPage(raw: readonly unknown[], items: Status[], cursor: string | undefined): TimelinePage {
+    return Object.assign(items, { nextCursor: raw.length > 0 ? cursor ?? null : null })
   }
 
   // Seam 7: no since_id, so page from the top until the known top entry.
@@ -133,9 +156,14 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       const data = await fetchPage(cursor)
       const at = data.feed.findIndex((e) => feedEntryId(e) === sinceId)
       if (at !== -1) return page(entries([...out, ...data.feed.slice(0, at + 1)]), undefined)
+      // An empty page ends the feed: its cursor names nothing.
+      if (data.feed.length === 0) {
+        cursor = undefined
+        break
+      }
       out.push(...data.feed)
       cursor = data.cursor
-      if (!cursor || data.feed.length === 0) break
+      if (!cursor) break
     }
     // Not met: a gap. Its cursor is where the page after it starts.
     return Object.assign(entries(out), { nextCursor: out.length > 0 ? cursor ?? null : null })
@@ -150,7 +178,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     }
     return run(`home:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
       const data = await fetchPage(params.cursor, params.limit)
-      return page(entries(data.feed), data.cursor)
+      return feedPage(data.feed, entries(data.feed), data.cursor)
     })
   }
 
@@ -158,15 +186,22 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     // Bookmarks are not polled, as on Mastodon.
     if (params.sinceId) return page([], undefined)
     return run(`bookmarks:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
-      const { data } = await agent.app.bsky.bookmark.getBookmarks({
-        ...(params.cursor ? { cursor: params.cursor } : {}),
-        ...(params.limit ? { limit: params.limit } : {}),
-      })
-      const posts = data.bookmarks.map((b): object => b.item).filter(isPostView)
-      // A page of only deleted posts is not the end: keep the cursor.
-      return Object.assign(posts.map((p) => mapPost(p, ctx)), {
-        nextCursor: data.bookmarks.length > 0 ? data.cursor ?? null : null,
-      })
+      // A page of only deleted or blocked bookmarks would look like the end
+      // to the store, and strand every older one. So read on, a few pages at
+      // most, until a page has a post or the bookmarks end.
+      let cursor = params.cursor
+      for (let i = 0; i < BOOKMARK_SKIP_PAGES; i++) {
+        const { data } = await agent.app.bsky.bookmark.getBookmarks({
+          ...(cursor ? { cursor } : {}),
+          ...(params.limit ? { limit: params.limit } : {}),
+        })
+        const views = data.bookmarks.map((b): object => b.item).filter(isPostView)
+        if (data.bookmarks.length === 0) return page([], undefined)
+        if (views.length > 0) return feedPage(data.bookmarks, posts(views), data.cursor)
+        if (!data.cursor) return page([], undefined)
+        cursor = data.cursor
+      }
+      return page([], undefined)
     })
   }
 
@@ -185,7 +220,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   function flattenReplies(node: AppBskyFeedDefs.ThreadViewPost, out: Status[]): void {
     for (const reply of node.replies ?? []) {
       if (!isThreadViewPost(reply)) continue
-      out.push(mapPost(reply.post, ctx))
+      out.push(...posts([reply.post]))
       flattenReplies(reply, out)
     }
   }
@@ -209,9 +244,9 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     async fetchStatus(statusId) {
       return run(`status:${statusId}`, async () => {
         const { data } = await agent.getPosts({ uris: [statusId] })
-        const post = data.posts[0]
+        const post = posts(data.posts.slice(0, 1))[0]
         if (!post) throw new CaribouError('not_found', 'post not found', { status: 404 })
-        return mapPost(post, ctx)
+        return post
       })
     },
 
@@ -219,16 +254,18 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (statusIds.length === 0) return []
       return run(`statuses:${statusIds.join(',')}`, async () => {
         const pages = await Promise.all(chunks(statusIds, BATCH).map((uris) => agent.getPosts({ uris })))
-        return pages.flatMap((p) => p.data.posts.map((post) => mapPost(post, ctx)))
+        return posts(pages.flatMap((p) => p.data.posts))
       })
     },
 
     async fetchThread(statusId) {
       return run(`thread:${statusId}`, async () => {
         const { data } = await agent.getPostThread({ uri: statusId })
-        if (!isThreadViewPost(data.thread)) throw new CaribouError('not_found', 'post not found', { status: 404 })
+        if (!isThreadViewPost(data.thread) || posts([data.thread.post]).length === 0) {
+          throw new CaribouError('not_found', 'post not found', { status: 404 })
+        }
         const ancestors: Status[] = []
-        for (let p = data.thread.parent; isThreadViewPost(p); p = p.parent) ancestors.unshift(mapPost(p.post, ctx))
+        for (let p = data.thread.parent; isThreadViewPost(p); p = p.parent) ancestors.unshift(...posts([p.post]))
         const descendants: Status[] = []
         flattenReplies(data.thread, descendants)
         return { ancestors, descendants }
@@ -262,7 +299,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
           actor: accountId, filter: author[tab], includePins: false,
           ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}),
         })
-        return page(entries(data.feed), data.cursor)
+        return feedPage(data.feed, entries(data.feed), data.cursor)
       })
     },
 

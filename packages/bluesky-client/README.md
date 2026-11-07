@@ -78,7 +78,7 @@ Spec 6.5. What maps to what, and what shows when data is missing.
 | `inReplyToId` | `record.reply.parent.uri` | `null` |
 | `inReplyToAccountId` | the DID in that URI | `null` |
 | `mediaAttachments`, `card`, `quote` | `mapEmbed(embed, ctx)` | — |
-| `mentions` | mention facets: `id` = the facet's DID, `acct` = the visible text without `@` | `[]` |
+| `mentions` | mention facets: `id` = the facet's DID, `acct` = the visible text without `@` (display only, see below) | `[]` |
 | `tags` | tag facets, `url` = `https://bsky.app/hashtag/<tag>` | `[]` |
 | counts | `likeCount`, `repostCount`, `replyCount`, `quoteCount` | `0` |
 | `favourited`, `reblogged` | `viewer.like != null`, `viewer.repost != null` | `false` |
@@ -92,6 +92,21 @@ Spec 6.5. What maps to what, and what shows when data is missing.
 | `bluesky.labels` | `mapLabels(labels)` | `[]` |
 | `bluesky.moderation` | `ctx.moderatePost(view)` | — (the caller always gives one) |
 | `bluesky.viewerOf` | `ctx.viewerOf` | — |
+
+- **Bad facets.** A record is author-written, so its facets can be
+  anything. A facet that is not an object, has no whole-number byte index,
+  or has no feature object is dropped; so is a feature that is not an
+  object. The post stays readable, and `renderFacets` gets only the good
+  facets.
+- **`mentions[].acct` is display text.** It is what the author typed, and it
+  can be stale or point the wrong way (spec 7.1). Only `id` (the DID) says
+  who is mentioned. Compose (#189) must address a reply's mentions by `id`,
+  never by `acct`.
+- **Authors have no moderation of their own.** A post's `account` and a
+  repost's reposter come from `mapAccount`, so their `bluesky.moderation`
+  is unset. A card reads the avatar and banner decision from the post's
+  `bluesky.moderation` (`avatar`, `banner`): the SDK's `moderatePost` already
+  counts the author's labels.
 
 `mapLabels` keeps `src`, `uri`, `cid`, `val`, `neg`, `cts` and drops the
 rest. The signature (`sig`) is bytes; it would not survive JSON, and the
@@ -133,6 +148,11 @@ list has no `blockUri` (the reader undoes it on the list).
   `reason.indexedAt`, its counts are `0`, its content is empty, and its
   `bluesky` names the repost record (`uri`, `cid` from `reason`) with the
   post's moderation, so the wrapper reads as a Bluesky resource.
+- A repost's id can change between reads: if the AppView sends `reason.uri`
+  on one read and leaves it out on the next, the same repost has two ids.
+  A catch-up then does not meet it and answers a gap (seam 7), which
+  replaces the list. That is the intended result, not a duplicate; do not
+  "fix" it by guessing.
 - Any other reason (`reasonPin`, an unknown one) maps as a plain entry.
   Profile feeds ask for no pins (`includePins: false`), so a pinned post
   never shows twice.
@@ -147,14 +167,24 @@ definitions). It imports the SDK for types only; `./browser` exports it.
 - **Order:** `timelineOrder()` is `null` for every kind: the store keeps
   feed order (seam 6).
 - **Paging:** `nextCursor` is the AppView's `cursor`, passed back as it
-  came. An empty page ends the feed (`nextCursor` `null`), even when the
-  AppView sends a cursor.
+  came. An empty AppView page ends the feed (`nextCursor` `null`), even
+  when it sends a cursor.
+- **One bad post never fails a page.** A mapper that still throws on one
+  post's data drops that post, not the page. The page keeps its cursor
+  (its end is read from what the AppView sent). In a thread a bad reply is
+  left out; a bad post asked for by itself (`fetchStatus`, the focus of
+  `fetchThread`) is `not_found`.
 - **Catch-up (`sinceId`, seam 7):** Bluesky has no `since_id`. The client
   pages from the top, at most 3 pages of 50, until it meets the entry whose
-  id is `sinceId`. Met: the answer is every entry above it, then it, and
+  id is `sinceId` (by entry id, so a bad post above it does not stop it). Met: the answer is every entry above it, then it, and
   `nextCursor` is `null`. Not met: the answer is every entry it read, and
-  `nextCursor` is the cursor after the last page. The store calls that a
-  gap ("Many new posts") and replaces the list when applied.
+  `nextCursor` is the cursor after the last page, or `null` when the feed
+  ended (an empty page drops its cursor). The store calls that a gap
+  ("Many new posts") and replaces the list when applied.
+- **Bookmarks:** a deleted or blocked bookmark is left out. The store ends
+  at an empty page, so a page of only unavailable bookmarks must not be
+  one: the client reads on (at most 5 pages) until a page has a post or the
+  bookmarks end. After 5 such pages it ends the list there.
 - **Reads:** `home` → `getTimeline`; `bookmarks` → `getBookmarks` (a check
   answers an empty page, as on Mastodon); `fetchStatus` and
   `fetchStatuses` → `getPosts` (25 per request); `fetchThread` →
