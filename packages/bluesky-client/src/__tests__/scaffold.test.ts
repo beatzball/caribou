@@ -4,7 +4,6 @@ import { mapEmbed, renderFacets } from '../index.js'
 // The scaffold (#177) fixes each module's signature. Each owner deletes its
 // line here when the real code and its tests land.
 describe('scaffold stubs', () => {
-  const post = { uri: 'at://did:plc:alice/app.bsky.feed.post/3kabc', cid: 'bafy', author: { did: 'did:plc:alice', handle: 'alice.example.com' }, record: {}, indexedAt: '2026-11-06T00:00:00.000Z' }
   const ctx = { viewerOf: null, moderatePost: () => { throw new Error('unused') } }
   const cases: [string, () => unknown][] = [
     ['#178', () => renderFacets('hi', undefined)],
