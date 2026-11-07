@@ -110,14 +110,15 @@ function mentionsAndTags(rec: PostRecord): { mentions: StatusMention[]; tags: Ta
 
 /**
  * One post view → a Caribou `Status` (spec 6.5; rules in the README). Calls
- * `mapEmbed` for the media, card and quote. Moderation comes from
+ * `mapEmbed` for the media, cards and quote. Moderation comes from
  * `ctx.moderatePost`.
  */
 export function mapPost(view: AppBskyFeedDefs.PostView, ctx: MapContext): Status {
   const rec = postRecord(view.record)
   const viewer = view.viewer ?? {}
   const parentUri = rec.reply?.parent.uri ?? null
-  const embed = mapEmbed(view.embed, ctx)
+  // The post URI is where a video card and the fallback card link.
+  const embed = mapEmbed(view.embed, ctx, view.uri)
   return {
     id: view.uri,
     uri: view.uri,
@@ -159,6 +160,7 @@ export function mapPost(view: AppBskyFeedDefs.PostView, ctx: MapContext): Status
       labels: mapLabels(view.labels),
       moderation: ctx.moderatePost(view),
       viewerOf: ctx.viewerOf,
+      recordCard: embed.recordCard,
     },
   }
 }

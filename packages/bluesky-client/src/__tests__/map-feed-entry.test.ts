@@ -4,7 +4,7 @@ import { feedEntryId, mapFeedEntry } from '../map/feed-entry.js'
 import { ctx, fixture, moderationFor } from './_helpers.js'
 
 vi.mock('../facets.js', () => ({ renderFacets: vi.fn((text: string) => `<p>${text}</p>`) }))
-vi.mock('../embeds.js', () => ({ mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, quote: null })) }))
+vi.mock('../embeds.js', () => ({ mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, recordCard: null, quote: null })) }))
 
 const feed = () => fixture<{ feed: AppBskyFeedDefs.FeedViewPost[] }>('feed-page.json').feed
 

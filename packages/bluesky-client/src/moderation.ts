@@ -281,13 +281,8 @@ export function labelDefsFromServices(views: AppBskyLabelerDefs.LabelerViewDetai
   return out
 }
 
-/**
- * True when the author asked that signed-out readers not see them (spec
- * 8.3). The server checks it per post and renders a notice instead.
- */
-export function isNoUnauthenticated(actor: { labels?: ComAtprotoLabelDefs.Label[] }): boolean {
-  return (actor.labels ?? []).some((l) => l.val === '!no-unauthenticated' && !l.neg)
-}
+// Spec 8.3. One copy, in a server-safe module, so the mappers can call it too.
+export { isNoUnauthenticated } from './no-unauthenticated.js'
 
 /** The active Bluesky reader, as the veil needs it. `null` fields are "not loaded". */
 export interface BlueskyReader {

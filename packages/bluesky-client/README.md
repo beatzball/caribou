@@ -3,8 +3,8 @@
 > Bluesky for Caribou: a `CaribouClient` for Bluesky, and mappers from
 > AppView JSON into Caribou's own types.
 
-**Status:** Phase 2a. The read client and mappers are in (#177); facets,
-embeds and moderation land in #178, #179 and #180.
+**Status:** Phase 2a. The read client and mappers (#177), facets (#178),
+embeds (#179) and moderation (#180) are in.
 Bluesky is behind a flag until phase 4 (see "The flag" below).
 
 ## Purpose
@@ -35,7 +35,8 @@ own files; ask in your report for a change in another's.
 | `src/map/account.ts` | `mapAccount(view) → Account`, `mapRelationship(view) → Relationship` | #177 |
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
-| `src/embeds.ts` | `mapEmbed(embed, ctx) → { mediaAttachments, card, quote }` | #179 |
+| `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, recordCard, quote }` | #179 |
+| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, plain data so mappers can call it; `./moderation` re-exports it | #179, #180 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
 | `src/map/labels.ts` | `mapLabels(labels) → BlueskyLabel[]` | #177 |
 | `src/client.ts` | `createBlueskyClient(opts) → CaribouClient` (read methods), `BLUESKY_CAPABILITIES` | #177 |
@@ -45,7 +46,7 @@ own files; ask in your report for a change in another's.
 
 How they fit:
 
-- `mapPost` calls `mapEmbed` for the media, card and quote.
+- `mapPost` calls `mapEmbed` for the media, cards and quote (see "Embeds").
 - `mapPost` does **not** run moderation. It calls `ctx.moderatePost(view)`,
   which the caller builds from `moderate()` with the reader's prefs (or the
   logged-out defaults on the server). The mappers stay free of the SDK.
@@ -193,7 +194,7 @@ Spec 6.5. What maps to what, and what shows when data is missing.
 | `account` | `mapAccount(author)` | — |
 | `inReplyToId` | `record.reply.parent.uri` | `null` |
 | `inReplyToAccountId` | the DID in that URI | `null` |
-| `mediaAttachments`, `card`, `quote` | `mapEmbed(embed, ctx)` | — |
+| `mediaAttachments`, `card`, `quote` | `mapEmbed(embed, ctx, uri)` | — |
 | `mentions` | mention facets: `id` = the facet's DID, `acct` = the visible text without `@` (display only, see below) | `[]` |
 | `tags` | tag facets, `url` = `https://bsky.app/hashtag/<tag>` | `[]` |
 | counts | `likeCount`, `repostCount`, `replyCount`, `quoteCount` | `0` |
@@ -208,6 +209,7 @@ Spec 6.5. What maps to what, and what shows when data is missing.
 | `bluesky.labels` | `mapLabels(labels)` | `[]` |
 | `bluesky.moderation` | `ctx.moderatePost(view)` | — (the caller always gives one) |
 | `bluesky.viewerOf` | `ctx.viewerOf` | — |
+| `bluesky.recordCard` | `mapEmbed(…).recordCard` (a feed, list, starter pack or labeler) | `null` |
 
 - **Bad facets.** A record is author-written, so its facets can be
   anything. A facet that is not an object, has no whole-number byte index,
@@ -325,6 +327,103 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `not_found`, 429 → `rate_limited` with `retryAfter` from
   `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
 - **Dedup:** two equal reads in flight share one request.
+
+## Embeds (`mapEmbed`, spec 7.3)
+
+**`mapPost` hands over the post URI:** it calls `mapEmbed(view.embed, ctx,
+view.uri)` and copies the parts into the `Status`: `mediaAttachments`,
+`card`, `quote`, and `recordCard` into `bluesky.recordCard`. The third
+argument is where a video and the fallback card link, since the embed view
+does not carry it. `embeds-map-post.test.ts` checks this through the real
+`mapPost`.
+
+**Requirement on moderation (#177, phase 2b):** a post's media moderation
+(`contentMedia`) covers everything its embed shows: `mediaAttachments`,
+`card` and its image, **and `bluesky.recordCard` and its image** (a feed or
+list avatar). The status card draws `recordCard` itself and does not read
+moderation contexts, so whoever wires moderation into the card must cover
+it, with a test.
+
+Two cards, two fields. `card` comes from the media (an external link, a
+video, or the fallback). `recordCard` comes from the record (a feed, list,
+starter pack or labeler, or the fallback for a record this build cannot
+map). So a post with a feed and media keeps both, and the reader can see
+and follow both. The status card shows `bluesky.recordCard` under the
+media; a Mastodon post has no `bluesky` field and keeps "no link card
+when there is media".
+
+| `embed.$type` | `mediaAttachments` | `card` | `recordCard` | `quote` |
+|---|---|---|---|---|
+| none | `[]` | `null` | `null` | `null` |
+| `app.bsky.embed.images#view` | up to 4, type `image` | `null` | `null` | `null` |
+| `app.bsky.embed.gallery#view` | up to 4, type `image` | `null` | `null` | `null` |
+| `app.bsky.embed.external#view` | `[]` | link card | `null` | `null` |
+| `app.bsky.embed.video#view` | `[]` | video card | `null` | `null` |
+| `app.bsky.embed.record#view` | `[]` | `null` | see "Records" | see "Records" |
+| `app.bsky.embed.recordWithMedia#view` | from `media` | from `media` | from `record` | from `record` |
+| anything else | `[]` | fallback card | `null` | `null` |
+
+- **Image:** `id` and `url` = `fullsize`, `previewUrl` = `thumb`,
+  `description` = `alt` (`null` when empty). With an `aspectRatio`,
+  `meta.original` and `meta.small` carry its width, height and aspect.
+- **Gallery:** each `items` entry maps like an image, with `thumbnail` for
+  `thumb`. An item of another `$type` is skipped.
+- **External:** `url` = `uri`, `title`, `description`, `image` = `thumb`,
+  type `link`. An empty title becomes the link's host, so the link card
+  (which needs a title) still shows. A Tenor GIF is an external embed.
+- **Video:** a card of type `video`. `image` = `thumbnail`, `url` = the
+  post on bsky.app, `title` = `alt` or "Video", description "Play on
+  bsky.app". The status card puts a play mark on its image (Bluesky posts
+  only). No `<video>` element: `playlist` is HLS (`.m3u8`), which only
+  Safari plays (spec 7.3, phase 6).
+- **Records** (`app.bsky.embed.record#view`, by `record.$type`):
+
+  | `record.$type` | result |
+  |---|---|
+  | `…#viewRecord` | quote `accepted`, `quotedStatus` = `mapPost` of the record, with the same `ctx` |
+  | `…#viewNotFound` | quote `deleted` ("The quoted post was deleted.") |
+  | `…#viewBlocked`, `author.viewer.blocking` set | quote `blocked_account` ("you blocked its author") |
+  | `…#viewBlocked`, any other block | quote `unauthorized` ("You cannot see the quoted post.") |
+  | `…#viewDetached` | quote `revoked` ("removed this quote") |
+  | feed (`generatorView`), list (`listView`), starter pack, labeler | `recordCard` that links to it on bsky.app |
+  | anything else | fallback `recordCard` |
+
+  A quoted record becomes a post view and goes through `mapPost`. Its
+  `value` is the `record`, its first `embeds` entry the `embed`, and its
+  `labels` and `author` (with the author's labels and viewer) pass through
+  as they came, so moderation reads them. It has no `viewer`. The quote
+  states reuse PR #167's quote card notes.
+- **`!no-unauthenticated` (spec 8.3):** in a signed-out copy (`ctx.viewerOf`
+  is `null`), a quoted post whose author has this label is never mapped. The
+  quote is `unauthorized` with no post and `bluesky.hidden =
+  'no-unauthenticated'`, and the quote card says "This account asked to be
+  seen only by signed-in readers." The SDK filters the outer post from
+  signed-out lists (`contentList.filter`) but leaves its thread view alone,
+  so `mapEmbed` hides the quoted post itself, on every surface. A reader
+  with a Bluesky account active sees the quote.
+- **One level of quote**, as on Bluesky. A quote inside a quoted post is
+  `accepted` with no post, and the quote card shows it as a link. This
+  also ends a chain that quotes itself.
+- **Links:** bsky.app path parts are URL-encoded (a DID keeps its colons).
+  A starter pack links by the creator's handle, else by DID. Building a
+  link never throws: a part that cannot be encoded (a lone surrogate, which
+  JSON allows) gives the root, `https://bsky.app`.
+- **Fallback:** a card titled "Not supported here — open on bsky.app" that
+  links to the post. It is the answer for an unknown `$type` and for a
+  shape that does not match its `$type`. `$type` is matched by `switch`
+  or `===`, never by an object lookup, so `__proto__` or `toString` is
+  unknown too.
+
+What fails closed: `mapEmbed` never throws. A bad record and good media
+keep the media and give a fallback `recordCard`; good record and bad media
+keep the quote or record card and give a fallback `card`. Both bad give
+one fallback `card`, not two (known by how it was built, not by its title). If `mapPost`
+throws on a quoted record, the quote is `accepted` with no post, and the
+card says "The quoted post is not available."
+
+Each card and media URL must be `http:` or `https:`, and is normalized
+(`URL.href`, as the app's `_http-url.ts` does). A `uri` or `thumb` that is
+not is dropped (the link card checks it again).
 
 ## Facets to HTML (`renderFacets`)
 

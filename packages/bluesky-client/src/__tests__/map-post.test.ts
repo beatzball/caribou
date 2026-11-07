@@ -11,7 +11,7 @@ vi.mock('../facets.js', () => ({
   renderFacets: vi.fn((text: string, facets: unknown[] | undefined) => `<p>[${facets?.length ?? 0}]${text}</p>`),
 }))
 vi.mock('../embeds.js', () => ({
-  mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, quote: null })),
+  mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, recordCard: null, quote: null })),
 }))
 
 const view = () => fixture<AppBskyFeedDefs.PostView>('post-view.json')
@@ -86,13 +86,17 @@ describe('mapPost', () => {
     expect(s).toMatchObject({ visibility: 'public', sensitive: false, spoilerText: '', poll: null, emojis: [], reblog: null })
   })
 
-  it('takes media, card and quote from mapEmbed', () => {
+  it('takes media, cards and quote from mapEmbed, and gives it the post URI', () => {
     const quote = { state: 'accepted' as const, quotedStatus: null }
-    vi.mocked(mapEmbed).mockReturnValueOnce({ mediaAttachments: [], card: null, quote })
+    const card = { url: 'https://example.com/a', title: 'A', description: '', type: 'link' as const, authors: [], embedUrl: '' }
+    const recordCard = { ...card, url: 'https://bsky.app/profile/did:plc:alice/feed/f', title: 'Feed' }
+    vi.mocked(mapEmbed).mockReturnValueOnce({ mediaAttachments: [], card, recordCard, quote })
     const v = view()
     const s = mapPost(v, ctx)
-    expect(mapEmbed).toHaveBeenLastCalledWith(v.embed, ctx)
+    expect(mapEmbed).toHaveBeenLastCalledWith(v.embed, ctx, v.uri)
     expect(s.quote).toBe(quote)
+    expect(s.card).toBe(card)
+    expect(s.bluesky!.recordCard).toBe(recordCard)
   })
 
   it('keeps moderation from the caller and the raw labels without the signature', () => {

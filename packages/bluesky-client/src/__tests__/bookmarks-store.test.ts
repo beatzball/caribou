@@ -5,7 +5,7 @@ import { BOOKMARK_SKIP_PAGES, createBlueskyClient, type BlueskyAgent } from '../
 import { fixture, moderationFor, READER } from './_helpers.js'
 
 vi.mock('../facets.js', () => ({ renderFacets: vi.fn((text: string) => `<p>${text}</p>`) }))
-vi.mock('../embeds.js', () => ({ mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, quote: null })) }))
+vi.mock('../embeds.js', () => ({ mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, recordCard: null, quote: null })) }))
 
 // Driven through the real stores. A list ends only on a null cursor
 // (`packages/state` README), so a page that came back empty (every post

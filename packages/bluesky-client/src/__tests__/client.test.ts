@@ -5,7 +5,7 @@ import { BLUESKY_CAPABILITIES, CATCH_UP_MAX_PAGES, CATCH_UP_PAGE_SIZE, createBlu
 import { fixture, moderationFor, READER } from './_helpers.js'
 
 vi.mock('../facets.js', () => ({ renderFacets: vi.fn((text: string) => `<p>${text}</p>`) }))
-vi.mock('../embeds.js', () => ({ mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, quote: null })) }))
+vi.mock('../embeds.js', () => ({ mapEmbed: vi.fn(() => ({ mediaAttachments: [], card: null, recordCard: null, quote: null })) }))
 
 const basePost = () => fixture<{ feed: AppBskyFeedDefs.FeedViewPost[] }>('feed-page.json').feed[0]!.post
 

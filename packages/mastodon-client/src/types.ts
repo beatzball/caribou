@@ -289,6 +289,12 @@ export type QuoteState =
 export interface Quote {
   state: QuoteState
   quotedStatus?: Status | null
+  /**
+   * Only on a Bluesky quote: why the post is left out. `no-unauthenticated`
+   * means its author asked to be hidden from signed-out readers (spec 8.3).
+   * A Mastodon quote never has it.
+   */
+  bluesky?: { hidden: 'no-unauthenticated' }
 }
 
 /** A quote that names the quoted post by id only. */
@@ -438,6 +444,12 @@ export interface StatusBluesky {
   moderation: BlueskyModerationResult
   /** The UserKey whose viewer state this copy carries, or null for a public copy. */
   viewerOf: `${string}@${string}` | null
+  /**
+   * The feed, list, starter pack or labeler the post embeds, as a card that
+   * links to it (spec 7.3). Apart from `card`, which comes from the media,
+   * so a post can show both. Missing means none.
+   */
+  recordCard?: PreviewCard | null
 }
 
 // ---------------------------------------------------------- relationship
