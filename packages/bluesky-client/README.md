@@ -63,6 +63,122 @@ How they fit:
   leaves `moderate()`: page data goes through JSON, and JSON drops its
   `ui()` method (spec 7.4).
 
+## Moderation rules (`src/moderation.ts`, spec 7.4 and 8.3)
+
+Moderation decides what a reader may see. Done wrong, it shows harmful
+media. So every gap **fails closed**: when Caribou does not know, it covers.
+
+`moderate(subject, userDid, prefs, labelDefs, opts?)`:
+
+- **Inputs.** `subject` is `{ kind: 'post', view }` or `{ kind: 'profile', view }`.
+  `userDid` is the reader's DID, or `undefined` for a signed-out reader.
+  `prefs` comes from `getPreferences`. `labelDefs` comes from
+  `getServices?dids=<subscribed>&detailed=true`, through
+  `labelDefsFromServices(views)`. `opts.labelersCovered` is what the AppView
+  answered in `atproto-content-labelers` for the fetch that gave this view.
+  `prefs` or `labelDefs` `null` means "missing or failed to load".
+- **Bluesky's labeler is always subscribed.** If `prefs.labelers` lacks
+  `BSKY_LABELER_DID`, `moderate()` adds it with no per-label choices. The
+  SDK's `getPreferences` does the same.
+- **Bluesky's labeler has custom labels too** (`spam`, `rude`, `sensitive`,
+  and more). So its definitions are needed like any labeler's. The server
+  loads and caches `getServices?dids=<BSKY_LABELER_DID>&detailed=true` and
+  passes it, also for signed-out SSR. Without it, those labels get the
+  fail-closed cover below.
+- **Plain data out.** The result has all seven contexts. Each is the SDK's
+  `ui(context)` as booleans plus `reasons`. The `ModerationDecision` never
+  leaves `moderate()`. A JSON round trip gives the same object.
+- **`labelersCovered`** is `opts.labelersCovered`, or `[]` when the caller
+  does not know. `[]` never settles the veil.
+
+The steps, in order:
+
+1. **Clean the subject once.** Caribou copies the subject (it never changes
+   the caller's view) and keeps only labels the SDK can define. This covers
+   every place the SDK reads labels: the post, its author (account and
+   profile labels), and a quoted post and its author.
+   - A negated label (`neg: true`) is dropped everywhere.
+   - A label stays only if the SDK can define its value by an **own key**
+     (`Object.hasOwn`): in the labeler's loaded definitions, or in the SDK's
+     built-in `LABELS`. A value like `constructor` or `__proto__` is not
+     defined. Every lookup table in this file uses own keys only.
+   - A dropped label on the post or its author goes to the gap scan (step 3).
+     A dropped label on a quoted post is only dropped: the quote is
+     moderated on its own, through `ctx.moderatePost`, by the embed mapper.
+2. **Run the SDK, wrapped.** If `moderatePost` or `moderateProfile` throws,
+   the result is a cover in every context: `blur: true`, `noOverride: true`,
+   `filter: false`, one reason named "Content warning (moderation failed)".
+3. **The gap scan.** Each label dropped in step 1 (not negated) from the
+   author or from a subscribed labeler gets the fail-closed cover.
+
+Fail-closed rules:
+
+| gap | what Caribou does |
+|---|---|
+| `prefs` is `null` | Strict prefs: adult content off, every built-in and every value on the subject `hide`, and every labeler named on the subject counts as subscribed. Every cover then has `noOverride`, except on the reader's own post or profile. |
+| `labelDefs` is `null`, or has no entry for a subscribed labeler | A label from that labeler that the SDK cannot define covers its target. Reason name: "Content warning (labeler unavailable)". |
+| The labeler's definitions loaded, but do not define this value | The same cover. Reason name: "Content warning (unknown label)". |
+| A self-label the SDK does not define | The same cover, "Content warning (unknown label)". |
+| The SDK throws | Every context covered (step 2). |
+
+The fail-closed cover:
+
+- A content label (on the post) blurs `contentList`, `contentView` and
+  `contentMedia`. An account label blurs every context. A profile label
+  (on the profile record) blurs `avatar` and `banner`.
+- It sets `noOverride`: no Show button. The card offers Retry, which loads
+  the definitions again (spec 7.4). `isLabelerUnavailable(reason)` tells the
+  card which reasons are these.
+- It never sets `filter`. A post the reader cannot judge stays in place as
+  a cover with Retry. It is never dropped without a word.
+- On the reader's own post or profile it leaves `noOverride` off, as the
+  SDK does: the author still sees the cover, with Show.
+
+Other rules:
+
+- **`noOverride`** comes from the SDK (a `no-override` label, an adult label
+  with adult content off, or a block), or from the rules above. The card and
+  `caribou-status-media` then show no Show button.
+- **Who wires it.** The Bluesky status card (phase 2b) sets
+  `caribou-status-media`'s `sensitive` from `contexts.contentMedia.blur` and
+  its `no-override` attribute from `contexts.contentMedia.noOverride`. That
+  card does not exist yet; its PR must test this wiring.
+- **Logged-out defaults** are `LOGGED_OUT_PREFS`: adult content off,
+  `DEFAULT_LABEL_SETTINGS`, Bluesky's labeler only. The server uses them,
+  with Bluesky's label definitions.
+- **`!no-unauthenticated`** (spec 8.3): `isNoUnauthenticated(author)` says
+  whether the author asked to be hidden from signed-out readers. The server
+  calls it per post (a repost in an author feed has another author) and
+  renders the notice, never the post. The SDK also covers such a post with
+  `noOverride` whenever `userDid` is `undefined`. A negated label counts for
+  neither. A reader with only a Mastodon account active is signed out of
+  Bluesky: `userDid` is `undefined`.
+- **Reasons.** One per label cause, for the cover's text: `label` is the
+  value, `source` the labeler's DID (or the author's), `name` the
+  definition's English name. A block, mute, muted word or hidden post adds
+  a reason too, with `label` set to the SDK's cause type
+  (`blocking`, `blocked-by`, `block-other`, `muted`, `mute-word`, `hidden`).
+
+The reader veil (`blueskyCheckSettled(post, reader)`):
+
+A Bluesky card stays under the reader veil until this returns `true`.
+SSR data was fetched with Bluesky's labeler only, so a label from another
+labeler the reader subscribes to is not on that post yet.
+
+- No Bluesky account active (`reader` is `null`): settled. The logged-out
+  default is final.
+- Otherwise the subscribed labelers are the reader's `prefs.labelers` plus
+  Bluesky's labeler. It is settled only when all of these hold:
+  1. The reader's prefs are loaded, and label definitions are loaded for
+     every subscribed labeler, Bluesky's included.
+  2. The post came from a fetch as this reader (`viewerOf` is the reader's
+     UserKey).
+  3. `labelersCovered` is not empty and has every subscribed labeler.
+  4. Moderation ran on that data (the reader fetch maps with the reader's
+     `moderatePost`, so 2 implies it).
+- A new subscription later breaks rule 3, and the card is covered again
+  until a refetch.
+
 ## Mapping rules (#177)
 
 Spec 6.5. What maps to what, and what shows when data is missing.
