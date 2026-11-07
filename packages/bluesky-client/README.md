@@ -72,9 +72,12 @@ The rules:
   encodes the text with `TextEncoder` and cuts the bytes.
 - **Bad facets drop.** A facet is skipped, and its bytes show as plain
   text, when its range is not whole numbers, is empty, falls outside the
-  text, cuts a character in half, or overlaps a facet before it (facets
-  are sorted by `byteStart` first). A facet with no `index` or no
-  `features` is skipped too.
+  text, or cuts a character in half. A facet with no `index`, or with no
+  feature that can render (below), is skipped too.
+- **Overlaps.** After the skips above, facets are sorted by `byteStart`
+  (equal starts keep the record's order). A facet that overlaps the one
+  kept before it drops. Skipping the facets that would render as text
+  first means a broken facet cannot hide a good one inside its range.
 - **The first known feature wins.** One facet can carry several features.
   The first one of type `#link`, `#mention` or `#tag` decides. An unknown
   type is passed over. If the deciding feature is not safe (below), the
@@ -83,30 +86,45 @@ The rules:
   target="_blank">`. Only `http:` and `https:`. Any other scheme, or a URI
   that does not parse, renders as plain text. The `href` is the parsed
   URL (`new URL(uri).href`).
-- **A link does not hide its host.** If the visible text looks like a URL
-  and names a different host than the URI, the link shows the real URI
-  instead. "Looks like a URL" means one word, an optional `http(s)://`, and
-  a host whose last label has a letter and two or more characters
-  (`example.com`, not `v1.2` or `e.g.`). Hosts compare after the URL parser
-  lowercases them and turns them into punycode, and after one leading
-  `www.` drops from each. Text with an `@` before the path
-  (`bank.example.com@evil.example`), or a host the parser refuses, fails
-  closed: the link shows the real URI. Text that does not look like a URL
-  ("read this") stays.
+- **A link does not hide its host.** One rule: if the visible text names
+  a host, and that host is not the link's host, the link shows its real
+  URI (`new URL(uri).href`) as its text. The text "names a host" when:
+  1. it is one word (no ASCII whitespace after trimming ASCII whitespace;
+     other characters, such as U+FEFF, go to the parser), and
+  2. the URL parser reads it (with `https://` added when it has no
+     `scheme://`), and
+  3. it has an explicit `scheme://`, or the parsed host is a domain (a dot,
+     and a last label of two or more characters with a letter), an IPv4
+     address written as four parts, or an IPv6 address.
+
+  Hosts compare as the parser writes them (lowercase, punycode, `．` and
+  `。` read as `.`), after one leading `www.` drops from each. Two cases
+  fail closed and show the real URI: text with user info
+  (`bank.example.com@evil.example`), and text the parser refuses that has a
+  `scheme://` or whose written host looks like a domain or an IP address. Prose ("read this"), version numbers (`v1.2`,
+  `3.14`) and abbreviations (`e.g.`) keep their text.
 - **`#mention`** → `<a href="/@<did>">`, built from the facet's DID. The
   visible text stays as written; it can be stale, and the profile page shows
   the current handle. A DID that is not `did:<method>:<id>` renders as
   plain text.
 - **`#tag`** → `<a href="/tags/<tag>?net=bsky">`, the tag URL-encoded. The
   href is the same for every reader, so the server render and the first
-  client render agree. An empty tag renders as plain text.
-- **Text.** Each segment is decoded and HTML-escaped (`&`, `<`, `>`, and a
+  client render agree. An empty tag, or one with a lone UTF-16 surrogate
+  (it cannot be URL-encoded), renders as plain text.
+- **Text.** Each segment is decoded (U+FEFF is kept: it is content, not a
+  byte-order mark) and HTML-escaped (`&`, `<`, `>`, and a
   no-break space as `&nbsp;`, the way the DOM writes text back). A line
   break (`\n`, `\r\n` or `\r`) becomes `<br>`.
 - **Wrap.** The whole text goes in one `<p>`. Empty text, or a `text` that
   is not a string, gives `''`.
 - **Stable through DOMPurify.** The output uses only tags and attributes in
   `PURIFY_OPTS`, so sanitizing returns the same string. A test checks this.
+- **Hydration.** The output depends only on its input, so the server render
+  equals the first client render. One exception to watch: the host check
+  uses `new URL`, and Node and the browser may ship different IDNA (UTS 46)
+  tables. For an unusual Unicode host in link text they could disagree, and
+  that one post's markup would differ at hydration. If a hydration mismatch
+  shows up on a Bluesky link, look here first.
 
 ## The chunk rule
 

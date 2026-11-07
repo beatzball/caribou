@@ -103,6 +103,18 @@ describe('renderFacets: byte offsets', () => {
     )
   })
 
+  it('keeps U+FEFF at the start of the text', () => {
+    expect(renderFacets('\ufeffhello', [])).toBe('<p>\ufeffhello</p>')
+  })
+
+  it('keeps U+FEFF at the start of a facet', () => {
+    expect(renderFacets('a\ufeffb', [raw(1, 5, tag('b'))])).toBe('<p>a<a href="/tags/b?net=bsky">\ufeffb</a></p>')
+  })
+
+  it('keeps U+FEFF right after a facet', () => {
+    expect(renderFacets('#a\ufeffb', [raw(0, 2, tag('a'))])).toBe('<p><a href="/tags/a?net=bsky">#a</a>\ufeffb</p>')
+  })
+
   it('takes a facet that covers a whole emoji', () => {
     expect(renderFacets('x🦌y', [raw(1, 5, tag('deer'))])).toBe('<p>x<a href="/tags/deer?net=bsky">🦌</a>y</p>')
   })
@@ -147,6 +159,16 @@ describe('renderFacets: bad facets never throw', () => {
     )
   })
 
+  it.each([
+    ['an unknown feature', { $type: 'app.example.facet#sparkle' } as Feature],
+    ['an unsafe link', link('javascript:alert(1)')],
+    ['a bad DID', mention('nope')],
+  ])('does not let a facet with %s hide a good one inside it', (_name, feature) => {
+    expect(renderFacets('abcdef', [raw(0, 6, feature), raw(2, 4, tag('t'))])).toBe(
+      '<p>ab<a href="/tags/t?net=bsky">cd</a>ef</p>',
+    )
+  })
+
   it('keeps facets that only touch', () => {
     expect(renderFacets('abcd', [raw(0, 2, tag('a')), raw(2, 4, tag('b'))])).toBe(
       '<p><a href="/tags/a?net=bsky">ab</a><a href="/tags/b?net=bsky">cd</a></p>',
@@ -170,6 +192,9 @@ describe('renderFacets: links', () => {
     ['javascript:', 'javascript:alert(1)'],
     ['JavaScript: mixed case', 'JavaScript:alert(1)'],
     ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['a space before javascript:', ' javascript:alert(1)'],
+    ['a newline inside javascript:', 'java\nscript:alert(1)'],
+    ['vbscript:', 'vbscript:msgbox(1)'],
     ['mailto:', 'mailto:alice@example.com'],
     ['a relative path', '/@did:plc:alice'],
     ['garbage', 'not a url'],
@@ -197,6 +222,61 @@ describe('renderFacets: links', () => {
     const text = 'x'
     const html = renderFacets(text, [raw(0, 1, link('https://example.com/"onmouseover="alert(1)'))])
     expect(html).toBe(`<p><a href="https://example.com/%22onmouseover=%22alert(1)" ${A_EXT}>x</a></p>`)
+  })
+
+  it('escapes a quote that reaches the href through the host', () => {
+    const html = renderFacets('x', [raw(0, 1, link('https://ex%22onmouseover=%22alert(1)%22.com/'))])
+    expect(html).toBe(`<p><a href="https://ex&quot;onmouseover=&quot;alert(1)&quot;.com/" ${A_EXT}>x</a></p>`)
+  })
+
+  it('shows the parsed URI, not the raw string, as the real URI', () => {
+    const text = 'bank.example.com'
+    expect(renderFacets(text, [raw(0, bytes(text), link('https://bank.example.com\t.evil.example.net/\n\tlogin'))])).toBe(
+      `<p><a href="https://bank.example.com.evil.example.net/login" ${A_EXT}>https://bank.example.com.evil.example.net/login</a></p>`,
+    )
+  })
+
+  describe('text that names a host', () => {
+    const evil = 'https://evil.example.net/phish'
+    const real = `<p><a href="${evil}" ${A_EXT}>${evil}</a></p>`
+    it.each([
+      ['U+FEFF inside the host', 'exam\ufeffple.com'],
+      ['U+FEFF before the host', '\ufeffexample.com'],
+      ['U+2028 inside the host', 'exam\u2028ple.com'],
+      ['U+2029 inside the host', 'exam\u2029ple.com'],
+      ['an explicit IPv4 URL', 'https://192.0.2.1/login'],
+      ['a bare IPv4 address', '192.0.2.1/login'],
+      ['an IPv6 URL', 'https://[2001:db8::1]/login'],
+      ['a bare IPv6 address', '[2001:db8::1]/login'],
+      ['an explicit localhost URL', 'http://localhost/login'],
+      ['an explicit single-label host', 'https://intranet/login'],
+      ['ideographic full stops', 'bank。example。com/login'],
+      ['an explicit URL with ideographic full stops', 'https://bank。example。com/login'],
+      ['fullwidth full stops', 'example．com'],
+      ['another scheme', 'ftp://example.com/file'],
+      ['uppercase scheme and host', 'HTTPS://EXAMPLE.COM'],
+    ])('shows the real URI for %s', (_name, text) => {
+      expect(renderFacets(text, [raw(0, bytes(text), link(evil))])).toBe(real)
+    })
+
+    it.each([
+      ['an IPv4 URL', '192.0.2.1/x', 'https://192.0.2.1/x'],
+      ['a localhost URL', 'http://localhost:3000/', 'http://localhost:3000/'],
+      ['ideographic full stops', 'example。com/a', 'https://example.com/a'],
+    ])('keeps the text for %s with the same host', (_name, text, uri) => {
+      expect(renderFacets(text, [raw(0, bytes(text), link(uri))])).toBe(
+        `<p><a href="${new URL(uri).href}" ${A_EXT}>${text}</a></p>`,
+      )
+    })
+
+    it.each([['a decimal', '3.14'], ['a bare word', 'localhost'], ['ASCII spaces around a word', '  here  ']])(
+      'keeps the text for %s',
+      (_name, text) => {
+        expect(renderFacets(text, [raw(0, bytes(text), link('https://example.com/'))])).toBe(
+          `<p><a href="https://example.com/" ${A_EXT}>${text}</a></p>`,
+        )
+      },
+    )
   })
 
   it('shows the real URI when the text names another host', () => {
@@ -299,6 +379,21 @@ describe('renderFacets: mentions and tags', () => {
 
   it('URL-encodes a tag', () => {
     expect(renderFacets('#a&b', [raw(0, 4, tag('a&b?/c'))])).toBe('<p><a href="/tags/a%26b%3F%2Fc?net=bsky">#a&amp;b</a></p>')
+  })
+
+  it.each([
+    ['a lone high surrogate', '\ud800'],
+    ['a lone low surrogate', '\udc00'],
+    ['a high surrogate at the end', 'ok\ud83e'],
+  ])('renders a tag with %s as plain text, without throwing', (_name, t) => {
+    expect(() => renderFacets('#x', [raw(0, 2, tag(t))])).not.toThrow()
+    expect(renderFacets('#x', [raw(0, 2, tag(t))])).toBe('<p>#x</p>')
+  })
+
+  it('keeps a valid facet after a tag with a lone surrogate', () => {
+    expect(renderFacets('#x #y', [raw(0, 2, tag('\ud800')), raw(3, 5, tag('y'))])).toBe(
+      '<p>#x <a href="/tags/y?net=bsky">#y</a></p>',
+    )
   })
 
   it('renders an empty or non-string tag as plain text', () => {

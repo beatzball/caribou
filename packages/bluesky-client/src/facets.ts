@@ -12,19 +12,26 @@ const LINK_ATTRS = 'rel="nofollow noopener noreferrer" target="_blank"'
 // the value is safe in a path and an attribute as it is.
 const DID = /^did:[a-z]+:[A-Za-z0-9._:-]+$/
 
-// What the visible text names when it looks like a URL: one word, an
-// optional http(s) scheme, then a host whose last label has a letter and two
-// or more characters ("example.com", not "v1.2" or "e.g."). Bluesky shortens
-// long link text with "…", so anything may follow the host.
-const SCHEME = /^https?:\/\//i
-const LAST_LABEL = /\.(?=[^.]*[a-z\u00a1-\uffff])[^.]{2,}$/i
+// The host rule (README, "A link does not hide its host"). Only ASCII
+// whitespace makes text prose; every other code point goes to the URL
+// parser, which drops or maps it the way a browser would.
+const ASCII_SPACE = /[\t\n\f\r ]/
+const ASCII_TRIM = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g
+const EXPLICIT_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+// The dots the URL parser reads as ".": full stop, ideographic, fullwidth
+// and halfwidth ideographic.
+const DOTS = /[.\u3002\uff0e\uff61]/g
+// A domain: a dot, and a last label of two or more characters with a letter.
+const DOMAIN = /\.(?=[^.]*[a-z\u00a1-\uffff])[^.]{2,}$/i
+const IPV4 = /^\d+\.\d+\.\d+\.\d+$/
 
 // Never equal to a real host: the text names a host we cannot read, so the
 // link shows its real URI.
 const UNREADABLE = '\u0000'
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
+// A post's U+FEFF is content, not a byte-order mark: keep it.
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
 /** Text as the DOM writes it back, so DOMPurify returns the same string. */
 function escapeText(s: string): string {
@@ -44,20 +51,38 @@ function hostOf(url: URL): string {
   return url.hostname.replace(/^www\./, '')
 }
 
-/** The host the visible text names, or null when it does not look like a URL. */
+/** True when a host, as written or as parsed, is a domain or an IP address. */
+function isHostLike(host: string): boolean {
+  if (host.startsWith('[')) return true
+  const h = host.replace(DOTS, '.').replace(/\.$/, '')
+  return IPV4.test(h) || DOMAIN.test(h)
+}
+
+/** The host part of text as written: no scheme, user info, path or port. */
+function writtenHost(t: string): string {
+  const authority = t.replace(EXPLICIT_SCHEME, '').split(/[/?#]/, 1)[0] as string
+  return (authority.split('@').pop() as string).replace(/:\d*$/, '')
+}
+
+/** The host the visible text names, or null when it names none. */
 function textHost(text: string): string | null {
-  const t = text.trim()
-  if (t === '' || /\s/.test(t)) return null
-  const authority = t.replace(SCHEME, '').split(/[/?#]/, 1)[0] as string
-  const hostPart = authority.replace(/:\d*$/, '')
-  if (!LAST_LABEL.test(hostPart.replace(/\.$/, ''))) return null
-  // "bank.example.com@evil.example" names one host and goes to another.
-  if (authority.includes('@')) return UNREADABLE
+  const t = text.replace(ASCII_TRIM, '')
+  if (t === '' || ASCII_SPACE.test(t)) return null
+  const explicit = EXPLICIT_SCHEME.test(t)
+  let url: URL
   try {
-    return hostOf(new URL(`https://${authority}`))
+    url = new URL(explicit ? t : `https://${t}`)
   } catch {
-    return UNREADABLE
+    // Unreadable, but it claims to be a URL: fail closed.
+    return explicit || isHostLike(writtenHost(t)) ? UNREADABLE : null
   }
+  // "bank.example.com@evil.example" names one host and goes to another.
+  if (url.username !== '' || url.password !== '') return UNREADABLE
+  if (!explicit && !isHostLike(url.hostname)) return null
+  // The parser reads "3.14" as the IPv4 address 3.0.0.14; only four
+  // written parts make an address.
+  if (!explicit && IPV4.test(url.hostname) && !IPV4.test(writtenHost(t).replace(DOTS, '.'))) return null
+  return hostOf(url)
 }
 
 type Wrap = (inner: string) => string
@@ -74,7 +99,7 @@ function linkWrap(uri: unknown, text: string): Wrap | null {
   const named = textHost(text)
   const open = `<a href="${escapeAttr(url.href)}" ${LINK_ATTRS}>`
   // A link must not pretend to go somewhere else: show the real URI.
-  if (named !== null && named !== hostOf(url)) return () => `${open}${escapeText(uri)}</a>`
+  if (named !== null && named !== hostOf(url)) return () => `${open}${escapeText(url.href)}</a>`
   return (inner) => `${open}${inner}</a>`
 }
 
@@ -90,9 +115,17 @@ function wrapFor(features: unknown, text: string): Wrap | null {
       case MENTION:
         if (typeof feature.did !== 'string' || !DID.test(feature.did)) return null
         return (inner) => `<a href="/@${feature.did as string}">${inner}</a>`
-      case TAG:
+      case TAG: {
         if (typeof feature.tag !== 'string' || feature.tag === '') return null
-        return (inner) => `<a href="/tags/${encodeURIComponent(feature.tag as string)}?net=bsky">${inner}</a>`
+        let encoded: string
+        try {
+          encoded = encodeURIComponent(feature.tag)
+        } catch {
+          // A lone surrogate cannot be URL-encoded.
+          return null
+        }
+        return (inner) => `<a href="/tags/${encoded}?net=bsky">${inner}</a>`
+      }
       default:
         continue
     }
@@ -105,9 +138,20 @@ function onBoundary(bytes: Uint8Array, i: number): boolean {
   return i === bytes.length || ((bytes[i] as number) & 0xc0) !== 0x80
 }
 
-function validRanges(bytes: Uint8Array, facets: unknown): { start: number; end: number; features: unknown }[] {
+interface Segment {
+  start: number
+  end: number
+  wrap: Wrap
+}
+
+/**
+ * The facets that will render, in order, without overlaps. A facet that
+ * would render as text drops before the overlap pass, so it cannot hide a
+ * good facet inside its range.
+ */
+function segments(bytes: Uint8Array, facets: unknown, decode: (s: number, e: number) => string): Segment[] {
   if (!Array.isArray(facets)) return []
-  const ranges: { start: number; end: number; features: unknown }[] = []
+  const found: Segment[] = []
   for (const facet of facets as unknown[]) {
     const index = (facet as { index?: unknown } | null)?.index as { byteStart?: unknown; byteEnd?: unknown } | null | undefined
     if (!index || typeof index !== 'object') continue
@@ -117,15 +161,16 @@ function validRanges(bytes: Uint8Array, facets: unknown): { start: number; end: 
     const e = end as number
     if (s < 0 || e > bytes.length || s >= e) continue
     if (!onBoundary(bytes, s) || !onBoundary(bytes, e)) continue
-    ranges.push({ start: s, end: e, features: (facet as { features?: unknown }).features })
+    const wrap = wrapFor((facet as { features?: unknown }).features, decode(s, e))
+    if (wrap) found.push({ start: s, end: e, wrap })
   }
   // Stable sort: equal starts keep the order the record gave.
-  ranges.sort((a, b) => a.start - b.start)
-  const kept: typeof ranges = []
-  for (const r of ranges) {
+  found.sort((a, b) => a.start - b.start)
+  const kept: Segment[] = []
+  for (const seg of found) {
     const prev = kept[kept.length - 1]
-    if (prev && r.start < prev.end) continue
-    kept.push(r)
+    if (prev && seg.start < prev.end) continue
+    kept.push(seg)
   }
   return kept
 }
@@ -142,14 +187,9 @@ export function renderFacets(text: string, facets: AppBskyRichtextFacet.Main[] |
   const decode = (s: number, e: number): string => decoder.decode(bytes.subarray(s, e))
   let html = ''
   let pos = 0
-  for (const r of validRanges(bytes, facets)) {
-    const segment = decode(r.start, r.end)
-    const wrap = wrapFor(r.features, segment)
-    // A range whose features give no link stays as text, merged with the
-    // text around it.
-    if (!wrap) continue
-    html += escapeText(decode(pos, r.start)) + wrap(escapeText(segment))
-    pos = r.end
+  for (const seg of segments(bytes, facets, decode)) {
+    html += escapeText(decode(pos, seg.start)) + seg.wrap(escapeText(decode(seg.start, seg.end)))
+    pos = seg.end
   }
   html += escapeText(decode(pos, bytes.length))
   return `<p>${html}</p>`
