@@ -41,7 +41,8 @@ own files; ask in your report for a change in another's.
 | `src/map/labels.ts` | `mapLabels(labels) → BlueskyLabel[]` | #177 |
 | `src/client.ts` | `createBlueskyClient(opts) → CaribouClient` (read methods), `BLUESKY_CAPABILITIES` | #177 |
 | `src/errors.ts` | `normalizeXrpcError(err) → CaribouError` | #177 |
-| `src/browser.ts` | the SDK classes; later the Bluesky `CaribouClient` and OAuth | #177, #182 |
+| `src/browser.ts` | the SDK classes, the client and the OAuth glue, for the lazy chunk | #177, #182 |
+| `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
 How they fit:
@@ -328,6 +329,62 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
 - **Dedup:** two equal reads in flight share one request.
 
+## Sign-in and sessions (`src/oauth.ts`, #182, spec 5.5 and 5.6)
+
+Browser only. It loads through `./browser`, in the lazy chunk.
+
+- **One OAuth client per page.** `loadOAuthClient(config)` makes the SDK's
+  `BrowserOAuthClient` once, with `responseMode: 'fragment'` and
+  `handleResolver` set to Caribou's own origin (spec 5.2). The app reads the
+  `client_id` from one place (`apps/caribou/components/_bluesky.ts`): on a
+  loopback host (`127.0.0.1`, `localhost`, `[::1]`) it is the loopback
+  client, else `<origin>/oauth/client-metadata.json`. The scope is
+  `atproto transition:generic`.
+- **What the reader types.** A DID (`did:plc:…`, `did:web:…`), a handle
+  (`alice.example.com`, a leading `@` is dropped) or a PDS host
+  (`https://pds.example.com`; a host with no scheme is read as a handle, as
+  the SDK reads it). Empty or anything else: "Enter a Bluesky handle, a DID
+  or a server address", and nothing is sent.
+- **Site storage first.** Before it sends anything, `beginSignIn` opens
+  IndexedDB. When that fails (some private windows), it throws
+  `StorageUnavailable`; the panel says Bluesky sign-in needs site storage.
+- **The expected DID.** For a DID it is that DID. For a handle, `beginSignIn`
+  resolves it through Caribou's resolver (the same one the SDK uses). For a
+  PDS host there is none. It goes into the SDK's `state`, which comes back
+  on the callback.
+- **The callback calls `initCallback()` once** and acts on its result. That
+  is what `init()` does on a callback URL; `init()` is not used, because on a
+  URL without callback parameters it restores the SDK's last session, which
+  can be another account. A second call on the same load would find the
+  state used up (the spike's "Not signed in", spec 12.2). The SDK swaps the
+  code, checks that the issuer is the DID's own authorization server, and
+  removes the fragment.
+- **The `sub` check.** When there is an expected DID and the session's DID
+  differs, `completeSignIn` calls `session.signOut()` (revoke, and delete the
+  stored tokens) and throws `SignInMismatch`. The app stores nothing.
+- **After the swap.** `completeSignIn` reads the profile with `getProfile`
+  and the PDS from the token's audience, and answers `{ did, handle, pds,
+  profile }`. A failed profile read does not fail the sign-in: the handle
+  is then the one typed, or the DID.
+- **Restore.** `restoreClient(oauth, did, opts)` calls `oauth.restore(did)`
+  (by Caribou's stored DID, never the SDK's own last-session pointer),
+  makes an `Agent`, loads the reader's moderation prefs and label
+  definitions, and builds the client with `createBlueskyClient`. When the SDK
+  says the session is gone (`TokenRefreshError`, `TokenRevokedError`,
+  `TokenInvalidError`) it throws `SessionGone`. (On the SDK's
+  `AuthMethodUnsatisfiableError`, which it does not export, the SDK deletes
+  the stored session; that call fails as a plain error and the next restore
+  is `SessionGone`.) Any other error is passed on as it is (a network error).
+- **Moderation inputs.** Prefs from `getPreferences`; definitions from
+  `getLabelerServices` for every subscribed labeler plus Bluesky's. Either
+  that fails is `null`, which `moderate()` treats as missing (fail closed).
+  `restoreClient` answers them with the client, for the reader veil.
+- **The deleted event.** The SDK's `onSessionDeleted` (here or in another
+  tab) calls the `onExpired` of every restored client for that DID. A 401 on
+  a request never sends `caribou:unauthorized`.
+- **Sign-out.** `signOut(oauth, did)` restores the session and calls
+  `session.signOut()`; with no stored session it does nothing.
+
 ## Embeds (`mapEmbed`, spec 7.3)
 
 **`mapPost` hands over the post URI:** it calls `mapEmbed(view.embed, ctx,
@@ -523,10 +580,11 @@ are pure functions.
 
 `./moderation` and `./browser` are the SDK doors. The server may import
 `./moderation` statically (SSR runs moderation with logged-out defaults).
-The client loads both lazily.
+The client loads both lazily. `src/oauth.ts` is browser only and loads
+through `./browser`.
 
 `src/__tests__/server-safe.test.ts` fails on a runtime `@atproto` import in
-any module other than those two: a value import, a side-effect import, or a
+any module other than those three: a value import, a side-effect import, or a
 dynamic `import()`. A lazy load of the SDK belongs in a door too, so the
 server-safe modules stay pure and the chunk rule has one place to look.
 

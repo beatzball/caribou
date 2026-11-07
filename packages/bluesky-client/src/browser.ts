@@ -3,10 +3,9 @@
  * through a dynamic `import()`, so the libraries land in the `bsky` chunk and
  * a Mastodon page never requests them (spec 12.2). Server code and the
  * server-safe modules (`./index.ts`) never import it.
- *
- * The OAuth session code grows here (#182).
  */
 export { Agent } from '@atproto/api'
 export { BrowserOAuthClient } from '@atproto/oauth-client-browser'
 export * from './client.js'
 export * from './errors.js'
+export * from './oauth.js'

@@ -21,6 +21,7 @@ import { startTheme } from './components/_theme.js'
 import { startChangelogSeen } from './components/_changelog-seen.js'
 import { startShortcuts } from './components/_shortcuts.js'
 import { blueskyEnabled, loadBluesky } from './components/_bluesky.js'
+import { installBlueskyDriver } from './components/_bluesky-session.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
@@ -31,6 +32,9 @@ if (typeof window !== 'undefined') {
   // status card shows its post once the reader's filters for it are known
   // (`server/lib/reader-veil-head.ts`).
   clearTimeout((window as unknown as { __caribouReaderVeil?: number }).__caribouReaderVeil)
+  // A Bluesky session restores through this driver, which alone loads the
+  // atproto chunk. Set before any client is made.
+  installBlueskyDriver()
   document.getElementById('caribou-reader-stalled')?.remove()
   loadFromStorage()
   // The head script set the theme before the first paint; this keeps it in

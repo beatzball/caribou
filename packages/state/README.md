@@ -49,6 +49,9 @@ Sources of truth — see file for full signatures.
   what a failure may do to a session. The rules are below.
 - `emitSessionExpired(detail)` — the event a client sends when the network
   says its credentials are gone.
+- `isBlueskySession(s)`, `blueskyUserKey(did)`, `setBlueskyDriver(d)`,
+  `blueskyRestore`, `signOutBluesky(userKey, generation)` — the Bluesky
+  session parts. The rules are below (8 to 12).
 
 **Session rules** (`users.ts`; the handlers are in
 `apps/caribou/components/_unauthorized.ts`)
@@ -99,6 +102,48 @@ session's `generation`.
 
 `loadFromStorage` fills a missing `generation` from the token. So an entry
 stored before these rules keeps its guard: a new sign-in has a new token.
+
+**Bluesky sessions** (`users.ts`, `bluesky-session.ts`; spec 5.5 and 5.6)
+
+A session is a `MastodonSession` or a `BlueskySession`. A Bluesky session
+has `network: 'bluesky'`, `did`, `handle` and `pds`, and no token: the SDK
+keeps the tokens and the DPoP key in IndexedDB under the DID. Its
+`userKey` is `<did>@bsky`. A Mastodon entry has no `network` field
+(entries stored before Bluesky have none either). Rules 1 to 7 hold for
+both networks. These add to them:
+
+8. **`activeClient` stays synchronous.** For a Bluesky session it returns a
+   client at once. `userKey`, `capabilities` and `timelineOrder` answer at
+   once. Every other method waits for one restore of the OAuth session
+   (`oauthClient.restore(did)`), then runs on the real client.
+   `blueskyRestore` is `'idle'`, `'pending'`, `'ready'` or `'failed'`;
+   screens show the splash while it is `'pending'`.
+9. **The restore is made once per client.** A client is made for one
+   session (its `generation`), as on Mastodon. When the restore succeeds,
+   every later call uses that client. When it fails with a network error,
+   the call fails like any other (rule 5) and the next call tries the
+   restore again. When the SDK says the session is gone (refresh refused,
+   token revoked, its `deleted` event), the client sends
+   `caribou:session-expired` with its own `generation` (rule 3) and every
+   call fails with `unauthorized`. A Bluesky client never sends
+   `caribou:unauthorized`.
+10. **The restore runs only through the driver.** This package never loads
+    the atproto libraries. The app sets a driver (`setBlueskyDriver`) that
+    loads them with a dynamic `import()`. With no driver, every call fails
+    with `unauthorized` and nothing is sent.
+11. **Sign-in checks who signed in.** The DID of the new session must equal
+    the DID the typed handle resolved to (or the typed DID). On a mismatch
+    the app revokes the new session and stores nothing. With a PDS host
+    typed, any account on it may sign in. A sign-in to a DID that is
+    already stored replaces its entry (rule 1), so it clears `expired`.
+12. **Sign-out revokes first.** `signOutBluesky(userKey, generation)` asks
+    the driver to sign out (`session.signOut()`, which revokes at the PDS
+    and deletes the stored tokens), then drops the entry, its prefs and
+    its drafts (rule 6) only while the entry still has that `generation`.
+    A revoke that fails (offline) still drops the entry: the reader asked
+    to sign out. The Mastodon `/api/signout` route is not used.
+
+`userName(user)` is the handle for a Bluesky session.
 
 **Stores**
 

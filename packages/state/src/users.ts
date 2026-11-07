@@ -6,15 +6,13 @@ import {
   type Account,
 } from '@beatzball/caribou-mastodon-client'
 import { prefsKey } from './prefs.js'
+import { blueskyDriver, deferredBlueskyClient, isBlueskySession } from './bluesky-session.js'
 
 // The rules for `generation` and `expired`, and for what a failure may do to
 // a session, are in this package's README ("Session rules"). The numbers in
 // the comments below name them.
-export interface UserSession {
+interface SessionBase {
   userKey: UserKey
-  server: string
-  token: string
-  vapidKey: string
   // A random id made at each sign-in (rule 1). It names the sign-in, not the
   // token; every failure event carries it (rule 2).
   generation: string
@@ -28,8 +26,35 @@ export interface UserSession {
   expired?: true
 }
 
+export interface MastodonSession extends SessionBase {
+  // Absent on Mastodon entries, also on those stored before Bluesky.
+  network?: 'mastodon'
+  server: string
+  token: string
+  vapidKey: string
+}
+
+/** A Bluesky sign-in (rules 8 to 12). The SDK keeps its tokens in IndexedDB under the DID. */
+export interface BlueskySession extends SessionBase {
+  network: 'bluesky'
+  did: string
+  // For display; refreshed from `getProfile`.
+  handle: string
+  // From the DID document; it can change.
+  pds: string
+  // A Bluesky session has none of these. They are here so code that reads
+  // them from any session gets `undefined` and not a type error.
+  server?: undefined
+  token?: undefined
+  vapidKey?: undefined
+}
+
+export type UserSession = MastodonSession | BlueskySession
+
+type New<S extends SessionBase> = Omit<S, 'generation' | 'expired'> & { generation?: string }
+
 /** A session as a sign-in hands it over: its `generation` is made if absent. */
-export type NewUserSession = Omit<UserSession, 'generation' | 'expired'> & { generation?: string }
+export type NewUserSession = New<MastodonSession> | New<BlueskySession>
 
 /** A new sign-in id: 128 random bits as hex. */
 export function newGeneration(): string {
@@ -73,6 +98,12 @@ export function emitSessionExpired(detail: SessionExpiredDetail): void {
 export const activeClient = computed<CaribouClient | null>(() => {
   const user = activeUser.value
   if (!user) return null
+  if (isBlueskySession(user)) {
+    // Rule 8: made at once; it restores the OAuth session on first use.
+    return deferredBlueskyClient(user, () => {
+      emit('caribou:session-expired', { userKey: user.userKey, generation: user.generation })
+    })
+  }
   const source: SessionSource = {
     get: () => ({ userKey: user.userKey, server: user.server, token: user.token }),
     onUnauthorized: () => { emit('caribou:unauthorized', { userKey: user.userKey, generation: user.generation }) },
@@ -91,7 +122,8 @@ export function addUserSession(session: NewUserSession): void {
 }
 
 /** The user's own handle on their server, with or without the account. */
-export function userName(user: Pick<UserSession, 'userKey' | 'account'>): string {
+export function userName(user: Pick<UserSession, 'userKey' | 'account'> & { network?: string; handle?: string }): string {
+  if (user.network === 'bluesky' && user.handle) return user.handle
   return user.account?.acct ?? user.userKey.slice(0, user.userKey.lastIndexOf('@'))
 }
 
@@ -138,6 +170,32 @@ function dropSession(key: UserKey): void {
   users.value = next
   localStorage.removeItem(prefsKey(key))
   localStorage.removeItem(`caribou.drafts.${key}`)
+}
+
+/**
+ * Signs out of a Bluesky account (rule 12): revokes at the PDS, then drops
+ * the entry, its prefs and drafts while it still has `generation`. When it
+ * was active, the next account becomes active, as `signOutActive` picks it.
+ * Returns the active session after it, or null.
+ */
+export async function signOutBluesky(userKey: UserKey, generation: string): Promise<UserSession | null> {
+  const entry = users.value.get(userKey)
+  if (entry && isBlueskySession(entry) && entry.generation === generation) {
+    try {
+      await blueskyDriver()?.signOut(entry.did)
+    } catch {
+      // Offline or refused: the reader asked to sign out, so the entry goes.
+    }
+  }
+  const current = users.value.get(userKey)
+  if (current?.generation === generation) {
+    const wasActive = activeUserKey.value === userKey
+    const nextKey = wasActive ? nextAccountKey(Array.from(users.value.keys()), userKey) : activeUserKey.value
+    dropSession(userKey)
+    activeUserKey.value = nextKey
+    saveToStorage()
+  }
+  return activeUser.value
 }
 
 export function removeActiveUser(): void {

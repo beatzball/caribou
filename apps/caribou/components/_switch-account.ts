@@ -211,10 +211,11 @@ export async function healInstanceCookie(
   shell: ShellInfo | null,
   deps: { fetch?: typeof fetch } = {},
 ): Promise<boolean> {
-  const session = activeUser.value
-  if (!session || landing || shell?.source !== 'cookie' || !shell.instance) return false
-  if (shell.instance.toLowerCase() === session.server.toLowerCase()) return false
-  const post = setInstanceCookie(session.server, deps.fetch ?? fetch)
+  // A Bluesky session has no server, so no cookie to heal.
+  const server = activeUser.value?.server
+  if (!server || landing || shell?.source !== 'cookie' || !shell.instance) return false
+  if (shell.instance.toLowerCase() === server.toLowerCase()) return false
+  const post = setInstanceCookie(server, deps.fetch ?? fetch)
   const gate = Promise.race([post, new Promise((r) => setTimeout(r, HEAL_WAIT_MS))])
   healing = gate
   try {

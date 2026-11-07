@@ -214,7 +214,7 @@ export class CaribouStatusQuote extends LitElement {
       const client = activeClient.value
       const q = quotedOf(this.quote)
       const instance = this.instance || this.shellInstance
-      const same = !!client && !!user && (!instance || user.server.toLowerCase() === instance.toLowerCase())
+      const same = !!client && !!user && (!instance || (user.server ?? '').toLowerCase() === instance.toLowerCase())
       const cached = q && same ? statusCache.value.get(q.id) : undefined
       const edit = q && cached && olderEdit(q, cached) ? cached : null
       if (edit !== this.liveEdit) this.liveEdit = edit

@@ -4,12 +4,12 @@ import {
   users, activeUserKey, activeUser,
   addUserSession, removeActiveUser, removeSession, switchAccount, signOutActive, nextAccountKey, isOwnAccount, userName, loadActiveAccount,
   loadFromStorage, saveToStorage, markExpired, emitSessionExpired,
-  type UserSession,
+  type UserSession, type MastodonSession,
 } from '../users.js'
 
 const key = toUserKey('beatzball', 'fosstodon.org')
 
-function sampleSession(): UserSession {
+function sampleSession(): MastodonSession {
   return {
     userKey: key,
     server: 'fosstodon.org',
@@ -180,7 +180,7 @@ describe('a session without its account (as sign-in stores it)', () => {
 })
 
 describe('loadActiveAccount', () => {
-  function bareSession(): UserSession {
+  function bareSession(): MastodonSession {
     return { ...sampleSession(), account: null }
   }
 

@@ -184,7 +184,7 @@ export class CaribouSearch extends LitElement {
     const source = client && user ? readSource(client.userKey) : undefined
     try {
       if (client && user) {
-        host = user.server
+        host = user.server ?? ''
         data = await client.search({ q, resolve: resolve && isUrlQuery(q), limit: LIMIT })
       } else {
         host = this.instance
