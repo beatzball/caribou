@@ -14,9 +14,10 @@ export const SSR_LINK_CARD = {
 export const SSR_STATUS_LINK_CARD = String.raw`<caribou-status-link-card ><template shadowroot="open" shadowrootmode="open"><!--lit-part uT7q81/2cXo=-->
       <!--lit-node 0--><a href="https://news.example/story" target="_blank" rel="noopener noreferrer" data-layout="large"
         aria-labelledby="title" aria-describedby="details">
-        <!--lit-part jtby1oTaaQ4=-->
+        <!--lit-part uFI98Hiik5o=-->
           <!--lit-node 0--><div class="image" style="--ar: 2">
             <!--lit-node 1--><img src="https://files.example.social/card.png" alt="A chart" loading="lazy" decoding="async" />
+            <!--lit-part--><!--/lit-part-->
           </div>
         <!--/lit-part-->
         <div class="text">

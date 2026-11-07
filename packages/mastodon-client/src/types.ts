@@ -438,6 +438,12 @@ export interface StatusBluesky {
   moderation: BlueskyModerationResult
   /** The UserKey whose viewer state this copy carries, or null for a public copy. */
   viewerOf: `${string}@${string}` | null
+  /**
+   * The feed, list, starter pack or labeler the post embeds, as a card that
+   * links to it (spec 7.3). Apart from `card`, which comes from the media,
+   * so a post can show both. Missing means none.
+   */
+  recordCard?: PreviewCard | null
 }
 
 // ---------------------------------------------------------- relationship

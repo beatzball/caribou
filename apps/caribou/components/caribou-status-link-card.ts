@@ -59,6 +59,11 @@ export class CaribouStatusLinkCard extends LitElement {
     [data-layout="large"] .image { width: 100%; aspect-ratio: var(--ar); max-height: 20rem; }
     [data-layout="compact"] .image { width: 6rem; aspect-ratio: 1; align-self: flex-start; }
     img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+    .play {
+      position: absolute; inset: 0; margin: auto; width: 3rem; height: 3rem;
+      display: grid; place-items: center; padding-inline-start: 0.2rem;
+      color: #fff; background: rgb(0 0 0 / 0.6); border-radius: 50%; font-size: 1.25rem;
+    }
     .text {
       display: flex; flex-direction: column; gap: var(--space-1);
       min-width: 0; padding: var(--space-3);
@@ -74,6 +79,9 @@ export class CaribouStatusLinkCard extends LitElement {
   `]
 
   @property({ attribute: false }) card: LinkCard | null = null
+  // A Bluesky video: the card opens the post on bsky.app, where it plays
+  // (spec 7.3). A play mark on the image says so. Mastodon cards never set it.
+  @property({ type: Boolean }) play = false
 
   override render() {
     const card = this.card
@@ -88,6 +96,7 @@ export class CaribouStatusLinkCard extends LitElement {
         ${layout === 'text' ? nothing : html`
           <div class="image" style="--ar: ${cardAspect(card)}">
             <img src=${image} alt=${card.imageDescription ?? ''} loading="lazy" decoding="async" />
+            ${this.play ? html`<span class="play" aria-hidden="true">▶</span>` : nothing}
           </div>
         `}
         <div class="text">

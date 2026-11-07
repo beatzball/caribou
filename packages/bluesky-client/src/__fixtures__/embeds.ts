@@ -10,11 +10,16 @@ const alice = {
   createdAt: '2024-01-01T00:00:00.000Z',
 }
 
+// The quoted post's author carries labels and viewer state, so a test can
+// check that moderation still sees them after the handoff to `mapPost`.
 const bob = {
   did: 'did:plc:bob',
   handle: 'bob.example.com',
   displayName: 'Bob',
-  labels: [],
+  labels: [
+    { src: 'did:plc:labeler', uri: 'did:plc:bob', val: 'rude', cts: '2026-10-01T00:00:00.000Z' },
+  ],
+  viewer: { muted: true, blockedBy: false },
 }
 
 export const POST_URI = 'at://did:plc:alice/app.bsky.feed.post/3kpost'
@@ -66,11 +71,32 @@ export const videoView = {
   aspectRatio: { width: 1080, height: 1920 },
 }
 
+// The raw record keeps its self-labels and its image alt text: moderation
+// reads both (self-labels, and muted words in alt text).
+export const galleryView = {
+  $type: 'app.bsky.embed.gallery#view',
+  items: [
+    {
+      $type: 'app.bsky.embed.gallery#viewImage',
+      thumbnail: 'https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:alice/bafkgal1@jpeg',
+      fullsize: 'https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:alice/bafkgal1@jpeg',
+      alt: 'First',
+      aspectRatio: { width: 1000, height: 1000 },
+    },
+    { $type: 'app.bsky.embed.gallery#viewSomethingNew', data: 1 },
+  ],
+}
+
 export const quotedPostValue = {
   $type: 'app.bsky.feed.post',
   text: 'The quoted post',
   createdAt: '2026-11-01T10:00:00.000Z',
   langs: ['en'],
+  labels: { $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'graphic-media' }] },
+  embed: {
+    $type: 'app.bsky.embed.images',
+    images: [{ alt: 'A caribou in the snow', image: { $type: 'blob', ref: { $link: 'bafkimg1' }, mimeType: 'image/jpeg', size: 1000 } }],
+  },
 }
 
 export const viewRecord = {
@@ -79,7 +105,10 @@ export const viewRecord = {
   cid: 'bafkquoted',
   author: bob,
   value: quotedPostValue,
-  labels: [],
+  labels: [
+    { src: 'did:plc:labeler', uri: 'at://did:plc:bob/app.bsky.feed.post/3kquoted', val: 'spam', cts: '2026-11-01T11:00:00.000Z' },
+    { src: 'did:plc:bob', uri: 'at://did:plc:bob/app.bsky.feed.post/3kquoted', val: 'graphic-media', cts: '2026-11-01T10:00:00.000Z' },
+  ],
   likeCount: 3,
   replyCount: 1,
   repostCount: 2,
@@ -102,6 +131,28 @@ export const blockedView = {
     uri: 'at://did:plc:bob/app.bsky.feed.post/3kblocked',
     blocked: true,
     author: { did: 'did:plc:bob', viewer: { blocking: 'at://did:plc:alice/app.bsky.graph.block/3kblock' } },
+  },
+}
+
+// A block the reader made, a block against the reader, and a block between
+// the two authors (every reader sees it, with no viewer state).
+export const blockedByView = {
+  $type: 'app.bsky.embed.record#view',
+  record: {
+    $type: 'app.bsky.embed.record#viewBlocked',
+    uri: 'at://did:plc:bob/app.bsky.feed.post/3kblocked',
+    blocked: true,
+    author: { did: 'did:plc:bob', viewer: { blockedBy: true } },
+  },
+}
+
+export const blockedBetweenAuthorsView = {
+  $type: 'app.bsky.embed.record#view',
+  record: {
+    $type: 'app.bsky.embed.record#viewBlocked',
+    uri: 'at://did:plc:bob/app.bsky.feed.post/3kblocked',
+    blocked: true,
+    author: { did: 'did:plc:bob' },
   },
 }
 
@@ -187,4 +238,16 @@ export const feedWithImagesView = {
   $type: 'app.bsky.embed.recordWithMedia#view',
   record: feedGeneratorView,
   media: imagesView,
+}
+
+export const feedWithExternalView = {
+  $type: 'app.bsky.embed.recordWithMedia#view',
+  record: feedGeneratorView,
+  media: externalView,
+}
+
+export const feedWithVideoView = {
+  $type: 'app.bsky.embed.recordWithMedia#view',
+  record: feedGeneratorView,
+  media: videoView,
 }

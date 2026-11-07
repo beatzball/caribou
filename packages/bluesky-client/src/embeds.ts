@@ -6,12 +6,17 @@ import { mapPost } from './map/post.js'
 /** The parts of a `Status` that come from a post's embed (spec 6.5 and 7.3). */
 export interface EmbedParts {
   mediaAttachments: MediaAttachment[]
+  /** From the media: an external link, a video, or the fallback. Goes in `Status.card`. */
   card: PreviewCard | null
+  /** From the record: a feed, list, starter pack or labeler. Goes in `Status.bluesky.recordCard`. */
+  recordCard: PreviewCard | null
   quote: Quote | null
 }
 
 // The rules are in the README, "Embeds". Every view arrives as JSON from
 // the AppView, so each field is checked here, not trusted from the types.
+// `$type` is matched with `switch` or `===` only, never an object lookup:
+// `__proto__` or `toString` would find an inherited property.
 
 const BSKY = 'https://bsky.app'
 const MAX_IMAGES = 4
@@ -19,7 +24,7 @@ const FALLBACK_TITLE = 'Not supported here — open on bsky.app'
 
 type Obj = Record<string, unknown>
 
-/** A shape that does not match its `$type`. `mapEmbed` turns it into the fallback card. */
+/** A shape that does not match its `$type`. It becomes the fallback card. */
 class BadShape extends Error {}
 
 function obj(v: unknown): Obj {
@@ -27,18 +32,28 @@ function obj(v: unknown): Obj {
   return v as Obj
 }
 
+function objOrEmpty(v: unknown): Obj {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Obj : {}
+}
+
 function str(v: unknown): string {
   return typeof v === 'string' ? v : ''
 }
 
+// The same rule as the app's `_http-url.ts`: http(s) only, normalized.
 function httpUrl(v: unknown): string | null {
   if (typeof v !== 'string') return null
   try {
     const u = new URL(v)
-    return u.protocol === 'http:' || u.protocol === 'https:' ? v : null
+    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null
   } catch {
     return null
   }
+}
+
+// One path segment of a bsky.app link. A DID keeps its colons.
+function seg(v: string): string {
+  return encodeURIComponent(v).replace(/%3A/gi, ':')
 }
 
 // `at://<did>/<collection>/<rkey>` → its parts, or null.
@@ -49,7 +64,7 @@ function atUri(v: unknown): { did: string; collection: string; rkey: string } | 
 
 function postUrl(postUri: string | undefined): string {
   const at = atUri(postUri)
-  return at ? `${BSKY}/profile/${at.did}/post/${at.rkey}` : BSKY
+  return at ? `${BSKY}/profile/${seg(at.did)}/post/${seg(at.rkey)}` : BSKY
 }
 
 function card(fields: Pick<PreviewCard, 'url' | 'title' | 'description'> & Partial<PreviewCard>): PreviewCard {
@@ -67,25 +82,38 @@ function size(aspectRatio: unknown): MediaAttachmentMetaImage | null {
   return { width, height, size: `${width}x${height}`, aspect: width / height }
 }
 
+function image(fullsize: unknown, thumb: unknown, alt: unknown, aspectRatio: unknown): MediaAttachment | null {
+  const url = httpUrl(fullsize)
+  const previewUrl = httpUrl(thumb) ?? url
+  if (!url || !previewUrl) return null
+  const dims = size(aspectRatio)
+  return {
+    id: url,
+    type: 'image',
+    url,
+    previewUrl,
+    description: str(alt) || null,
+    meta: dims ? { original: dims, small: dims } : null,
+  }
+}
+
 function mapImages(view: Obj): MediaAttachment[] {
   if (!Array.isArray(view.images)) throw new BadShape()
-  const out: MediaAttachment[] = []
-  for (const raw of view.images.slice(0, MAX_IMAGES)) {
-    const image = obj(raw)
-    const url = httpUrl(image.fullsize)
-    const previewUrl = httpUrl(image.thumb) ?? url
-    if (!url || !previewUrl) continue
-    const dims = size(image.aspectRatio)
-    out.push({
-      id: url,
-      type: 'image',
-      url,
-      previewUrl,
-      description: str(image.alt) || null,
-      meta: dims ? { original: dims, small: dims } : null,
-    })
-  }
-  return out
+  return view.images.slice(0, MAX_IMAGES)
+    .map((raw) => { const i = obj(raw); return image(i.fullsize, i.thumb, i.alt, i.aspectRatio) })
+    .filter((m): m is MediaAttachment => m !== null)
+}
+
+// A gallery is images by another name (`thumbnail` for `thumb`). An item
+// of a kind this build does not know is skipped.
+function mapGallery(view: Obj): MediaAttachment[] {
+  if (!Array.isArray(view.items)) throw new BadShape()
+  return view.items
+    .map(objOrEmpty)
+    .filter((i) => i.$type === undefined || i.$type === 'app.bsky.embed.gallery#viewImage')
+    .slice(0, MAX_IMAGES)
+    .map((i) => image(i.fullsize, i.thumbnail, i.alt, i.aspectRatio))
+    .filter((m): m is MediaAttachment => m !== null)
 }
 
 function hostOf(url: string): string {
@@ -118,7 +146,8 @@ function mapVideo(view: Obj, postUri: string | undefined): PreviewCard {
 }
 
 // A quoted record → the post view `mapPost` reads. No `viewer`: the
-// AppView sends none for a quoted record.
+// AppView sends none for a quoted record. Every input moderation reads
+// (labels, author, raw record, embed) passes through as it came.
 function toPostView(record: Obj): AppBskyFeedDefs.PostView {
   const value = obj(record.value)
   if (value.$type !== undefined && value.$type !== 'app.bsky.feed.post') throw new BadShape()
@@ -140,22 +169,43 @@ function toPostView(record: Obj): AppBskyFeedDefs.PostView {
   return view as unknown as AppBskyFeedDefs.PostView
 }
 
-const STUB_STATES: Record<string, QuoteState> = {
-  'app.bsky.embed.record#viewNotFound': 'deleted',
-  'app.bsky.embed.record#viewBlocked': 'blocked_account',
-  'app.bsky.embed.record#viewDetached': 'revoked',
+// How many quoted posts `mapEmbed` is inside right now. Bluesky shows one
+// level of quote; a quote inside a quote keeps no post, and the quote card
+// shows it as a link. This also ends a chain that quotes itself. Mapping
+// is synchronous, so a module counter is safe.
+let quoteDepth = 0
+
+function mapQuoted(record: Obj, ctx: MapContext): Quote {
+  const postView = toPostView(record)
+  if (quoteDepth > 0) return { state: 'accepted', quotedStatus: null }
+  quoteDepth++
+  try {
+    return { state: 'accepted', quotedStatus: mapPost(postView, ctx) }
+  } catch {
+    // `mapPost` is another module's; a throw there must not lose the post.
+    return { state: 'accepted', quotedStatus: null }
+  } finally {
+    quoteDepth--
+  }
+}
+
+// The reader blocked the author: the card says so. Any other block (the
+// author blocked the reader, or the two authors) only says "cannot see".
+function blockedState(record: Obj): QuoteState {
+  const viewer = objOrEmpty(objOrEmpty(record.author).viewer)
+  return typeof viewer.blocking === 'string' && viewer.blocking !== '' ? 'blocked_account' : 'unauthorized'
 }
 
 // A feed, list, starter pack or labeler → a small card that opens it on bsky.app.
-function recordCard(type: string, record: Obj): PreviewCard | null {
+function recordCard(type: string, record: Obj): PreviewCard {
   const at = atUri(record.uri)
-  const creator = typeof record.creator === 'object' && record.creator !== null ? record.creator as Obj : {}
+  const creator = objOrEmpty(record.creator)
   const did = str(creator.did) || at?.did || ''
   switch (type) {
     case 'app.bsky.feed.defs#generatorView':
       if (!at || !did) throw new BadShape()
       return card({
-        url: `${BSKY}/profile/${did}/feed/${at.rkey}`,
+        url: `${BSKY}/profile/${seg(did)}/feed/${seg(at.rkey)}`,
         title: str(record.displayName) || at.rkey,
         description: str(record.description),
         image: httpUrl(record.avatar),
@@ -164,18 +214,18 @@ function recordCard(type: string, record: Obj): PreviewCard | null {
     case 'app.bsky.graph.defs#listView':
       if (!at || !did) throw new BadShape()
       return card({
-        url: `${BSKY}/profile/${did}/lists/${at.rkey}`,
+        url: `${BSKY}/profile/${seg(did)}/lists/${seg(at.rkey)}`,
         title: str(record.name) || at.rkey,
         description: str(record.description),
         image: httpUrl(record.avatar),
         providerName: 'Bluesky list',
       })
     case 'app.bsky.graph.defs#starterPackViewBasic': {
-      const handle = str(creator.handle)
-      if (!at || !handle) throw new BadShape()
-      const inner = typeof record.record === 'object' && record.record !== null ? record.record as Obj : {}
+      const who = str(creator.handle) || str(creator.did)
+      if (!at || !who) throw new BadShape()
+      const inner = objOrEmpty(record.record)
       return card({
-        url: `${BSKY}/starter-pack/${handle}/${at.rkey}`,
+        url: `${BSKY}/starter-pack/${seg(who)}/${seg(at.rkey)}`,
         title: str(inner.name) || 'Starter pack',
         description: str(inner.description),
         image: null,
@@ -185,73 +235,86 @@ function recordCard(type: string, record: Obj): PreviewCard | null {
     case 'app.bsky.labeler.defs#labelerView':
       if (!did) throw new BadShape()
       return card({
-        url: `${BSKY}/profile/${did}`,
+        url: `${BSKY}/profile/${seg(did)}`,
         title: str(creator.displayName) || str(creator.handle) || did,
         description: str(creator.description),
         image: null,
         providerName: 'Bluesky labeler',
       })
     default:
-      return null
+      throw new BadShape()
   }
 }
 
-function mapRecord(view: Obj, ctx: MapContext): Pick<EmbedParts, 'card' | 'quote'> {
+type RecordPart = Pick<EmbedParts, 'recordCard' | 'quote'>
+
+function mapRecordStrict(view: Obj, ctx: MapContext): RecordPart {
   const record = obj(view.record)
   const type = str(record.$type)
-  if (type === 'app.bsky.embed.record#viewRecord') {
-    const postView = toPostView(record)
-    let quotedStatus = null
-    // `mapPost` is another module's; a throw there must not lose the post.
-    try { quotedStatus = mapPost(postView, ctx) } catch { /* the card says "not available" */ }
-    return { card: null, quote: { state: 'accepted', quotedStatus } }
+  switch (type) {
+    case 'app.bsky.embed.record#viewRecord':
+      return { recordCard: null, quote: mapQuoted(record, ctx) }
+    case 'app.bsky.embed.record#viewNotFound':
+      return { recordCard: null, quote: { state: 'deleted', quotedStatus: null } }
+    case 'app.bsky.embed.record#viewBlocked':
+      return { recordCard: null, quote: { state: blockedState(record), quotedStatus: null } }
+    case 'app.bsky.embed.record#viewDetached':
+      return { recordCard: null, quote: { state: 'revoked', quotedStatus: null } }
+    default:
+      return { recordCard: recordCard(type, record), quote: null }
   }
-  const state = STUB_STATES[type]
-  if (state) return { card: null, quote: { state, quotedStatus: null } }
-  const linked = recordCard(type, record)
-  if (!linked) throw new BadShape()
-  return { card: linked, quote: null }
 }
 
-function mapMedia(view: Obj, postUri: string | undefined): Pick<EmbedParts, 'mediaAttachments' | 'card'> {
+// A record this build cannot map becomes the fallback card, in the record's
+// place; the media next to it still shows.
+function mapRecord(view: unknown, ctx: MapContext, postUri: string | undefined): RecordPart {
+  try {
+    return mapRecordStrict(obj(view), ctx)
+  } catch {
+    return { recordCard: fallbackCard(postUri), quote: null }
+  }
+}
+
+type MediaPart = Pick<EmbedParts, 'mediaAttachments' | 'card'>
+
+function mapMediaStrict(view: Obj, postUri: string | undefined): MediaPart {
   switch (view.$type) {
     case 'app.bsky.embed.images#view': return { mediaAttachments: mapImages(view), card: null }
+    case 'app.bsky.embed.gallery#view': return { mediaAttachments: mapGallery(view), card: null }
     case 'app.bsky.embed.external#view': return { mediaAttachments: [], card: mapExternal(view) }
     case 'app.bsky.embed.video#view': return { mediaAttachments: [], card: mapVideo(view, postUri) }
     default: throw new BadShape()
   }
 }
 
-function mapKnown(embed: Obj, ctx: MapContext, postUri: string | undefined): EmbedParts {
-  if (embed.$type === 'app.bsky.embed.record#view') {
-    return { mediaAttachments: [], ...mapRecord(embed, ctx) }
+// Media this build cannot map becomes the fallback card; the record next
+// to it still shows.
+function mapMedia(view: unknown, postUri: string | undefined): MediaPart {
+  try {
+    return mapMediaStrict(obj(view), postUri)
+  } catch {
+    return { mediaAttachments: [], card: fallbackCard(postUri) }
   }
-  if (embed.$type === 'app.bsky.embed.recordWithMedia#view') {
-    const { card: recordCard, quote } = mapRecord(obj(embed.record), ctx)
-    let media: Pick<EmbedParts, 'mediaAttachments' | 'card'>
-    try {
-      media = mapMedia(obj(embed.media), postUri)
-    } catch {
-      // The quote still shows; only the media is unknown.
-      media = { mediaAttachments: [], card: fallbackCard(postUri) }
-    }
-    return { mediaAttachments: media.mediaAttachments, card: media.card ?? recordCard, quote }
-  }
-  return { quote: null, ...mapMedia(embed, postUri) }
 }
 
+const NO_RECORD: RecordPart = { recordCard: null, quote: null }
+
 /**
- * A post's embed view → media, card and quote (README, "Embeds"). An unknown
- * `$type`, or a shape that does not match its `$type`, becomes a "Not
- * supported here — open on bsky.app" card; it never throws. `ctx` maps a
- * quoted post the same way `mapPost` maps the outer one. `postUri` is the
+ * A post's embed view → media, cards and quote (README, "Embeds"). An
+ * unknown `$type`, or a shape that does not match its `$type`, becomes a
+ * "Not supported here — open on bsky.app" card; it never throws. `ctx` maps
+ * a quoted post the same way `mapPost` maps the outer one. `postUri` is the
  * post's AT URI, for the links a video and the fallback card open.
  */
 export function mapEmbed(embed: AppBskyFeedDefs.PostView['embed'], ctx: MapContext, postUri?: string): EmbedParts {
-  if (embed === undefined || embed === null) return { mediaAttachments: [], card: null, quote: null }
-  try {
-    return mapKnown(obj(embed), ctx, postUri)
-  } catch {
-    return { mediaAttachments: [], card: fallbackCard(postUri), quote: null }
+  if (embed === undefined || embed === null) return { mediaAttachments: [], card: null, ...NO_RECORD }
+  const view = objOrEmpty(embed)
+  switch (view.$type) {
+    case 'app.bsky.embed.record#view':
+      return { mediaAttachments: [], card: null, ...mapRecord(view, ctx, postUri) }
+    case 'app.bsky.embed.recordWithMedia#view':
+      return { ...mapMedia(view.media, postUri), ...mapRecord(view.record, ctx, postUri) }
+    default:
+      return { ...mapMedia(view, postUri), ...NO_RECORD }
   }
 }
