@@ -86,23 +86,28 @@ The rules:
   target="_blank">`. Only `http:` and `https:`. Any other scheme, or a URI
   that does not parse, renders as plain text. The `href` is the parsed
   URL (`new URL(uri).href`).
-- **A link does not hide its host.** One rule: if the visible text names
-  a host, and that host is not the link's host, the link shows its real
-  URI (`new URL(uri).href`) as its text. The text "names a host" when:
-  1. it is one word (no ASCII whitespace after trimming ASCII whitespace;
-     other characters, such as U+FEFF, go to the parser), and
-  2. the URL parser reads it (with `https://` added when it has no
-     `scheme://`), and
-  3. it has an explicit `scheme://`, or the parsed host is a domain (a dot,
-     and a last label of two or more characters with a letter), an IPv4
-     address written as four parts, or an IPv6 address.
+- **A link does not hide its host.** An allow-list. The link keeps its
+  visible text only when one of these is true:
+  1. **Same host.** The text, read by the URL parser (with `https://`
+     added when it does not start with `scheme://`, after ASCII whitespace
+     is trimmed), has no user info and gives the link's host. Hosts compare
+     as the parser writes them (lowercase, punycode, `．` and `。` read as
+     `.`), after one leading `www.` drops from each.
+  2. **Plain prose.** After NFKC, the text has no format or invisible
+     character (`\p{Cf}`, which covers U+FEFF, U+200B–U+200F, U+202A–U+202E,
+     U+2060–U+206F and the soft hyphen; also U+2028 and U+2029), and none of
+     `. : / @ [ ] \` or a Unicode full stop (`。`, `۔`, `܁`, `܂`, `።`, `⸼`).
 
-  Hosts compare as the parser writes them (lowercase, punycode, `．` and
-  `。` read as `.`), after one leading `www.` drops from each. Two cases
-  fail closed and show the real URI: text with user info
-  (`bank.example.com@evil.example`), and text the parser refuses that has a
-  `scheme://` or whose written host looks like a domain or an IP address. Prose ("read this"), version numbers (`v1.2`,
-  `3.14`) and abbreviations (`e.g.`) keep their text.
+  Otherwise the link shows its real URI (`new URL(uri).href`) as its text.
+  So any text with an invisible character, and any text that looks like an
+  address but names another host, shows where the link really goes.
+
+  The accepted cost: link text such as `e.g.`, `v1.2`, `3.14`, `[1]`,
+  `word…` (NFKC turns `…` into `...`) or `see example.com now` over a link
+  to another host shows the URI instead. So does text with a zero-width
+  joiner, such as a family emoji. Prose like "read this" or "click here"
+  keeps its text. A false alarm only shows more than needed; a missed spoof
+  hides where a link goes.
 - **`#mention`** → `<a href="/@<did>">`, built from the facet's DID. The
   visible text stays as written; it can be stale, and the profile page shows
   the current handle. A DID that is not `did:<method>:<id>` renders as

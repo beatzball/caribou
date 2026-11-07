@@ -12,22 +12,15 @@ const LINK_ATTRS = 'rel="nofollow noopener noreferrer" target="_blank"'
 // the value is safe in a path and an attribute as it is.
 const DID = /^did:[a-z]+:[A-Za-z0-9._:-]+$/
 
-// The host rule (README, "A link does not hide its host"). Only ASCII
-// whitespace makes text prose; every other code point goes to the URL
-// parser, which drops or maps it the way a browser would.
-const ASCII_SPACE = /[\t\n\f\r ]/
+// The host allow-list (README, "A link does not hide its host").
 const ASCII_TRIM = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g
-const EXPLICIT_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
-// The dots the URL parser reads as ".": full stop, ideographic, fullwidth
-// and halfwidth ideographic.
-const DOTS = /[.\u3002\uff0e\uff61]/g
-// A domain: a dot, and a last label of two or more characters with a letter.
-const DOMAIN = /\.(?=[^.]*[a-z\u00a1-\uffff])[^.]{2,}$/i
-const IPV4 = /^\d+\.\d+\.\d+\.\d+$/
-
-// Never equal to a real host: the text names a host we cannot read, so the
-// link shows its real URI.
-const UNREADABLE = '\u0000'
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+// Format and invisible characters. `\p{Cf}` covers U+00AD, U+200B–U+200F,
+// U+202A–U+202E, U+2060–U+206F and U+FEFF; U+2028 and U+2029 are separators.
+const INVISIBLE = /[\p{Cf}\u2028\u2029]/u
+// Characters that make text look like an address, after NFKC (which turns
+// fullwidth and small stops into ".").
+const ADDRESS = /[.:/@[\]\\\u3002\u06d4\u0701\u0702\u1362\u2e3c]/
 
 const encoder = new TextEncoder()
 // A post's U+FEFF is content, not a byte-order mark: keep it.
@@ -51,38 +44,22 @@ function hostOf(url: URL): string {
   return url.hostname.replace(/^www\./, '')
 }
 
-/** True when a host, as written or as parsed, is a domain or an IP address. */
-function isHostLike(host: string): boolean {
-  if (host.startsWith('[')) return true
-  const h = host.replace(DOTS, '.').replace(/\.$/, '')
-  return IPV4.test(h) || DOMAIN.test(h)
-}
-
-/** The host part of text as written: no scheme, user info, path or port. */
-function writtenHost(t: string): string {
-  const authority = t.replace(EXPLICIT_SCHEME, '').split(/[/?#]/, 1)[0] as string
-  return (authority.split('@').pop() as string).replace(/:\d*$/, '')
-}
-
-/** The host the visible text names, or null when it names none. */
-function textHost(text: string): string | null {
+/** Rule 1: the text, read as a URL, has no user info and gives `url`'s host. */
+function namesSameHost(text: string, url: URL): boolean {
   const t = text.replace(ASCII_TRIM, '')
-  if (t === '' || ASCII_SPACE.test(t)) return null
-  const explicit = EXPLICIT_SCHEME.test(t)
-  let url: URL
+  let parsed: URL
   try {
-    url = new URL(explicit ? t : `https://${t}`)
+    parsed = new URL(HAS_SCHEME.test(t) ? t : `https://${t}`)
   } catch {
-    // Unreadable, but it claims to be a URL: fail closed.
-    return explicit || isHostLike(writtenHost(t)) ? UNREADABLE : null
+    return false
   }
-  // "bank.example.com@evil.example" names one host and goes to another.
-  if (url.username !== '' || url.password !== '') return UNREADABLE
-  if (!explicit && !isHostLike(url.hostname)) return null
-  // The parser reads "3.14" as the IPv4 address 3.0.0.14; only four
-  // written parts make an address.
-  if (!explicit && IPV4.test(url.hostname) && !IPV4.test(writtenHost(t).replace(DOTS, '.'))) return null
-  return hostOf(url)
+  return parsed.username === '' && parsed.password === '' && hostOf(parsed) === hostOf(url)
+}
+
+/** Rule 2: plain prose, with no invisible character and nothing address-like. */
+function isProse(text: string): boolean {
+  const t = text.normalize('NFKC')
+  return !INVISIBLE.test(t) && !ADDRESS.test(t)
 }
 
 type Wrap = (inner: string) => string
@@ -96,10 +73,10 @@ function linkWrap(uri: unknown, text: string): Wrap | null {
     return null
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-  const named = textHost(text)
   const open = `<a href="${escapeAttr(url.href)}" ${LINK_ATTRS}>`
-  // A link must not pretend to go somewhere else: show the real URI.
-  if (named !== null && named !== hostOf(url)) return () => `${open}${escapeText(url.href)}</a>`
+  // A link must not pretend to go somewhere else: keep the text only when
+  // it is allowed, otherwise show the real URI.
+  if (!namesSameHost(text, url) && !isProse(text)) return () => `${open}${escapeText(url.href)}</a>`
   return (inner) => `${open}${inner}</a>`
 }
 

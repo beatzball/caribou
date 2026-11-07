@@ -236,14 +236,18 @@ describe('renderFacets: links', () => {
     )
   })
 
-  describe('text that names a host', () => {
+  describe('the host allow-list', () => {
     const evil = 'https://evil.example.net/phish'
     const real = `<p><a href="${evil}" ${A_EXT}>${evil}</a></p>`
+    const over = (text: string, uri: string): string => renderFacets(text, [raw(0, bytes(text), link(uri))])
+
+    // Each row names a host (or hides one) and the link goes elsewhere.
     it.each([
-      ['U+FEFF inside the host', 'exam\ufeffple.com'],
-      ['U+FEFF before the host', '\ufeffexample.com'],
-      ['U+2028 inside the host', 'exam\u2028ple.com'],
-      ['U+2029 inside the host', 'exam\u2029ple.com'],
+      // Round 1.
+      ['U+FEFF inside the host', 'exam﻿ple.com'],
+      ['U+FEFF before the host', '﻿example.com'],
+      ['U+2028 inside the host', 'exam ple.com'],
+      ['U+2029 inside the host', 'exam ple.com'],
       ['an explicit IPv4 URL', 'https://192.0.2.1/login'],
       ['a bare IPv4 address', '192.0.2.1/login'],
       ['an IPv6 URL', 'https://[2001:db8::1]/login'],
@@ -255,28 +259,82 @@ describe('renderFacets: links', () => {
       ['fullwidth full stops', 'example．com'],
       ['another scheme', 'ftp://example.com/file'],
       ['uppercase scheme and host', 'HTTPS://EXAMPLE.COM'],
+      ['user info before the host', 'bank.example.com@evil.example.net'],
+      ['a host the URL parser refuses', 'exa[mple.com'],
+      ['a port too large', 'evil.example.net:999999'],
+      // Round 2, blocking: invisible characters around a visible URL.
+      ['U+FEFF before an explicit scheme', '﻿https://bank.example.com/login'],
+      ['U+FEFF inside the scheme', 'h﻿ttps://bank.example.com/login'],
+      ['U+FEFF inside a four-part IPv4 address', '192.0.2.﻿1/login'],
+      // Round 2: user info with no host.
+      ['a dangling @', 'bank.example.com@'],
+      ['a dangling @ before a path', 'bank.example.com@/login'],
+      ['a doubled @', 'bank.example.com@@evil.example'],
+      ['user info and a path', 'bank.example.com@evil.example/x'],
+      ['an @ before the host', '@bank.example.com'],
+      // Round 2: other spellings.
+      ['IPv4 with ideographic full stops', '192。0。2。1/login'],
+      ['http:/ with one slash', 'http:/bank.example.com/login'],
+      ['https: with no slashes', 'https:bank.example.com'],
+      ['a scheme-relative URL', '//bank.example.com/login'],
+      ['a backslash', 'bank.example.com\\evil'],
+      ['IPv4 with a trailing dot', '192.0.2.1.'],
+      ['hex IPv4', '0x7f.0.0.1'],
+      ['short IPv4', '127.1'],
+      ['uppercase scheme and an IP', 'HTTP://192.0.2.1'],
+      ['javascript:// with a host', 'javascript://example.com'],
+      ['a percent-encoded host', 'exam%70le.com'],
+      ['a host and port', 'bank.example.com:8080/x'],
+      ['fullwidth letters', 'ｂａｎｋ.example.com'],
+      ['a no-break space inside the host', 'bank .example.com'],
+      ['an ideographic space inside the host', 'bank　.example.com'],
+      ['a zero-width space inside the host', 'bank​.example.com'],
+      ['a zero-width joiner inside the host', 'bank‍.example.com'],
+      ['a soft hyphen inside the host', 'bank­.example.com'],
+      ['a right-to-left override', '‮moc.elpmaxe.knab'],
+      ['an invisible character in a single word', 'ba​nk'],
+      // The allow-list's accepted cost: address characters in prose.
+      ['a version number', 'v1.2'],
+      ['a decimal', '3.14'],
+      ['an abbreviation', 'e.g.'],
+      ['a footnote mark', '[1]'],
+      ['a bracketed word', '[link]'],
+      ['an ellipsis', 'word…'],
+      ['a dotted word in prose', 'see example.com now'],
+      ['a no-break space and a dot', 'Hello Mr.Smith'],
+      ['a family emoji (zero-width joiners)', '👩‍👩‍👧'],
     ])('shows the real URI for %s', (_name, text) => {
-      expect(renderFacets(text, [raw(0, bytes(text), link(evil))])).toBe(real)
+      expect(over(text, evil)).toBe(real)
     })
 
     it.each([
       ['an IPv4 URL', '192.0.2.1/x', 'https://192.0.2.1/x'],
       ['a localhost URL', 'http://localhost:3000/', 'http://localhost:3000/'],
       ['ideographic full stops', 'example。com/a', 'https://example.com/a'],
+      ['a host with a port', 'example.com:8080/x', 'https://example.com:8080/x'],
+      ['an IPv6 address written another way', '[2001:DB8:0:0::1]/', 'https://[2001:db8::1]/'],
+      ['a shortened path', 'example.com/notes…', 'https://example.com/notes/2026'],
+      ['ASCII spaces around the host', '  example.com  ', 'https://example.com/'],
+      ['an invisible character, same host', 'exam﻿ple.com', 'https://example.com/'],
     ])('keeps the text for %s with the same host', (_name, text, uri) => {
-      expect(renderFacets(text, [raw(0, bytes(text), link(uri))])).toBe(
-        `<p><a href="${new URL(uri).href}" ${A_EXT}>${text}</a></p>`,
-      )
+      expect(over(text, uri)).toBe(`<p><a href="${new URL(uri).href}" ${A_EXT}>${text}</a></p>`)
     })
 
-    it.each([['a decimal', '3.14'], ['a bare word', 'localhost'], ['ASCII spaces around a word', '  here  ']])(
-      'keeps the text for %s',
-      (_name, text) => {
-        expect(renderFacets(text, [raw(0, bytes(text), link('https://example.com/'))])).toBe(
-          `<p><a href="https://example.com/" ${A_EXT}>${text}</a></p>`,
-        )
-      },
-    )
+    it.each([
+      ['read this'],
+      ['click here'],
+      ['here'],
+      ['  here  '],
+      ['localhost'],
+      ['Hello world!'],
+      ['read this'],
+      ['café'],
+      ['日本語のリンク'],
+      ['❤️ this'],
+    ])('keeps prose: %j', (text) => {
+      const shown = text.replace(/\u00a0/g, '&nbsp;')
+      expect(over(text, 'https://example.com/')).toBe(`<p><a href="https://example.com/" ${A_EXT}>${shown}</a></p>`)
+    })
   })
 
   it('shows the real URI when the text names another host', () => {
@@ -312,47 +370,8 @@ describe('renderFacets: links', () => {
     )
   })
 
-  it.each([
-    ['user info before the host', 'bank.example.com@evil.example.net'],
-    ['a host the URL parser refuses', 'exa[mple.com'],
-    ['a port too large', 'evil.example.net:999999'],
-  ])('shows the real URI for text with %s', (_name, text) => {
-    expect(renderFacets(text, [raw(0, bytes(text), link('https://evil.example.net/'))])).toBe(
-      `<p><a href="https://evil.example.net/" ${A_EXT}>https://evil.example.net/</a></p>`,
-    )
-  })
 
-  it.each([['a version number', 'v1.2'], ['an abbreviation', 'e.g.'], ['one word', 'here']])(
-    'keeps text that is %s',
-    (_name, text) => {
-      expect(renderFacets(text, [raw(0, bytes(text), link('https://example.com/'))])).toBe(
-        `<p><a href="https://example.com/" ${A_EXT}>${text}</a></p>`,
-      )
-    },
-  )
-
-  it('keeps the text for a host with a port', () => {
-    const text = 'example.com:8080/x'
-    expect(renderFacets(text, [raw(0, bytes(text), link('https://example.com:8080/x'))])).toBe(
-      `<p><a href="https://example.com:8080/x" ${A_EXT}>example.com:8080/x</a></p>`,
-    )
-  })
-
-  it('keeps text that does not look like a URL', () => {
-    const text = 'read this'
-    expect(renderFacets(text, [raw(0, 9, link('https://example.com/'))])).toBe(
-      `<p><a href="https://example.com/" ${A_EXT}>read this</a></p>`,
-    )
-  })
-
-  it('treats a dotted word with a space as not a URL', () => {
-    const text = 'see example.com now'
-    expect(renderFacets(text, [raw(0, bytes(text), link('https://other.example/'))])).toBe(
-      `<p><a href="https://other.example/" ${A_EXT}>see example.com now</a></p>`,
-    )
-  })
 })
-
 describe('renderFacets: mentions and tags', () => {
   it('links a mention by its DID, not the text', () => {
     const text = 'hi @bob.example.com'
