@@ -113,6 +113,25 @@ async function checkSigninStart() {
   }
 }
 
+// The atproto OAuth client metadata (apps/caribou/README.md, "Bluesky
+// sign-in endpoints"). An authorization server fetches the client_id URL and
+// requires the file to name itself, so client_id must equal the URL we just
+// fetched. A wrong PUBLIC_BASE_URL fails here instead of at sign-in.
+async function checkClientMetadata() {
+  const url = `${BASE}/oauth/client-metadata.json`
+  const res = await fetchWithTimeout(url)
+  if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`)
+  const body = await res.json()
+  if (body.client_id !== url) {
+    throw new Error(`client_id ${JSON.stringify(body.client_id)} is not ${url}`)
+  }
+  const redirect = `${BASE}/signin/bluesky`
+  if (!Array.isArray(body.redirect_uris) || body.redirect_uris.length !== 1 || body.redirect_uris[0] !== redirect) {
+    throw new Error(`redirect_uris ${JSON.stringify(body.redirect_uris)} is not [${redirect}]`)
+  }
+  if (body.dpop_bound_access_tokens !== true) throw new Error('dpop_bound_access_tokens is not true')
+}
+
 console.log(
   `Verifying ${BASE}${EXPECTED_SHA ? ` (expecting commit ${EXPECTED_SHA.slice(0, 8)})` : ' (no SHA pin)'}`,
 )
@@ -121,6 +140,7 @@ const results = []
 results.push(await withRetry('GET  /', checkLanding))
 results.push(await withRetry('GET  /api/health', checkHealth))
 results.push(await withRetry('GET  /feed (route)', checkFeedRoute))
+results.push(await withRetry('GET  /oauth/client-metadata.json', checkClientMetadata))
 results.push(await withRetry('POST /api/signin/start (oauth init)', checkSigninStart))
 
 const failed = results.filter((r) => !r.ok)
