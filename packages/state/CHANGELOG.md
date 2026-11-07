@@ -1,5 +1,14 @@
 # @beatzball/caribou-state
 
+## 0.4.7
+
+### Patch Changes
+
+- [#222](https://github.com/beatzball/caribou/pull/222) [`8bd7867`](https://github.com/beatzball/caribou/commit/8bd7867f1b6179379259278a263ae4e30180fcf9) Thanks [@beatzball](https://github.com/beatzball)! - The timeline and profile stores end a list only when the client says so, with a null cursor. An empty page that names a next cursor no longer ends it. Mastodon gives an empty page a null cursor, so nothing changes there.
+
+- Updated dependencies [[`33f4f1e`](https://github.com/beatzball/caribou/commit/33f4f1eaf98d28970411ca2bef5c54462a236426), [`ed5753a`](https://github.com/beatzball/caribou/commit/ed5753ad296d6901607cc59576624bfcfe3a645c)]:
+  - @beatzball/caribou-mastodon-client@0.4.6
+
 ## 0.4.6
 
 ### Patch Changes
