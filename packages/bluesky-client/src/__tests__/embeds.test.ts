@@ -204,6 +204,31 @@ describe('mapEmbed', () => {
     expect(map(fx.recordView).quote?.quotedStatus).toBeTruthy()
   })
 
+  describe('a quoted author who asked to be hidden from signed-out readers (spec 8.3)', () => {
+    const NO_UNAUTH = { src: 'did:plc:bob', uri: 'at://did:plc:bob/app.actor.profile/self', val: '!no-unauthenticated', cts: '2026-01-01T00:00:00.000Z' }
+    const hiddenAuthor = (neg?: boolean) => ({
+      ...fx.recordView,
+      record: { ...fx.viewRecord, author: { ...fx.viewRecord.author, labels: [{ ...NO_UNAUTH, ...(neg ? { neg } : {}) }] } },
+    })
+
+    it('hides the quote from a signed-out reader, and never maps the post', () => {
+      expect(map(hiddenAuthor())).toEqual({
+        ...NONE,
+        quote: { state: 'unauthorized', quotedStatus: null, bluesky: { hidden: 'no-unauthenticated' } },
+      })
+      expect(mapPostMock).not.toHaveBeenCalled()
+    })
+
+    it('shows the quote to a signed-in Bluesky reader', () => {
+      const signedIn = { ...ctx, viewerOf: 'did:plc:alice@bsky' as const }
+      expect(mapEmbed(hiddenAuthor() as unknown as Embed, signedIn, fx.POST_URI).quote).toEqual({ state: 'accepted', quotedStatus })
+    })
+
+    it('ignores a negated label', () => {
+      expect(map(hiddenAuthor(true)).quote).toEqual({ state: 'accepted', quotedStatus })
+    })
+  })
+
   it.each([
     ['not found', fx.notFoundView, 'deleted'],
     ['blocked by the reader', fx.blockedView, 'blocked_account'],

@@ -43,6 +43,8 @@ const STATE_NOTES: Record<string, string> = {
   muted_account: 'Quoted post hidden: you muted its author.',
 }
 const NOT_AVAILABLE = 'The quoted post is not available.'
+// Spec 8.3: a Bluesky author asked to be hidden from signed-out readers.
+const NO_UNAUTHENTICATED = 'This account asked to be seen only by signed-in readers.'
 
 function absoluteLabel(iso: string): string {
   const d = new Date(iso)
@@ -281,7 +283,8 @@ export class CaribouStatusQuote extends LitElement {
     if (!quote) return nothing
     const q = quotedOf(quote)
     if (!q || this.deleted) {
-      const note = this.deleted ? STATE_NOTES.deleted : STATE_NOTES[quote.state] ?? NOT_AVAILABLE
+      const hidden = 'bluesky' in quote && quote.bluesky?.hidden === 'no-unauthenticated'
+      const note = this.deleted ? STATE_NOTES.deleted : hidden ? NO_UNAUTHENTICATED : STATE_NOTES[quote.state] ?? NOT_AVAILABLE
       // An accepted quote whose post the server left out.
       return html`<p class="quote-note">${quote.state === 'accepted' && !this.deleted ? NOT_AVAILABLE : note}</p>`
     }

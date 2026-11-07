@@ -257,6 +257,19 @@ describe('<caribou-status-quote>', () => {
   })
 })
 
+describe('<caribou-status-quote> Bluesky signed-out notice (spec 8.3)', () => {
+  it('says the author asked to be seen only by signed-in readers', async () => {
+    const el = await mount({ state: 'unauthorized', quotedStatus: null, bluesky: { hidden: 'no-unauthenticated' } } as Quote)
+    expect($(el, '.quote-note')?.textContent).toBe('This account asked to be seen only by signed-in readers.')
+    expect($(el, '.quote')).toBeNull()
+  })
+
+  it('keeps the usual note for a quote with no such reason', async () => {
+    const el = await mount({ state: 'unauthorized', quotedStatus: null })
+    expect($(el, '.quote-note')?.textContent).toBe('You cannot see the quoted post.')
+  })
+})
+
 describe('<caribou-status-card> with a quote', () => {
   async function card(status: Status) {
     await import('../caribou-status-card.js')

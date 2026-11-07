@@ -2,6 +2,7 @@ import type { AppBskyFeedDefs } from '@atproto/api'
 import type { MediaAttachment, MediaAttachmentMetaImage, PreviewCard, Quote, QuoteState } from '@beatzball/caribou-mastodon-client'
 import type { MapContext } from './map/context.js'
 import { mapPost } from './map/post.js'
+import { isNoUnauthenticated } from './no-unauthenticated.js'
 
 /** The parts of a `Status` that come from a post's embed (spec 6.5 and 7.3). */
 export interface EmbedParts {
@@ -184,6 +185,13 @@ let quoteDepth = 0
 
 function mapQuoted(record: Obj, ctx: MapContext): Quote {
   const postView = toPostView(record)
+  // Spec 8.3. A signed-out copy (`viewerOf` null: the server, or a reader
+  // with no Bluesky account active) never carries this author's post. The
+  // SDK does not count an embed's author in the outer post's moderation, so
+  // the check is here. The post is never mapped, so none of it is kept.
+  if (ctx.viewerOf === null && isNoUnauthenticated(postView.author)) {
+    return { state: 'unauthorized', quotedStatus: null, bluesky: { hidden: 'no-unauthenticated' } }
+  }
   if (quoteDepth > 0) return { state: 'accepted', quotedStatus: null }
   quoteDepth++
   try {

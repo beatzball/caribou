@@ -289,6 +289,12 @@ export type QuoteState =
 export interface Quote {
   state: QuoteState
   quotedStatus?: Status | null
+  /**
+   * Only on a Bluesky quote: why the post is left out. `no-unauthenticated`
+   * means its author asked to be hidden from signed-out readers (spec 8.3).
+   * A Mastodon quote never has it.
+   */
+  bluesky?: { hidden: 'no-unauthenticated' }
 }
 
 /** A quote that names the quoted post by id only. */

@@ -35,6 +35,7 @@ own files; ask in your report for a change in another's.
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
 | `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, recordCard, quote }` | #179 |
+| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, plain data so mappers can call it; `./moderation` re-exports it | #179, #180 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
 | `src/browser.ts` | the SDK classes; later the Bluesky `CaribouClient` and OAuth | #177, #182 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
@@ -123,6 +124,13 @@ when there is media".
   `labels` and `author` (with the author's labels and viewer) pass through
   as they came, so moderation reads them. It has no `viewer`. The quote
   states reuse PR #167's quote card notes.
+- **`!no-unauthenticated` (spec 8.3):** in a signed-out copy (`ctx.viewerOf`
+  is `null`), a quoted post whose author has this label is never mapped. The
+  quote is `unauthorized` with no post and `bluesky.hidden =
+  'no-unauthenticated'`, and the quote card says "This account asked to be
+  seen only by signed-in readers." The SDK does not count an embed's author
+  in the outer post's moderation, so `mapEmbed` checks it. A reader with a
+  Bluesky account active sees the quote.
 - **One level of quote**, as on Bluesky. A quote inside a quoted post is
   `accepted` with no post, and the quote card shows it as a link. This
   also ends a chain that quotes itself.
