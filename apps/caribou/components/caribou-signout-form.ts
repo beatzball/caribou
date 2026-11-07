@@ -1,6 +1,6 @@
 import { LitElement, html, css } from 'lit'
 import { customElement } from 'lit/decorators.js'
-import { activeUser, signOutActive } from '@beatzball/caribou-state'
+import { activeUser, isBlueskySession, signOutActive, signOutBluesky } from '@beatzball/caribou-state'
 import { claimSignOut, land } from './_switch-account.js'
 
 /**
@@ -27,6 +27,13 @@ export class CaribouSignoutForm extends LitElement {
   private onSubmit = (e: Event) => {
     e.preventDefault()
     if (!claimSignOut()) return
+    const user = activeUser.value
+    // A Bluesky account revokes at its PDS, then leaves (state rule 12). The
+    // Mastodon route is not used. The landing waits for it.
+    if (user && isBlueskySession(user)) {
+      void land({ from: null, after: signOutBluesky(user.userKey, user.generation) })
+      return
+    }
     const form = e.target as HTMLFormElement
     const action = form.action || '/api/signout'
     const from = activeUser.value?.server ?? null

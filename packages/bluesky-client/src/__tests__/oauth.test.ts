@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { TokenRefreshError, TokenRevokedError, type OAuthSession } from '@atproto/oauth-client-browser'
 import {
-  beginSignIn, completeSignIn, parseSignInInput, restoreClient, signOut, resolveHandle,
+  beginSignIn, completeSignIn, parseSignInInput, restoreClient, signOut, resolveHandle, notifySessionDeleted,
   InvalidSignInInput, SessionGone, SignInMismatch, StorageUnavailable, BLUESKY_SCOPE,
 } from '../oauth.js'
 import { fixture } from './_helpers.js'
@@ -166,6 +166,36 @@ describe('restoreClient', () => {
     const out = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired: () => {} })
     expect(out.prefs).toBeNull()
     expect(out.labelDefs).toBeNull()
+  })
+
+  it('the deleted event expires the client only when no session can be restored now', async () => {
+    const session = fakeSession(ALICE)
+    const restore = vi.fn(async () => session)
+    const onExpired = vi.fn()
+    await restoreClient({ restore } as never, ALICE, { userKey, onExpired })
+    // A late event: a newer sign-in stored a session for the DID.
+    notifySessionDeleted(ALICE)
+    await vi.waitFor(() => expect(restore).toHaveBeenCalledTimes(2))
+    expect(restore).toHaveBeenLastCalledWith(ALICE, false)
+    expect(onExpired).not.toHaveBeenCalled()
+    // Offline during the check: nothing changes.
+    restore.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    notifySessionDeleted(ALICE)
+    await vi.waitFor(() => expect(restore).toHaveBeenCalledTimes(3))
+    await Promise.resolve()
+    expect(onExpired).not.toHaveBeenCalled()
+    // Really gone. The check's own "deleted" report is ignored.
+    restore.mockImplementationOnce(async () => {
+      notifySessionDeleted(ALICE)
+      throw new TokenRefreshError(ALICE, 'The session was deleted by another process')
+    })
+    notifySessionDeleted(ALICE)
+    await vi.waitFor(() => expect(onExpired).toHaveBeenCalledTimes(1))
+    expect(restore).toHaveBeenCalledTimes(4)
+    // Once expired, it no longer listens.
+    notifySessionDeleted(ALICE)
+    await Promise.resolve()
+    expect(restore).toHaveBeenCalledTimes(4)
   })
 
   it('a refused refresh or a revoked token is SessionGone', async () => {

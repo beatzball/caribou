@@ -111,6 +111,7 @@ export async function startBlueskySignIn(input: string): Promise<string> {
     await mod.beginSignIn(oauth, input, { handleResolver: blueskyOAuthConfig(location.origin).handleResolver })
     return await new Promise<never>(() => {})
   } catch (err) {
+    console.warn('[caribou] Bluesky sign-in did not start', err)
     return signInErrorMessage(err, mod)
   }
 }
@@ -120,7 +121,23 @@ export async function startBlueskySignIn(input: string): Promise<string> {
  * store the session, and answer the user key. Throws the reader-facing
  * message when it failed; nothing is stored then.
  */
-export async function finishBlueskySignIn(): Promise<UserKey> {
+export function finishBlueskySignIn(): Promise<UserKey> {
+  // Once per page load. The page can mount its element twice (hydration and
+  // the router's first render), and the SDK's state is single-use: a second
+  // run finds the fragment gone and fails, which is what the spike saw
+  // (spec 12.2). Every caller gets the one result.
+  finishing ??= finish()
+  return finishing
+}
+
+let finishing: Promise<UserKey> | null = null
+
+/** Tests only: forget the finished run. */
+export function resetFinishForTests(): void {
+  finishing = null
+}
+
+async function finish(): Promise<UserKey> {
   let mod: BlueskyBrowser | undefined
   try {
     mod = await load()
@@ -137,6 +154,7 @@ export async function finishBlueskySignIn(): Promise<UserKey> {
     })
     return userKey
   } catch (err) {
+    console.warn('[caribou] Bluesky sign-in did not finish', err)
     throw new Error(signInErrorMessage(err, mod), { cause: err })
   }
 }

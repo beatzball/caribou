@@ -380,7 +380,11 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   that fails is `null`, which `moderate()` treats as missing (fail closed).
   `restoreClient` answers them with the client, for the reader veil.
 - **The deleted event.** The SDK's `onSessionDeleted` (here or in another
-  tab) calls the `onExpired` of every restored client for that DID. A 401 on
+  tab) makes every restored client for that DID check: it calls
+  `oauth.restore(did, false)`, and only when that says the session is gone
+  does it call `onExpired`. The event can be late: a restore that started
+  before a new sign-in to the same DID stored its tokens reports the
+  session deleted, and the new sign-in must not be marked expired. A 401 on
   a request never sends `caribou:unauthorized`.
 - **Sign-out.** `signOut(oauth, did)` restores the session and calls
   `session.signOut()`; with no stored session it does nothing.

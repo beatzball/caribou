@@ -67,13 +67,16 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
     clientId: config.clientId,
     handleResolver: config.handleResolver,
     responseMode: 'fragment',
-    onSessionDeleted: (sub: string) => {
-      for (const fn of deletedListeners.get(sub) ?? []) fn()
-    },
+    onSessionDeleted: (sub: string) => { notifySessionDeleted(sub) },
   })
   shared = { key, client }
   client.catch(() => { if (shared?.client === client) shared = null })
   return client
+}
+
+/** The SDK's deleted event for `sub` (here or in another tab). */
+export function notifySessionDeleted(sub: string): void {
+  for (const fn of [...deletedListeners.get(sub) ?? []]) fn()
 }
 
 export type SignInInput =
@@ -194,7 +197,8 @@ export async function completeSignIn(
     throw new SignInMismatch(state.expected, session.did)
   }
   const info = await session.getTokenInfo(false)
-  const pds = String(info.aud)
+  // The token's audience is the PDS. Keep its origin: no trailing slash.
+  const pds = new URL(String(info.aud)).origin
   let profile: AppBskyActorDefs.ProfileViewDetailed | null = null
   try {
     const agent = opts.agent ? opts.agent(session) : new Agent(session)
@@ -245,8 +249,28 @@ export async function restoreClient(
     if (isGone(err)) throw new SessionGone(err)
     throw err
   }
+  // The deleted event can be late: a restore that started before a new
+  // sign-in to the same DID stored its tokens finds nothing and reports the
+  // session deleted. So check: only when no session can be restored now is
+  // this one gone. A failed check that is not "gone" (offline) changes
+  // nothing (rule 5). The check's own failure reports "deleted" again; it
+  // is ignored while the check runs.
   const listeners = deletedListeners.get(did) ?? new Set()
-  listeners.add(opts.onExpired)
+  let checking = false
+  const onDeleted = () => {
+    if (checking) return
+    checking = true
+    oauth.restore(did, false).then(
+      () => { checking = false },
+      (err: unknown) => {
+        checking = false
+        if (!isGone(err)) return
+        listeners.delete(onDeleted)
+        opts.onExpired()
+      },
+    )
+  }
+  listeners.add(onDeleted)
   deletedListeners.set(did, listeners)
 
   const agent = new Agent(session)
