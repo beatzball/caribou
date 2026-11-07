@@ -23,6 +23,7 @@
   },
   "devDependencies": {
     "@beatzball/caribou-eslint-config": "workspace:*",
+    "@beatzball/caribou-state": "workspace:*",
     "@beatzball/caribou-tsconfig": "workspace:*",
     "@types/jsdom": "^21.1.7",
     "@vitest/coverage-v8": "^2.1.0",

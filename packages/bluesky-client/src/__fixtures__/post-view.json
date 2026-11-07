@@ -1,0 +1,60 @@
+{
+  "$type": "app.bsky.feed.defs#postView",
+  "uri": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1",
+  "cid": "bafyreialicepost1",
+  "author": {
+    "did": "did:plc:alice",
+    "handle": "alice.example.com",
+    "displayName": "Alice 🌷",
+    "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:alice/bafkreialiceavatar@jpeg",
+    "associated": { "chat": { "allowIncoming": "following" } },
+    "labels": [],
+    "createdAt": "2024-01-02T03:04:05.000Z"
+  },
+  "record": {
+    "$type": "app.bsky.feed.post",
+    "createdAt": "2026-11-05T10:00:00.000Z",
+    "langs": ["en"],
+    "text": "héllo 🌷 @bob.example.com #Caribou",
+    "facets": [
+      {
+        "$type": "app.bsky.richtext.facet",
+        "index": { "byteStart": 12, "byteEnd": 28 },
+        "features": [{ "$type": "app.bsky.richtext.facet#mention", "did": "did:plc:bob" }]
+      },
+      {
+        "$type": "app.bsky.richtext.facet",
+        "index": { "byteStart": 29, "byteEnd": 37 },
+        "features": [{ "$type": "app.bsky.richtext.facet#tag", "tag": "Caribou" }]
+      }
+    ],
+    "reply": {
+      "root": { "uri": "at://did:plc:carol/app.bsky.feed.post/3lcarolroot", "cid": "bafyreicarolroot" },
+      "parent": { "uri": "at://did:plc:bob/app.bsky.feed.post/3lbobparent", "cid": "bafyreibobparent" }
+    }
+  },
+  "bookmarkCount": 0,
+  "replyCount": 2,
+  "repostCount": 3,
+  "likeCount": 5,
+  "quoteCount": 1,
+  "indexedAt": "2026-11-05T10:00:01.123Z",
+  "viewer": {
+    "like": "at://did:plc:reader/app.bsky.feed.like/3lreaderlike",
+    "bookmarked": true,
+    "threadMuted": false,
+    "replyDisabled": true,
+    "embeddingDisabled": false
+  },
+  "labels": [
+    {
+      "ver": 1,
+      "src": "did:plc:labeler",
+      "uri": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1",
+      "cid": "bafyreialicepost1",
+      "val": "graphic-media",
+      "cts": "2026-11-05T10:01:00.000Z",
+      "sig": { "$bytes": "c2lnbmF0dXJl" }
+    }
+  ]
+}

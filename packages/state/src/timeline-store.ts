@@ -155,10 +155,11 @@ export function createTimelineStore(kind: TimelineKind, opts: CreateTimelineStor
   }
 
   // A page that names no cursor is the last one, so the store does not ask
-  // once more only to learn the list has ended.
+  // once more only to learn the list has ended. Only that ends the list: an
+  // empty page with a cursor is not the end (README, "SSR seeding").
   function setPaging(page: TimelinePage) {
     cursor.value = page.nextCursor ?? null
-    hasMore.value = page.length > 0 && cursor.value !== null
+    hasMore.value = cursor.value !== null
   }
 
   // The operation `retry()` runs again: the last one that failed.

@@ -1,0 +1,29 @@
+{
+  "did": "did:plc:alice",
+  "handle": "alice.example.com",
+  "displayName": "Alice 🌷",
+  "description": "Hi <there>\nI post at https://example.com",
+  "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:alice/bafkreialiceavatar@jpeg",
+  "banner": "https://cdn.bsky.app/img/banner/plain/did:plc:alice/bafkreialicebanner@jpeg",
+  "followersCount": 120,
+  "followsCount": 80,
+  "postsCount": 345,
+  "associated": { "lists": 0, "feedgens": 0, "starterPacks": 0, "labeler": false },
+  "indexedAt": "2024-01-02T03:04:06.000Z",
+  "createdAt": "2024-01-02T03:04:05.000Z",
+  "viewer": {
+    "muted": false,
+    "blockedBy": false,
+    "following": "at://did:plc:reader/app.bsky.graph.follow/3lreaderfollow",
+    "followedBy": "at://did:plc:alice/app.bsky.graph.follow/3lalicefollow"
+  },
+  "labels": [
+    {
+      "src": "did:plc:alice",
+      "uri": "at://did:plc:alice/app.bsky.actor.profile/self",
+      "cid": "bafyreialiceprofile",
+      "val": "!no-unauthenticated",
+      "cts": "2024-01-02T03:04:05.000Z"
+    }
+  ]
+}
