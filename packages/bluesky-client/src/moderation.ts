@@ -32,12 +32,14 @@ export interface ModerateOptions {
 
 /** The reason name of a label Caribou could not define because its labeler's definitions did not load. */
 export const LABELER_UNAVAILABLE = 'Content warning (labeler unavailable)'
-/** The reason name of a label its labeler's loaded definitions do not name. */
+/** The reason name of a label nobody's loaded definitions name. */
 export const UNKNOWN_LABEL = 'Content warning (unknown label)'
+/** The reason name of the cover when the SDK threw. */
+export const MODERATION_FAILED = 'Content warning (moderation failed)'
 
 /** True for a fail-closed reason. The cover then offers Retry, not Show. */
 export function isLabelerUnavailable(reason: BlueskyModerationReason): boolean {
-  return reason.name === LABELER_UNAVAILABLE || reason.name === UNKNOWN_LABEL
+  return reason.name === LABELER_UNAVAILABLE || reason.name === UNKNOWN_LABEL || reason.name === MODERATION_FAILED
 }
 
 /** What the server uses: it does not know the reader (spec 7.4). */
@@ -105,35 +107,84 @@ function labelsOf(subject: ModerationSubject): TargetedLabel[] {
   return out
 }
 
+// Label definitions with no prototype, so a labeler DID such as
+// `constructor` finds nothing. Only own entries that are arrays are kept.
+function ownDefs(labelDefs: LabelDefs | null): LabelDefs {
+  const out = Object.create(null) as LabelDefs
+  for (const [did, defs] of Object.entries(labelDefs ?? {})) if (Array.isArray(defs)) out[did] = defs
+  return out
+}
+
+// Would the SDK find a definition for this label (`ModerationDecision.addLabel`),
+// by own keys only? A value that names an `Object.prototype` member never
+// counts: the SDK would read the prototype and throw.
+function sdkDefines(label: ComAtprotoLabelDefs.Label, defs: LabelDefs): boolean {
+  const val = label.val
+  if (typeof val !== 'string' || val in Object.prototype) return false
+  if (CUSTOM_LABEL_VALUE_RE.test(val) && Object.hasOwn(defs, label.src) && defs[label.src]!.some((d) => d.identifier === val)) return true
+  return Object.hasOwn(LABELS, val)
+}
+
+type Labeled = { labels?: ComAtprotoLabelDefs.Label[] }
+
+// Step 1 (README): a copy of the subject with only labels the SDK can
+// define, and no negated ones, wherever the SDK reads labels.
+function cleanLabels<T extends Labeled>(x: T, defs: LabelDefs): T {
+  return Array.isArray(x.labels) ? { ...x, labels: x.labels.filter((l) => !l.neg && sdkDefines(l, defs)) } : x
+}
+
+function cleanRecord(record: unknown, defs: LabelDefs): unknown {
+  if (!record || typeof record !== 'object') return record
+  const r = cleanLabels(record as Labeled & { author?: unknown }, defs)
+  return r.author && typeof r.author === 'object' ? { ...r, author: cleanLabels(r.author as Labeled, defs) } : r
+}
+
+function cleanEmbed(embed: AppBskyFeedDefs.PostView['embed'], defs: LabelDefs): AppBskyFeedDefs.PostView['embed'] {
+  if (!embed || typeof embed !== 'object') return embed
+  const e = embed as { $type?: string; record?: { record?: unknown } }
+  if (e.$type === 'app.bsky.embed.record#view') return { ...embed, record: cleanRecord(e.record, defs) } as typeof embed
+  if (e.$type === 'app.bsky.embed.recordWithMedia#view' && e.record && typeof e.record === 'object') {
+    return { ...embed, record: { ...e.record, record: cleanRecord(e.record.record, defs) } } as typeof embed
+  }
+  return embed
+}
+
+function cleanSubject(subject: ModerationSubject, defs: LabelDefs): ModerationSubject {
+  if (subject.kind === 'profile') return { kind: 'profile', view: cleanLabels(subject.view, defs) }
+  const view = cleanLabels(subject.view, defs)
+  return { kind: 'post', view: { ...view, author: cleanLabels(view.author, defs), embed: cleanEmbed(view.embed, defs) } }
+}
+
+// Bluesky's labeler is always subscribed (README); `getPreferences` adds it too.
+function withBskyLabeler(prefs: ModerationPrefs): ModerationPrefs {
+  if (prefs.labelers.some((l) => l.did === BSKY_LABELER_DID)) return prefs
+  return { ...prefs, labelers: [{ did: BSKY_LABELER_DID, labels: {} }, ...prefs.labelers] }
+}
+
 // Prefs missing: hide all a label could hide. Adult content off, every
 // built-in and every value on the subject set to hide, and every labeler
-// named on the subject counted as subscribed.
-function strictPrefs(labels: TargetedLabel[]): ModerationPrefs {
+// named on the subject counted as subscribed. Only safe values become keys.
+function strictPrefs(labels: TargetedLabel[], defs: LabelDefs): ModerationPrefs {
   const hide: Record<string, LabelPreference> = {}
   for (const val of Object.keys(LABELS)) hide[val] = 'hide'
-  for (const { label } of labels) hide[label.val] = 'hide'
-  const labelers = [...new Set(labels.map((l) => l.label.src).filter((src, i) => src !== labels[i]!.owner))]
+  for (const { label } of labels) if (sdkDefines(label, defs)) hide[label.val] = 'hide'
+  const labelers = [...new Set(labels.filter((l) => l.label.src !== l.owner).map((l) => l.label.src))]
   return { adultContentEnabled: false, labels: hide, labelers: labelers.map((did) => ({ did, labels: {} })), mutedWords: [], hiddenPosts: [] }
 }
 
-// Would the SDK find a definition for this label? (`ModerationDecision.addLabel`.)
-function sdkDefines(label: ComAtprotoLabelDefs.Label, labelDefs: LabelDefs | null): boolean {
-  if (CUSTOM_LABEL_VALUE_RE.test(label.val) && labelDefs?.[label.src]?.some((d) => d.identifier === label.val)) return true
-  return label.val in LABELS
-}
-
 function defName(label: ComAtprotoLabelDefs.Label, def: InterpretedLabelValueDefinition | undefined): string {
-  const locales = def?.locales ?? []
+  const locales = Array.isArray(def?.locales) ? def.locales : []
   const en = locales.find((l) => l.lang === 'en' || l.lang.startsWith('en-')) ?? locales[0]
-  return en?.name || BUILT_IN_NAMES[label.val] || label.val
+  if (typeof en?.name === 'string' && en.name) return en.name
+  return Object.hasOwn(BUILT_IN_NAMES, label.val) ? BUILT_IN_NAMES[label.val]! : String(label.val)
 }
 
 function reasonOf(cause: ModerationCause): BlueskyModerationReason {
   if (cause.type === 'label') {
-    return { label: cause.label.val, source: cause.label.src, name: defName(cause.label, cause.labelDef) }
+    return { label: String(cause.label.val), source: String(cause.label.src), name: defName(cause.label, cause.labelDef) }
   }
   const source = cause.source.type === 'list' ? cause.source.list.uri : cause.source.type === 'labeler' ? cause.source.did : ''
-  return { label: cause.type, source, name: CAUSE_NAMES[cause.type] }
+  return { label: cause.type, source, name: Object.hasOwn(CAUSE_NAMES, cause.type) ? CAUSE_NAMES[cause.type] : cause.type }
 }
 
 function pushReason(ui: BlueskyModerationUi, reason: BlueskyModerationReason) {
@@ -150,6 +201,14 @@ function flatten(decision: ModerationDecision, context: BlueskyModerationContext
   return ui
 }
 
+// Step 2's fallback: the SDK threw, so cover everything.
+function failedContexts(): BlueskyModerationResult['contexts'] {
+  return Object.fromEntries(CONTEXTS.map((c) => [c, {
+    filter: false, blur: true, alert: false, inform: false, noOverride: true,
+    reasons: [{ label: '!moderation-failed', source: '', name: MODERATION_FAILED }],
+  }])) as BlueskyModerationResult['contexts']
+}
+
 /**
  * Runs the SDK's moderation and flattens the decision to plain data, one
  * entry per context (spec 7.4). The SDK's class instance never leaves this
@@ -157,7 +216,7 @@ function flatten(decision: ModerationDecision, context: BlueskyModerationContext
  * the client loads it only through a dynamic `import()` (the `bsky` chunk).
  *
  * `prefs` or `labelDefs` `null` means they are missing or failed to load;
- * moderation then fails closed (README, "Moderation rules").
+ * moderation then fails closed (README, "Moderation rules"). It never throws.
  */
 export function moderate(
   subject: ModerationSubject,
@@ -166,31 +225,53 @@ export function moderate(
   labelDefs: LabelDefs | null,
   opts: ModerateOptions = {},
 ): BlueskyModerationResult {
+  const labelersCovered = [...(opts.labelersCovered ?? [])]
+  try {
+    return { contexts: decide(subject, userDid, prefs, labelDefs), labelersCovered }
+  } catch {
+    return { contexts: failedContexts(), labelersCovered }
+  }
+}
+
+function decide(
+  subject: ModerationSubject,
+  userDid: string | undefined,
+  prefs: ModerationPrefs | null,
+  labelDefs: LabelDefs | null,
+): BlueskyModerationResult['contexts'] {
+  const defs = ownDefs(labelDefs)
   const labels = labelsOf(subject).filter((l) => !l.label.neg)
-  const effective = prefs ?? strictPrefs(labels)
-  const sdkOpts = { userDid, prefs: effective, labelDefs: labelDefs ?? {} }
-  const decision = subject.kind === 'post' ? moderatePost(subject.view, sdkOpts) : moderateProfile(subject.view, sdkOpts)
+  const effective = withBskyLabeler(prefs ?? strictPrefs(labels, defs))
+  const clean = cleanSubject(subject, defs)
+  const sdkOpts = { userDid, prefs: effective, labelDefs: defs }
+  const decision = clean.kind === 'post' ? moderatePost(clean.view, sdkOpts) : moderateProfile(clean.view, sdkOpts)
 
   const contexts = Object.fromEntries(CONTEXTS.map((c) => [c, flatten(decision, c)])) as BlueskyModerationResult['contexts']
+  const actorDid = subject.kind === 'post' ? subject.view.author.did : subject.view.did
+  const readerIsActor = actorDid === userDid
 
-  // Fail closed: a label from a subscribed labeler that the SDK would skip
-  // for want of a definition covers what it could cover, with no Show.
+  // Prefs missing: no cover may offer Show, except on the reader's own.
+  if (!prefs && !readerIsActor) {
+    for (const ui of Object.values(contexts)) if (ui.blur) ui.noOverride = true
+  }
+
+  // Step 3, the gap scan: a label the cleaning dropped, from the author or a
+  // subscribed labeler, covers what it could cover, with no Show.
   const subscribed = new Set(effective.labelers.map((l) => l.did))
   for (const { label, target, owner } of labels) {
-    if (label.src === owner) continue // a self-label: the SDK knows every value it may use
-    if (!subscribed.has(label.src)) continue
-    if (sdkDefines(label, labelDefs)) continue
-    const name = labelDefs?.[label.src] ? UNKNOWN_LABEL : LABELER_UNAVAILABLE
+    if (sdkDefines(label, defs)) continue
+    const self = label.src === owner
+    if (!self && !subscribed.has(label.src)) continue
+    const name = self || Object.hasOwn(defs, label.src) ? UNKNOWN_LABEL : LABELER_UNAVAILABLE
     const isMe = owner === userDid
     for (const c of GAP_CONTEXTS[target]) {
       const ui = contexts[c]
       ui.blur = true
       if (!isMe) ui.noOverride = true
-      pushReason(ui, { label: label.val, source: label.src, name })
+      pushReason(ui, { label: String(label.val), source: String(label.src), name })
     }
   }
-
-  return { contexts, labelersCovered: [...(opts.labelersCovered ?? [])] }
+  return contexts
 }
 
 /** `getServices?dids=…&detailed=true` → definitions keyed by labeler DID. */
@@ -226,10 +307,10 @@ export function blueskyCheckSettled(
   if (!reader) return true
   const { prefs, labelDefs } = reader
   if (!prefs || !labelDefs) return false
-  const subscribed = prefs.labelers.map((l) => l.did)
-  // Bluesky's own labeler publishes only built-in labels; others need definitions.
-  if (subscribed.some((did) => did !== BSKY_LABELER_DID && !labelDefs[did])) return false
+  // Bluesky's labeler is always subscribed, and has custom labels of its own.
+  const subscribed = withBskyLabeler(prefs).labelers.map((l) => l.did)
+  if (subscribed.some((did) => !Object.hasOwn(labelDefs, did))) return false
   if (post.viewerOf !== reader.userKey) return false
   const covered = new Set(post.moderation.labelersCovered)
-  return subscribed.every((did) => covered.has(did))
+  return covered.size > 0 && subscribed.every((did) => covered.has(did))
 }

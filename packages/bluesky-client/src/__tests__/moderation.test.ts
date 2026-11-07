@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { ModerationPrefs } from '@atproto/api'
+import type { AppBskyFeedDefs, ModerationPrefs } from '@atproto/api'
 import type { BlueskyModerationResult, StatusBluesky } from '@beatzball/caribou-mastodon-client'
 import {
   LABELER_UNAVAILABLE, LOGGED_OUT_PREFS, UNKNOWN_LABEL,
   blueskyCheckSettled, isLabelerUnavailable, isNoUnauthenticated, labelDefsFromServices, moderate,
 } from '../moderation.js'
-import { ALICE, BOB, BSKY_LABELER, LABELER, LABELER_SERVICE, author, label, post } from '../__fixtures__/moderation.js'
+import { ALICE, BOB, BSKY_LABELER, BSKY_SERVICE, LABELER, LABELER_SERVICE, author, label, post, quoting } from '../__fixtures__/moderation.js'
 
 const READER = BOB
 const PROFILE_SELF = `at://${ALICE}/app.bsky.actor.profile/self`
@@ -20,7 +20,7 @@ function prefs(over: Partial<ModerationPrefs> = {}): ModerationPrefs {
     ...over,
   }
 }
-const DEFS = labelDefsFromServices([LABELER_SERVICE])
+const DEFS = labelDefsFromServices([LABELER_SERVICE, BSKY_SERVICE])
 
 const covered = (r: BlueskyModerationResult, c: keyof BlueskyModerationResult['contexts']) => r.contexts[c].blur || r.contexts[c].filter
 
@@ -161,9 +161,10 @@ describe('moderate: fail closed', () => {
     expect(r.contexts.contentView).toMatchObject({ blur: true, noOverride: false })
   })
 
-  it('an unknown self-label is skipped: a self-label can only use a built-in value', () => {
-    const r = moderate({ kind: 'post', view: post({ labels: [label('made-up', ALICE)] }) }, READER, prefs(), {})
-    expect(covered(r, 'contentView')).toBe(false)
+  it('a self-label the SDK cannot define covers as unknown', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('made-up', ALICE)] }) }, READER, prefs(), DEFS)
+    expect(r.contexts.contentView).toMatchObject({ blur: true, noOverride: true, filter: false })
+    expect(r.contexts.contentView.reasons[0]?.name).toBe(UNKNOWN_LABEL)
   })
 
   it('prefs null: a built-in label hides all it could, with no Show', () => {
@@ -182,6 +183,137 @@ describe('moderate: fail closed', () => {
   it('prefs null and labelDefs null: a custom label still covers', () => {
     const r = moderate({ kind: 'post', view: post({ labels: [label('anything-new', 'did:plc:other')] }) }, READER, null, null)
     expect(r.contexts.contentView).toMatchObject({ blur: true, noOverride: true })
+  })
+})
+
+describe('moderate: hostile and negated input (fix round 1)', () => {
+  const PROTO = ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']
+
+  it.each(PROTO)('a self-label named %s covers, never throws, and stays JSON-safe', (val) => {
+    let r!: BlueskyModerationResult
+    expect(() => { r = moderate({ kind: 'post', view: post({ labels: [label(val, ALICE)] }) }, READER, prefs(), DEFS) }).not.toThrow()
+    expect(r.contexts.contentView).toMatchObject({ blur: true, noOverride: true, filter: false })
+    for (const reason of r.contexts.contentView.reasons) expect(typeof reason.name).toBe('string')
+    expect(JSON.parse(JSON.stringify(r))).toEqual(r)
+  })
+
+  it.each(PROTO)('a subscribed labeler label named %s covers, never throws', (val) => {
+    for (const [p, d] of [[prefs(), DEFS], [prefs(), {}], [null, null]] as const) {
+      const r = moderate({ kind: 'post', view: post({ labels: [label(val, LABELER)] }) }, READER, p, d)
+      expect(r.contexts.contentMedia).toMatchObject({ blur: true, noOverride: true })
+      expect(JSON.parse(JSON.stringify(r))).toEqual(r)
+    }
+  })
+
+  it('a labeler that defines a value named constructor: covered, never throws', () => {
+    const svc = structuredClone(LABELER_SERVICE)
+    svc.policies.labelValueDefinitions = [{ ...svc.policies.labelValueDefinitions![0]!, identifier: 'constructor' }]
+    const defs = labelDefsFromServices([svc, BSKY_SERVICE])
+    const r = moderate({ kind: 'post', view: post({ labels: [label('constructor', LABELER)] }) }, READER, prefs(), defs)
+    expect(r.contexts.contentView).toMatchObject({ blur: true, noOverride: true })
+    expect(r.contexts.contentView.reasons[0]?.name).toBe(UNKNOWN_LABEL)
+  })
+
+  it('a prototype-named labeler DID with a built-in value does not throw', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('porn', 'constructor')] }) }, READER, null, DEFS)
+    expect(r.contexts.contentMedia).toMatchObject({ blur: true, noOverride: true })
+  })
+
+  it('prototype-named author labels cover the account, never throw', () => {
+    const view = post({ author: author(ALICE, [label('toString', LABELER, ALICE), label('__proto__', ALICE, PROFILE_SELF)]) })
+    const r = moderate({ kind: 'post', view }, READER, prefs(), DEFS)
+    for (const ui of Object.values(r.contexts)) expect(ui).toMatchObject({ blur: true, noOverride: true })
+  })
+
+  it('does not change the caller\'s view', () => {
+    const view = post({ labels: [label('porn', BSKY_LABELER, undefined, { neg: true }), label('constructor', LABELER)] })
+    const before = JSON.stringify(view)
+    moderate({ kind: 'post', view }, READER, prefs(), DEFS)
+    expect(JSON.stringify(view)).toBe(before)
+  })
+
+  it('prefs null: every label cover has no Show, on post media', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('nudity', BSKY_LABELER)] }) }, READER, null, DEFS)
+    expect(r.contexts.contentMedia).toMatchObject({ blur: true, noOverride: true })
+    const custom = moderate({ kind: 'post', view: post({ labels: [label('spoiler', LABELER)] }) }, READER, null, DEFS)
+    expect(custom.contexts.contentList).toMatchObject({ blur: true, noOverride: true })
+  })
+
+  it('prefs null: every label cover has no Show, on profile media', () => {
+    const view = author(ALICE, [label('nudity', BSKY_LABELER, PROFILE_SELF)])
+    const r = moderate({ kind: 'profile', view }, READER, null, DEFS)
+    expect(r.contexts.avatar).toMatchObject({ blur: true, noOverride: true })
+    expect(r.contexts.banner).toMatchObject({ blur: true, noOverride: true })
+  })
+
+  it("prefs null: the reader's own post keeps Show", () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('nudity', BSKY_LABELER)] }) }, ALICE, null, DEFS)
+    expect(r.contexts.contentMedia).toMatchObject({ blur: true, noOverride: false })
+  })
+
+  it('a negated built-in label does nothing', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('porn', BSKY_LABELER, undefined, { neg: true })] }) }, READER, prefs(), DEFS)
+    expect(r.contexts.contentMedia).toMatchObject({ blur: false, noOverride: false })
+  })
+
+  it('a negated defined custom label does nothing', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('scam-strict', LABELER, undefined, { neg: true })] }) }, READER, prefs(), DEFS)
+    expect(r.contexts.contentList).toMatchObject({ filter: false, blur: false })
+    expect(r.contexts.contentView).toMatchObject({ alert: false, blur: false })
+  })
+
+  it('a negated author !no-unauthenticated: the helper and moderate() agree', () => {
+    const actor = author(ALICE, [label('!no-unauthenticated', ALICE, PROFILE_SELF, { neg: true })])
+    expect(isNoUnauthenticated(actor)).toBe(false)
+    const r = moderate({ kind: 'post', view: post({ author: actor }) }, undefined, LOGGED_OUT_PREFS, DEFS)
+    expect(r.contexts.contentView).toMatchObject({ blur: false, noOverride: false })
+  })
+
+  it('a quoted post: a defined hide label filters the outer post from lists, a negated one does not', () => {
+    const hide = moderate({ kind: 'post', view: quoting({ labels: [label('!hide', BSKY_LABELER)] }) }, READER, prefs(), DEFS)
+    expect(hide.contexts.contentList.filter).toBe(true)
+    const neg = moderate({ kind: 'post', view: quoting({ labels: [label('!hide', BSKY_LABELER, undefined, { neg: true })] }) }, READER, prefs(), DEFS)
+    expect(neg.contexts.contentList.filter).toBe(false)
+  })
+
+  it('a quote with media (recordWithMedia): the same cleaning reaches the quoted post', () => {
+    const withMedia = (labels: ReturnType<typeof label>[]) => {
+      const v = quoting({ labels })
+      v.embed = { $type: 'app.bsky.embed.recordWithMedia#view', record: v.embed, media: post().embed } as AppBskyFeedDefs.PostView['embed']
+      return v
+    }
+    expect(moderate({ kind: 'post', view: withMedia([label('!hide', BSKY_LABELER)]) }, READER, prefs(), DEFS).contexts.contentList.filter).toBe(true)
+    expect(moderate({ kind: 'post', view: withMedia([label('!hide', BSKY_LABELER, undefined, { neg: true })]) }, READER, prefs(), DEFS).contexts.contentList.filter).toBe(false)
+  })
+
+  it('a quoted post with a prototype-named label does not throw', () => {
+    const view = quoting({ labels: [label('constructor', LABELER)], author: author(ALICE, [label('valueOf', LABELER, ALICE)]) })
+    expect(() => moderate({ kind: 'post', view }, READER, prefs(), DEFS)).not.toThrow()
+  })
+})
+
+describe("Bluesky's own labeler (fix round 1)", () => {
+  it('spam with its definitions loaded: a list filter and a note, not a locked cover', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('spam', BSKY_LABELER)] }) }, READER, prefs(), DEFS)
+    expect(r.contexts.contentView).toMatchObject({ inform: true, blur: false, noOverride: false })
+    expect(r.contexts.contentView.reasons).toEqual([{ label: 'spam', source: BSKY_LABELER, name: 'Spam' }])
+    expect(r.contexts.contentList.filter).toBe(true)
+  })
+
+  it('signed out, with Bluesky definitions: spam is not locked', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('spam', BSKY_LABELER)] }) }, undefined, LOGGED_OUT_PREFS, labelDefsFromServices([BSKY_SERVICE]))
+    expect(r.contexts.contentView).toMatchObject({ inform: true, noOverride: false })
+  })
+
+  it('without Bluesky definitions: spam gets the fail-closed cover', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('spam', BSKY_LABELER)] }) }, undefined, LOGGED_OUT_PREFS, {})
+    expect(r.contexts.contentView).toMatchObject({ blur: true, noOverride: true })
+    expect(r.contexts.contentView.reasons[0]?.name).toBe(LABELER_UNAVAILABLE)
+  })
+
+  it('prefs without Bluesky labeler: it is added, so adult media stays locked', () => {
+    const r = moderate({ kind: 'post', view: post({ labels: [label('porn', BSKY_LABELER)] }) }, READER, prefs({ labelers: [{ did: LABELER, labels: {} }] }), DEFS)
+    expect(r.contexts.contentMedia).toMatchObject({ blur: true, noOverride: true })
   })
 })
 
@@ -208,7 +340,7 @@ describe('!no-unauthenticated (spec 8.3)', () => {
 
 describe('labelDefsFromServices', () => {
   it('keys the interpreted definitions by labeler DID', () => {
-    expect(Object.keys(DEFS)).toEqual([LABELER])
+    expect(Object.keys(DEFS)).toEqual([LABELER, BSKY_LABELER])
     expect(DEFS[LABELER]!.map((d) => d.identifier)).toEqual(['spoiler', 'scam-strict'])
   })
 })
@@ -258,6 +390,20 @@ describe('blueskyCheckSettled (the reader veil)', () => {
     expect(blueskyCheckSettled(card(), { ...reader, labelDefs: null })).toBe(false)
     // One subscribed labeler's definitions missing.
     expect(blueskyCheckSettled(card(), { ...reader, labelDefs: {} })).toBe(false)
+  })
+
+  it("does not settle without Bluesky's definitions", () => {
+    expect(blueskyCheckSettled(card(), { ...reader, labelDefs: labelDefsFromServices([LABELER_SERVICE]) })).toBe(false)
+  })
+
+  it("prefs that leave out Bluesky's labeler still need it covered", () => {
+    const only = { ...reader, prefs: prefs({ labelers: [{ did: LABELER, labels: {} }] }) }
+    expect(blueskyCheckSettled(card({ covered: [LABELER] }), only)).toBe(false)
+    expect(blueskyCheckSettled(card({ covered: [LABELER, BSKY_LABELER] }), only)).toBe(true)
+  })
+
+  it('an empty covered list never settles, even with no labelers in prefs', () => {
+    expect(blueskyCheckSettled(card({ covered: [] }), { ...reader, prefs: prefs({ labelers: [] }) })).toBe(false)
   })
 
   it('the veil gap: never visible between SSR, prefs loading, and a late or failed reader fetch', () => {

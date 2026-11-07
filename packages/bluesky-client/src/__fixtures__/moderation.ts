@@ -5,6 +5,7 @@ import type { AppBskyActorDefs, AppBskyFeedDefs, AppBskyLabelerDefs, ComAtprotoL
 
 export const ALICE = 'did:plc:alice'
 export const BOB = 'did:plc:bob'
+export const CAROL = 'did:plc:carol'
 /** A third-party labeler the reader subscribes to. */
 export const LABELER = 'did:plc:labelerexample'
 /** Bluesky's own moderation labeler (`BSKY_LABELER_DID`). */
@@ -20,8 +21,8 @@ export function label(val: string, src: string, uri = POST_URI, extra: Partial<C
 export function author(did = ALICE, labels: ComAtprotoLabelDefs.Label[] = []): AppBskyActorDefs.ProfileViewBasic {
   return {
     did,
-    handle: did === ALICE ? 'alice.example.com' : 'bob.example.com',
-    displayName: did === ALICE ? 'Alice' : 'Bob',
+    handle: `${did.slice('did:plc:'.length)}.example.com`,
+    displayName: did.slice('did:plc:'.length),
     avatar: `https://cdn.bsky.app/img/avatar/plain/${did}/bafkreiexample@jpeg`,
     viewer: { muted: false, blockedBy: false },
     labels,
@@ -80,4 +81,49 @@ export const LABELER_SERVICE: AppBskyLabelerDefs.LabelerViewDetailed = {
   },
   likeCount: 0,
   indexedAt: CTS,
+}
+
+/**
+ * `getServices?dids=<BSKY_LABELER>&detailed=true`, cut to one of its custom
+ * labels. The live service defines 18 (spam, rude, sensitive, …).
+ */
+export const BSKY_SERVICE: AppBskyLabelerDefs.LabelerViewDetailed = {
+  $type: 'app.bsky.labeler.defs#labelerViewDetailed',
+  uri: `at://${BSKY_LABELER}/app.bsky.labeler.service/self`,
+  cid: 'bafyreibskylabeler',
+  creator: { did: BSKY_LABELER, handle: 'moderation.bsky.app', labels: [] } as AppBskyActorDefs.ProfileView,
+  policies: {
+    labelValues: ['!hide', '!warn', 'porn', 'sexual', 'nudity', 'graphic-media', 'spam'],
+    labelValueDefinitions: [
+      {
+        adultOnly: false,
+        blurs: 'content',
+        defaultSetting: 'hide',
+        identifier: 'spam',
+        locales: [{ description: 'Unwanted, repeated, or unrelated actions that bother users.', lang: 'en', name: 'Spam' }],
+        severity: 'inform',
+      },
+    ],
+  },
+  likeCount: 0,
+  indexedAt: CTS,
+}
+
+/** A post that quotes another post (`app.bsky.embed.record#view`). */
+export function quoting(quoted: { labels?: ComAtprotoLabelDefs.Label[]; author?: AppBskyActorDefs.ProfileViewBasic }): AppBskyFeedDefs.PostView {
+  const outer = post({ author: author(CAROL) })
+  outer.uri = `at://${CAROL}/app.bsky.feed.post/3kquote2xyzaa`
+  outer.embed = {
+    $type: 'app.bsky.embed.record#view',
+    record: {
+      $type: 'app.bsky.embed.record#viewRecord',
+      uri: POST_URI,
+      cid: 'bafyreiexamplecid',
+      author: quoted.author ?? author(),
+      value: { $type: 'app.bsky.feed.post', text: 'Quoted', createdAt: CTS },
+      labels: quoted.labels ?? [],
+      indexedAt: CTS,
+    },
+  }
+  return outer
 }
