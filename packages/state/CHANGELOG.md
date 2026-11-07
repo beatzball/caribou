@@ -1,5 +1,16 @@
 # @beatzball/caribou-state
 
+## 0.4.6
+
+### Patch Changes
+
+- [#212](https://github.com/beatzball/caribou/pull/212) [`53e3716`](https://github.com/beatzball/caribou/commit/53e3716f0a522b923201b60249fc2d32c8331d19) Thanks [@beatzball](https://github.com/beatzball)! - Sessions get a `generation`, one per sign-in, and an `expired` state. A failure changes a session only while it has the same `generation`. `markExpired` keeps the session, its prefs and its drafts. `removeSession` (a 401) now keeps the drafts and prefs; only a sign-out deletes them. The failure events carry `{ userKey, generation }`, and `caribou:session-expired` is split from `caribou:unauthorized`. The rules are in the README.
+
+- [#213](https://github.com/beatzball/caribou/pull/213) [`f0a9069`](https://github.com/beatzball/caribou/commit/f0a906960cfe7954928eccb86ddfe660118ac750) Thanks [@beatzball](https://github.com/beatzball)! - Viewer state lives in slots: a like, a repost and a bookmark each keep their flag and record ref together. One rule decides which copy of a post may change a slot: only the reader's copy, never while the reader's write is out, never a fetch that started before that write finished, and not inside the network's lag window when its flag or record ref disagrees with that write. A copy from another account never brings viewer state, cached or not, on either network. An account change clears every viewer field, `replyDisabled` and `embeddingDisabled` included. Stores and the edit path pass each copy's source (`readSource`). Relationship reads follow the same lag rule.
+
+- Updated dependencies [[`f0a9069`](https://github.com/beatzball/caribou/commit/f0a906960cfe7954928eccb86ddfe660118ac750)]:
+  - @beatzball/caribou-mastodon-client@0.4.5
+
 ## 0.4.5
 
 ### Patch Changes

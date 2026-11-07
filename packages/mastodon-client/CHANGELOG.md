@@ -1,5 +1,11 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.5
+
+### Patch Changes
+
+- [#213](https://github.com/beatzball/caribou/pull/213) [`f0a9069`](https://github.com/beatzball/caribou/commit/f0a906960cfe7954928eccb86ddfe660118ac750) Thanks [@beatzball](https://github.com/beatzball)! - Add `resourceNetwork` and `canActOn`, so a screen acts only through a client on the resource's own network. Add `Account.bluesky` and `Capabilities.readLagMs` (0 for Mastodon).
+
 ## 0.4.4
 
 ### Patch Changes

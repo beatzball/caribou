@@ -1,5 +1,17 @@
 # caribou-app
 
+## 0.10.7
+
+### Patch Changes
+
+- [#213](https://github.com/beatzball/caribou/pull/213) [`f0a9069`](https://github.com/beatzball/caribou/commit/f0a906960cfe7954928eccb86ddfe660118ac750) Thanks [@beatzball](https://github.com/beatzball)! - The post card, the profile header and the profile act, read relationships and page only through a client on the resource's network, and build Bluesky links by handle or DID. Search and the edit dialog cache the reader's copies with their source. Nothing changes for a Mastodon reader on a Mastodon post.
+
+- [#212](https://github.com/beatzball/caribou/pull/212) [`53e3716`](https://github.com/beatzball/caribou/commit/53e3716f0a522b923201b60249fc2d32c8331d19) Thanks [@beatzball](https://github.com/beatzball)! - A 401 no longer deletes the account's drafts and settings; signing in again finds them. Sign-in stores a new `generation` for each sign-in. A new `caribou:session-expired` handler marks the session expired and keeps the page.
+
+- Updated dependencies [[`f0a9069`](https://github.com/beatzball/caribou/commit/f0a906960cfe7954928eccb86ddfe660118ac750), [`53e3716`](https://github.com/beatzball/caribou/commit/53e3716f0a522b923201b60249fc2d32c8331d19), [`f0a9069`](https://github.com/beatzball/caribou/commit/f0a906960cfe7954928eccb86ddfe660118ac750)]:
+  - @beatzball/caribou-mastodon-client@0.4.5
+  - @beatzball/caribou-state@0.4.6
+
 ## 0.10.6
 
 ### Patch Changes
