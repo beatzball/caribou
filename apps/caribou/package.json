@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@beatzball/caribou-auth": "workspace:*",
+    "@beatzball/caribou-bluesky-client": "workspace:*",
     "@beatzball/caribou-design-tokens": "workspace:*",
     "@beatzball/caribou-mastodon-client": "workspace:*",
     "@beatzball/caribou-state": "workspace:*",

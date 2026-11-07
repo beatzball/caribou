@@ -88,6 +88,18 @@ export interface AccountBluesky {
    * Links then use the DID, not the handle (spec 8.4).
    */
   handleInvalid: boolean
+  /**
+   * The raw labels on the profile, so the client can run moderation again
+   * when the reader's prefs or labelers change (spec 7.4).
+   */
+  labels?: BlueskyLabel[]
+  /**
+   * Moderation for the account's surfaces (`avatar`, `banner`,
+   * `profileList`, `profileView`), as plain data. The mapper leaves it out
+   * until the caller runs moderation; a screen treats a missing result as
+   * "not checked yet" and keeps the profile covered (spec 7.4, fail closed).
+   */
+  moderation?: BlueskyModerationResult
 }
 
 /** Who may quote the reader's posts, as the reader set it. */
@@ -353,8 +365,7 @@ export interface StatusSource {
 
 // ------------------------------------------------------- bluesky fields
 //
-// The shapes a Bluesky client fills in. Nothing reads them yet; they are
-// here so later work has one place to grow them (spec 6.5 and 7.4).
+// The shapes `@beatzball/caribou-bluesky-client` fills in (spec 6.5 and 7.4).
 
 /** An AT URI and the CID of the exact record version. */
 export interface BlueskyStrongRef {
@@ -377,16 +388,37 @@ export type BlueskyModerationContext =
   | 'contentList' | 'contentView' | 'contentMedia'
   | 'avatar' | 'banner' | 'profileList' | 'profileView'
 
-/** The SDK's moderation decision, flattened to plain data so it survives JSON. */
+/** Why moderation covered or flagged something, for the cover's text. */
+export interface BlueskyModerationReason {
+  /** The label value, such as `porn` or a labeler's own label. */
+  label: string
+  /** The labeler's DID, or the author's for a self-label. */
+  source: string
+  /** The name to show, from the label's definition. */
+  name: string
+}
+
+/**
+ * The SDK's `ui(context)` for one context, as plain data (spec 7.4).
+ * `noOverride` means the cover has no Show button.
+ */
+export interface BlueskyModerationUi {
+  filter: boolean
+  blur: boolean
+  alert: boolean
+  inform: boolean
+  noOverride: boolean
+  reasons: BlueskyModerationReason[]
+}
+
+/**
+ * The SDK's moderation decision, flattened to plain data so it survives JSON
+ * (spec 7.4: the class instance never leaves the mapper). One entry per
+ * context. A post fills the content contexts and an account the profile
+ * ones; each fills all seven, so a reader never meets a missing key.
+ */
 export interface BlueskyModerationResult {
-  contexts: Record<BlueskyModerationContext, {
-    filter: boolean
-    blur: boolean
-    alert: boolean
-    inform: boolean
-    noOverride: boolean
-    reasons: { label: string; source: string; name: string }[]
-  }>
+  contexts: Record<BlueskyModerationContext, BlueskyModerationUi>
   /** The labelers whose labels this post's data includes. */
   labelersCovered: string[]
 }

@@ -112,7 +112,15 @@ export default defineConfig({
         // hydration support, which app.ts guarantees by importing the app
         // dynamically.
         codeSplitting: {
-          groups: [{ name: 'boot', test: /lit-element-hydrate-support|[\\/]lit-html[\\/]|vite\/preload-helper/ }],
+          groups: [
+            { name: 'boot', test: /lit-element-hydrate-support|[\\/]lit-html[\\/]|vite\/preload-helper/ },
+            // The atproto libraries, in their own lazy chunk (Bluesky spec
+            // 12.2). Without this group, rolldown puts its runtime helpers
+            // inside the atproto chunk, app-main imports that chunk
+            // statically for them, and every Mastodon page downloads 182 KB.
+            // `tests/e2e/bluesky-chunk.spec.ts` fails without it.
+            { name: 'bsky', test: /[\\/]node_modules[\\/]\.pnpm[\\/]@atproto/ },
+          ],
         },
       },
     },

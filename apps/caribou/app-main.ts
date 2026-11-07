@@ -20,6 +20,7 @@ import { installPreloadErrorReload, withStaleBuildReload } from './components/_s
 import { startTheme } from './components/_theme.js'
 import { startChangelogSeen } from './components/_changelog-seen.js'
 import { startShortcuts } from './components/_shortcuts.js'
+import { blueskyEnabled, loadBluesky } from './components/_bluesky.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
@@ -61,6 +62,10 @@ if (typeof window !== 'undefined') {
   startShortcuts(window, document)
   // One "Updating…" live region for the whole tab, outside every page.
   document.body.append(document.createElement('caribou-update-notice'))
+  // Bluesky is behind a flag (`components/_bluesky.ts`). With it on, warm the
+  // lazy chunk; nothing reads it yet. A failed load is the stale-build
+  // reload's job (`vite:preloadError`), so the rejection is dropped here.
+  if (blueskyEnabled(window)) loadBluesky().catch(() => {})
 }
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null
