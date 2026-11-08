@@ -1,5 +1,19 @@
 # caribou-app
 
+## 0.10.9
+
+### Patch Changes
+
+- [#224](https://github.com/beatzball/caribou/pull/224) [`5165742`](https://github.com/beatzball/caribou/commit/5165742dbd2fe695d17192eb3e834113377e8d7b) Thanks [@beatzball](https://github.com/beatzball)! - Serve the atproto OAuth client metadata at `/oauth/client-metadata.json`, built from `PUBLIC_BASE_URL`, and a handle resolver at `/xrpc/com.atproto.identity.resolveHandle`. The resolver looks up DNS and HTTPS behind an SSRF guard bound to the connection: it vets every address once, connects to that address only, and checks every redirect. Nothing in the app uses these yet.
+
+- [#226](https://github.com/beatzball/caribou/pull/226) [`2aaa752`](https://github.com/beatzball/caribou/commit/2aaa752f68a197a7ca1f6a5e73dda7af32f91496) Thanks [@beatzball](https://github.com/beatzball)! - Behind the Bluesky flag: the sign-in page has two panels, Mastodon and Bluesky, as a real tablist. The Bluesky callback at `/signin/bluesky` sends `no-store` and `no-referrer`, finishes the sign-in once and goes to `/home`. A Bluesky session that ended shows "Your Bluesky session ended. Sign in again." and keeps the page and the drafts. Sign-out of a Bluesky account deletes its tokens and revokes it at its server. Account names in the rail and on /settings are `@handle` for a Bluesky account and say "Bluesky" to assistive technology. A switch or sign-out that lands on a Bluesky account sends `/local` and `/public` to `/home`; a Bluesky profile or post path is kept only when the new account is Bluesky. The session glue feeds the Bluesky reader veil (`setBlueskyReader`) and answers a cover's Retry by loading the label definitions again. With the flag off nothing changes for Mastodon readers, except one fix: a chunk that fails to load because the page is leaving no longer reloads the old page (Firefox), so it cannot cancel the reader's navigation.
+
+- [#225](https://github.com/beatzball/caribou/pull/225) [`e85a68a`](https://github.com/beatzball/caribou/commit/e85a68a16728b922c63dd58cc2a6489f67f525e4) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky views behind the flag (#184). A Bluesky account's Home is the Following feed, with the new-posts banner and "Many new posts" when a catch-up does not meet the top post. Profiles (posts, replies, media) and threads render on the client for a Bluesky route. The nav hides Local, Public, Search and Lists for a Bluesky account. The status card, the quote card and the profile header apply Bluesky moderation: list filtering, label covers with Show only when allowed, media and card images, avatars and banners, and the reader veil. A timeline or a profile that is empty but has a cursor keeps its "Older posts" anchor and shows the empty notice only at the real end.
+
+- Updated dependencies [[`e85a68a`](https://github.com/beatzball/caribou/commit/e85a68a16728b922c63dd58cc2a6489f67f525e4), [`2aaa752`](https://github.com/beatzball/caribou/commit/2aaa752f68a197a7ca1f6a5e73dda7af32f91496), [`2aaa752`](https://github.com/beatzball/caribou/commit/2aaa752f68a197a7ca1f6a5e73dda7af32f91496)]:
+  - @beatzball/caribou-state@0.4.8
+  - @beatzball/caribou-bluesky-client@0.1.1
+
 ## 0.10.8
 
 ### Patch Changes
