@@ -98,9 +98,6 @@ let shared: { key: string; client: Promise<BrowserOAuthClient> } | null = null
 // The deleted listeners: one per DID and sign-in (`RestoreOptions.key`).
 const deletedListeners = new Map<string, Map<string, () => void>>()
 
-/** How long a sign-out waits for the server revoke (README: "Sign-out"). */
-export const SIGN_OUT_REVOKE_MS = 5000
-
 /** The page's SDK client (README: "One OAuth client per page"). */
 export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAuthClient> {
   const key = JSON.stringify(config)
@@ -110,6 +107,10 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
     handleResolver: config.handleResolver,
     responseMode: 'fragment',
     onSessionDeleted: (sub: string) => { notifySessionDeleted(sub) },
+  }).then((c) => {
+    // Every write of a session goes through the guard (README: "Sign-out").
+    guardSessionStore(c)
+    return c
   })
   shared = { key, client }
   client.catch(() => { if (shared?.client === client) shared = null })
@@ -197,6 +198,8 @@ export async function beginSignIn(
   if (input.kind === 'did') expected = input.value
   else if (input.kind === 'handle') expected = await resolveHandle(opts.handleResolver, input.value, opts.fetch)
   const state: SignInState = { input: input.value, ...(expected ? { expected } : {}) }
+  // A new sign-in for this DID: its writes are allowed again.
+  if (expected) allowSessionWrites(expected)
   try {
     await oauth.signIn(expected ?? input.value, { scope: BLUESKY_SCOPE, state: JSON.stringify(state) })
   } catch (err) {
@@ -391,11 +394,13 @@ interface StoredSession {
   authMethod: unknown
   tokenSet: { iss: string; access_token: string; refresh_token?: string }
 }
+interface SessionGetterLike {
+  getStored(sub: string): Promise<StoredSession | undefined>
+  setStored(sub: string, session: StoredSession): Promise<void>
+  delStored(sub: string, cause?: unknown): Promise<void>
+}
 interface SdkInternals {
-  sessionGetter: {
-    getStored(sub: string): Promise<StoredSession | undefined>
-    delStored(sub: string, cause?: unknown): Promise<void>
-  }
+  sessionGetter: SessionGetterLike
   serverFactory: {
     fromIssuer(iss: string, authMethod: unknown, dpopKey: unknown): Promise<{ revoke(token: string): Promise<void> }>
   }
@@ -403,35 +408,62 @@ interface SdkInternals {
 
 function internals(oauth: object): SdkInternals {
   const o = oauth as Partial<SdkInternals>
-  if (typeof o.sessionGetter?.getStored !== 'function' || typeof o.sessionGetter.delStored !== 'function') {
+  const g = o.sessionGetter
+  if (typeof g?.getStored !== 'function' || typeof g.setStored !== 'function' || typeof g.delStored !== 'function') {
     throw new Error('Bluesky SDK: no session store to delete from')
   }
   if (typeof o.serverFactory?.fromIssuer !== 'function') throw new Error('Bluesky SDK: no server factory')
   return o as SdkInternals
 }
 
-/**
- * Signs out of `did` (README: "Sign-out"): deletes the stored tokens and DPoP
- * key first, without the SDK's per-DID lock, then revokes at the server for
- * at most `revokeMs`, then queues the SDK's own `revoke` for anything a
- * pending refresh stores later. Throws only when the local delete failed.
- */
-export async function signOut(
-  oauth: Pick<OAuthLike, 'revoke'>, did: string, opts: { revokeMs?: number } = {},
-): Promise<void> {
-  const { sessionGetter, serverFactory } = internals(oauth)
-  const stored = await sessionGetter.getStored(did)
-  if (!stored) return
-  await sessionGetter.delStored(did, new TokenRevokedError(did))
-  const { tokenSet } = stored
-  const atServer = serverFactory.fromIssuer(tokenSet.iss, stored.authMethod, stored.dpopKey)
+// The DIDs signing out on this page. Their writes are refused (README:
+// "Sign-out", the one rule).
+const signingOut = new Set<string>()
+const guarded = new WeakSet<object>()
+
+/** Revokes a session's tokens at its server; best effort, never waited for. */
+function revokeAtServer(sdk: SdkInternals, session: StoredSession): void {
+  const { tokenSet } = session
+  void sdk.serverFactory.fromIssuer(tokenSet.iss, session.authMethod, session.dpopKey)
     .then((server) => server.revoke(tokenSet.refresh_token ?? tokenSet.access_token))
-  let timer: ReturnType<typeof setTimeout> | undefined
-  await Promise.race([
-    atServer.catch(() => {}),
-    new Promise<void>((r) => { timer = setTimeout(r, opts.revokeMs ?? SIGN_OUT_REVOKE_MS) }),
-  ])
-  clearTimeout(timer)
-  // After whatever holds the lock: a pending refresh that stores new tokens.
-  void oauth.revoke(did).catch(() => {})
+    .catch(() => {})
+}
+
+/**
+ * Wraps the SDK's one write path for sessions (`sessionGetter.setStored`):
+ * a write for a DID that is signing out is dropped, anything stored for it
+ * is deleted, and the dropped tokens are revoked at the server, best effort.
+ * Idempotent.
+ */
+export function guardSessionStore(oauth: object): void {
+  const sdk = internals(oauth)
+  const getter = sdk.sessionGetter
+  if (guarded.has(getter)) return
+  guarded.add(getter)
+  const write = getter.setStored.bind(getter)
+  getter.setStored = async (sub, session) => {
+    if (!signingOut.has(sub)) return write(sub, session)
+    revokeAtServer(sdk, session)
+    await getter.delStored(sub)
+  }
+}
+
+/** A new sign-in for `did` starts: its writes are allowed again. */
+export function allowSessionWrites(did: string): void {
+  signingOut.delete(did)
+}
+
+/**
+ * Signs out of `did` (README: "Sign-out"): refuses every later write for it,
+ * deletes the stored tokens and DPoP key, then starts the server revoke and
+ * does not wait for it. Throws only when the local delete failed.
+ */
+export async function signOut(oauth: Pick<OAuthLike, 'revoke'>, did: string): Promise<void> {
+  guardSessionStore(oauth)
+  const sdk = internals(oauth)
+  signingOut.add(did)
+  const stored = await sdk.sessionGetter.getStored(did)
+  if (!stored) return
+  await sdk.sessionGetter.delStored(did, new TokenRevokedError(did))
+  revokeAtServer(sdk, stored)
 }

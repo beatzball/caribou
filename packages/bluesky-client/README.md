@@ -408,20 +408,24 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   before a new sign-in to the same DID stored its tokens reports the
   session deleted, and the new sign-in must not be marked expired. A 401 on
   a request never sends `caribou:unauthorized`.
-- **Sign-out.** `signOut(oauth, did)`:
-  1. reads the stored session for `did` and deletes it from the SDK's
-     session store (`sessionGetter.getStored` / `delStored`). This does not
-     take the SDK's per-DID lock, so a refresh that hangs, or any request
-     queued on that lock, cannot hold the delete. The SDK's own `revoke`
-     takes that lock first, which is why it is not used for this step.
-  2. then revokes the read tokens at the authorization server, best effort,
-     for at most `SIGN_OUT_REVOKE_MS` (5 s); it does not wait longer and
-     never throws for it.
-  3. then queues the SDK's `revoke(did)` without waiting. It runs after
-     whatever holds the lock. If a refresh that was pending succeeds and
-     stores new tokens, this revokes and deletes them too.
-  Only step 1 can throw (the store failed); then the tokens may still be
-  stored and the caller must not show the account as signed out. These
+- **Sign-out.** One rule: **once sign-out starts for a DID, the SDK's
+  session store refuses every write for that DID until a new sign-in for
+  that DID starts.** Every SDK write of a session (the callback, every
+  refresh) goes through `sessionGetter.setStored`. `guardSessionStore`
+  wraps that one method on the page's client: a write for a DID in the
+  signing-out set is dropped, anything stored for it is deleted, and the
+  dropped tokens are revoked at the server, best effort. A delete always
+  works. `signOut(oauth, did)`:
+  1. adds the DID to the set;
+  2. reads the stored session and deletes it (`getStored`, `delStored`; no
+     per-DID lock, so nothing pending can hold it);
+  3. starts the server revoke of the read tokens and does not wait for it.
+  It answers after step 2; only step 2 can throw (the store failed), and
+  then the caller must not show the account as signed out.
+  `allowSessionWrites(did)` takes the DID out of the set. `beginSignIn`
+  calls it for the expected DID. A sign-in always leaves the page for the
+  authorization server, and the set lives in the page, so the callback
+  page starts with an empty set. Same tab only; other tabs are #214. These
   reach SDK internals (`sessionGetter`, `serverFactory`); a missing one
   throws, so an SDK upgrade that moves them fails the tests. Nothing else
   is aborted: other accounts' requests go on.

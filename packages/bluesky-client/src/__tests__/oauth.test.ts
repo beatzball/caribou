@@ -7,6 +7,7 @@ import {
 import { fixture } from './_helpers.js'
 
 const ALICE = 'did:plc:aliceaaaaaaaaaaaaaaaaaaa'
+const BOB = 'did:plc:bobbbbbbbbbbbbbbbbbbbbbb'
 const MALLORY = 'did:plc:malloryaaaaaaaaaaaaaaaaa'
 const RESOLVER = 'http://127.0.0.1:3182'
 
@@ -364,24 +365,48 @@ describe('signOut', () => {
     return { client, map, getter }
   }
 
-  it('a refresh already pending and hung: the stored tokens are deleted at once, the server revoke is bounded', async () => {
-    const revoke = vi.fn(async () => {})
-    const { client, map, getter } = sdk({ refresh: () => new Promise(() => {}), revoke }, stored0('2000-01-01T00:00:00.000Z'))
-    // The token is stale, so this starts a refresh that never answers, and
-    // holds the SDK's per-DID lock.
-    void getter.getSession(ALICE as never).catch(() => {})
+  it('a refresh pending at sign-out that lands with new tokens: the store stays empty', async () => {
+    let land!: (v: unknown) => void
+    const revoke = vi.fn((_token: string) => new Promise<void>(() => {}))  // the server never answers
+    const fresh = { iss: 'https://auth.example.test', sub: ALICE, access_token: 'acc-2', refresh_token: 'ref-2', aud: 'x', scope: 'atproto' }
+    const { client, map, getter } = sdk({ refresh: () => new Promise((r) => { land = r }), revoke }, stored0('2000-01-01T00:00:00.000Z'))
+    // A stale token: this starts a refresh that holds the SDK's per-DID lock.
+    const pending = getter.getSession(ALICE as never).catch(() => {})
     await new Promise((r) => setTimeout(r, 10))
-    const started = Date.now()
-    await signOut(client, ALICE, { revokeMs: 50 })
-    expect(Date.now() - started).toBeLessThan(2000)
+    await signOut(client, ALICE)
+    // When sign-out answers (the entry goes), nothing is stored.
     expect(map.has(ALICE)).toBe(false)
-    // The read tokens were revoked at the server, outside the lock too.
-    expect(revoke).toHaveBeenCalledWith('ref-1')
+    // The refresh lands with new tokens: the write is refused.
+    land(fresh)
+    await pending
+    await new Promise((r) => setTimeout(r, 10))
+    expect(map.has(ALICE)).toBe(false)
+    // The read tokens and the dropped ones are revoked, best effort.
+    expect(revoke.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining(['ref-1', 'ref-2']))
+  })
+
+  it('another DID writes as before while one signs out', async () => {
+    const { client, map, getter } = sdk({ revoke: async () => {} }, stored0('2999-01-01T00:00:00.000Z'))
+    await signOut(client, ALICE)
+    await getter.setStored(BOB as never, { ...stored0('2999-01-01T00:00:00.000Z'), tokenSet: { ...stored0('2999').tokenSet, sub: BOB } } as never)
+    expect(map.has(BOB)).toBe(true)
+  })
+
+  it('a new sign-in for the DID stores normally again', async () => {
+    const { client, map, getter } = sdk({ revoke: async () => {} }, stored0('2999-01-01T00:00:00.000Z'))
+    await signOut(client, ALICE)
+    await getter.setStored(ALICE as never, stored0('2999-01-01T00:00:00.000Z') as never)
+    expect(map.has(ALICE)).toBe(false)
+    // beginSignIn for this DID takes it out of the set.
+    const signIn = vi.fn(async () => undefined as never)
+    await beginSignIn({ signIn }, ALICE, { handleResolver: RESOLVER, indexedDB: okIdb() })
+    await getter.setStored(ALICE as never, stored0('2999-01-01T00:00:00.000Z') as never)
+    expect(map.has(ALICE)).toBe(true)
   })
 
   it('offline: the stored tokens are deleted, and sign-out does not throw', async () => {
     const { client, map } = sdk({ revoke: async () => { throw new TypeError('Failed to fetch') } }, stored0('2999-01-01T00:00:00.000Z'))
-    await expect(signOut(client, ALICE, { revokeMs: 50 })).resolves.toBeUndefined()
+    await expect(signOut(client, ALICE)).resolves.toBeUndefined()
     expect(map.has(ALICE)).toBe(false)
   })
 
@@ -389,7 +414,7 @@ describe('signOut', () => {
     const { client, map } = sdk({ revoke: async () => {} }, stored0('2999-01-01T00:00:00.000Z'))
     const unreachable = Object.create(client) as OAuthClient
     Object.defineProperty(unreachable, 'serverFactory', { value: { fromIssuer: async () => { throw new TypeError('Failed to fetch') } } })
-    await signOut(unreachable, ALICE, { revokeMs: 50 })
+    await signOut(unreachable, ALICE)
     expect(map.has(ALICE)).toBe(false)
   })
 
