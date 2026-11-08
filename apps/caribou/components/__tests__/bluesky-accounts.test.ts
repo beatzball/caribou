@@ -97,11 +97,14 @@ describe('pathAfterSwitch with Bluesky', () => {
     ['/public?local=true', true, '/home'],
     ['/local', false, '/local'],
     ['/home', true, '/home'],
-    // Bluesky profile and post paths are global (spec 8.4): kept for any account.
+    // Bluesky profile and post paths are global (spec 8.4), but only a
+    // Bluesky client can read them: kept only when the new account is Bluesky.
     ['/@alice.example.com', true, '/@alice.example.com'],
-    ['/@alice.example.com?tab=media', false, '/@alice.example.com?tab=media'],
+    ['/@alice.example.com?tab=media', true, '/@alice.example.com?tab=media'],
     ['/@alice.example.com/3mzhabc', true, '/@alice.example.com/3mzhabc'],
-    [`/@${DID}/3mzhabc`, false, `/@${DID}/3mzhabc`],
+    [`/@${DID}/3mzhabc`, true, `/@${DID}/3mzhabc`],
+    ['/@alice.example.com?tab=media', false, '/home'],
+    [`/@${DID}/3mzhabc`, false, '/home'],
     // A local Mastodon name and a Mastodon post stay per server.
     ['/@carol', true, '/home'],
     ['/@carol@example.social/1099', true, '/home'],

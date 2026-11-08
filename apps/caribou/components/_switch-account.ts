@@ -13,7 +13,8 @@ const NEUTRAL = new Set(['/home', '/notifications', '/bookmarks', '/local', '/pu
 const CURSORS = ['max_id', 'min_id', 'since_id']
 
 // A Bluesky profile or post (spec 8.4): `/@did:…` or `/@<name with a dot>`,
-// with no second `@`, then maybe `/<rkey>`. A DID and an AT URI are global.
+// with no second `@`, then maybe `/<rkey>`. A DID and an AT URI are global,
+// so the path is kept when the new account is Bluesky.
 const BLUESKY_PATH = /^\/@(?:did:[^/@]+|[^/@]*\.[^/@]*)(?:\/[^/]+)?$/
 
 /**
@@ -30,7 +31,8 @@ export function pathAfterSwitch(path: string, serverChanged = false, toBluesky =
     // A fully qualified profile (`/@name@host`) is the same person from any
     // server. A post id (`/@name/<id>`) is not: ids are per server.
     || /^\/@[^/@]+@[^/@]+$/.test(pathname)
-    || BLUESKY_PATH.test(pathname)
+    // A Bluesky profile or post: only a Bluesky client can read it.
+    || (toBluesky && BLUESKY_PATH.test(pathname))
   if (!kept) return '/home'
   if (!serverChanged || q < 0) return path
   const params = new URLSearchParams(path.slice(q + 1))

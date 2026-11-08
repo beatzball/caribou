@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { OAuthClient, TokenRefreshError, TokenRevokedError, type OAuthSession } from '@atproto/oauth-client-browser'
+import { OAuthClient, SessionGetter, TokenRefreshError, TokenRevokedError, requestLocalLock, type OAuthSession } from '@atproto/oauth-client-browser'
 import {
-  beginSignIn, completeSignIn, parseSignInInput, restoreClient, signOut, resolveHandle, notifySessionDeleted, sdkFetch, NoCallbackParams, SignInCancelled, ForeignCallback,
+  beginSignIn, completeSignIn, parseSignInInput, restoreClient, signOut, resolveHandle, notifySessionDeleted, NoCallbackParams, SignInCancelled, ForeignCallback,
   InvalidSignInInput, SessionGone, SignInMismatch, StorageUnavailable, BLUESKY_SCOPE,
 } from '../oauth.js'
 import { fixture } from './_helpers.js'
@@ -259,6 +259,51 @@ describe('restoreClient', () => {
     expect(onExpired).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['app.bsky.actor.getPreferences', 'app.bsky.labeler.getServices'])(
+    'a 401 from %s at restore expires the session; moderation stays fail closed', async (method) => {
+      const routes: Record<string, () => Response> = {
+        'app.bsky.actor.getPreferences': () => json({ preferences: [] }),
+        'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
+        'app.bsky.labeler.getServices': () => json({ views: [] }),
+        [method]: () => json({ error: 'AuthRequired', message: 'no' }, 401),
+      }
+      const onExpired = vi.fn()
+      const out = await restoreClient({ restore: async () => fakeSession(ALICE, routes) } as never, ALICE, { userKey, onExpired, key: 'M401' })
+      expect(onExpired).toHaveBeenCalledTimes(1)
+      expect(method.endsWith('getPreferences') ? out.prefs : out.labelDefs).toBeNull()
+    })
+
+  it.each(['app.bsky.actor.getPreferences', 'app.bsky.labeler.getServices'])(
+    'a 401 from %s in reloadModeration expires the session too', async (method) => {
+      let fail = false
+      const routes: Record<string, () => Response> = {
+        'app.bsky.actor.getPreferences': () => json({ preferences: [] }),
+        'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
+        'app.bsky.labeler.getServices': () => json({ views: [] }),
+      }
+      const ok = routes[method]!
+      routes[method] = () => fail ? json({ error: 'AuthRequired' }, 401) : ok()
+      const onExpired = vi.fn()
+      const out = await restoreClient({ restore: async () => fakeSession(ALICE, routes) } as never, ALICE, { userKey, onExpired, key: 'R401' })
+      expect(onExpired).not.toHaveBeenCalled()
+      fail = true
+      const again = await out.reloadModeration()
+      expect(onExpired).toHaveBeenCalledTimes(1)
+      expect(method.endsWith('getPreferences') ? again.prefs : again.labelDefs).toBeNull()
+    })
+
+  it('a 502 or a network error in the moderation loads: null, no expiry', async () => {
+    const onExpired = vi.fn()
+    const routes: Record<string, () => Response> = {
+      'app.bsky.actor.getPreferences': () => json({ error: 'x' }, 502),
+      'app.bsky.labeler.getServices': () => { throw new TypeError('Failed to fetch') },
+    }
+    const out = await restoreClient({ restore: async () => fakeSession(ALICE, routes) } as never, ALICE, { userKey, onExpired, key: 'M502' })
+    expect(out.prefs).toBeNull()
+    expect(out.labelDefs).toBeNull()
+    expect(onExpired).not.toHaveBeenCalled()
+  })
+
   it('a 5xx is not a 401: no expiry', async () => {
     const session = fakeSession(ALICE, { 'app.bsky.feed.getTimeline': () => json({ error: 'InternalServerError' }, 502) })
     const onExpired = vi.fn()
@@ -296,61 +341,67 @@ describe('restoreClient', () => {
 })
 
 describe('signOut', () => {
-  // The SDK's own revoke, on an in-memory store, with the issuer unreachable.
-  function sdkClient(stored: Map<string, unknown>, fromIssuer: () => Promise<unknown>) {
-    const client = Object.create(OAuthClient.prototype) as OAuthClient
-    Object.defineProperty(client, 'sessionGetter', { value: {
-      getSession: async (sub: string) => {
-        const v = stored.get(sub)
-        if (!v) throw new TokenRefreshError(sub, 'none')
-        return v
-      },
-      delStored: async (sub: string) => { stored.delete(sub) },
-    } })
-    Object.defineProperty(client, 'serverFactory', { value: { fromIssuer } })
-    return client
-  }
-  const tokens = { dpopKey: {}, authMethod: 'none', tokenSet: { iss: 'https://auth.example.test', sub: ALICE, access_token: 'a', aud: 'x', scope: 'atproto' } }
-
-  it('offline before the revoke starts: the stored tokens are still deleted', async () => {
-    const stored = new Map<string, unknown>([[ALICE, tokens]])
-    const client = sdkClient(stored, async () => { throw new TypeError('Failed to fetch') })
-    await signOut(client, ALICE).catch(() => {})
-    expect(stored.has(ALICE)).toBe(false)
+  const stored0 = (expiresAt: string) => ({
+    dpopKey: {}, authMethod: 'none',
+    tokenSet: { iss: 'https://auth.example.test', sub: ALICE, access_token: 'acc-1', refresh_token: 'ref-1', aud: 'x', scope: 'atproto', expires_at: expiresAt },
   })
 
-  it('a revoke that hangs is cut off, and the stored tokens are deleted', async () => {
-    const stored = new Map<string, unknown>([[ALICE, tokens]])
-    // The revoke request goes out through the SDK fetch and never answers.
-    const base = vi.fn((_: unknown, init?: RequestInit) => new Promise<Response>((_r, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal!.reason))
-    }))
-    vi.stubGlobal('fetch', base)
-    try {
-      const client = sdkClient(stored, async () => ({ revoke: () => sdkFetch('https://auth.example.test/oauth/revoke', { method: 'POST' }) }))
-      const started = Date.now()
-      await signOut(client, ALICE, { timeoutMs: 30 }).catch(() => {})
-      expect(Date.now() - started).toBeLessThan(2000)
-      expect(stored.has(ALICE)).toBe(false)
-      expect(base).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.unstubAllGlobals()
+  // The SDK's own client and session getter, with its own local lock, over
+  // an in-memory store. `server` answers fromIssuer.
+  function sdk(server: { refresh?: () => Promise<unknown>; revoke: (t: string) => Promise<void> }, initial?: unknown) {
+    const map = new Map<string, unknown>(initial ? [[ALICE, initial]] : [])
+    const store = {
+      get: async (k: string) => map.get(k),
+      set: async (k: string, v: unknown) => { map.set(k, v) },
+      del: async (k: string) => { map.delete(k) },
     }
+    const serverFactory = { fromIssuer: async () => ({ authMethod: 'none', ...server }) }
+    const runtime = { hasImplementationLock: true, usingLock: requestLocalLock }
+    const getter = new SessionGetter(store as never, serverFactory as never, runtime as never)
+    const client = Object.create(OAuthClient.prototype) as OAuthClient
+    Object.defineProperty(client, 'sessionGetter', { value: getter })
+    Object.defineProperty(client, 'serverFactory', { value: serverFactory })
+    return { client, map, getter }
+  }
+
+  it('a refresh already pending and hung: the stored tokens are deleted at once, the server revoke is bounded', async () => {
+    const revoke = vi.fn(async () => {})
+    const { client, map, getter } = sdk({ refresh: () => new Promise(() => {}), revoke }, stored0('2000-01-01T00:00:00.000Z'))
+    // The token is stale, so this starts a refresh that never answers, and
+    // holds the SDK's per-DID lock.
+    void getter.getSession(ALICE as never).catch(() => {})
+    await new Promise((r) => setTimeout(r, 10))
+    const started = Date.now()
+    await signOut(client, ALICE, { revokeMs: 50 })
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(map.has(ALICE)).toBe(false)
+    // The read tokens were revoked at the server, outside the lock too.
+    expect(revoke).toHaveBeenCalledWith('ref-1')
+  })
+
+  it('offline: the stored tokens are deleted, and sign-out does not throw', async () => {
+    const { client, map } = sdk({ revoke: async () => { throw new TypeError('Failed to fetch') } }, stored0('2999-01-01T00:00:00.000Z'))
+    await expect(signOut(client, ALICE, { revokeMs: 50 })).resolves.toBeUndefined()
+    expect(map.has(ALICE)).toBe(false)
+  })
+
+  it('the issuer cannot be reached: the stored tokens are still deleted', async () => {
+    const { client, map } = sdk({ revoke: async () => {} }, stored0('2999-01-01T00:00:00.000Z'))
+    const unreachable = Object.create(client) as OAuthClient
+    Object.defineProperty(unreachable, 'serverFactory', { value: { fromIssuer: async () => { throw new TypeError('Failed to fetch') } } })
+    await signOut(unreachable, ALICE, { revokeMs: 50 })
+    expect(map.has(ALICE)).toBe(false)
   })
 
   it('no stored session: nothing to do', async () => {
-    const client = sdkClient(new Map(), async () => { throw new Error('not reached') })
+    const revoke = vi.fn(async () => {})
+    const { client } = sdk({ revoke })
     await expect(signOut(client, ALICE)).resolves.toBeUndefined()
+    expect(revoke).not.toHaveBeenCalled()
   })
 
-  it('outside a sign-out, SDK requests are not cut off', async () => {
-    const base = vi.fn(async () => new Response('ok'))
-    vi.stubGlobal('fetch', base)
-    try {
-      await sdkFetch('https://pds.example.test/xrpc/x')
-      expect(base.mock.calls[0]).toEqual(['https://pds.example.test/xrpc/x', undefined])
-    } finally {
-      vi.unstubAllGlobals()
-    }
+  it('an SDK without the session store fails loudly, so an upgrade is noticed', async () => {
+    const client = Object.create(OAuthClient.prototype) as OAuthClient
+    await expect(signOut(client, ALICE)).rejects.toThrow(/session store/)
   })
 })

@@ -152,16 +152,19 @@ both networks. These add to them:
       is now that account's only session. `renewSession(userKey)` gives the
       entry a new `generation` and clears `expired` (rule 1). The active
       account does not change.
-12. **Sign-out always deletes the tokens.** `signOutBluesky(userKey,
-    generation)` asks the driver to sign out, then drops the entry, its
-    prefs and its drafts (rule 6) only while the entry still has that
-    `generation`. The driver calls the SDK's `revoke(did)`: it revokes at the
-    authorization server and deletes the stored tokens and DPoP key in a
-    `finally`, so they go also when the server cannot be reached, even
-    before the revoke starts. The wait is bounded: after
-    `SIGN_OUT_WAIT_MS` (8 s) the entry is dropped anyway. A revoke that
-    fails or hangs still drops the entry: the reader asked to sign out. The
-    Mastodon `/api/signout` route is not used.
+12. **Sign-out deletes the tokens first, and that does not wait for the
+    network.** `signOutBluesky(userKey, generation)` asks the driver to sign
+    out. The driver deletes the SDK's stored session for that DID (tokens
+    and DPoP key) straight from the SDK's session store: not through the
+    SDK's per-DID lock, so a refresh that hangs cannot hold it. Only then
+    does it try the server revoke, best effort, for at most 5 s. When the
+    driver has answered, the entry, its prefs and its drafts are dropped
+    (rule 6), only while the entry still has that `generation`; the landing
+    goes on only after that. A revoke that fails or hangs at the server
+    still drops the entry. When the local delete itself fails, the driver
+    throws and the entry stays: the account is not shown as signed out
+    while its tokens are still stored. The Mastodon `/api/signout` route is
+    not used.
 
 `userName(user)` for a Bluesky session is the loaded account's handle
 (`account.acct`), else the stored `handle` (rule 7 keeps the two in step).

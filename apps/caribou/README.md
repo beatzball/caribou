@@ -582,8 +582,9 @@ account's server, then does one full navigation: the same page when it means
 the same for any account (`pathAfterSwitch`), else `/home`; `/` when no account
 is left. When the new active account is Bluesky, `/local` and `/public` go to
 `/home` (Bluesky has neither). A Bluesky profile or post path (`/@did:…`,
-`/@<dotted handle>`, either with `/<rkey>`; spec 8.4) is kept for any
-account: a DID and an AT URI are global. A Bluesky account has no server, so
+`/@<dotted handle>`, either with `/<rkey>`; spec 8.4) is kept when the new
+account is Bluesky: a DID and an AT URI are global, but only a Bluesky
+client can read them. To a Mastodon account it goes to `/home`. A Bluesky account has no server, so
 no cookie is written for it.
 
 **Account names.** `fullHandle` is `@name@server` for Mastodon and `@handle`

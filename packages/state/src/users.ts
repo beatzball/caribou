@@ -56,9 +56,6 @@ type New<S extends SessionBase> = Omit<S, 'generation' | 'expired'> & { generati
 /** A session as a sign-in hands it over: its `generation` is made if absent. */
 export type NewUserSession = New<MastodonSession> | New<BlueskySession>
 
-/** How long a Bluesky sign-out waits for the revoke (rule 12). */
-export const SIGN_OUT_WAIT_MS = 8000
-
 /** A new sign-in id: 128 random bits as hex. */
 export function newGeneration(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
@@ -187,14 +184,15 @@ export async function signOutBluesky(userKey: UserKey, generation: string): Prom
   const entry = users.value.get(userKey)
   const d = blueskyDriver()
   if (entry && isBlueskySession(entry) && entry.generation === generation && d) {
-    // Offline, refused or hung: the reader asked to sign out, so the entry
-    // goes. The wait is bounded (rule 12).
-    let timer: ReturnType<typeof setTimeout> | undefined
-    await Promise.race([
-      d.signOut(entry.did).catch(() => {}),
-      new Promise<void>((r) => { timer = setTimeout(r, SIGN_OUT_WAIT_MS) }),
-    ])
-    clearTimeout(timer)
+    // Rule 12: the driver answers once the stored tokens are deleted; it
+    // bounds the server revoke itself. When the local delete failed, the
+    // tokens may still be stored: the account stays, not shown signed out.
+    try {
+      await d.signOut(entry.did)
+    } catch (err) {
+      console.warn('[caribou] Bluesky sign-out could not delete the stored session', err)
+      return activeUser.value
+    }
   }
   const current = users.value.get(userKey)
   if (current?.generation === generation) {

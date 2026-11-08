@@ -9,6 +9,7 @@ import {
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { createBlueskyClient, type BlueskyAgent } from './client.js'
+import { normalizeXrpcError } from './errors.js'
 import { labelDefsFromServices, moderate, type LabelDefs } from './moderation.js'
 
 export const BLUESKY_SCOPE = 'atproto transition:generic'
@@ -97,23 +98,8 @@ let shared: { key: string; client: Promise<BrowserOAuthClient> } | null = null
 // The deleted listeners: one per DID and sign-in (`RestoreOptions.key`).
 const deletedListeners = new Map<string, Map<string, () => void>>()
 
-/** How long a sign-out lets any SDK request run (README: "Sign-out"). */
-export const SIGN_OUT_TIMEOUT_MS = 5000
-
-// While a sign-out runs, the time after which every SDK request is cut off.
-let cutOffAt: number | null = null
-
-/**
- * The fetch the SDK uses. Outside a sign-out it is plain `fetch`. During one
- * every request is aborted at the cut-off, so a revoke that hangs still ends
- * and the SDK deletes the stored tokens in its `finally`.
- */
-export function sdkFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  if (cutOffAt === null) return fetch(input, init)
-  const timeout = AbortSignal.timeout(Math.max(0, cutOffAt - Date.now()))
-  const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
-  return fetch(input, { ...init, signal })
-}
+/** How long a sign-out waits for the server revoke (README: "Sign-out"). */
+export const SIGN_OUT_REVOKE_MS = 5000
 
 /** The page's SDK client (README: "One OAuth client per page"). */
 export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAuthClient> {
@@ -123,7 +109,6 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
     clientId: config.clientId,
     handleResolver: config.handleResolver,
     responseMode: 'fragment',
-    fetch: sdkFetch,
     onSessionDeleted: (sub: string) => { notifySessionDeleted(sub) },
   })
   shared = { key, client }
@@ -359,12 +344,18 @@ export async function restoreClient(
   // The moderation inputs. Either failing to load is null: fail closed.
   let prefs: ModerationPrefs | null = null
   let labelDefs: LabelDefs | null = null
+  // Missing is null (fail closed). A 401 also ends the session (README:
+  // "401"); a network error or a 5xx does not.
+  const failed = (err: unknown): null => {
+    if (normalizeXrpcError(err).code === 'unauthorized') opts.onExpired()
+    return null
+  }
   async function loadModeration() {
-    prefs = await agent.getPreferences().then((p) => p.moderationPrefs, () => null)
+    prefs = await agent.getPreferences().then((p) => p.moderationPrefs, failed)
     const labelerDids = [...new Set([BSKY_LABELER_DID, ...(prefs?.labelers ?? []).map((l) => l.did)])]
     agent.configureLabelers(labelerDids)
     labelDefs = await agent.app.bsky.labeler.getServices({ dids: labelerDids, detailed: true })
-      .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), () => null)
+      .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), failed)
   }
   await loadModeration()
 
@@ -392,19 +383,55 @@ export async function restoreClient(
   return out
 }
 
+// The SDK internals sign-out needs (README: "Sign-out"). Protected in the
+// SDK's types; a missing one throws, so an SDK upgrade that moves them fails
+// the tests instead of leaving tokens behind.
+interface StoredSession {
+  dpopKey: unknown
+  authMethod: unknown
+  tokenSet: { iss: string; access_token: string; refresh_token?: string }
+}
+interface SdkInternals {
+  sessionGetter: {
+    getStored(sub: string): Promise<StoredSession | undefined>
+    delStored(sub: string, cause?: unknown): Promise<void>
+  }
+  serverFactory: {
+    fromIssuer(iss: string, authMethod: unknown, dpopKey: unknown): Promise<{ revoke(token: string): Promise<void> }>
+  }
+}
+
+function internals(oauth: object): SdkInternals {
+  const o = oauth as Partial<SdkInternals>
+  if (typeof o.sessionGetter?.getStored !== 'function' || typeof o.sessionGetter.delStored !== 'function') {
+    throw new Error('Bluesky SDK: no session store to delete from')
+  }
+  if (typeof o.serverFactory?.fromIssuer !== 'function') throw new Error('Bluesky SDK: no server factory')
+  return o as SdkInternals
+}
+
 /**
- * Revokes the session for `did` and deletes its stored tokens (README:
- * "Sign-out"). The SDK's `revoke` deletes them in a `finally`, also when the
- * issuer cannot be reached; while it runs, SDK requests are cut off after
- * `timeoutMs`. No stored session: nothing to do.
+ * Signs out of `did` (README: "Sign-out"): deletes the stored tokens and DPoP
+ * key first, without the SDK's per-DID lock, then revokes at the server for
+ * at most `revokeMs`, then queues the SDK's own `revoke` for anything a
+ * pending refresh stores later. Throws only when the local delete failed.
  */
 export async function signOut(
-  oauth: Pick<OAuthLike, 'revoke'>, did: string, opts: { timeoutMs?: number } = {},
+  oauth: Pick<OAuthLike, 'revoke'>, did: string, opts: { revokeMs?: number } = {},
 ): Promise<void> {
-  cutOffAt = Date.now() + (opts.timeoutMs ?? SIGN_OUT_TIMEOUT_MS)
-  try {
-    await oauth.revoke(did)
-  } finally {
-    cutOffAt = null
-  }
+  const { sessionGetter, serverFactory } = internals(oauth)
+  const stored = await sessionGetter.getStored(did)
+  if (!stored) return
+  await sessionGetter.delStored(did, new TokenRevokedError(did))
+  const { tokenSet } = stored
+  const atServer = serverFactory.fromIssuer(tokenSet.iss, stored.authMethod, stored.dpopKey)
+    .then((server) => server.revoke(tokenSet.refresh_token ?? tokenSet.access_token))
+  let timer: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    atServer.catch(() => {}),
+    new Promise<void>((r) => { timer = setTimeout(r, opts.revokeMs ?? SIGN_OUT_REVOKE_MS) }),
+  ])
+  clearTimeout(timer)
+  // After whatever holds the lock: a pending refresh that stores new tokens.
+  void oauth.revoke(did).catch(() => {})
 }

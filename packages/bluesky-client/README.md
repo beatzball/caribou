@@ -381,7 +381,10 @@ Browser only. It loads through `./browser`, in the lazy chunk.
 - **401.** The client's `onUnauthorized` is wired to `onExpired`. The SDK
   deletes a session only on a 401 with a `DPoP`/`Bearer` challenge naming
   `invalid_token`; any other 401 is also the end of the session for
-  Caribou. Transport errors are not 401s.
+  Caribou. Transport errors are not 401s. The moderation loads
+  (`getPreferences`, `getServices`, at restore and in `reloadModeration`)
+  follow the same rule: a 401 calls `onExpired`, and the input is still
+  `null` (fail closed); a network error or a 5xx is only `null`.
 - **Restore.** `restoreClient(oauth, did, opts)` calls `oauth.restore(did)`
   (by Caribou's stored DID, never the SDK's own last-session pointer),
   makes an `Agent`, loads the reader's moderation prefs and label
@@ -405,12 +408,23 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   before a new sign-in to the same DID stored its tokens reports the
   session deleted, and the new sign-in must not be marked expired. A 401 on
   a request never sends `caribou:unauthorized`.
-- **Sign-out.** `signOut(oauth, did)` calls the SDK's `revoke(did)`, not
-  `restore` and `signOut`: `revoke` deletes the stored tokens in a
-  `finally`, also when the issuer cannot be reached. With no stored
-  session it does nothing. While it runs, every SDK request is cut off
-  after `SIGN_OUT_TIMEOUT_MS` (5 s), through the SDK's `fetch` option, so a
-  revoke that hangs still ends and the tokens are deleted.
+- **Sign-out.** `signOut(oauth, did)`:
+  1. reads the stored session for `did` and deletes it from the SDK's
+     session store (`sessionGetter.getStored` / `delStored`). This does not
+     take the SDK's per-DID lock, so a refresh that hangs, or any request
+     queued on that lock, cannot hold the delete. The SDK's own `revoke`
+     takes that lock first, which is why it is not used for this step.
+  2. then revokes the read tokens at the authorization server, best effort,
+     for at most `SIGN_OUT_REVOKE_MS` (5 s); it does not wait longer and
+     never throws for it.
+  3. then queues the SDK's `revoke(did)` without waiting. It runs after
+     whatever holds the lock. If a refresh that was pending succeeds and
+     stores new tokens, this revokes and deletes them too.
+  Only step 1 can throw (the store failed); then the tokens may still be
+  stored and the caller must not show the account as signed out. These
+  reach SDK internals (`sessionGetter`, `serverFactory`); a missing one
+  throws, so an SDK upgrade that moves them fails the tests. Nothing else
+  is aborted: other accounts' requests go on.
 
 ## Embeds (`mapEmbed`, spec 7.3)
 

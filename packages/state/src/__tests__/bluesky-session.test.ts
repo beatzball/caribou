@@ -4,7 +4,6 @@ import { CaribouError, type CaribouClient, type Capabilities } from '@beatzball/
 import {
   users, activeUserKey, activeUser, activeClient,
   addUserSession, markExpired, userName, loadFromStorage, signOutBluesky, renewSession, loadActiveAccount,
-  SIGN_OUT_WAIT_MS,
   type UserSession, type BlueskySession,
 } from '../users.js'
 import {
@@ -251,28 +250,26 @@ describe('signOutBluesky (rule 12)', () => {
     expect(fetchCalls()).toEqual([])
   })
 
-  it('a revoke that hangs: the entry is dropped after the bounded wait', async () => {
-    vi.useFakeTimers()
-    try {
-      setBlueskyDriver(driver({ signOut: vi.fn(() => new Promise<void>(() => {})) }))
-      addUserSession(bsky())
-      const done = signOutBluesky(bskyKey, 'B1')
-      await vi.advanceTimersByTimeAsync(SIGN_OUT_WAIT_MS - 1)
-      expect(users.value.has(bskyKey)).toBe(true)
-      await vi.advanceTimersByTimeAsync(1)
-      await done
-      expect(users.value.has(bskyKey)).toBe(false)
-    } finally {
-      vi.useRealTimers()
-    }
+  it('the entry goes only after the driver answered (the local delete is done)', async () => {
+    let done!: () => void
+    setBlueskyDriver(driver({ signOut: vi.fn(() => new Promise<void>((r) => { done = r })) }))
+    addUserSession(bsky())
+    const out = signOutBluesky(bskyKey, 'B1')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(users.value.has(bskyKey)).toBe(true)
+    done()
+    await out
+    expect(users.value.has(bskyKey)).toBe(false)
   })
 
-  it('a failed revoke still drops the entry', async () => {
-    setBlueskyDriver(driver({ signOut: vi.fn(async () => { throw new Error('offline') }) }))
+  it('a local delete that failed keeps the entry, its prefs and drafts', async () => {
+    setBlueskyDriver(driver({ signOut: vi.fn(async () => { throw new Error('store failed') }) }))
     addUserSession(bsky())
+    localStorage.setItem(`caribou.drafts.${bskyKey}`, '["draft"]')
     await signOutBluesky(bskyKey, 'B1')
-    expect(users.value.has(bskyKey)).toBe(false)
-    expect(activeUserKey.value).toBeNull()
+    expect(users.value.has(bskyKey)).toBe(true)
+    expect(activeUserKey.value).toBe(bskyKey)
+    expect(localStorage.getItem(`caribou.drafts.${bskyKey}`)).toBe('["draft"]')
   })
 
   it('a sign-out of an older sign-in leaves the newer one', async () => {
