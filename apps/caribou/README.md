@@ -459,6 +459,107 @@ shortcut there and in `onKey` together. `n` belongs here too: it sends
 **Bluesky is behind a flag.** `localStorage['caribou.flag.bluesky'] = '1'` turns it on for a developer.
 `components/_bluesky.ts` is the only door to the atproto libraries (`loadBluesky()`, a dynamic `import()`); they build into the `bsky` chunk group in `vite.config.ts`, which a Mastodon page never requests (`packages/bluesky-client/README.md`).
 
+### Bluesky views (#184)
+
+Phase 2b: client render only. Every rule here applies only to a Bluesky
+post or account (one with a `bluesky` field) or to a Bluesky client. A
+Mastodon post, account or client renders as before.
+
+**Home, profile and thread.**
+
+- Home for a Bluesky account is the Following feed: `<caribou-timeline
+  kind="home">` with the Bluesky client. It polls every 30 s like Mastodon.
+  The store keeps feed order (`timelineOrder()` is `null`). When a catch-up
+  does not meet the top post (`gap`), the banner says "Many new posts", and
+  applying it replaces the list.
+- Profile tabs are posts, replies and media (`getAuthorFeed` filters, in the
+  client). The thread is `getPostThread`.
+- The profile and thread pages render on the server as today. After
+  hydration, with the flag on and a Bluesky account active, a Bluesky route
+  (`/@did:…`, or `/@name` with a dot and no second `@`, spec 8.4) swaps in
+  a client-rendered `<caribou-profile>` or `<caribou-thread>`. The thread's
+  id is `at://<handle or did>/app.bsky.feed.post/<rkey>`. `/@me` looks the
+  account up by its DID. SSR for these routes is phase 3.
+
+**Nav.** With a Bluesky account active the rail hides Local and Public (by
+`capabilities`), and Search and Lists until phase 5 (by network).
+
+**A list that is empty but not ended.** A list ends only on a null cursor
+(`packages/state` README). A page can be empty with more behind it (five
+pages of unavailable bookmarks; a page where no post could be mapped). So
+the timeline and the profile render the "Older posts" anchor while the list
+is empty and has a cursor, and the empty notice only at the real end. With a
+client, the anchor loads the next page in place until a post arrives or the
+list ends. The server and the first client render agree: both read the
+cursor.
+
+**Moderation on the card** (spec 7.4, `packages/bluesky-client` README).
+The card reads the newest copy's `bluesky.moderation` (status cache first,
+so a refetch after Retry shows). The surface is `contentView` on the focused
+post of a thread and `contentList` everywhere else.
+
+| what | rule |
+|---|---|
+| `contentList.filter` | The card is hidden, like a filter's `hide`. Never on the focused post. |
+| surface `blur` | The post is covered: "Content warning: <reason names>". A Show button unless `noOverride`. |
+| a fail-closed reason (labeler unavailable, unknown label, moderation failed) | The cover also offers Retry: it fires `caribou:bluesky-moderation-retry` (the session glue reloads definitions) and refetches the post through the active Bluesky client. |
+| `contentMedia.blur` | `caribou-status-media` gets `sensitive`; `contentMedia.noOverride` sets its `no-override`. The link card, the video card and `bluesky.recordCard` lose their image, and one line says "Media hidden by a content label", with Show unless `noOverride`. |
+| `avatar.blur` (the post's result) | The author's avatar is blurred. |
+| a quoted post | The same rules with its own `bluesky.moderation`, inside the quote card: filter and blur cover the quote with its reasons; Show unless `noOverride`; the avatar blurs. |
+| profile header | `avatar` and `banner` from the account's `bluesky.moderation`. A Bluesky account with no result yet is blurred (fail closed). |
+
+**Covers compose; the strictest wins.** What a reader sees of a Bluesky
+post, quote or profile is the strictest of every cover that applies: the
+label cover (from the current reader's decision), the relationship cover
+(mute or block), the filter verdict, and the veil. A Show on one cover
+never lifts another: the covers nest, each with its own Show, outermost
+first. A `noOverride` cover (a label that forbids it, the veil, a decision
+Caribou cannot read) has no Show at all, and nothing under it renders.
+
+**A decision belongs to one reader.** Each copy records whose decision it
+carries (`bluesky.viewerOf` on a post; the reader that looked up a profile,
+the header's `.viewerOf` property, which `<caribou-profile>` sets). The current reader is the active Bluesky
+account, or none. A decision made for another reader, or for no reader
+when one is active, is never reused: the item is covered ("Checking this
+post against your moderation settings…", no Show, Retry) until a copy for
+the current reader arrives. Retry fetches as the reader, so with no
+Bluesky reader a cover has no Retry. With no Bluesky reader (signed out, or a
+Mastodon account active), an author with a `!no-unauthenticated` self-label
+is never shown: the notice "This account asked to be seen only by
+signed-in readers." takes the post's, quote's or profile's place, whatever
+decision the copy carries. A Bluesky post or account with no `moderation`
+is covered too (fail closed).
+
+**Every surface.** The card, the quote card and the profile header each
+ask `blueskyDecisionSettled` (`components/_bluesky-moderation.ts`) about
+their own newest decision: made for the current reader, and the reader
+veil settled for it (every subscribed labeler covered). Until it says so,
+the surface is covered, locked, with Retry; a new labeler subscription
+covers it again. The check reads the reader and check signals on every call,
+whatever its inputs, so an effect that first ran with no decision or
+another reader's still follows later changes. The quote card reads the quoted post's newest copy from
+the status cache, as the outer card does, and gets the same rules. The
+profile header covers the display name, handle and bio under
+`profileView` (and blurs the avatar and banner by their own contexts); its
+Retry fetches the account again through the reader. A successful Retry
+moves focus to what it revealed. The card's `labeled` class names the
+cover the reader is at (the first one not lifted).
+
+**The reader veil for Bluesky cards.** With a Bluesky account active, a
+Bluesky card shows its post only when `blueskyCheckSettled(post, reader)`
+says so. Until then it is covered with "Checking this post against your
+moderation settings…" and a Retry, and never a Show button. The check is
+in `./moderation`, so `_bluesky.ts` loads it lazily, the first time a
+Bluesky account is active; until it loads, the card is covered. The reader
+(prefs and label definitions) comes from `setBlueskyReader()`, which the
+session glue (`components/_bluesky-session.ts`) calls when the active
+Bluesky client restores; a reader for another account counts as none. A
+cover's Retry fires `caribou:bluesky-moderation-retry`: the glue loads the
+prefs and definitions again (one load at a time), sets the reader, and the
+active client's calls wait for that load, so the card's refetch is judged
+with the new definitions. A failed load leaves the reader as it was.
+With a Mastodon account active, or none, a Bluesky card settles at once.
+
 ## Accounts
 
 A reader can be signed in to several accounts, on several servers, with one
@@ -726,6 +827,126 @@ The phone nav bar uses it for More (Public, Bookmarks, Settings, Sign out).
   there, so its name is in the accessibility tree once. In e2e, check that
   with `ariaSnapshot()`: `getByRole` still finds an item slotted into the
   closed panel.
+
+## Bluesky sign-in endpoints
+
+The browser OAuth client (`@atproto/oauth-client-browser`) needs two things
+from this server (spec 5.2 and 10). Both are plain Nitro routes; neither
+stores anything.
+
+### `GET /oauth/client-metadata.json`
+
+`server/routes/oauth/client-metadata.json.get.ts`, built by
+`server/lib/bluesky-client-metadata.ts`.
+
+- The origin comes from `PUBLIC_BASE_URL` only, never from the `Host`
+  header. It is normalized with `new URL(value).origin`, so case and a
+  default port do not matter. atproto requires an `https` `client_id`
+  with no port. The one exception is a local host (`localhost`,
+  `127.0.0.1`, `[::1]`), which may use `http` and any port, for local
+  tests and the CI smoke job. Any other value (unset, `http` on a real
+  host, a port, a path, a query, credentials) makes the route answer
+  404: a guessed `client_id` is worse than none. Local dev does not need
+  it; the SDK uses its loopback client there.
+- `client_id` is `<origin>/oauth/client-metadata.json`, the exact URL the
+  file is served from. `client_uri` is `<origin>`; `redirect_uris` is
+  `["<origin>/signin/bluesky"]`.
+- A public client: `token_endpoint_auth_method: "none"`, no `jwks`.
+  `scope: "atproto transition:generic"`, `grant_types:
+  ["authorization_code", "refresh_token"]`, `response_types: ["code"]`,
+  `application_type: "web"`, `dpop_bound_access_tokens: true`,
+  `client_name: "Caribou"`.
+- `Cache-Control: public, max-age=300`. The file changes only with a deploy
+  or a new `PUBLIC_BASE_URL`, and an authorization server caches it anyway.
+- Health check: `scripts/verify-prod.mjs` fetches the file from the URL it
+  probes and fails unless `client_id` equals that URL and `redirect_uris`
+  is that origin's `/signin/bluesky`. The `smoke-image` job runs the
+  container with `PUBLIC_BASE_URL=http://localhost:3000` so the same check
+  runs before merge.
+
+### `GET /xrpc/com.atproto.identity.resolveHandle?handle=`
+
+`server/routes/xrpc/com.atproto.identity.resolveHandle.get.ts`, built by
+`server/lib/handle-resolver.ts` and `server/lib/ssrf-guard.ts`. A browser
+cannot read DNS TXT records, so the SDK's `handleResolver` points here.
+The answer has the shape the SDK's `XrpcHandleResolver` reads:
+
+- `200 {"did": "did:plc:…"}`, `Cache-Control: public, max-age=60`.
+- `400 {"error":"InvalidRequest","message":"Unable to resolve handle"}`
+  when neither lookup gives a DID. The SDK reads exactly this message as
+  "no such handle".
+- `400 {"error":"InvalidRequest","message":"Invalid handle"}` for a handle
+  that fails the syntax check. No lookup is made.
+- `429` over the rate limit, `503` when 16 lookups are already running.
+  Every error is `no-store`.
+
+The rules, in order. Each one has a test in
+`server/lib/__tests__/ssrf-guard.test.ts` or
+`server/lib/__tests__/handle-resolver.test.ts`.
+
+1. **Handle syntax first.** The atproto handle grammar: labels of
+   `[a-z0-9-]`, 1–63 characters, no leading or trailing hyphen, at least two
+   labels, the last label starts with a letter, 253 characters at most.
+   Lowercased before use. The reserved TLDs atproto refuses (`.alt`,
+   `.arpa`, `.example`, `.internal`, `.invalid`, `.local`, `.localhost`,
+   `.onion`, `.test`) are refused. An IP address is never a handle.
+2. **DNS first.** TXT `_atproto.<handle>`. Exactly one distinct
+   `did=<did>` value counts; none or two different ones count as no
+   answer. A DNS answer wins: HTTPS is tried only when DNS gives none.
+3. **Answer only a DID, by the atproto method rules.** The DNS value and
+   the HTTPS body (trimmed) must be `did:plc:<24 base32 chars>` or
+   `did:web:<host>`. The `did:web` host must pass rule 1 (syntax, no
+   reserved TLD, not an IP address) and has no port: atproto allows a
+   port only for `localhost`, which rule 1 already refuses. Anything else
+   counts as no answer, on both the DNS and the HTTPS path.
+4. **HTTPS only on port 443.** `https://<handle>/.well-known/atproto-did`,
+   `GET`, no cookies, no credentials.
+5. **Resolve once, vet every address.** The host is looked up once: A and
+   AAAA records through a `dns.promises.Resolver`, which can be cancelled
+   (not `dns.lookup`, which cannot). If **any** address is special, the whole
+   lookup is refused; a host that mixes public and private addresses is not
+   trusted. Special means, for IPv4: `0.0.0.0/8`, `10.0.0.0/8`,
+   `100.64.0.0/10` (CGNAT, and Alibaba's metadata address), `127.0.0.0/8`,
+   `169.254.0.0/16` (link-local, and the cloud metadata address
+   `169.254.169.254`), `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`,
+   `192.88.99.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`,
+   `203.0.113.0/24`, `224.0.0.0/4` (multicast), `240.0.0.0/4` (reserved and
+   broadcast). For IPv6 the rule is an allow list: only global unicast
+   `2000::/3`, and inside it not `2001::/23` (IETF special use, Teredo),
+   `2001:db8::/32` (documentation) or `2002::/16` (6to4). So loopback,
+   unspecified, IPv4-mapped (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`),
+   unique local (`fc00::/7`, and AWS's `fd00:ec2::254`), link-local and
+   multicast are all refused.
+6. **Connect to the vetted address only.** The request goes to that IP
+   literal; the host name is used only for TLS (SNI and certificate check)
+   and the `Host` header. There is no second DNS lookup, so a resolver that
+   answers a public address to the check and a private one to the connect
+   (DNS rebinding) cannot reach the private one. When the connection to one
+   vetted address fails (refused, unreachable, timed out), the next vetted
+   address is tried. An HTTP answer or a TLS failure is final.
+7. **Redirects are checked like the first hop.** At most 3. Each target must
+   be `https:` on port 443 with no credentials. Its host name must pass all
+   of rule 1 (syntax, no reserved TLD); an IP literal goes straight to the
+   address check. Then rules 5 and 6 run again for it.
+8. **Limits.** 3 s for the whole lookup (DNS, every hop and the body), 2 KB
+   body (more is a failure, not a cut), at most 3 redirects, at most 16
+   lookups at once (then 503), 30 requests per client IP per minute (then
+   429). The client IP is the last `X-Forwarded-For` entry (the one the
+   proxy in front of us added), else the socket address.
+9. **Cache.** An answer is kept for 5 minutes (under the 10 the spec
+   allows). A real "no answer" (no DID in DNS, and HTTPS answered without
+   one or was refused by rules 4–7) is kept for 30 seconds. A null that
+   came from the deadline or a passing error (a DNS server failure, a
+   connection or TLS error) is not kept, so the next request tries again.
+   At most 5,000 handles. The same handle asked twice at once makes one
+   lookup.
+10. **A lookup holds its slot until its work is over.** One of the 16
+    slots is held until every DNS and HTTPS operation the lookup started
+    has settled or been cancelled, not only until the answer is sent. At
+    the deadline every running operation is cancelled (the DNS resolver's
+    `cancel()`, the request's abort signal). The signal is checked before
+    each phase (TXT, then the address lookup, then each connection), so no
+    phase starts after the deadline.
 
 ## Tests
 

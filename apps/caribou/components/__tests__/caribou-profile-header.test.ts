@@ -5,6 +5,11 @@ import {
   activeClient, activeUserKey, addUserSession, relationshipCache, users, type UserSession,
 } from '@beatzball/caribou-state'
 import '../caribou-profile-header.js'
+import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
+
+// Bluesky's own labeler, the one every reader subscribes to.
+const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
+afterEach(() => { _testOnlyResetBlueskyVeil() })
 import type { CaribouProfileHeader } from '../caribou-profile-header.js'
 import type { CaribouButton } from '../caribou-button.js'
 import { mastodonLinkText } from '../_shared-styles.js'
@@ -118,10 +123,11 @@ function signIn(server = 'example.social'): NonNullable<typeof activeClient.valu
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0))
 
-async function mountWith(account: Account, instance = 'example.social'): Promise<CaribouProfileHeader> {
+async function mountWith(account: Account, instance = 'example.social', viewerOf: string | null = null): Promise<CaribouProfileHeader> {
   const el = document.createElement('caribou-profile-header') as CaribouProfileHeader
   el.account = account
   el.instance = instance
+  el.viewerOf = viewerOf
   document.body.appendChild(el)
   await el.updateComplete
   await flush()
@@ -417,11 +423,26 @@ describe('<caribou-profile-header> mute and block', () => {
 describe('<caribou-profile-header> across networks', () => {
   const BSKY = {
     ...ACCOUNT, id: 'did:plc:bob', acct: 'bob.example.com',
-    bluesky: { did: 'did:plc:bob', handleInvalid: false },
+    // A clean decision, made for the reader that looked the account up.
+    bluesky: {
+      did: 'did:plc:bob', handleInvalid: false,
+      moderation: {
+        contexts: Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView']
+          .map((c) => [c, { filter: false, blur: false, alert: false, inform: false, noOverride: false, reasons: [] }])),
+        labelersCovered: [BSKY_LABELER],
+      },
+    },
   } as unknown as Account
   const asBluesky = (client: NonNullable<typeof activeClient.value>) => {
     (client as { capabilities: typeof client.capabilities }).capabilities =
       { ...client.capabilities, network: 'bluesky', readLagMs: 60_000 }
+    // The reader veil's inputs, loaded, with Bluesky's labeler covered in
+    // the fixture: the decision is settled (app README, "Bluesky views").
+    setBlueskyReader({
+      userKey: client.userKey,
+      prefs: { adultContentEnabled: false, labels: {}, labelers: [], mutedWords: [], hiddenPosts: [] },
+      labelDefs: { [BSKY_LABELER]: [] },
+    })
   }
 
   afterEach(() => {
@@ -448,7 +469,11 @@ describe('<caribou-profile-header> across networks', () => {
     asBluesky(client)
     const lookup = vi.spyOn(client, 'lookupAccount')
     const fetchRel = vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ id: 'did:plc:bob' })])
-    const el = await mountWith(BSKY, '')
+    const el = await mountWith(BSKY, '', client.userKey)
+    // The veil's check loads lazily.
+    await _testOnlyVeilLoaded()
+    await flush()
+    await el.updateComplete
     expect(lookup).not.toHaveBeenCalled()
     expect(fetchRel).toHaveBeenCalledWith(['did:plc:bob'])
     expect(button(el)?.textContent).toBe('Follow')

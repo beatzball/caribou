@@ -10,6 +10,7 @@
 // them on every page.
 
 import type * as BlueskyBrowserModule from '@beatzball/caribou-bluesky-client/browser'
+import type * as BlueskyModerationNs from '@beatzball/caribou-bluesky-client/moderation'
 
 export const BLUESKY_FLAG_KEY = 'caribou.flag.bluesky'
 
@@ -54,4 +55,11 @@ export function blueskyOAuthConfig(origin: string): { clientId: string; handleRe
     return { clientId, handleResolver: url.origin }
   }
   return { clientId: `${url.origin}/oauth/client-metadata.json`, handleResolver: url.origin }
+}
+
+export type BlueskyModerationModule = typeof BlueskyModerationNs
+
+/** Moderation (the reader veil's check), from the same lazy chunk. */
+export function loadBlueskyModeration(): Promise<BlueskyModerationModule> {
+  return import('@beatzball/caribou-bluesky-client/moderation')
 }

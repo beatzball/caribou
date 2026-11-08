@@ -281,6 +281,14 @@ for Mastodon and Bluesky. The code is `viewer-slots.ts` (`settleViewer`,
   - **Page data.** Neither: `PAGE_DATA` with no other account named.
 - **The viewer clock.** A number that goes up by one each time a slot
   write finishes.
+- **A Bluesky decision stays with its reader.** `bluesky.moderation` was
+  made for the reader in that copy's `bluesky.viewerOf` (or for no reader).
+  The two always travel together. When the merge keeps the cached
+  `viewerOf` (another account's copy, page data), it keeps the cached
+  `moderation` too. When it clears `viewerOf` (another account's copy with
+  nothing cached, an account change), it drops `moderation`: a screen then
+  covers the post until a copy for the current reader arrives (app README,
+  "A decision belongs to one reader").
 
 **Who writes a slot.** Only two things:
 

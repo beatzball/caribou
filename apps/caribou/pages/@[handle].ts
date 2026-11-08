@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRouterParams } from 'h3'
-import { activeUserKey } from '@beatzball/caribou-state'
+import { activeClient, activeUserKey } from '@beatzball/caribou-state'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { shellInfo } from '../server/lib/shell-info.js'
 import {
@@ -15,6 +15,7 @@ import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
 import '../components/caribou-profile.js'
 import { enterWithCache } from '../components/_page-cache.js'
+import { blueskyActor, didOfUserKey, rendersBluesky } from '../components/_bluesky-route.js'
 
 type Tab = 'posts' | 'replies' | 'media'
 
@@ -70,9 +71,26 @@ export class HandlePage extends LitroPage {
   // knows neither, so both are read after the first update; the first render
   // is the placeholder the server sent.
   @state() private me: { userKey: string; tab: Tab } | null = null
+  // A Bluesky profile, rendered on the client (phase 2b; README, "Bluesky
+  // views"): the actor to look up and the segment the links keep. Set
+  // after the first render, which matches the server's.
+  @state() private bluesky: { actor: string; link: string; tab: Tab } | null = null
 
   protected override firstUpdated() {
     const data = this.serverData as HandlePageData | null
+    if (rendersBluesky(window, activeClient.value)) {
+      const tab = parseTab(new URLSearchParams(window.location.search).get('tab'))
+      const key = activeUserKey.value
+      if (data?.handle === 'me' && key) {
+        this.bluesky = { actor: didOfUserKey(key), link: 'me', tab }
+        return
+      }
+      const actor = blueskyActor(data?.handle ?? '')
+      if (actor) {
+        this.bluesky = { actor, link: '', tab }
+        return
+      }
+    }
     if (data?.handle !== 'me') return
     const userKey = activeUserKey.value
     if (!userKey) return
@@ -89,6 +107,14 @@ export class HandlePage extends LitroPage {
   override render() {
     const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null }, handle: '' }) as HandlePageData
     const inst = data.shell.instance ?? ''
+    if (this.bluesky) {
+      const { actor, link, tab } = this.bluesky
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <caribou-profile handle=${actor} link-handle=${link} tab=${tab}></caribou-profile>
+        </caribou-app-shell>
+      `
+    }
     if (data.kind === 'auth-required' && this.me) {
       // No `initial`: the profile looks the account up through the signed-in
       // client, which holds the token the server never sees.

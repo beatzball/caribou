@@ -14,6 +14,10 @@ import { confirmBlock } from './caribou-confirm-dialog.js'
 import { openListPicker } from './caribou-list-picker.js'
 import './caribou-button.js'
 import './caribou-menu.js'
+import {
+  BLUESKY_RETRY_EVENT, NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, blueskyDecisionSettled, coverNote,
+  currentBlueskyReader, decisionFits, isFailClosed, uiOf,
+} from './_bluesky-moderation.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
 // Without a window DOMPurify is a stub with no `addHook`; the server has its
@@ -27,6 +31,23 @@ export class CaribouProfileHeader extends LitElement {
     .banner { aspect-ratio: 3/1; background: var(--bg-2); }
     .row    { display: flex; gap: var(--space-3); padding: var(--space-3); }
     img.avatar { width: 80px; height: 80px; border-radius: var(--radius-md); flex-shrink: 0; }
+    /* A Bluesky avatar or banner label (README, "Bluesky views"). */
+    .banner.blurred, img.avatar.blurred { filter: blur(12px); }
+    .banner.blurred { clip-path: inset(0); }
+    .profile-cover .notice { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--fg-muted); }
+    .profile-cover .notice p { margin: 0; }
+    .vh {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
+    p.profile-cover { padding: var(--space-3); margin: 0; color: var(--fg-muted); }
+    .filter-toggle {
+      padding: var(--space-1) var(--space-3); font: inherit; font-size: 0.875rem; font-weight: 600;
+      cursor: pointer; color: var(--fg-0); background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+    }
+    .filter-toggle:hover { background: var(--bg-1); }
+    .filter-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .name   { color: var(--fg-0); font-weight: 600; font-size: 1.25rem; }
     .handle { color: var(--fg-muted); }
     .bio    { color: var(--fg-1); padding: 0 var(--space-3) var(--space-3); }
@@ -61,6 +82,24 @@ export class CaribouProfileHeader extends LitElement {
   // has to look the account up on their own server before they can follow
   // it. Without it the header cannot tell, and shows no button.
   @property() instance = ''
+  // Whose decision a Bluesky account's `moderation` is: the user key of the
+  // reader that looked it up, or null for no reader (the server's copy).
+  // README, "A decision belongs to one reader".
+  @property({ attribute: false }) viewerOf: string | null = null
+
+  // The reader a Bluesky decision must be made for. Null until mount, as on
+  // the server, which knows no reader.
+  @state() private blueskyReaderKey: string | null = null
+  // The reader chose Show on a profile covered by a label.
+  @state() private profileShown = false
+  // A Bluesky account's decision is settled for the reader
+  // (`blueskyDecisionSettled`: theirs, every subscribed labeler covered).
+  // True until mount, as on the server.
+  @state() private profileSettled = true
+  // The account as a Retry fetched it through the reader, with that reader.
+  // It stands in for `account` while it is the same account.
+  @state() private refreshed: { account: Account; viewerOf: string } | null = null
+  @state() private profileRetrying = false
 
   // What the follow button needs, known only after mount: the server has no
   // session. Both stay empty until then, so the first client render equals
@@ -120,15 +159,72 @@ export class CaribouProfileHeader extends LitElement {
   // the effect never sees them change; this re-resolves for those. Before
   // the first update bind() has not run, and its effect does the first
   // resolve itself.
-  protected override willUpdate(changed: PropertyValues<this>) {
+  // Untyped: `refreshed` is private, so it is not a key of `this`.
+  protected override willUpdate(changed: PropertyValues) {
+    if (changed.has('account') && changed.get('account') !== undefined) {
+      this.profileShown = false
+      this.refreshed = null
+    }
     if (this.hasUpdated && (changed.has('account') || changed.has('instance'))) {
       void this.resolveTarget(activeUser.value)
     }
+    // `account`, `viewerOf` and `refreshed` are not signals: the veil effect
+    // does not see them change.
+    if (this.hasUpdated && (changed.has('account') || changed.has('viewerOf') || changed.has('refreshed'))) this.syncSettled()
+  }
+
+  // The account shown and whose decision it carries.
+  private shownAccount(): { account: Account | null; viewerOf: string | null } {
+    const r = this.refreshed
+    return r && r.account.id === this.account?.id ? r : { account: this.account, viewerOf: this.viewerOf }
+  }
+
+  // Calls the shared check every time, with or without an account, so the
+  // effect that runs this always follows the client, the reader and the
+  // check; `willUpdate` covers the Lit properties.
+  private syncSettled() {
+    const client = activeClient.value
+    const { account, viewerOf } = this.shownAccount()
+    const owned = account?.bluesky ? { viewerOf, moderation: account.bluesky.moderation ?? null } : null
+    const settled = blueskyDecisionSettled(owned, client)
+    if (settled !== this.profileSettled) this.profileSettled = settled
+  }
+
+  // Asks the session glue to reload label definitions, and fetches the
+  // account again through the current reader.
+  private onRetryProfile = async () => {
+    const account = this.shownAccount().account
+    if (!account || this.profileRetrying) return
+    window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: account.id } }))
+    const client = activeClient.peek()
+    if (!client || client.capabilities.network !== 'bluesky') return
+    const hadFocus = this.shadowRoot?.activeElement?.matches('caribou-button.retry') === true
+    this.profileRetrying = true
+    try {
+      const fresh = await client.lookupAccount(account.id)
+      if (activeClient.peek() === client && fresh?.id === this.account?.id) {
+        this.refreshed = { account: fresh, viewerOf: client.userKey }
+      }
+    } catch {
+      // Still covered, with Retry.
+    } finally {
+      this.profileRetrying = false
+    }
+    // It worked: the Retry is gone, so focus goes to the profile it
+    // revealed (its name row).
+    await this.updateComplete
+    const row = this.renderRoot.querySelector<HTMLElement>('.row')
+    if (!hadFocus || !row || this.renderRoot.querySelector('.profile-cover')) return
+    row.setAttribute('tabindex', '-1')
+    row.focus()
   }
 
   private bind() {
     const disposeResolve = effect(() => { void this.resolveTarget(activeUser.value) })
+    // The reader, their prefs and their label definitions are signals.
+    const disposeVeil = effect(() => { this.syncSettled() })
     const disposeRead = effect(() => {
+      this.blueskyReaderKey = currentBlueskyReader(activeClient.value)
       const user = activeUser.value
       const target = this.targetSignal.value
       this.target = target
@@ -136,7 +232,7 @@ export class CaribouProfileHeader extends LitElement {
         ? relationshipCache.value.get(relationshipKey(user.userKey, target.id))
         : undefined
     })
-    this.dispose = () => { disposeResolve(); disposeRead() }
+    this.dispose = () => { disposeResolve(); disposeVeil(); disposeRead() }
   }
 
   // Finds the account as the signed-in user's server knows it. Nothing to
@@ -267,7 +363,7 @@ export class CaribouProfileHeader extends LitElement {
   }
 
   override render() {
-    const a = this.account
+    const { account: a, viewerOf } = this.shownAccount()
     if (!a) return nothing
     const headerImg = a.headerStatic || a.header
     // JSON.stringify gives a quoted CSS string, so a `)` or a quote in the
@@ -275,10 +371,55 @@ export class CaribouProfileHeader extends LitElement {
     const banner = headerImg
       ? `background-image:url(${JSON.stringify(headerImg)});background-size:cover;`
       : nothing
+    // A Bluesky account: covers compose and the strictest wins (README,
+    // "Bluesky views"). Only a decision made for the current reader counts;
+    // no fitting decision blurs the pictures and covers the profile. A
+    // Mastodon account has no `bluesky` field.
+    const bsky = a.bluesky
+    const reader = this.blueskyReaderKey
+    if (bsky && reader === null && asksNoUnauthenticated(a)) {
+      return html`<div class="banner blurred"></div>
+        <p class="profile-cover notice">${NO_UNAUTHENTICATED_NOTE}</p>`
+    }
+    const mod = bsky && decisionFits(viewerOf, reader) && this.profileSettled ? bsky.moderation : undefined
+    const blurAvatar = !!bsky && (!mod || uiOf(mod, 'avatar')!.blur)
+    const blurBanner = !!bsky && (!mod || uiOf(mod, 'banner')!.blur)
+    const view = bsky ? (mod ? uiOf(mod, 'profileView')! : UNREADABLE) : null
+    if (view && (view.blur || view.filter)) {
+      const note = mod ? coverNote(view) : 'Checking this profile against your moderation settings…'
+      const canShow = !!mod && !view.noOverride
+      const shown = canShow && this.profileShown
+      // Retry fetches as the reader: with no Bluesky reader there is none.
+      const retry = reader !== null && (!mod || view.reasons.some(isFailClosed))
+      return html`
+        <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
+        <div class="profile-cover">
+          <div class="row">
+            <img class=${blurAvatar ? 'avatar blurred' : 'avatar'} src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
+            <div class="notice">
+              <p>${note}</p>
+              ${canShow
+                ? html`<button type="button" class="filter-toggle" aria-controls="profile-covered"
+                    aria-expanded=${shown ? 'true' : 'false'}
+                    aria-label=${`${shown ? 'Hide' : 'Show'} profile with a label: ${note}`}
+                    @click=${this.onToggleProfile}>${shown ? 'Hide' : 'Show'}</button>`
+                : nothing}
+              ${retry
+                ? html`<caribou-button class="retry" variant="secondary" ?loading=${this.profileRetrying}
+                    @click=${this.onRetryProfile}>Retry<span class="vh"> checking this profile</span></caribou-button>`
+                : nothing}
+            </div>
+          </div>
+          ${canShow
+            ? html`<div id="profile-covered" ?hidden=${!shown}>${shown ? this.renderIdentity(a) : nothing}</div>`
+            : nothing}
+        </div>
+      `
+    }
     return html`
-      <div class="banner" style=${banner}></div>
+      <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
       <div class="row">
-        <img class="avatar" src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
+        <img class=${blurAvatar ? 'avatar blurred' : 'avatar'} src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
         <div>
           <div class="name">${a.displayName || a.username}</div>
           <div class="handle">@${a.acct}</div>
@@ -293,5 +434,29 @@ export class CaribouProfileHeader extends LitElement {
         <span><strong>${a.followersCount}</strong> Followers</span>
       </div>
     `
+  }
+
+  private onToggleProfile = () => { this.profileShown = !this.profileShown }
+
+  // What a profile cover hides: name, handle, badges, follow, bio, counts.
+  // One element around it all: happy-dom drops a child binding at the top
+  // level of a template (README, Tests).
+  private renderIdentity(a: Account) {
+    return html`<div class="identity">
+      <div class="row">
+        <div>
+          <div class="name">${a.displayName || a.username}</div>
+          <div class="handle">@${a.acct}</div>
+          ${this.renderBadges()}
+        </div>
+        ${this.renderFollow()}
+      </div>
+      <div class="bio">${unsafeHTML(this.safeNote(a.note ?? ''))}</div>
+      <div class="counts">
+        <span><strong>${a.statusesCount}</strong> Posts</span>
+        <span><strong>${a.followingCount}</strong> Following</span>
+        <span><strong>${a.followersCount}</strong> Followers</span>
+      </div>
+    </div>`
   }
 }

@@ -161,7 +161,13 @@ function keep(out: Fields, had: Fields, key: string): void {
 export function withoutViewerState(copy: Status): Status {
   const out = { ...copy } as unknown as Fields
   for (const key of VIEWER_FIELDS) delete out[key]
-  if (copy.bluesky) out.bluesky = { ...copy.bluesky, ...BLUESKY_VIEWER_FIELDS }
+  if (copy.bluesky) {
+    // The decision was made for the reader named in `viewerOf`; with that
+    // name gone, so is the decision (README, "A Bluesky decision stays with
+    // its reader").
+    const { moderation: _decision, ...rest } = copy.bluesky
+    out.bluesky = { ...rest, ...BLUESKY_VIEWER_FIELDS }
+  }
   return out as unknown as Status
 }
 
@@ -212,7 +218,15 @@ export function settleViewer(copy: Status, known: Status | undefined, source: Co
     // A field the cache lacks is the copy's (page data) or gone (another
     // account's: `withoutViewerState` removed it).
     for (const key of VIEWER_FIELDS) if (key in had) out[key] = had[key]
-    if (outBsky && hadBsky) for (const key of BLUESKY_KEYS) outBsky[key] = hadBsky[key]
+    if (outBsky && hadBsky) {
+      for (const key of BLUESKY_KEYS) outBsky[key] = hadBsky[key]
+      // The decision goes with the `viewerOf` it was made for: the copy's
+      // when the kept reader is the copy's, else the cached one.
+      const copyBsky = copy.bluesky as unknown as Fields
+      if ((copyBsky.viewerOf ?? null) === (hadBsky.viewerOf ?? null)) outBsky.moderation = copyBsky.moderation
+      else if ('moderation' in hadBsky) outBsky.moderation = hadBsky.moderation
+      else delete outBsky.moderation
+    }
     keepPageCounts(out, had, copy.id)
   }
   if (outBsky) out.bluesky = outBsky

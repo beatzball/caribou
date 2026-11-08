@@ -189,7 +189,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Run container
-        run: docker run -d --rm -p 3000:3000 --name caribou-smoke caribou-app:ci
+        # PUBLIC_BASE_URL makes /oauth/client-metadata.json answer, so the
+        # probe can check that its client_id equals the URL it is served from.
+        run: docker run -d --rm -p 3000:3000 -e PUBLIC_BASE_URL=http://localhost:3000 --name caribou-smoke caribou-app:ci
       - name: Probe container
         env:
           CARIBOU_BASE_URL: http://localhost:3000

@@ -34,7 +34,13 @@ done.
    - starts a deploy and checks that Coolify answered for this app,
    - waits up to 8 minutes until Coolify reports `finished`.
 5. `verify-prod` checks that `https://caribou.quest/api/health` reports the
-   same commit.
+   same commit, and that `https://caribou.quest/oauth/client-metadata.json`
+   names itself as its `client_id`. That second check fails when the app's
+   `PUBLIC_BASE_URL` is unset or is not `https://caribou.quest`.
+
+The handle resolver's rate limit trusts the last `X-Forwarded-For` entry. So
+the app must only be reachable through the proxy (Coolify's Traefik), which
+adds that entry; a client that reaches the container directly can set it.
 
 Coolify never builds the app. It only pulls and runs the tested image.
 

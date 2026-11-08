@@ -6,24 +6,60 @@
 // Every atproto call goes through `loadBluesky()`, so the libraries stay in
 // their lazy chunk (`_bluesky.ts`).
 
-import { signal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
-import { CaribouError } from '@beatzball/caribou-mastodon-client'
+import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { BLUESKY_CAPABILITIES } from '@beatzball/caribou-bluesky-client'
-import type { BlueskyReader } from '@beatzball/caribou-bluesky-client/moderation'
 import {
   activeUserKey, addUserSession, blueskyUserKey, isBlueskySession, renewSession, setBlueskyDriver, users,
   BlueskySessionGone,
   type BlueskyDriver,
 } from '@beatzball/caribou-state'
 import { BLUESKY_CALLBACK_PATH, blueskyOAuthConfig, loadBluesky, type BlueskyBrowser } from './_bluesky.js'
+import { BLUESKY_RETRY_EVENT, blueskyReader, setBlueskyReader } from './_bluesky-moderation.js'
 
-/**
- * The active Bluesky reader's moderation inputs, for the reader veil and the
- * cards (#184). Null until the active Bluesky client has restored, and while
- * a Mastodon account is active. `prefs` or `labelDefs` null: failed to load.
- */
-export const blueskyReader = signal<BlueskyReader | null>(null)
+// The active Bluesky reader's moderation inputs (prefs and label
+// definitions) go to the one reader signal in `_bluesky-moderation.ts`,
+// through `setBlueskyReader`. Null until the active Bluesky client has
+// restored, and while a Mastodon account is active. `prefs` or `labelDefs`
+// null: failed to load (fail closed).
+
+type Restored = Awaited<ReturnType<BlueskyBrowser['restoreClient']>>
+
+// The active account's restored session, for a cover's Retry
+// (`BLUESKY_RETRY_EVENT`): its definitions load again, and the client's
+// calls wait for that, so the card's refetch is judged with the new ones.
+let active: { userKey: string; restored: Restored; reloading: Promise<void> | null } | null = null
+
+function publishReader(userKey: string, r: { prefs: Restored['prefs']; labelDefs: Restored['labelDefs'] }): void {
+  setBlueskyReader({ userKey: userKey as `${string}@${string}`, prefs: r.prefs, labelDefs: r.labelDefs })
+}
+
+/** Loads the active reader's moderation inputs again. One at a time. */
+export function reloadActiveModeration(): Promise<void> | null {
+  const a = active
+  if (!a || activeUserKey.peek() !== a.userKey) return null
+  a.reloading ??= a.restored.reloadModeration().then(
+    (r) => { if (active === a && activeUserKey.peek() === a.userKey) publishReader(a.userKey, r) },
+    // Still unknown: the covers stay, with Retry.
+    () => {},
+  ).finally(() => { a.reloading = null })
+  return a.reloading
+}
+
+// Every async call waits for a reload in progress for its account.
+function afterReload(client: CaribouClient, userKey: string): CaribouClient {
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver)
+      if (typeof value !== 'function' || prop === 'timelineOrder') return value
+      return (...args: unknown[]) => {
+        const pending = active?.userKey === userKey ? active.reloading : null
+        if (!pending) return (value as (...a: unknown[]) => unknown).apply(target, args)
+        return pending.then(() => (value as (...a: unknown[]) => unknown).apply(target, args))
+      }
+    },
+  })
+}
 
 async function oauthClient(mod: BlueskyBrowser) {
   return mod.loadOAuthClient(blueskyOAuthConfig(location.origin))
@@ -53,13 +89,10 @@ export const blueskyDriver: BlueskyDriver = {
         onExpired: hooks.onExpired,
       })
       if (activeUserKey.peek() === session.userKey) {
-        blueskyReader.value = {
-          userKey: session.userKey as BlueskyReader['userKey'],
-          prefs: restored.prefs,
-          labelDefs: restored.labelDefs,
-        }
+        active = { userKey: session.userKey, restored, reloading: null }
+        publishReader(session.userKey, restored)
       }
-      return restored.client
+      return afterReload(restored.client, session.userKey)
     } catch (err) {
       if (err instanceof mod.SessionGone) throw new BlueskySessionGone(err.message, { cause: err })
       throw mod.normalizeXrpcError(err)
@@ -85,8 +118,11 @@ export function installBlueskyDriver(): void {
   setBlueskyDriver(blueskyDriver)
   // The reader belongs to one account.
   activeUserKey.subscribe((key) => {
-    if (blueskyReader.peek() && blueskyReader.peek()!.userKey !== key) blueskyReader.value = null
+    if (blueskyReader.peek() && blueskyReader.peek()!.userKey !== key) setBlueskyReader(null)
+    if (active && active.userKey !== key) active = null
   })
+  // A cover's Retry (#184): load the definitions again.
+  window.addEventListener(BLUESKY_RETRY_EVENT, () => { void reloadActiveModeration() })
 }
 
 /** Why a sign-in did not start or did not finish, in words for the reader. */
