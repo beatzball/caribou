@@ -96,6 +96,20 @@ describe('stale build reload', () => {
     expect(assign).toHaveBeenCalledOnce()
   })
 
+  it('a chunk the browser drops because the page is leaving does not reload', () => {
+    // Firefox fails a dynamic import still loading when the page navigates
+    // away. A reload then would cancel the reader's own navigation.
+    const target = new EventTarget()
+    installPreloadErrorReload(target, env)
+    target.dispatchEvent(new Event('beforeunload'))
+    target.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: loadError() }))
+    expect(assign).not.toHaveBeenCalled()
+    // Back from the back-forward cache: the page is live again.
+    target.dispatchEvent(new Event('pageshow'))
+    target.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: loadError() }))
+    expect(assign).toHaveBeenCalledOnce()
+  })
+
   it('ignores a vite:preloadError that is not a load failure', () => {
     const target = new EventTarget()
     installPreloadErrorReload(target, env)
