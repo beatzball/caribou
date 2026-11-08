@@ -2,15 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import type { Relationship, Status } from '@beatzball/caribou-mastodon-client'
 import {
-  activeUserKey, cacheStatus, relationshipCache, relationshipKey, removeActiveUser, statusCache, users,
+  activeUserKey, cacheStatus, readSource, relationshipCache, relationshipKey, removeActiveUser, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
-import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded } from '../_bluesky-moderation.js'
+import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
 import { blueskyClients } from './_bluesky-clients.js'
 import {
-  ALICE, BSKY_LABELER, LABELER, READER_KEY, asPostView, author, blueskyClient, fakeAgent, label,
-  mappedPost, post, publicPost, quoting, signInBluesky, type FakeAgent,
+  ALICE, BSKY_LABELER, DEFS, LABELER, READER_KEY, asPostView, author, blueskyClient, fakeAgent, label,
+  mappedPost, post, prefs, publicPost, quoting, readerOf, signInBluesky, type FakeAgent,
 } from './_bluesky-helpers.js'
 
 // Covers compose; the strictest wins; a decision belongs to one reader
@@ -257,11 +257,15 @@ describe('the quote card', () => {
     let q = await quoteOf(el)
     expect(q.shadowRoot!.querySelector('.quote-note')!.textContent).toContain('unknown label')
     agent.getPosts.mockResolvedValue({ data: { posts: [asPostView({ ...post(), uri: quotedUri })] } })
-    ;(q.shadowRoot!.querySelector('caribou-button.retry') as HTMLElement).click()
+    const quoteRetry = q.shadowRoot!.querySelector('caribou-button.retry') as HTMLElement
+    quoteRetry.focus()
+    quoteRetry.click()
     await settle(el)
     q = await quoteOf(el)
     expect(agent.getPosts).toHaveBeenCalledWith({ uris: [quotedUri] })
     expect(q.shadowRoot!.querySelector('.quote-content')).not.toBeNull()
+    // Focus went from the Retry to the quote it revealed.
+    expect(q.shadowRoot!.activeElement).toBe(q.shadowRoot!.querySelector('.quote'))
   })
 
   it("a signed-out reader never uses another reader's copy of the quoted post", async () => {
@@ -277,5 +281,70 @@ describe('the quote card', () => {
     // The cache dropped the other reader's decision: covered, no Show.
     expect(q.shadowRoot!.querySelector('.quote-note')).not.toBeNull()
     expect(q.shadowRoot!.querySelector('button.filter-toggle')).toBeNull()
+  })
+})
+
+describe('the veil on every surface: every subscribed labeler covered', () => {
+  const NEW_LABELER = 'did:plc:newlabeler'
+  const quotedUri = `at://${ALICE}/app.bsky.feed.post/3kabc2xyzaa22`
+  const ALL = [BSKY_LABELER, LABELER, NEW_LABELER]
+  const quoteOf = async (el: CaribouStatusCard) => {
+    const q = $(el, 'caribou-status-quote') as HTMLElement & { updateComplete: Promise<boolean> }
+    await q.updateComplete
+    return q
+  }
+
+  it('a quoted copy for this reader that misses a labeler stays covered until a covered copy arrives', async () => {
+    signIn()
+    const el = await mount(await mappedPost(quoting({})))
+    cacheStatus(await mappedPost({ ...post(), uri: quotedUri }, { covered: [BSKY_LABELER] }), readSource(READER_KEY))
+    await settle(el)
+    let q = await quoteOf(el)
+    expect($(el, '.status-content')).not.toBeNull()
+    expect(q.shadowRoot!.querySelector('.quote-content')).toBeNull()
+    expect(q.shadowRoot!.querySelector('button.filter-toggle')).toBeNull()
+    expect(q.shadowRoot!.querySelector('caribou-button.retry')).not.toBeNull()
+    cacheStatus(await mappedPost({ ...post(), uri: quotedUri }), readSource(READER_KEY))
+    await settle(el)
+    q = await quoteOf(el)
+    expect(q.shadowRoot!.querySelector('.quote-content')).not.toBeNull()
+  })
+
+  it('a new subscription covers the quote again, while the outer post (covered for it) shows', async () => {
+    signIn()
+    const el = await mount(await mappedPost(quoting({}), { covered: ALL }))
+    cacheStatus(await mappedPost({ ...post(), uri: quotedUri }), readSource(READER_KEY))
+    await settle(el)
+    expect((await quoteOf(el)).shadowRoot!.querySelector('.quote-content')).not.toBeNull()
+    setBlueskyReader(readerOf({
+      prefs: prefs({ labelers: [{ did: BSKY_LABELER, labels: {} }, { did: LABELER, labels: {} }, { did: NEW_LABELER, labels: {} }] }),
+      defs: { ...DEFS, [NEW_LABELER]: [] },
+    }))
+    await settle(el)
+    expect($(el, '.status-content')).not.toBeNull()
+    expect((await quoteOf(el)).shadowRoot!.querySelector('.quote-content')).toBeNull()
+  })
+})
+
+describe('Retry needs a reader', () => {
+  it('signed out, a cover has no Retry', async () => {
+    signIn()
+    const el = await mount(await mappedPost(post()))
+    removeActiveUser()
+    await settle(el)
+    expect($(el, 'article.filtered')).not.toBeNull()
+    expect($(el, 'caribou-button.retry')).toBeNull()
+  })
+})
+
+describe('the article class follows the cover shown', () => {
+  it('a lifted label over a filter cover: the article is no longer "labeled"', async () => {
+    signIn()
+    const el = await mount(withFilter(await mappedPost(post({ labels: [label('spoiler', LABELER)] }))))
+    expect($(el, 'article')!.classList.contains('labeled')).toBe(true)
+    $$(el, 'button.filter-toggle')[0]!.click()
+    await settle(el)
+    expect($(el, 'article')!.classList.contains('labeled')).toBe(false)
+    expect($(el, 'article')!.classList.contains('filtered')).toBe(true)
   })
 })

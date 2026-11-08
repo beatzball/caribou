@@ -18,7 +18,7 @@ import { accountPath, postPath } from './_profile-path.js'
 import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import {
-  BLUESKY_RETRY_EVENT, NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, blueskyVeilSettled, coverNote,
+  BLUESKY_RETRY_EVENT, NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, blueskyDecisionSettled, coverNote,
   currentBlueskyReader, decisionFits, isFailClosed, surfaceOf, uiOf,
 } from './_bluesky-moderation.js'
 import { confirmBlock, confirmDialog } from './caribou-confirm-dialog.js'
@@ -505,7 +505,7 @@ export class CaribouStatusCard extends LitElement {
       if (bluesky !== this.liveBluesky) this.liveBluesky = bluesky
       const reader = currentBlueskyReader(client)
       if (reader !== this.blueskyReaderKey) this.blueskyReaderKey = reader
-      const settled = bluesky?.moderation ? blueskyVeilSettled(bluesky, client) : true
+      const settled = blueskyDecisionSettled(bluesky, client)
       if (settled !== this.blueskySettled) this.blueskySettled = settled
       const prev = this.liveFields
       if (next === null ? prev !== null : prev === null || !sameFields(prev, next)) this.liveFields = next
@@ -1157,7 +1157,9 @@ export class CaribouStatusCard extends LitElement {
     // A cover with no Show is the only one shown: nothing under it renders.
     const locked = covers.find((c) => !c.canShow)
     const chain = locked ? [locked] : covers
-    return html`<article data-variant=${this.variant} class=${chain[0]!.labeled ? 'filtered labeled' : 'filtered'}>${this.renderCovers(s, chain, 0)}</article>`
+    // The class names the cover the reader is at: the first one not lifted.
+    const at = chain.find((c) => !(c.canShow && c.shown))
+    return html`<article data-variant=${this.variant} class=${at?.labeled ? 'filtered labeled' : 'filtered'}>${this.renderCovers(s, chain, 0)}</article>`
   }
 
   // One cover and, when its Show is on, the next one inside it (or the post).
@@ -1192,7 +1194,8 @@ export class CaribouStatusCard extends LitElement {
     return {
       labeled: true, note, canShow, shown, toggle: this.onToggleLabel,
       name: `${shown ? 'Hide' : 'Show'} post with a label: ${note}`,
-      retry: ui === null || ui.reasons.some(isFailClosed)
+      // Retry fetches as the reader: with no Bluesky reader there is none.
+      retry: this.blueskyReaderKey !== null && (ui === null || ui.reasons.some(isFailClosed))
         ? html`<caribou-button class="retry" variant="secondary" ?loading=${this.moderationRetrying}
             @click=${this.onRetryModeration}>Retry<span class="vh"> checking this post</span></caribou-button>`
         : nothing,

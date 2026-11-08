@@ -6,8 +6,10 @@ import { blueskyClients } from './_bluesky-clients.js'
 import '../caribou-profile-header.js'
 import type { CaribouProfileHeader } from '../caribou-profile-header.js'
 import {
-  ALICE, BSKY_LABELER, READER_KEY, author, blueskyClient, fakeAgent, label, prefs, signInBluesky,
+  ALICE, BSKY_LABELER, DEFS, LABELER, READER_KEY, author, blueskyClient, fakeAgent, label, prefs, readerOf,
+  signInBluesky,
 } from './_bluesky-helpers.js'
+import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
 
 vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
   const real = await importOriginal<typeof ClientModule>()
@@ -40,11 +42,16 @@ async function mount(account: Account, viewerOf: string | null = null): Promise<
   el.account = account
   el.viewerOf = viewerOf
   document.body.appendChild(el)
-  for (let i = 0; i < 3; i++) {
+  await settle(el)
+  return el
+}
+
+async function settle(el: CaribouProfileHeader) {
+  for (let i = 0; i < 4; i++) {
+    await _testOnlyVeilLoaded()
     await new Promise((r) => setTimeout(r, 0))
     while (!(await el.updateComplete)) { /* settle */ }
   }
-  return el
 }
 
 const text = (el: Element) => el.shadowRoot!.textContent ?? ''
@@ -56,6 +63,7 @@ beforeEach(() => {
   activeUserKey.value = null
   blueskyClients.clear()
   localStorage.clear()
+  _testOnlyResetBlueskyVeil()
 })
 afterEach(() => { document.body.replaceChildren() })
 
@@ -147,5 +155,58 @@ describe('<caribou-profile-header>: the profile cover (profileView) and whose de
     const el = await mount(await lookedUp([]), READER_KEY)
     expect(el.shadowRoot!.querySelector('.name')).not.toBeNull()
     expect(blurred(el, 'img.avatar')).toBe(false)
+  })
+})
+
+describe('<caribou-profile-header>: the veil (every subscribed labeler covered) and Retry', () => {
+  const NEW_LABELER = 'did:plc:newlabeler'
+  const view = { ...author(ALICE), banner: BANNER, description: 'bio', followersCount: 1, followsCount: 2, postsCount: 3 }
+  let getProfile: ReturnType<typeof vi.fn>
+  function signIn() {
+    getProfile = vi.fn(async () => ({ data: view }))
+    signInBluesky(blueskyClient(fakeAgent({ getProfile })))
+  }
+  const name = (el: Element) => el.shadowRoot!.querySelector('.name')
+  const retry = (el: Element) => el.shadowRoot!.querySelector<HTMLElement>('caribou-button.retry')
+
+  it('the same reader, but a subscribed labeler not covered: covered, no Show, with Retry; Retry brings a covered copy', async () => {
+    signIn()
+    const el = await mount(await lookedUp([], { covered: [BSKY_LABELER] }), READER_KEY)
+    expect(name(el)).toBeNull()
+    expect(blurred(el, 'img.avatar')).toBe(true)
+    expect(el.shadowRoot!.querySelector('button.filter-toggle')).toBeNull()
+    retry(el)!.focus()
+    retry(el)!.click()
+    await settle(el)
+    expect(getProfile).toHaveBeenCalledWith({ actor: ALICE })
+    expect(name(el)).not.toBeNull()
+    expect(blurred(el, 'img.avatar')).toBe(false)
+  })
+
+  it('a new subscription covers the profile again', async () => {
+    signIn()
+    const el = await mount(await lookedUp([], {}), READER_KEY)
+    expect(name(el)).not.toBeNull()
+    setBlueskyReader(readerOf({
+      prefs: prefs({ labelers: [{ did: BSKY_LABELER, labels: {} }, { did: LABELER, labels: {} }, { did: NEW_LABELER, labels: {} }] }),
+      defs: { ...DEFS, [NEW_LABELER]: [] },
+    }))
+    await settle(el)
+    expect(name(el)).toBeNull()
+  })
+
+  it('a fail-closed profile has a Retry that refetches through the reader', async () => {
+    signIn()
+    const el = await mount(await lookedUp([label('not-defined', LABELER, ALICE)], {}), READER_KEY)
+    expect(el.shadowRoot!.textContent).toContain('unknown label')
+    retry(el)!.click()
+    await settle(el)
+    expect(name(el)).not.toBeNull()
+  })
+
+  it('signed out, a cover has no Retry: there is no reader to fetch as', async () => {
+    const el = await mount(await lookedUp([]), READER_KEY)
+    expect(name(el)).toBeNull()
+    expect(retry(el)).toBeNull()
   })
 })

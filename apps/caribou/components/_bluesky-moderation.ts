@@ -152,3 +152,26 @@ export function asksNoUnauthenticated(account: { bluesky?: { labels?: readonly {
 export function decisionFits(viewerOf: string | null | undefined, reader: string | null): boolean {
   return (viewerOf ?? null) === reader
 }
+
+/**
+ * The full check for one surface's own newest decision (README, "Covers
+ * compose"): the decision was made for the current reader, and the reader
+ * veil is settled for it (every subscribed labeler covered). The card, the
+ * quote and the profile header all ask this. Reads signals, so an effect
+ * that calls it follows reader and subscription changes. A decision that is
+ * missing is not judged here: the caller covers it as unreadable.
+ */
+export function blueskyDecisionSettled(
+  owned: { viewerOf?: string | null; moderation?: BlueskyModerationResult | null } | null | undefined,
+  client: Pick<CaribouClient, 'userKey' | 'capabilities'> | null,
+): boolean {
+  if (!owned) return true
+  // Load the check as soon as a Bluesky reader is active, even when this
+  // copy is not yet theirs: the reader's copy must not wait a turn for it.
+  if (client?.capabilities.network === 'bluesky') ensureCheck()
+  if (!decisionFits(owned.viewerOf, currentBlueskyReader(client))) return false
+  if (!owned.moderation) return true
+  return blueskyVeilSettled({
+    viewerOf: (owned.viewerOf ?? null) as StatusBluesky['viewerOf'], moderation: owned.moderation,
+  }, client)
+}

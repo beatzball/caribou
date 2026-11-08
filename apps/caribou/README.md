@@ -513,22 +513,30 @@ Caribou cannot read) has no Show at all, and nothing under it renders.
 
 **A decision belongs to one reader.** Each copy records whose decision it
 carries (`bluesky.viewerOf` on a post; the reader that looked up a profile,
-`viewer-of` on the header). The current reader is the active Bluesky
+the header's `.viewerOf` property, which `<caribou-profile>` sets). The current reader is the active Bluesky
 account, or none. A decision made for another reader, or for no reader
 when one is active, is never reused: the item is covered ("Checking this
 post against your moderation settings…", no Show, Retry) until a copy for
-the current reader arrives. With no Bluesky reader (signed out, or a
+the current reader arrives. Retry fetches as the reader, so with no
+Bluesky reader a cover has no Retry. With no Bluesky reader (signed out, or a
 Mastodon account active), an author with a `!no-unauthenticated` self-label
 is never shown: the notice "This account asked to be seen only by
 signed-in readers." takes the post's, quote's or profile's place, whatever
 decision the copy carries. A Bluesky post or account with no `moderation`
 is covered too (fail closed).
 
-**Every surface.** The quote card reads the quoted post's newest copy
-from the status cache, as the outer card does, and gets the same rules,
-with Retry on a fail-closed cover. The profile header covers the display
-name, handle and bio under `profileView` (and blurs the avatar and banner
-by their own contexts). A successful Retry moves focus to what it revealed.
+**Every surface.** The card, the quote card and the profile header each
+ask `blueskyDecisionSettled` (`components/_bluesky-moderation.ts`) about
+their own newest decision: made for the current reader, and the reader
+veil settled for it (every subscribed labeler covered). Until it says so,
+the surface is covered, locked, with Retry; a new labeler subscription
+covers it again. The quote card reads the quoted post's newest copy from
+the status cache, as the outer card does, and gets the same rules. The
+profile header covers the display name, handle and bio under
+`profileView` (and blurs the avatar and banner by their own contexts); its
+Retry fetches the account again through the reader. A successful Retry
+moves focus to what it revealed. The card's `labeled` class names the
+cover the reader is at (the first one not lifted).
 
 **The reader veil for Bluesky cards.** With a Bluesky account active, a
 Bluesky card shows its post only when `blueskyCheckSettled(post, reader)`

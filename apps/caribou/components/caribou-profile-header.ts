@@ -15,7 +15,8 @@ import { openListPicker } from './caribou-list-picker.js'
 import './caribou-button.js'
 import './caribou-menu.js'
 import {
-  NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, coverNote, currentBlueskyReader, decisionFits, uiOf,
+  BLUESKY_RETRY_EVENT, NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, blueskyDecisionSettled, coverNote,
+  currentBlueskyReader, decisionFits, isFailClosed, uiOf,
 } from './_bluesky-moderation.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
@@ -35,6 +36,10 @@ export class CaribouProfileHeader extends LitElement {
     .banner.blurred { clip-path: inset(0); }
     .profile-cover .notice { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--fg-muted); }
     .profile-cover .notice p { margin: 0; }
+    .vh {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
     p.profile-cover { padding: var(--space-3); margin: 0; color: var(--fg-muted); }
     .filter-toggle {
       padding: var(--space-1) var(--space-3); font: inherit; font-size: 0.875rem; font-weight: 600;
@@ -87,6 +92,14 @@ export class CaribouProfileHeader extends LitElement {
   @state() private blueskyReaderKey: string | null = null
   // The reader chose Show on a profile covered by a label.
   @state() private profileShown = false
+  // A Bluesky account's decision is settled for the reader
+  // (`blueskyDecisionSettled`: theirs, every subscribed labeler covered).
+  // True until mount, as on the server.
+  @state() private profileSettled = true
+  // The account as a Retry fetched it through the reader, with that reader.
+  // It stands in for `account` while it is the same account.
+  @state() private refreshed: { account: Account; viewerOf: string } | null = null
+  @state() private profileRetrying = false
 
   // What the follow button needs, known only after mount: the server has no
   // session. Both stay empty until then, so the first client render equals
@@ -146,15 +159,59 @@ export class CaribouProfileHeader extends LitElement {
   // the effect never sees them change; this re-resolves for those. Before
   // the first update bind() has not run, and its effect does the first
   // resolve itself.
-  protected override willUpdate(changed: PropertyValues<this>) {
-    if (changed.has('account') && changed.get('account') !== undefined) this.profileShown = false
+  // Untyped: `refreshed` is private, so it is not a key of `this`.
+  protected override willUpdate(changed: PropertyValues) {
+    if (changed.has('account') && changed.get('account') !== undefined) {
+      this.profileShown = false
+      this.refreshed = null
+    }
     if (this.hasUpdated && (changed.has('account') || changed.has('instance'))) {
       void this.resolveTarget(activeUser.value)
+    }
+    // `account`, `viewerOf` and `refreshed` are not signals: the veil effect
+    // does not see them change.
+    if (this.hasUpdated && (changed.has('account') || changed.has('viewerOf') || changed.has('refreshed'))) this.syncSettled()
+  }
+
+  // The account shown and whose decision it carries.
+  private shownAccount(): { account: Account | null; viewerOf: string | null } {
+    const r = this.refreshed
+    return r && r.account.id === this.account?.id ? r : { account: this.account, viewerOf: this.viewerOf }
+  }
+
+  private syncSettled() {
+    const { account, viewerOf } = this.shownAccount()
+    const settled = account?.bluesky
+      ? blueskyDecisionSettled({ viewerOf, moderation: account.bluesky.moderation ?? null }, activeClient.value)
+      : true
+    if (settled !== this.profileSettled) this.profileSettled = settled
+  }
+
+  // Asks the session glue to reload label definitions, and fetches the
+  // account again through the current reader.
+  private onRetryProfile = async () => {
+    const account = this.shownAccount().account
+    if (!account || this.profileRetrying) return
+    window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: account.id } }))
+    const client = activeClient.peek()
+    if (!client || client.capabilities.network !== 'bluesky') return
+    this.profileRetrying = true
+    try {
+      const fresh = await client.lookupAccount(account.id)
+      if (activeClient.peek() === client && fresh?.id === this.account?.id) {
+        this.refreshed = { account: fresh, viewerOf: client.userKey }
+      }
+    } catch {
+      // Still covered, with Retry.
+    } finally {
+      this.profileRetrying = false
     }
   }
 
   private bind() {
     const disposeResolve = effect(() => { void this.resolveTarget(activeUser.value) })
+    // The reader, their prefs and their label definitions are signals.
+    const disposeVeil = effect(() => { this.syncSettled() })
     const disposeRead = effect(() => {
       this.blueskyReaderKey = currentBlueskyReader(activeClient.value)
       const user = activeUser.value
@@ -164,7 +221,7 @@ export class CaribouProfileHeader extends LitElement {
         ? relationshipCache.value.get(relationshipKey(user.userKey, target.id))
         : undefined
     })
-    this.dispose = () => { disposeResolve(); disposeRead() }
+    this.dispose = () => { disposeResolve(); disposeVeil(); disposeRead() }
   }
 
   // Finds the account as the signed-in user's server knows it. Nothing to
@@ -295,7 +352,7 @@ export class CaribouProfileHeader extends LitElement {
   }
 
   override render() {
-    const a = this.account
+    const { account: a, viewerOf } = this.shownAccount()
     if (!a) return nothing
     const headerImg = a.headerStatic || a.header
     // JSON.stringify gives a quoted CSS string, so a `)` or a quote in the
@@ -313,7 +370,7 @@ export class CaribouProfileHeader extends LitElement {
       return html`<div class="banner blurred"></div>
         <p class="profile-cover notice">${NO_UNAUTHENTICATED_NOTE}</p>`
     }
-    const mod = bsky && decisionFits(this.viewerOf, reader) ? bsky.moderation : undefined
+    const mod = bsky && decisionFits(viewerOf, reader) && this.profileSettled ? bsky.moderation : undefined
     const blurAvatar = !!bsky && (!mod || uiOf(mod, 'avatar')!.blur)
     const blurBanner = !!bsky && (!mod || uiOf(mod, 'banner')!.blur)
     const view = bsky ? (mod ? uiOf(mod, 'profileView')! : UNREADABLE) : null
@@ -321,6 +378,8 @@ export class CaribouProfileHeader extends LitElement {
       const note = mod ? coverNote(view) : 'Checking this profile against your moderation settings…'
       const canShow = !!mod && !view.noOverride
       const shown = canShow && this.profileShown
+      // Retry fetches as the reader: with no Bluesky reader there is none.
+      const retry = reader !== null && (!mod || view.reasons.some(isFailClosed))
       return html`
         <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
         <div class="profile-cover">
@@ -333,6 +392,10 @@ export class CaribouProfileHeader extends LitElement {
                     aria-expanded=${shown ? 'true' : 'false'}
                     aria-label=${`${shown ? 'Hide' : 'Show'} profile with a label: ${note}`}
                     @click=${this.onToggleProfile}>${shown ? 'Hide' : 'Show'}</button>`
+                : nothing}
+              ${retry
+                ? html`<caribou-button class="retry" variant="secondary" ?loading=${this.profileRetrying}
+                    @click=${this.onRetryProfile}>Retry<span class="vh"> checking this profile</span></caribou-button>`
                 : nothing}
             </div>
           </div>

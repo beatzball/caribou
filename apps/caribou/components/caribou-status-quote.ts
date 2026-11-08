@@ -19,8 +19,8 @@ import { filterVerdict, type FilterContext, type FilterVerdict } from './_status
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-button.js'
 import {
-  BLUESKY_RETRY_EVENT, NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, coverNote, currentBlueskyReader,
-  decisionFits, isFailClosed, uiOf,
+  BLUESKY_RETRY_EVENT, NO_UNAUTHENTICATED_NOTE, UNREADABLE, asksNoUnauthenticated, blueskyDecisionSettled, coverNote,
+  currentBlueskyReader, decisionFits, isFailClosed, uiOf,
 } from './_bluesky-moderation.js'
 
 // The same hooks as the server's sanitizer, so the two agree on every string.
@@ -180,6 +180,9 @@ export class CaribouStatusQuote extends LitElement {
   @state() private liveBluesky: StatusBluesky | null | undefined = undefined
   // The reader a decision must be made for; null until mount, as on the server.
   @state() private blueskyReaderKey: string | null = null
+  // The quoted post's own decision is settled for the reader
+  // (`blueskyDecisionSettled`). True until mount, as on the server.
+  @state() private blueskySettled = true
   @state() private retrying = false
 
   private adoptedServerRender = false
@@ -255,6 +258,8 @@ export class CaribouStatusQuote extends LitElement {
       if (bluesky !== this.liveBluesky) this.liveBluesky = bluesky
       const reader = currentBlueskyReader(client)
       if (reader !== this.blueskyReaderKey) this.blueskyReaderKey = reader
+      const settled = blueskyDecisionSettled(bluesky, client)
+      if (settled !== this.blueskySettled) this.blueskySettled = settled
     })
   }
 
@@ -314,6 +319,7 @@ export class CaribouStatusQuote extends LitElement {
     window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: q.id } }))
     const client = activeClient.peek()
     if (!client || client.capabilities.network !== 'bluesky') return
+    const hadFocus = this.shadowRoot?.activeElement?.matches('caribou-button.retry') === true
     this.retrying = true
     try {
       const source = readSource(client.userKey)
@@ -324,6 +330,12 @@ export class CaribouStatusQuote extends LitElement {
     } finally {
       this.retrying = false
     }
+    // It worked: the Retry is gone, so focus goes to the quote it revealed.
+    await this.updateComplete
+    const shown = this.renderRoot.querySelector<HTMLElement>('.quote')
+    if (!hadFocus || !shown) return
+    shown.setAttribute('tabindex', '-1')
+    shown.focus()
   }
 
   // The quoted post's moderation, from its newest copy.
@@ -358,14 +370,15 @@ export class CaribouStatusQuote extends LitElement {
       if (reader === null && asksNoUnauthenticated(q.account)) {
         return html`<p class="quote-note">${NO_UNAUTHENTICATED_NOTE}</p>`
       }
-      const ui = decisionFits(live.viewerOf, reader)
+      const ui = decisionFits(live.viewerOf, reader) && this.blueskySettled
         ? (live.moderation ? uiOf(live.moderation, 'contentList')! : UNREADABLE)
         : null
       if (ui === null || ui.filter || ui.blur) {
         const note = ui === null ? 'Checking this quoted post against your moderation settings…' : coverNote(ui)
         const canShow = ui !== null && !ui.noOverride
         const shown = canShow && this.labelShown
-        const retry = ui === null || ui.reasons.some(isFailClosed)
+        // Retry fetches as the reader: with no Bluesky reader there is none.
+        const retry = reader !== null && (ui === null || ui.reasons.some(isFailClosed))
         return html`<div class="quote-note">
           <div class="notice">
             <p>Quoted post: <strong>${note}</strong></p>
