@@ -1,5 +1,13 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.1.2
+
+### Patch Changes
+
+- [#230](https://github.com/beatzball/caribou/pull/230) [`e70b6d7`](https://github.com/beatzball/caribou/commit/e70b6d7c2b3f2d40edf62820cb8ee15bba75847d) Thanks [@beatzball](https://github.com/beatzball)! - The signed-out page code moved into the package (`src/signed-out.ts`, exported from `./moderation`): `signedOutProfilePage`, `signedOutThread`, `signedOutLabelDefs` and the guards, with the caller's fetch and HTML cleaner. The app's server and its browser fallback now share one copy. `./moderation` also exports `isProvenVisible`. A source can name errors that must reach the caller (`mustPropagate`); the app passes its rate-limit check, so a 429 on the label definitions is never read as "no definitions".
+
+- [#228](https://github.com/beatzball/caribou/pull/228) [`a9931de`](https://github.com/beatzball/caribou/commit/a9931deafacaa9aa23e75b0e362abcc1bb0be52b) Thanks [@beatzball](https://github.com/beatzball)! - The signed-out allow-list (spec 8.3): `isProvenVisible(actor)` is true only for an author object with a DID, a handle and a `labels` array with no `!no-unauthenticated`. In a signed-out copy, a quoted post whose author is not proven visible is the hidden quote, and a feed, list, starter pack or labeler card whose creator is not (the label, or a missing or partial creator) is a card with the note "This account asked to be seen only by signed-in readers." and nothing of the record. A new server door, `./syntax`, exports `isValidHandle`, `isValidDid` and `isValidRecordKey` from `@atproto/syntax`. SSR test fixtures are in `src/__fixtures__/ssr-appview.ts`.
+
 ## 0.1.1
 
 ### Patch Changes
