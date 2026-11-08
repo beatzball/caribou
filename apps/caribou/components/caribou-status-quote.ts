@@ -11,7 +11,7 @@ import {
   relationshipCache, relationshipKey, statusCache,
 } from '@beatzball/caribou-state'
 import { findShell } from './_shell.js'
-import { accountPath } from './_profile-path.js'
+import { accountPath, postPath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import { hashtagOf, sameUrl } from './_post-links.js'
 import { tagPath } from './_tag-path.js'
@@ -63,9 +63,11 @@ function hostOf(url: string): string {
   try { return new URL(url).host } catch { return '' }
 }
 
-// The same path as the status card's permalink: the thread page.
-function threadPath(s: Status): string {
-  return `/@${s.account.acct}/${encodeURIComponent(s.id)}`
+// The same link as the status card's permalink (`postPath`): the thread
+// page, the post's own page for a Mastodon post Caribou cannot place, or
+// none.
+function threadPath(s: Status, host: string): string | null {
+  return postPath(s, host)
 }
 
 const MEDIA_WORDS: Record<string, [string, string]> = {
@@ -285,7 +287,10 @@ export class CaribouStatusQuote extends LitElement {
     if (typeof window !== 'undefined' && (window.getSelection?.()?.toString() ?? '') !== '') return
     const q = quotedOf(this.quote)
     if (!q) return
-    const href = threadPath(q)
+    const href = threadPath(q, this.instance || this.shellInstance)
+    // Only Caribou's own thread page opens in place; an outside page opens
+    // from its link, and no link means no thread to open.
+    if (!href?.startsWith('/')) return
     void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
   }
 
@@ -427,7 +432,8 @@ export class CaribouStatusQuote extends LitElement {
     const warning = display.spoilerText ?? ''
     const bodyShown = warning === '' || this.warningOpen
     const media = display.mediaAttachments ?? []
-    const thread = threadPath(display)
+    const thread = threadPath(display, this.instance || this.shellInstance)
+    const inApp = thread?.startsWith('/') ?? false
     // One element around it all: happy-dom drops a child binding at the top
     // level of a template (README, Tests).
     return html`<div class="quote" role="group" aria-label=${`Quoted post by ${name}`} @click=${this.onCardClick}>
@@ -438,7 +444,11 @@ export class CaribouStatusQuote extends LitElement {
           <strong>${name}</strong>
           <span class="acct">@${display.account.acct}</span>
         </a>
-        <a class="permalink" href=${thread} @click=${spaClick}><time datetime=${dt}>${when}</time></a>
+        ${thread === null
+          ? html`<span class="permalink"><time datetime=${dt}>${when}</time></span>`
+          : inApp
+          ? html`<a class="permalink" href=${thread} @click=${spaClick}><time datetime=${dt}>${when}</time></a>`
+          : html`<a class="permalink" href=${thread} rel="noopener noreferrer" target="_blank"><time datetime=${dt}>${when}</time></a>`}
       </header>
       ${warning
         ? html`<p class="spoiler">${warning}</p>
@@ -452,8 +462,8 @@ export class CaribouStatusQuote extends LitElement {
         ${bodyShown && (media.length || display.poll)
           ? html`<span class="media-summary">${mediaSummary(media, !!display.poll)}${media.length && (display.sensitive || uiOf(this.liveModeration(display), 'contentMedia')?.blur) ? ' (marked sensitive)' : ''}</span>`
           : nothing}
-        ${bodyShown && display.quote?.state === 'accepted'
-          ? html`<a class="nested" href=${thread} @click=${spaClick}>This post quotes another post. Open it to see the quote.</a>`
+        ${bodyShown && display.quote?.state === 'accepted' && inApp
+          ? html`<a class="nested" href=${thread!} @click=${spaClick}>This post quotes another post. Open it to see the quote.</a>`
           : nothing}
       </div>
     </div>`

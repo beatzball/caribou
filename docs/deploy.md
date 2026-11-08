@@ -229,6 +229,16 @@ Some steps run on the Coolify server, over SSH.
   6. Delete `COOLIFY_API_URL` and `COOLIFY_APP_UUID`. Deploys may resume;
      CI uses the webhook again.
 
+## App env vars for Bluesky
+
+Set these on the app in Coolify, next to `PUBLIC_BASE_URL`. Both are read at
+runtime; changing one needs a restart, not a new image.
+
+| var | default | what it does |
+|---|---|---|
+| `BLUESKY_SSR` | unset (off) | `1` makes the server render Bluesky profiles and threads for signed-out readers (`apps/caribou/README.md`, "Bluesky SSR"). With it on, **every reader** gets the Bluesky page for a dotted `/@name` or a `/@did:…` route, whatever their browser's Bluesky flag says. Leave it unset until Bluesky goes live. |
+| `BLUESKY_PUBLIC_APPVIEW` | `https://public.api.bsky.app` | The only host the server asks for Bluesky data. An http(s) origin. The server does not follow its redirects. |
+
 ## Repository secrets
 
 | secret | path | value |

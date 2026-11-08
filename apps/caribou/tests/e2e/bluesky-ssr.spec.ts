@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer } from 'node:net'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,7 +8,7 @@ import { expect, test, type Page } from './_fixtures.js'
 import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 import { startAppViewStub, type AppViewStub } from './_appview-stub.js'
 import {
-  HANA_SECRETS, NORA_SECRETS,
+  HANA_SECRETS, NORA_SECRETS, PARTIAL_SECRETS,
 } from '../../../../packages/bluesky-client/src/__fixtures__/ssr-appview.js'
 
 // Bluesky profiles and threads as the server paints them signed out (app
@@ -47,6 +47,12 @@ test.beforeAll(async () => {
   if (!existsSync(SERVER)) throw new Error(`No build at ${SERVER}. Run \`pnpm --filter caribou-app build\` first.`)
   appview = await startAppViewStub()
   storage = mkdtempSync(join(tmpdir(), 'caribou-bluesky-ssr-'))
+  // A registration for example.social opens the instance-cookie gate, so a
+  // page's shell carries the reader's server (the Mastodon-reader tests).
+  // The dummy credentials are never sent.
+  mkdirSync(join(storage, 'apps/example.social'), { recursive: true })
+  writeFileSync(join(storage, 'apps/example.social/e2e-seed'),
+    JSON.stringify({ client_id: 'e2e', client_secret: 'e2e', vapid_key: 'e2e', registered_at: 1 }))
   const port = await freePort()
   base = `http://localhost:${port}`
   server = spawn(process.execPath, [SERVER], {
@@ -128,9 +134,10 @@ test.describe('the server response', () => {
     expect(text).toContain('alice thread focus')
     expect(text).toContain('bob parent post')
     expect(text).toContain('carol thread reply')
-    // The root and one reply are hana's.
-    expect(noticeCards(text)).toBe(2)
+    // The root and one reply are hana's; one reply's author has labels null.
+    expect(noticeCards(text)).toBe(3)
     expectNowhere(text, HANA_SECRETS)
+    expectNowhere(text, PARTIAL_SECRETS)
   })
 
   test('a bad handle, DID or record key: 404, and no request to the AppView', async () => {
@@ -184,12 +191,31 @@ test.describe('!no-unauthenticated: nothing of a hidden author in the whole resp
     const { text } = await body('/@alice.example.com')
     expectNowhere(text, HANA_SECRETS)
     expectNowhere(text, NORA_SECRETS)
-    // Notice cards: hana's repost, nora's repost, the repost by hana.
-    expect(noticeCards(text)).toBe(3)
+    expectNowhere(text, PARTIAL_SECRETS)
+    // Notice cards: hana's repost, nora's repost, the repost by hana, pia's
+    // post (labels null), the repost by quin (labels not an array).
+    expect(noticeCards(text)).toBe(5)
     // The quote card's note and the record card's title.
     expect(text).toContain('alice quoting hana')
     expect(text).toContain('alice sharing a list')
     expect(count(text, NOTICE)).toBeGreaterThanOrEqual(5)
+  })
+
+  test('fail closed: an author with labels null or not an array, a creator with a DID only (the review\'s reproduction) or none', async () => {
+    const { text } = await body('/@alice.example.com')
+    expect(text).toContain('alice sharing a partial list')
+    expect(text).toContain('alice sharing a creatorless feed')
+    for (const s of ['partial list name', 'partial list description', 'creatorless feed name', 'creatorless-avatar.jpg', 'Pia Nulllabels', 'pia null labels post', 'Quin Oddlabels', 'alice post quin reposted']) {
+      expect(text, s).not.toContain(s)
+    }
+  })
+
+  test('the profiles of authors whose labels are null or not an array', async () => {
+    for (const path of ['/@pia.example.com', '/@quin.example.com']) {
+      const { text } = await body(path)
+      expect(text).toContain('"kind":"hidden"')
+      expectNowhere(text, PARTIAL_SECRETS)
+    }
   })
 
   test('a thread focused on a hidden author\'s post: the notice, and no handle in the page data', async () => {
@@ -258,8 +284,8 @@ test.describe('hydration, signed out', () => {
     await page.goto(`${base}/@alice.example.com/3kalicefocus`)
     await settled(page)
     const report = await serverPageReport(page)
-    expect(report).toEqual({ sent: 5, atSwap: 5, sameNodes: true, deferred: [] })
-    await expect(livePage(page).getByText(NOTICE)).toHaveCount(2)
+    expect(report).toEqual({ sent: 6, atSwap: 6, sameNodes: true, deferred: [] })
+    await expect(livePage(page).getByText(NOTICE)).toHaveCount(3)
     expect(errors).toEqual([])
   })
 
@@ -321,12 +347,16 @@ test.describe('hydration with a Mastodon account active', () => {
     const asked: string[] = []
     page.on('request', (r) => { if (r.url().startsWith('https://example.social/')) asked.push(r.url()) })
     await watchServerPage(page, CARD_BODY)
-    // The cookie names the reader's server, so the shell carries it.
+    // The cookie names the reader's server and the storage trusts it, so
+    // the shell carries it: the reader check runs for this page.
+    const served = await (await fetch(`${base}/@alice.example.com/3kalicefocus`, { headers: { Cookie: 'caribou.instance=example.social' } })).text()
+    expect(served).toMatch(/<caribou-app-shell\s+instance="example\.social"/)
     await page.context().addCookies([{ name: 'caribou.instance', value: 'example.social', domain: 'localhost', path: '/' }])
     await page.goto(`${base}/@alice.example.com/3kalicefocus`)
     await settled(page)
+    await expect(livePage(page).locator('caribou-app-shell')).toHaveAttribute('instance', 'example.social')
     const report = await serverPageReport(page)
-    expect(report).toEqual({ sent: 5, atSwap: 5, sameNodes: true, deferred: [] })
+    expect(report).toEqual({ sent: 6, atSwap: 6, sameNodes: true, deferred: [] })
     await expect(livePage(page).getByText('alice thread focus')).toBeVisible()
     await expect(livePage(page).getByText(/Could not check this post/)).toHaveCount(0)
     expect(asked.filter((u) => decodeURIComponent(u).includes('at://'))).toEqual([])

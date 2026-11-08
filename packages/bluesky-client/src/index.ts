@@ -6,6 +6,7 @@ export * from './map/account.js'
 export * from './map/feed-entry.js'
 export * from './facets.js'
 export * from './embeds.js'
+export { isNoUnauthenticated, isProvenVisible } from './no-unauthenticated.js'
 // The capabilities only: the app's session driver needs them at once,
 // before the lazy chunk loads.
 export { BLUESKY_CAPABILITIES } from './client.js'

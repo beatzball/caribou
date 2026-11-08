@@ -7,7 +7,7 @@
 
 import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import {
-  mapAccount, mapFeedEntry, mapPost, NO_UNAUTHENTICATED_NOTE, type MapContext,
+  isProvenVisible, mapAccount, mapFeedEntry, mapPost, NO_UNAUTHENTICATED_NOTE, type MapContext,
 } from '@beatzball/caribou-bluesky-client'
 import {
   LOGGED_OUT_PREFS, labelDefsFromServices, moderate, type LabelDefs,
@@ -20,10 +20,7 @@ export { NO_UNAUTHENTICATED_NOTE }
 
 export const DEFAULT_PUBLIC_APPVIEW = 'https://public.api.bsky.app'
 
-/** True when the server paints Bluesky routes (the server side of the flag). */
-export function blueskySsrEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.BLUESKY_SSR === '1'
-}
+export { blueskySsrEnabled } from './bluesky-flag.js'
 
 /** The AppView origin: `BLUESKY_PUBLIC_APPVIEW` when it is an http(s) URL, else the default. */
 export function publicAppView(env: NodeJS.ProcessEnv = process.env): string {
@@ -52,7 +49,8 @@ export function validRecordKey(rkey: string): boolean {
 async function xrpc<T>(method: string, params: Record<string, string | undefined>, ttl: number): Promise<T> {
   const q = new URLSearchParams()
   for (const [k, v] of Object.entries(params)) if (v !== undefined) q.set(k, v)
-  return cachedFetch<T>(`${publicAppView()}/xrpc/${method}?${q}`, ttl)
+  // `redirect: 'error'`: a 3xx from the AppView never sends the server to another host.
+  return cachedFetch<T>(`${publicAppView()}/xrpc/${method}?${q}`, ttl, { redirect: 'error' })
 }
 
 const BSKY_LABELERS = LOGGED_OUT_PREFS.labelers.map((l) => l.did)
@@ -74,34 +72,65 @@ export async function fetchLabelDefs(): Promise<LabelDefs | null> {
 }
 
 // ---------------------------------------------------------------- 8.3
+//
+// The allow-list (README, "Bluesky SSR"): an author's content shows signed
+// out only when the code has seen that author whole, with a `labels` array
+// and no `!no-unauthenticated` (`isProvenVisible`). Each author slot of an
+// AppView answer is checked by name before mapping. An author that is not
+// proven visible is replaced by a hidden marker: its DID (or the one in the
+// record's URI), `handle.invalid`, and the label. Nothing else of it is
+// kept. Quoted authors and record card creators are checked the same way
+// inside `mapEmbed` (`ctx.viewerOf` is null here).
 
 const NO_UNAUTH = '!no-unauthenticated'
 
-type Json = unknown
-
-function isActor(v: Record<string, unknown>): boolean {
-  return typeof v.did === 'string' && v.did.startsWith('did:') && typeof v.handle === 'string'
+function didOfUri(uri: unknown): string {
+  const m = typeof uri === 'string' ? /^at:\/\/(did:[^/]+)\//.exec(uri) : null
+  return m ? m[1]! : 'did:invalid:unknown'
 }
 
-/**
- * A copy of an AppView answer in which every author object (anything with
- * a `did` and a `handle`) that has no `labels` array gets a
- * `!no-unauthenticated` self-label. An author whose labels were not read
- * counts as hidden (fail closed). The mappers and `mapEmbed` then hide it.
- */
-export function failClosedLabels<T>(raw: T): T {
-  const walk = (v: Json): Json => {
-    if (Array.isArray(v)) return v.map(walk)
-    if (typeof v !== 'object' || v === null) return v
-    const o = v as Record<string, unknown>
-    const out: Record<string, unknown> = {}
-    for (const [k, val] of Object.entries(o)) out[k] = walk(val)
-    if (isActor(o) && !Array.isArray(o.labels)) {
-      out.labels = [{ src: o.did, uri: `at://${String(o.did)}/app.bsky.actor.profile/self`, val: NO_UNAUTH, cts: '1970-01-01T00:00:00.000Z' }]
-    }
-    return out
+function hiddenActor(actor: unknown, fallbackDid: string) {
+  const own = typeof actor === 'object' && actor !== null ? (actor as { did?: unknown }).did : undefined
+  const did = typeof own === 'string' && own.startsWith('did:') ? own : fallbackDid
+  return {
+    did, handle: 'handle.invalid',
+    labels: [{ src: did, uri: `at://${did}/app.bsky.actor.profile/self`, val: NO_UNAUTH, cts: '1970-01-01T00:00:00.000Z' }],
   }
-  return walk(raw) as T
+}
+
+/** The author as it came when proven visible, else the hidden marker. */
+export function guardActor<T>(actor: T, fallbackDid: string): T {
+  return (isProvenVisible(actor) ? actor : hiddenActor(actor, fallbackDid)) as T
+}
+
+type Obj = Record<string, unknown>
+
+function guardPost<T>(post: T): T {
+  if (typeof post !== 'object' || post === null) return post
+  const p = post as Obj
+  return { ...p, author: guardActor(p.author, didOfUri(p.uri)) } as T
+}
+
+/** A feed entry with its author and reposter checked. Its `reply` is dropped: it is never shown. */
+export function guardFeedEntry<T>(entry: T): T {
+  const e = entry as Obj
+  const out: Obj = { ...e, post: guardPost(e.post) }
+  delete out.reply
+  const reason = e.reason as Obj | undefined
+  if (reason && typeof reason === 'object' && reason.$type === 'app.bsky.feed.defs#reasonRepost') {
+    out.reason = { ...reason, by: guardActor(reason.by, didOfUri(reason.uri)) }
+  }
+  return out as T
+}
+
+/** A thread with every post's author checked, parents and replies included. */
+export function guardThreadNode<T>(node: T): T {
+  if (!isThreadViewPost(node)) return node
+  const n = node as unknown as Obj
+  const out: Obj = { ...n, post: guardPost(n.post) }
+  if (n.parent !== undefined) out.parent = guardThreadNode(n.parent)
+  if (Array.isArray(n.replies)) out.replies = n.replies.map(guardThreadNode)
+  return out as T
 }
 
 /** True when the mapped account self-labels `!no-unauthenticated` (not negated). */
@@ -121,7 +150,8 @@ export function hiddenAccount(a: Account): Account {
     locked: false, fields: [], emojis: [], bot: false, group: false,
     createdAt: '', lastStatusAt: null, statusesCount: 0, followersCount: 0, followingCount: 0, roles: [],
     bluesky: {
-      did, handleInvalid: false,
+      // `handleInvalid`: every path built from it is a DID path, never `/@`.
+      did, handleInvalid: true,
       labels: (a.bluesky?.labels ?? []).filter((l) => l.val === NO_UNAUTH && !l.neg),
     },
   }
@@ -214,10 +244,11 @@ export async function fetchBlueskyProfilePage(
     xrpc<ProfileView>('app.bsky.actor.getProfile', { actor }, TTL.BLUESKY),
     fetchLabelDefs(),
   ])
-  const view = failClosedLabels(profileRaw)
+  // A hidden profile, or one whose labels were not read: its posts are
+  // not even fetched.
+  if (!isProvenVisible(profileRaw)) return { kind: 'hidden' }
+  const view = profileRaw
   const mapped = mapAccount(view)
-  // A hidden profile: its posts are not even fetched.
-  if (asksHidden(mapped)) return { kind: 'hidden' }
   const account = sanitizeAccount({
     ...mapped,
     bluesky: { ...mapped.bluesky!, moderation: moderate({ kind: 'profile', view }, undefined, LOGGED_OUT_PREFS, defs) },
@@ -225,9 +256,9 @@ export async function fetchBlueskyProfilePage(
   const feedRaw = await xrpc<{ feed: FeedViewPost[]; cursor?: string }>('app.bsky.feed.getAuthorFeed', {
     actor, filter: AUTHOR_FILTER[opts.tab], includePins: 'false', cursor: opts.cursor,
   }, TTL.BLUESKY)
-  const feed = failClosedLabels(feedRaw)
+  const feed = feedRaw
   const ctx = context(defs)
-  const statuses = each(feed.feed, (e) => clean(mapFeedEntry(e, ctx)))
+  const statuses = each(feed.feed, (e) => clean(mapFeedEntry(guardFeedEntry(e), ctx)))
   // An empty AppView page ends the list, even with a cursor (as in the client).
   const nextCursor = feed.feed.length > 0 ? feed.cursor ?? null : null
   return { kind: 'ok', account, statuses, nextCursor }
@@ -253,7 +284,7 @@ export async function fetchBlueskyThread(actor: string, rkey: string): Promise<B
     xrpc<{ thread: unknown }>('app.bsky.feed.getPostThread', { uri }, TTL.BLUESKY),
     fetchLabelDefs(),
   ])
-  const { thread } = failClosedLabels(raw)
+  const thread = guardThreadNode(raw.thread)
   if (!isThreadViewPost(thread)) throw new Error('bluesky: post not found')
   const ctx = context(defs)
   const posts = (views: PostView[]) => each(views, (v) => clean(mapPost(v, ctx)))

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fx from '../../../../packages/bluesky-client/src/__fixtures__/ssr-appview.js'
 import {
-  blueskySsrEnabled, failClosedLabels, fetchBlueskyProfilePage, fetchBlueskyThread, publicAppView,
+  blueskySsrEnabled, guardActor, fetchBlueskyProfilePage, fetchBlueskyThread, publicAppView,
   signedOutStatus, validActor, validRecordKey,
 } from '../../server/lib/bluesky-public.js'
 
@@ -18,8 +18,10 @@ beforeEach(() => {
   process.env.BLUESKY_PUBLIC_APPVIEW = origin
   calls = []
   failMethods = new Set()
-  vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+  vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     calls.push(input)
+    // Every AppView fetch refuses a redirect: it never reaches another host.
+    if (init?.redirect !== 'error') throw new Error(`fetch without redirect: 'error': ${input}`)
     const url = new URL(input)
     const method = url.pathname.replace('/xrpc/', '')
     const { status, body } = failMethods.has(method)
@@ -64,13 +66,20 @@ describe('config and syntax', () => {
   })
 })
 
-describe('failClosedLabels', () => {
-  it('adds the label to an author with no labels array, and leaves one that has it', () => {
-    const out = failClosedLabels({ a: fx.nora as typeof fx.nora & { labels?: { src: string; val: string }[] }, b: fx.alice })
-    expect(out.a.labels?.[0]).toMatchObject({ src: 'did:plc:nora', val: '!no-unauthenticated' })
-    expect(out.b.labels).toEqual([])
-    // The input is not changed.
-    expect('labels' in fx.nora).toBe(false)
+describe('guardActor: show only an author proven visible (spec 8.3, fail closed)', () => {
+  it('keeps an author with a labels array and no hiding label', () => {
+    expect(guardActor(fx.alice, 'did:plc:x')).toBe(fx.alice)
+  })
+
+  it.each([
+    ['no labels key', fx.nora, 'did:plc:nora'],
+    ['labels null', fx.pia, 'did:plc:pia'],
+    ['labels not an array', fx.quin, 'did:plc:quin'],
+    ['no handle', { did: 'did:plc:hana', labels: [] }, 'did:plc:hana'],
+    ['no author at all, DID from the record', undefined, 'did:plc:fallback'],
+  ])('replaces %s with the hidden marker, keeping nothing else', (_name, actor, did) => {
+    const out = guardActor(actor as unknown, 'did:plc:fallback') as { did: string; handle: string; labels: { val: string }[] }
+    expect(out).toEqual({ did, handle: 'handle.invalid', labels: [expect.objectContaining({ src: did, val: '!no-unauthenticated' })] })
   })
 })
 
@@ -100,9 +109,11 @@ describe('fetchBlueskyProfilePage', () => {
     expect(calls.some((u) => u.includes('getAuthorFeed'))).toBe(false)
   })
 
-  it('hides a profile whose labels were not read (fail closed)', async () => {
-    expect(await fetchBlueskyProfilePage('nora.example.com', { tab: 'posts' })).toEqual({ kind: 'hidden' })
-  })
+  it.each(['nora.example.com', 'pia.example.com', 'quin.example.com'])(
+    'hides a profile whose labels were not read (fail closed): %s', async (actor) => {
+      expect(await fetchBlueskyProfilePage(actor, { tab: 'posts' })).toEqual({ kind: 'hidden' })
+      expect(calls.some((u) => u.includes('getAuthorFeed'))).toBe(false)
+    })
 
   it('throws on an AppView error', async () => {
     await expect(fetchBlueskyProfilePage(fx.BROKEN_HANDLE, { tab: 'posts' })).rejects.toThrow()
@@ -119,6 +130,24 @@ describe('fetchBlueskyProfilePage', () => {
       const p = await page()
       expectNone(p, fx.HANA_SECRETS)
       expectNone(p, fx.NORA_SECRETS)
+      expectNone(p, fx.PARTIAL_SECRETS)
+    })
+
+    it('an author with labels null, and a reposter whose labels are not an array, are hidden', async () => {
+      const p = await page()
+      const pia = p.statuses.find((s) => s.account.id === 'did:plc:pia')!
+      expect(pia.content).toBe('')
+      const quin = p.statuses.find((s) => s.id === 'at://did:plc:quin/app.bsky.feed.repost/3krp4')!
+      expect(quin.reblog).toBeNull()
+      expect(quin.account.bluesky?.handleInvalid).toBe(true)
+    })
+
+    it('a record card whose creator is partial, or missing, is the notice card', async () => {
+      const p = await page()
+      for (const text of ['alice sharing a partial list', 'alice sharing a creatorless feed']) {
+        const item = p.statuses.find((s) => s.content.includes(text))!
+        expect(item.bluesky?.recordCard).toMatchObject({ title: 'This account asked to be seen only by signed-in readers.', image: null, description: '' })
+      }
     })
 
     it('a repost of a hidden author keeps only its id, time and the hidden mark', async () => {
@@ -182,9 +211,11 @@ describe('fetchBlueskyThread', () => {
     expect(t.ancestors.map((s) => s.account.id)).toEqual(['did:plc:hana', 'did:plc:bob'])
     expect(t.ancestors[0]!.content).toBe('')
     expect(t.ancestors[1]!.content).toContain('bob parent post')
-    expect(t.descendants.map((s) => s.account.id)).toEqual(['did:plc:hana', 'did:plc:carol'])
+    expect(t.descendants.map((s) => s.account.id)).toEqual(['did:plc:hana', 'did:plc:carol', 'did:plc:pia'])
+    expect(t.descendants[2]!.content).toBe('')
     expect(t.descendants[0]!.inReplyToId).toBe(fx.threadFocus.uri)
     expectNone(t, fx.HANA_SECRETS)
+    expectNone(t, fx.PARTIAL_SECRETS)
   })
 
   it('hides a focused post by a hidden author; its replies stay', async () => {

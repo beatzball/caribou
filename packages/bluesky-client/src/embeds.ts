@@ -2,7 +2,7 @@ import type { AppBskyFeedDefs } from '@atproto/api'
 import type { MediaAttachment, MediaAttachmentMetaImage, PreviewCard, Quote, QuoteState } from '@beatzball/caribou-mastodon-client'
 import type { MapContext } from './map/context.js'
 import { mapPost } from './map/post.js'
-import { isNoUnauthenticated } from './no-unauthenticated.js'
+import { isProvenVisible } from './no-unauthenticated.js'
 
 /** The parts of a `Status` that come from a post's embed (spec 6.5 and 7.3). */
 export interface EmbedParts {
@@ -201,7 +201,8 @@ function mapQuoted(record: Obj, ctx: MapContext): Quote {
   // but leaves its thread view alone, and the quote would still carry the
   // post. So the quote hides it here. The post is never mapped, so none of
   // it is kept.
-  if (ctx.viewerOf === null && isNoUnauthenticated(postView.author)) {
+  // Fail closed: an author whose labels were not read is hidden too.
+  if (ctx.viewerOf === null && !isProvenVisible(postView.author)) {
     return { state: 'unauthorized', quotedStatus: null, bluesky: { hidden: 'no-unauthenticated' } }
   }
   if (quoteDepth > 0) return { state: 'accepted', quotedStatus: null }
@@ -284,6 +285,15 @@ function hiddenCreatorCard(): PreviewCard {
 
 type RecordPart = Pick<EmbedParts, 'recordCard' | 'quote'>
 
+// The record types `recordCard` builds a card for. A Set of literals:
+// `has` never finds an inherited name.
+const RECORD_CARD_TYPES = new Set([
+  'app.bsky.feed.defs#generatorView',
+  'app.bsky.graph.defs#listView',
+  'app.bsky.graph.defs#starterPackViewBasic',
+  'app.bsky.labeler.defs#labelerView',
+])
+
 function mapRecordStrict(view: Obj, ctx: MapContext): RecordPart {
   const record = obj(view.record)
   const type = str(record.$type)
@@ -296,16 +306,14 @@ function mapRecordStrict(view: Obj, ctx: MapContext): RecordPart {
       return { recordCard: null, quote: { state: blockedState(record), quotedStatus: null } }
     case 'app.bsky.embed.record#viewDetached':
       return { recordCard: null, quote: { state: 'revoked', quotedStatus: null } }
-    default: {
-      const built = recordCard(type, record)
-      // Spec 8.3: a signed-out copy never carries the creator's name, text
-      // or image when the creator asked not to be seen so. A known shape
-      // only: a bad one is still the fallback card.
-      if (ctx.viewerOf === null && isNoUnauthenticated(objOrEmpty(record.creator))) {
+    default:
+      // Spec 8.3: a signed-out copy of a known record shows its creator's
+      // card only when the creator's labels were read and none hides it. A
+      // missing or partial creator is hidden too (fail closed).
+      if (ctx.viewerOf === null && RECORD_CARD_TYPES.has(type) && !isProvenVisible(record.creator)) {
         return { recordCard: hiddenCreatorCard(), quote: null }
       }
-      return { recordCard: built, quote: null }
-    }
+      return { recordCard: recordCard(type, record), quote: null }
   }
 }
 

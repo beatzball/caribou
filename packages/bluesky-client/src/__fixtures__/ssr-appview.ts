@@ -31,6 +31,25 @@ export const nora = {
   avatar: 'https://cdn.example.com/nora-avatar.jpg',
 }
 
+// `labels: null`: the server cannot prove her labels were read.
+export const pia = {
+  did: 'did:plc:pia', handle: 'pia.example.com', displayName: 'Pia Nulllabels',
+  avatar: 'https://cdn.example.com/pia-avatar.jpg', labels: null,
+}
+// `labels` is not an array.
+export const quin = {
+  did: 'did:plc:quin', handle: 'quin.example.com', displayName: 'Quin Oddlabels',
+  avatar: 'https://cdn.example.com/quin-avatar.jpg', labels: { val: 'not a list' },
+}
+
+/** Every string from an author or record whose labels were not read (fail closed). */
+export const PARTIAL_SECRETS = [
+  'Pia Nulllabels', 'pia.example.com', 'https://cdn.example.com/pia-avatar.jpg', 'pia null labels post', 'pia thread reply',
+  'Quin Oddlabels', 'quin.example.com', 'https://cdn.example.com/quin-avatar.jpg', 'alice post quin reposted',
+  'partial list name', 'partial list description', 'creatorless feed name', 'creatorless feed description',
+  'https://cdn.example.com/creatorless-avatar.jpg', 'Pia bio text', 'Quin bio text',
+]
+
 /** Every string of hana's that must appear nowhere in a signed-out response. */
 export const HANA_SECRETS = [
   'Hana Hidden', 'hana.example.com', 'https://cdn.example.com/hana-avatar.jpg',
@@ -57,6 +76,8 @@ export const profiles: Record<string, Record<string, unknown>> = {
   [hana.did]: detailed(hana, { description: 'Hana bio text', banner: 'https://cdn.example.com/hana-banner.jpg' }),
   [nora.did]: detailed(nora, { description: 'Nora bio text' }),
   [bob.did]: detailed(bob),
+  [pia.did]: detailed(pia, { description: 'Pia bio text' }),
+  [quin.did]: detailed(quin, { description: 'Quin bio text' }),
 }
 
 let n = 0
@@ -85,6 +106,8 @@ const hanaParent = post(hana, 'hana parent post')
 const hanaRoot = post(hana, 'hana root post')
 const noraReposted = post(nora, 'nora reposted post')
 const aliceRepostedByHana = post(alice, 'alice post hana reposted')
+const piaPost = post(pia, 'pia null labels post')
+const aliceRepostedByQuin = post(alice, 'alice post quin reposted')
 
 export const alicePosts = {
   plain: post(alice, 'alice plain post', { rkey: '3kaliceplain' }),
@@ -107,6 +130,28 @@ export const alicePosts = {
         $type: 'app.bsky.graph.defs#listView', uri: 'at://did:plc:hana/app.bsky.graph.list/3khanalist',
         cid: 'bafyhanalist', creator: hana, name: 'hana list name', description: 'hana list description',
         purpose: 'app.bsky.graph.defs#curatelist', indexedAt: CTS,
+      },
+    },
+  }),
+  // Codex's reproduction: a list whose creator has a DID and nothing else.
+  partialList: post(alice, 'alice sharing a partial list', {
+    embed: {
+      $type: 'app.bsky.embed.record#view',
+      record: {
+        $type: 'app.bsky.graph.defs#listView', uri: 'at://did:plc:hana/app.bsky.graph.list/3kpartial',
+        cid: 'bafypartial', creator: { did: 'did:plc:hana' }, name: 'partial list name', description: 'partial list description',
+        purpose: 'app.bsky.graph.defs#curatelist', indexedAt: CTS,
+      },
+    },
+  }),
+  // A feed generator with no creator at all.
+  creatorlessFeed: post(alice, 'alice sharing a creatorless feed', {
+    embed: {
+      $type: 'app.bsky.embed.record#view',
+      record: {
+        $type: 'app.bsky.feed.defs#generatorView', uri: 'at://did:plc:hana/app.bsky.feed.generator/creatorless',
+        cid: 'bafycreatorless', did: 'did:web:feeds.example.com', displayName: 'creatorless feed name',
+        description: 'creatorless feed description', avatar: 'https://cdn.example.com/creatorless-avatar.jpg', indexedAt: CTS,
       },
     },
   }),
@@ -134,6 +179,12 @@ export const aliceFeed = {
     // A repost by a hidden reposter (the reposter line).
     { post: aliceRepostedByHana, reason: { $type: 'app.bsky.feed.defs#reasonRepost', by: { ...hana, displayName: 'hana reposter text' }, uri: 'at://did:plc:hana/app.bsky.feed.repost/3krp3', cid: 'bafyrp3', indexedAt: CTS } },
     { post: alicePosts.graphic },
+    { post: alicePosts.partialList },
+    { post: alicePosts.creatorlessFeed },
+    // An author with `labels: null`.
+    { post: piaPost },
+    // A reposter whose `labels` is not an array.
+    { post: aliceRepostedByQuin, reason: { $type: 'app.bsky.feed.defs#reasonRepost', by: quin, uri: 'at://did:plc:quin/app.bsky.feed.repost/3krp4', cid: 'bafyrp4', indexedAt: CTS } },
   ],
 }
 
@@ -151,12 +202,13 @@ export const threadFocus = post(alice, 'alice thread focus', {
 })
 const hanaReply = post(hana, 'hana thread reply', { record: { reply: { root: ref(threadRoot), parent: ref(threadFocus) } } })
 const carolReply = post(carol, 'carol thread reply', { record: { reply: { root: ref(threadRoot), parent: ref(threadFocus) } } })
+const piaReply = post(pia, 'pia thread reply', { record: { reply: { root: ref(threadRoot), parent: ref(threadFocus) } } })
 
 /** `/@alice.example.com/3kalicefocus`: hana is the root and has a reply; bob and carol are visible. */
 export const aliceThread = {
   thread: node(threadFocus, {
     parent: node(threadParent, { parent: node(threadRoot) }),
-    replies: [node(hanaReply), node(carolReply)],
+    replies: [node(hanaReply), node(carolReply), node(piaReply)],
   }),
 }
 
@@ -198,7 +250,7 @@ export const labelerServices = {
 
 /** Handle → DID, for the fixture server and tests. */
 export const handles: Record<string, string> = Object.fromEntries(
-  [alice, bob, carol, hana, nora].map((a) => [a.handle, a.did]),
+  [alice, bob, carol, hana, nora, pia, quin].map((a) => [a.handle, a.did]),
 )
 
 /** The threads by focused post URI (DID form). */

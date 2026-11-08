@@ -48,9 +48,17 @@ export function blueskyActor(segment: string): string | null {
  */
 export function routeSegment(pathname: string): string {
   const m = /^\/@([^/]+)/.exec(pathname)
-  if (!m) return ''
+  return m ? decodeSegment(m[1]!) : ''
+}
+
+/**
+ * A route segment as both sides read it: percent-decoded once, so
+ * `/@did%3Aplc%3Aalice` is `/@did:plc:alice` on the server and in the
+ * client. A segment that does not decode (a stray `%`) is ''.
+ */
+export function decodeSegment(raw: string): string {
   try {
-    return decodeURIComponent(m[1]!)
+    return decodeURIComponent(raw)
   } catch {
     return ''
   }

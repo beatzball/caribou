@@ -568,13 +568,18 @@ them.
 
 **The server flag.** The Bluesky flag lives in the browser, so the server
 cannot read it. The server paints Bluesky routes only when the env var
-`BLUESKY_SSR=1` is set. Without it a Bluesky route renders as it did in
-phase 2b, and nothing changes for any reader.
+`BLUESKY_SSR=1` is set (`server/lib/bluesky-flag.ts`, read before the SDK
+loads). Without it a Bluesky route renders as it did in phase 2b, and
+nothing changes for any reader. With it, **every** reader gets the Bluesky
+page for a Bluesky route, whatever their browser flag says: the browser flag
+then only decides whether a Bluesky account can swap in its own render.
+Deploy notes: `docs/deploy.md`, "App env vars for Bluesky".
 
 **What the server fetches.** Only `BLUESKY_PUBLIC_APPVIEW` (default
 `https://public.api.bsky.app`), through `upstream-cache.ts`, with a fixed
 TTL (`TTL.BLUESKY`, 30 s; label definitions `TTL.BLUESKY_LABEL_DEFS`, 1 h).
-Never a handle's own domain, never a PDS. Calls: `app.bsky.actor.getProfile`,
+Never a handle's own domain, never a PDS, and no redirect is followed
+(`redirect: 'error'`). Calls: `app.bsky.actor.getProfile`,
 `app.bsky.feed.getAuthorFeed` (`includePins=false`, the tab's filter, the
 `max_id` query as the cursor), `app.bsky.feed.getPostThread`, and
 `app.bsky.labeler.getServices` for Bluesky's labeler.
@@ -588,6 +593,9 @@ Never a handle's own domain, never a PDS. Calls: `app.bsky.actor.getProfile`,
 4. `@name` with no dot: Mastodon, local to the cookie's server.
 5. `/@<handle or did>/<id>`: a Bluesky post when rule 2 or 3 matched.
 
+The server reads the route segment percent-decoded once (`decodeSegment`),
+as the client reads the address (`routeSegment`), so `/@did%3Aplc%3Aalice`
+and `/@alice%40example.social` mean the same route on both sides.
 Before any fetch the server checks the syntax: the DID, the handle and the
 record key, with `@atproto/syntax` (`@beatzball/caribou-bluesky-client/syntax`).
 A bad one gets a 404 page in the shell and no request.
@@ -595,7 +603,11 @@ A bad one gets a 404 page in the shell and no request.
 **Links Caribou builds.** `profilePath` never makes a bare dotted `/@name`
 for a Mastodon account: rule 3 would read it as a Bluesky handle. With no
 host it takes the host from the account's `url`. With no host and no URL, a
-dotted name links to a search for the account.
+dotted name links to a search for the account. `postPath` follows the same
+rule for a post's link: a dotted local acct takes the host given, then the
+account URL's host. With neither, the time links to the post's own `url` on
+its server (a new tab) when that is an http(s) URL, and is not a link at
+all when it is not. The status card and the quote card both use it.
 
 **A page opened by DID** (`/@did:plc:…`) replaces the address bar with the
 handle form in `firstUpdated`, never in `render`, with `history.replaceState`.
@@ -614,8 +626,19 @@ signed-out SSR only if that author's own labels were read and none is
 - Per author, everywhere an author's content can appear: the profile, each
   feed item, the reposter of a repost, a quoted post, the parent and root of a
   reply, every post in a thread, and a record card's creator.
-- Fail closed. An author object in the AppView's answer with no `labels`
-  array counts as hidden. The server adds the label to it before mapping.
+- An allow-list, not a block-list: an author shows only when the code has
+  **seen** it whole (`isProvenVisible`): an object with a `did:` DID, a
+  string handle, and a `labels` array of objects with no
+  `!no-unauthenticated`. A missing author, a partial one (no DID, no handle,
+  no labels), or `labels` that is null or not an array is hidden.
+- The server checks each author slot by name before mapping: the profile,
+  each feed item's author and reposter, and every thread post's author. A
+  failed one becomes a marker with only its DID, `handle.invalid` and the
+  label. A feed item's `reply` is dropped. `mapEmbed` checks a quoted
+  author and a record card's creator the same way for a signed-out copy;
+  a known record card with a missing or partial creator is the notice card.
+- A hidden account in the page data has `handleInvalid: true`, so any path
+  built from it is a DID path, never `/@`.
 - The server filters before the data goes into `serverData`. A hidden
   author's display name, handle, avatar, banner, bio and post text are not
   in the response at all: not in the body, the title, a meta tag or the

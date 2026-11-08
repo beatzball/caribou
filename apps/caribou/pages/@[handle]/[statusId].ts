@@ -9,13 +9,14 @@ import {
   fetchStatus, fetchThreadContext,
 } from '../../server/lib/mastodon-public.js'
 import { getStorage } from '../../server/lib/storage.js'
+import { blueskySsrEnabled } from '../../server/lib/bluesky-flag.js'
 import type { ThreadPageData, ShellInfo } from '../../server/lib/page-data-types.js'
 import '../../components/caribou-app-shell.js'
 import '../../components/caribou-auth-required.js'
 import '../../components/caribou-thread.js'
 import { enterWithCache } from '../../components/_page-cache.js'
 import {
-  blueskyActor, blueskyPostUri, postRouteOf, rendersBluesky, replaceDidRoute, routeSegment,
+  blueskyActor, blueskyPostUri, postRouteOf, decodeSegment, rendersBluesky, replaceDidRoute, routeSegment,
 } from '../../components/_bluesky-route.js'
 
 // `not-found`: a Bluesky route whose DID, handle or record key is not well
@@ -28,11 +29,12 @@ export type StatusPageData = (ThreadPageData | { kind: 'not-found' }) & {
 
 export const pageData = definePageData<StatusPageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string; statusId?: string }
-  const handle = String(params.handle ?? '')
+  // Decoded as the client decodes it (`routeSegment`), so both sides read one route.
+  const handle = decodeSegment(String(params.handle ?? ''))
   // `statusId` is decoded from the URL path; the matcher's regex captures
   // the raw segment (which may be `encodeURIComponent`-encoded for ids
   // that contain `/`, `:`, etc. from non-Mastodon ActivityPub bridges).
-  const statusId = decodeURIComponent(String(params.statusId ?? ''))
+  const statusId = decodeSegment(String(params.statusId ?? ''))
 
   // Status detail uses the cookie host (user's home instance) — NOT the
   // path host. Status ids are minted per-instance, and the id we have in
@@ -52,22 +54,21 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
   // A Bluesky post (spec 8.4 rule 5), behind the server flag. It needs no
   // instance: the public AppView answers for every post.
   const route = postRouteOf(handle, statusId)
-  if (route.network === 'bluesky') {
+  // The flag is read before the import: with it off, no SDK load.
+  if (route.network === 'bluesky' && blueskySsrEnabled()) {
     const bsky = await import('../../server/lib/bluesky-public.js')
-    if (bsky.blueskySsrEnabled()) {
-      if (!bsky.validActor(route.actor) || !bsky.validRecordKey(route.rkey)) {
-        setResponseStatus(event, 404)
-        return { kind: 'not-found', shell, statusId: '', handle: '' }
-      }
-      try {
-        const thread = await bsky.fetchBlueskyThread(route.actor, route.rkey)
-        // A hidden author's thread keeps no handle (spec 8.3): the client
-        // reads the address instead.
-        const shown = bsky.asksHidden(thread.focused.account) ? '' : handle
-        return { kind: 'ok', ...thread, shell, statusId, handle: shown }
-      } catch (err) {
-        return { kind: 'error', message: String(err), shell, statusId, handle } as StatusPageData
-      }
+    if (!bsky.validActor(route.actor) || !bsky.validRecordKey(route.rkey)) {
+      setResponseStatus(event, 404)
+      return { kind: 'not-found', shell, statusId: '', handle: '' }
+    }
+    try {
+      const thread = await bsky.fetchBlueskyThread(route.actor, route.rkey)
+      // A hidden author's thread keeps no handle (spec 8.3): the client
+      // reads the address instead.
+      const shown = bsky.asksHidden(thread.focused.account) ? '' : handle
+      return { kind: 'ok', ...thread, shell, statusId, handle: shown }
+    } catch (err) {
+      return { kind: 'error', message: String(err), shell, statusId, handle } as StatusPageData
     }
   }
   if (!cookieHost) {

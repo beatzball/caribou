@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { BLUESKY_FLAG_KEY } from '../_bluesky.js'
-import { blueskyActor, blueskyPostUri, didOfUserKey, postRouteOf, rendersBluesky, routeOf } from '../_bluesky-route.js'
+import { blueskyActor, blueskyPostUri, decodeSegment, didOfUserKey, postRouteOf, rendersBluesky, routeOf, routeSegment } from '../_bluesky-route.js'
 
 describe('blueskyActor (spec 8.4)', () => {
   it.each([
@@ -46,6 +46,25 @@ describe('routeOf: the route rules, in order (spec 8.4)', () => {
 
   it('an empty segment is a Mastodon one, as before', () => {
     expect(routeOf('')).toEqual({ network: 'mastodon', remote: false })
+  })
+})
+
+describe('one segment, one route on both sides', () => {
+  // The server decodes the router param with `decodeSegment`; the client
+  // reads the address with `routeSegment`. Encoded forms agree.
+  it.each([
+    ['alice%40example.social', { network: 'mastodon', remote: true }],
+    ['did%3Aplc%3Aalice', { network: 'bluesky', by: 'did', actor: 'did:plc:alice' }],
+    ['%40alice.example.com', { network: 'bluesky', by: 'handle', actor: 'alice.example.com' }],
+  ])('%s', (raw, route) => {
+    expect(routeOf(decodeSegment(raw))).toEqual(route)
+    expect(routeOf(routeSegment(`/@${raw}`))).toEqual(route)
+    expect(routeOf(routeSegment(`/@${raw}/3k1`))).toEqual(route)
+  })
+
+  it('a segment that does not decode is empty, on both sides', () => {
+    expect(decodeSegment('%E0%A4%A')).toBe('')
+    expect(routeSegment('/@%E0%A4%A')).toBe('')
   })
 })
 

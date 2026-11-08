@@ -250,11 +250,31 @@ describe('profilePath', () => {
     expect(profilePath('bob@other.example', 'example.social', 'https://third.example/@bob')).toBe('/@bob@other.example')
     expect(profilePath('alice', 'example.social', 'https://third.example/@alice')).toBe('/@alice@example.social')
   })
-  it('a Mastodon post path adds the url host to a dotted local acct, and leaves others as they were', () => {
-    const account = (acct: string, url?: string) => ({ acct, ...(url ? { url } : {}) })
-    expect(postPath({ id: '9', account: account('first.last', 'https://pleroma.example/users/first.last') })).toBe('/@first.last@pleroma.example/9')
-    expect(postPath({ id: '9', account: account('alice', 'https://example.social/@alice') })).toBe('/@alice/9')
-    expect(postPath({ id: '9', account: account('bob@other.example') })).toBe('/@bob@other.example/9')
+  describe('postPath never makes a bare dotted name for a Mastodon post (spec 8.4)', () => {
+    const post = (acct: string, accountUrl?: string, url?: string | null) =>
+      ({ id: '9', account: { acct, ...(accountUrl !== undefined ? { url: accountUrl } : {}) }, ...(url !== undefined ? { url } : {}) })
+
+    it('leaves a local name with no dot, and a name with a host, as they were', () => {
+      expect(postPath(post('alice', 'https://example.social/@alice'))).toBe('/@alice/9')
+      expect(postPath(post('bob@other.example'))).toBe('/@bob@other.example/9')
+    })
+
+    it('a dotted name: the host given first, then the account url\'s host', () => {
+      expect(postPath(post('first.last', 'https://pleroma.example/users/first.last'), 'example.social')).toBe('/@first.last@example.social/9')
+      expect(postPath(post('first.last', 'https://pleroma.example/users/first.last'))).toBe('/@first.last@pleroma.example/9')
+    })
+
+    it.each([
+      ['missing', undefined],
+      ['empty', ''],
+      ['invalid', 'not a url'],
+      ['not http', 'javascript:alert(1)'],
+    ])('a dotted name with no host and an account url %s: the post\'s own url, else no link', (_name, accountUrl) => {
+      expect(postPath(post('first.last', accountUrl, 'https://pleroma.example/notice/9'))).toBe('https://pleroma.example/notice/9')
+      expect(postPath(post('first.last', accountUrl, null))).toBeNull()
+      expect(postPath(post('first.last', accountUrl, ''))).toBeNull()
+      expect(postPath(post('first.last', accountUrl, 'javascript:alert(1)'))).toBeNull()
+    })
   })
   it('never makes a bare dotted name: with no host and no url it links to a search', () => {
     expect(profilePath('first.last', '')).toBe('/search?q=%40first.last')

@@ -11,6 +11,9 @@ vi.mock('../../server/lib/mastodon-public.js', () => ({
   fetchAccountByHandle: vi.fn(),
   fetchAccountStatuses: vi.fn(),
 }))
+// Loading it would mean the SDK loads: the flag-off test checks it never does.
+const blueskyPublicLoaded = vi.fn()
+vi.mock('../../server/lib/bluesky-public.js', () => { blueskyPublicLoaded(); return {} })
 vi.mock('../../server/lib/storage.js', () => ({
   getStorage: () => ({ getItem: async () => null }),
 }))
@@ -215,5 +218,21 @@ describe('/@[handle] pageData', () => {
     expect(vi.mocked(fetchAccountByHandle)).toHaveBeenCalledWith('alice.example.com', { instance: 'mastodon.social' })
     expect(fetchSpy).not.toHaveBeenCalled()
     fetchSpy.mockRestore()
+    // The flag is read before the import: the SDK module never loads.
+    expect(blueskyPublicLoaded).not.toHaveBeenCalled()
+  })
+
+  it('decodes the handle segment as the client does: %40 is a remote Mastodon handle', async () => {
+    vi.mocked(resolveInstanceForRoute).mockResolvedValue({ instance: 'example.social', source: 'path' })
+    vi.mocked(fetchAccountByHandle).mockResolvedValue({ id: '42', acct: 'alice@example.social' } as Awaited<ReturnType<typeof fetchAccountByHandle>>)
+    vi.mocked(fetchAccountStatuses).mockResolvedValue([])
+    const event = {
+      context: { params: { handle: 'alice%40example.social' } },
+      url: '/@alice%40example.social',
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
+    const { pageData } = await import('../@[handle].js')
+    const result = await pageData.fetcher(event)
+    expect(result).toMatchObject({ kind: 'ok', handle: 'alice@example.social' })
+    expect(vi.mocked(resolveInstanceForRoute)).toHaveBeenCalledWith(event, { handle: 'alice@example.social' }, expect.anything())
   })
 })

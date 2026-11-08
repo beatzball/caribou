@@ -47,22 +47,26 @@ export function accountPath(account: AnyAccount, host: string): string {
 }
 
 /**
- * The thread path for a post of either network. A Bluesky post is
+ * The thread link for a post of either network. A Bluesky post is
  * `/@<handle or did>/<rkey>`, the rkey being the last part of its AT URI.
- * A Mastodon post is `/@<acct>/<encoded id>`, as it always was, with the
- * host added to a dotted local acct when its url names one.
+ * A Mastodon post is `/@<acct>/<encoded id>`, as it always was, except that
+ * it never has a bare dotted name (spec 8.4: that is a Bluesky route). A
+ * dotted local acct takes `host`, else the host of the account's url. With
+ * neither, the link is the post's own `url` on its server when that is an
+ * http(s) URL, and `null` (no link) when it is not. A path starts with `/`;
+ * anything else is an outside URL.
  */
 export function postPath(post: {
-  id: string; account: AnyAccount; bluesky?: { uri: string } | undefined
-}): string {
+  id: string; account: AnyAccount; url?: string | null | undefined; bluesky?: { uri: string } | undefined
+}, host = ''): string | null {
   if (post.bluesky) {
     const rkey = post.bluesky.uri.slice(post.bluesky.uri.lastIndexOf('/') + 1)
     return `${accountPath(post.account, '')}/${encodeURIComponent(rkey)}`
   }
-  // A dotted local acct gets its host from the account's url: a bare dotted
-  // segment is a Bluesky route (spec 8.4). The thread page reads the post
-  // from the reader's server, so the segment is for display.
   const { acct, url } = post.account
-  const host = !acct.includes('@') && acct.includes('.') ? hostOf(url) : ''
-  return `/@${host ? `${acct}@${host}` : acct}/${encodeURIComponent(post.id)}`
+  const id = encodeURIComponent(post.id)
+  if (acct.includes('@') || !acct.includes('.')) return `/@${acct}/${id}`
+  const known = host || hostOf(url)
+  if (known) return `/@${acct}@${known}/${id}`
+  return hostOf(post.url) ? new URL(post.url!).href : null
 }

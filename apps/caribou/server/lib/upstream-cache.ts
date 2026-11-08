@@ -15,7 +15,7 @@ export const TTL = {
 const lru = new LRUCache<string, { value: unknown; expiresAt: number }>({ max: 5_000 })
 const inflight = new Map<string, Promise<unknown>>()
 
-export async function cachedFetch<T>(url: string, ttlMs: number): Promise<T> {
+export async function cachedFetch<T>(url: string, ttlMs: number, init: Pick<RequestInit, 'redirect'> = {}): Promise<T> {
   const now = Date.now()
   const cached = lru.get(url)
   if (cached && cached.expiresAt > now) return cached.value as T
@@ -25,7 +25,7 @@ export async function cachedFetch<T>(url: string, ttlMs: number): Promise<T> {
 
   const promise = (async () => {
     try {
-      const res = await fetch(url, { headers: { accept: 'application/json' } })
+      const res = await fetch(url, { ...init, headers: { accept: 'application/json' } })
       if (!res.ok) throw new Error(`upstream ${res.status} ${url}`)
       const value = (await res.json()) as T
       lru.set(url, { value, expiresAt: Date.now() + ttlMs })

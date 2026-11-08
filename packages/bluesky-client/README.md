@@ -36,7 +36,7 @@ own files; ask in your report for a change in another's.
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
 | `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, recordCard, quote }` | #179 |
-| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, plain data so mappers can call it; `./moderation` re-exports it | #179, #180 |
+| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, `isProvenVisible(actor)` (the signed-out allow-list), plain data so mappers can call them; the root and `./moderation` export them | #179, #180, #186 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
 | `src/map/labels.ts` | `mapLabels(labels) → BlueskyLabel[]` | #177 |
 | `src/client.ts` | `createBlueskyClient(opts) → CaribouClient` (read methods), `BLUESKY_CAPABILITIES` | #177 |
@@ -504,9 +504,15 @@ when there is media".
   signed-out lists (`contentList.filter`) but leaves its thread view alone,
   so `mapEmbed` hides the quoted post itself, on every surface. A reader
   with a Bluesky account active sees the quote.
-- **A record card's creator with `!no-unauthenticated` (spec 8.3):** in a
-  signed-out copy, a feed, list, starter pack or labeler whose creator has
-  this label (not negated) becomes a card with the note "This account asked
+- **The signed-out allow-list (spec 8.3):** in a signed-out copy, a quoted
+  post shows only when `isProvenVisible(author)`: the author object is
+  there with a `did:` DID, a string handle and a `labels` array, and no
+  `!no-unauthenticated`. Otherwise the quote is the hidden quote above. A
+  missing author, a partial one, or labels null or not an array count as
+  hidden (fail closed).
+- **A record card's creator (spec 8.3):** in a signed-out copy, a feed,
+  list, starter pack or labeler whose creator is not `isProvenVisible` (the
+  label, or a missing or partial creator) becomes a card with the note "This account asked
   to be seen only by signed-in readers." (`NO_UNAUTHENTICATED_NOTE`), which
   links to `https://bsky.app`. Nothing of the record is kept: no name,
   description, image or handle. A reader with a Bluesky account active

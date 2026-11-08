@@ -21,7 +21,7 @@ const feed = {
     uri: 'at://did:plc:alice/app.bsky.feed.generator/caribous',
     cid: 'bafkfeed',
     did: 'did:web:feeds.example.com',
-    creator: { did: 'did:plc:alice', handle: 'alice.example.com' },
+    creator: { did: 'did:plc:alice', handle: 'alice.example.com', labels: [] },
     displayName: 'Caribou pictures',
     indexedAt: '2026-10-01T00:00:00.000Z',
   },

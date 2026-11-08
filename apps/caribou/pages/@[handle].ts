@@ -10,13 +10,14 @@ import {
   fetchAccountByHandle, fetchAccountStatuses,
 } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
+import { blueskySsrEnabled } from '../server/lib/bluesky-flag.js'
 import type { ProfilePageData, ShellInfo } from '../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
 import '../components/caribou-profile.js'
 import { enterWithCache } from '../components/_page-cache.js'
 import {
-  blueskyActor, didOfUserKey, rendersBluesky, replaceDidRoute, routeOf, routeSegment,
+  blueskyActor, didOfUserKey, decodeSegment, rendersBluesky, replaceDidRoute, routeOf, routeSegment,
 } from '../components/_bluesky-route.js'
 import { NO_UNAUTHENTICATED_NOTE } from '../components/_bluesky-moderation.js'
 
@@ -33,7 +34,8 @@ export type HandlePageData = (ProfilePageData | { kind: 'hidden' } | { kind: 'no
 
 export const pageData = definePageData<HandlePageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string }
-  const handle = String(params.handle ?? '')
+  // Decoded as the client decodes it (`routeSegment`), so both sides read one route.
+  const handle = decodeSegment(String(params.handle ?? ''))
   const resolution = await resolveInstanceForRoute(event, { handle }, { storage: getStorage() })
   const shell: ShellInfo = shellInfo(resolution)
   // /@me is auth-required (Plan 3 design §8.8): the user's own profile is
@@ -46,20 +48,19 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   // A Bluesky route (spec 8.4; README, "Bluesky SSR"), behind the server flag.
   const route = routeOf(handle)
-  if (route.network === 'bluesky') {
+  // The flag is read before the import: with it off, no SDK load.
+  if (route.network === 'bluesky' && blueskySsrEnabled()) {
     const bsky = await import('../server/lib/bluesky-public.js')
-    if (bsky.blueskySsrEnabled()) {
-      if (!bsky.validActor(route.actor)) {
-        setResponseStatus(event, 404)
-        return { kind: 'not-found', shell, handle: '' }
-      }
-      try {
-        const page = await bsky.fetchBlueskyProfilePage(route.actor, { tab, cursor: maxId })
-        if (page.kind === 'hidden') return { kind: 'hidden', shell, handle: '' }
-        return { ...page, tab, shell, handle } as HandlePageData
-      } catch (err) {
-        return { kind: 'error', message: String(err), shell, handle } as HandlePageData
-      }
+    if (!bsky.validActor(route.actor)) {
+      setResponseStatus(event, 404)
+      return { kind: 'not-found', shell, handle: '' }
+    }
+    try {
+      const page = await bsky.fetchBlueskyProfilePage(route.actor, { tab, cursor: maxId })
+      if (page.kind === 'hidden') return { kind: 'hidden', shell, handle: '' }
+      return { ...page, tab, shell, handle } as HandlePageData
+    } catch (err) {
+      return { kind: 'error', message: String(err), shell, handle } as HandlePageData
     }
   }
   if (!resolution.instance) return { kind: 'auth-required', shell, handle } as HandlePageData
