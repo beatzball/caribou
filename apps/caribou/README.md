@@ -76,7 +76,12 @@ the `appScriptUrl` option the litro patch adds), so a browser that kept an
 old entry never meets it again. That only works while no chunk imports
 `app.js`: `vite.config.ts` keeps lit-html and Vite's preload helper out of it.
 A tab that stays open across a deploy loads the target URL in full when a
-page chunk fails to load (`components/_stale-build.ts`).
+page chunk fails to load (`components/_stale-build.ts`). Not once the page
+is leaving (`beforeunload`, until `pageshow`): Firefox fails a dynamic import
+still loading when the page navigates away (the Bluesky chunk on a Bluesky
+page), and a reload then would cancel the reader's navigation. WebKit can do
+the same and was seen in CI to fire the failure without that guard catching
+it; a reader who leaves a Bluesky page in its first moment may be sent back.
 During a rolling deploy the HTML of one build can reach the other for its
 entry; any query other than none or exactly this build's `?v=` is answered
 `no-store` (`server/plugins/app-entry-cache.ts`), so no browser keeps the

@@ -106,6 +106,10 @@ test.describe('Bluesky sign-in', () => {
     const auth = await installFixtureAuth(page)
     await startSignIn(page, origin, 'bob.example.com')
     await page.waitForURL(`${origin}/home`)
+    // Let /home finish loading Bluesky before leaving it. A chunk cut off
+    // by the next navigation can make the stale-build handler reload /home
+    // in WebKit (the app README, "A deploy must not strand a browser").
+    await page.waitForLoadState('networkidle')
     const [[, before]] = await storedUsers(page) as [[string, { generation: string }]]
 
     // Add Alice, but approve as Bob on the same server.
