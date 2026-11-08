@@ -229,6 +229,26 @@ describe('restoreClient', () => {
     expect(restore).toHaveBeenCalledTimes(4)
   })
 
+  it('reloadModeration loads prefs and definitions again; later decisions use them', async () => {
+    let servicesUp = false
+    let prefsUp = false
+    const session = fakeSession(ALICE, {
+      'app.bsky.actor.getPreferences': () => prefsUp ? json({ preferences: [] }) : json({ error: 'x' }, 502),
+      'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
+      'app.bsky.labeler.getServices': () => servicesUp ? json({ views: [] }) : json({ error: 'x' }, 502),
+    })
+    const out = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired: () => {}, key: 'R1' })
+    expect(out.prefs).toBeNull()
+    expect(out.labelDefs).toBeNull()
+    servicesUp = true
+    prefsUp = true
+    const again = await out.reloadModeration()
+    expect(again.prefs).not.toBeNull()
+    expect(again.labelDefs).toEqual({})
+    expect(out.prefs).toBe(again.prefs)
+    expect(out.labelDefs).toBe(again.labelDefs)
+  })
+
   it('a 401 without a token challenge expires the session too', async () => {
     const session = fakeSession(ALICE, {
       'app.bsky.feed.getTimeline': () => json({ error: 'AuthRequired', message: 'no' }, 401),

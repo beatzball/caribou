@@ -394,7 +394,9 @@ Browser only. It loads through `./browser`, in the lazy chunk.
 - **Moderation inputs.** Prefs from `getPreferences`; definitions from
   `getLabelerServices` for every subscribed labeler plus Bluesky's. Either
   that fails is `null`, which `moderate()` treats as missing (fail closed).
-  `restoreClient` answers them with the client, for the reader veil.
+  `restoreClient` answers them with the client, for the reader veil, and
+  `reloadModeration()`, which loads both again (a cover's Retry); the
+  client's later decisions use the new ones.
 - **The deleted event.** One listener per DID and sign-in (`opts.key`): a
   restore for a new sign-in drops the listeners of earlier ones. The SDK's
   `onSessionDeleted` (here or in another tab) makes the client check: it calls

@@ -299,6 +299,12 @@ export interface RestoredClient {
   prefs: ModerationPrefs | null
   /** Label definitions by labeler DID, `null` when they failed to load. */
   labelDefs: LabelDefs | null
+  /**
+   * Loads the prefs and the definitions again (a cover's Retry). Later
+   * decisions of this client use the new ones; `prefs` and `labelDefs`
+   * above follow too.
+   */
+  reloadModeration(): Promise<{ prefs: ModerationPrefs | null; labelDefs: LabelDefs | null }>
 }
 
 export interface RestoreOptions {
@@ -350,11 +356,17 @@ export async function restoreClient(
   deletedListeners.set(did, listeners)
 
   const agent = new Agent(session)
-  const prefs = await agent.getPreferences().then((p) => p.moderationPrefs, () => null)
-  const labelerDids = [...new Set([BSKY_LABELER_DID, ...(prefs?.labelers ?? []).map((l) => l.did)])]
-  agent.configureLabelers(labelerDids)
-  const labelDefs = await agent.app.bsky.labeler.getServices({ dids: labelerDids, detailed: true })
-    .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), () => null)
+  // The moderation inputs. Either failing to load is null: fail closed.
+  let prefs: ModerationPrefs | null = null
+  let labelDefs: LabelDefs | null = null
+  async function loadModeration() {
+    prefs = await agent.getPreferences().then((p) => p.moderationPrefs, () => null)
+    const labelerDids = [...new Set([BSKY_LABELER_DID, ...(prefs?.labelers ?? []).map((l) => l.did)])]
+    agent.configureLabelers(labelerDids)
+    labelDefs = await agent.app.bsky.labeler.getServices({ dids: labelerDids, detailed: true })
+      .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), () => null)
+  }
+  await loadModeration()
 
   const client = createBlueskyClient({
     userKey: opts.userKey,
@@ -368,7 +380,16 @@ export async function restoreClient(
     onUnauthorized: opts.onExpired,
     ...(opts.onMapError ? { onMapError: opts.onMapError } : {}),
   })
-  return { client, agent, prefs, labelDefs }
+  const out: RestoredClient = {
+    client, agent, prefs, labelDefs,
+    async reloadModeration() {
+      await loadModeration()
+      out.prefs = prefs
+      out.labelDefs = labelDefs
+      return { prefs, labelDefs }
+    },
+  }
+  return out
 }
 
 /**
