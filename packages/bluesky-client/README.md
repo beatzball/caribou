@@ -193,6 +193,11 @@ it comes through `./moderation`.
   AppView call; `call` is `profile`, `authorFeed`, `thread` or `labelDefs`,
   so the server can pick a TTL) and `clean` (its DOMPurify for a post's and
   an account's HTML).
+- `mustPropagate(err)`, when given, marks errors that must reach the caller
+  from any call. The server passes its rate-limit check: **a rate limit is
+  never turned into "no data"**, so a 429 on the label definitions fails
+  the page (which the app defers) instead of rendering it with every label
+  covered. Any other label-definition failure is `null`.
 - Every author slot is checked by name with `isProvenVisible` before
   mapping (profile, feed author, reposter, thread posts); a failed one
   becomes a hidden marker. `mapEmbed` checks quotes and record cards.

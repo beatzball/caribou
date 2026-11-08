@@ -677,7 +677,10 @@ is not documented (spec 12.1). So a 429 never becomes an error page.
    at most `BACKOFF_MAX_S` (60 s); `BACKOFF_DEFAULT_S` (30 s) when the header
    is missing or unreadable. Every Bluesky page in that time is `deferred`,
    with no fetch. A 5xx or a network error is an error page as before, with
-   no back-off.
+   no back-off. **A rate limit is never turned into "no data"**: a 429 on
+   any call, label definitions included, reaches the page fetcher, which
+   defers. Only other label-definition failures give "not loaded" (moderation
+   then covers, fail closed).
 3. **The browser reads it.** After hydration, a deferred page reads its
    route from the address and asks `appview` (the origin the server named)
    itself. With a Bluesky account active, it swaps in the signed-in client
@@ -687,7 +690,14 @@ is not documented (spec 12.1). So a 429 never becomes an error page.
    and moderation as the server, before anything renders, with the
    browser's DOMPurify for the HTML. The SDK comes in the `bsky` chunk,
    loaded only on a deferred Bluesky page. A failed browser read is the
-   page's error message.
+   page's error message, which names the address the reader typed.
+4. **A late answer is dropped.** The browser uses its result only if its
+   page is still connected and the address is still the one it started
+   from (`stillOn` in `components/_bluesky-route.ts`). It checks before it
+   sets the page's data and before `replaceDidRoute`, so a slow answer never
+   changes the page or the address the reader moved on to.
+5. **Not kept.** The page cache never keeps a `deferred` page
+   (`_page-cache.ts`): it is only a loading shell, so a revisit asks again.
 
 **The reader check skips Bluesky posts.** `loadReaderViewFrom` asks a
 Mastodon reader's server for its copy of server-rendered posts. It never

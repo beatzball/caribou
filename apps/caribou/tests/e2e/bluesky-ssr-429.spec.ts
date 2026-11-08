@@ -98,7 +98,8 @@ const deepHtml = (page: Page) => page.evaluate(() => {
 })
 
 test('a 429: the server sends the loading shell, with no handle and no data', async () => {
-  appview.rateLimit('app.bsky.actor.getProfile', 1, '30')
+  // The cap: the serial tests below rely on the back-off still running.
+  appview.rateLimit('app.bsky.actor.getProfile', 1, '60')
   const res = await fetch(`${base}/@alice.example.com`)
   const text = await res.text()
   expect(res.status).toBe(200)
@@ -146,10 +147,14 @@ test('the browser reads a thread itself', async ({ page }) => {
 test('a hidden profile read by the browser is the notice, and its posts are never fetched', async ({ page }) => {
   const errors = collectErrors(page)
   const before = appview.requests.length
+  const serverBefore = appview.serverRequests.length
   await page.goto(`${base}/@hana.example.com`)
   await settled(page)
   await expect(livePage(page).getByText(NOTICE)).toBeVisible()
   expect(appview.requests.slice(before).some((r) => r.includes('getAuthorFeed'))).toBe(false)
+  // Still backed off: the browser read it, not the server.
+  expect(appview.serverRequests.length).toBe(serverBefore)
+  expect(appview.requests.length).toBeGreaterThan(before)
   for (const s of HANA_SECRETS) expect(await deepHtml(page), s).not.toContain(s)
   expect(errors).toEqual([])
 })

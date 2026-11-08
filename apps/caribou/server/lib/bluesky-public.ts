@@ -123,6 +123,8 @@ async function xrpc<T>(method: string, params: Record<string, string | undefined
 const SOURCE: SignedOutSource = {
   xrpc,
   clean: { status: sanitizeStatus, account: sanitizeAccount },
+  // A 429 on any call, label definitions included, defers the page.
+  mustPropagate: (err) => isRateLimited(err),
 }
 
 /** Bluesky's label definitions; `null` when they cannot load (fail closed). */

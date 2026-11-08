@@ -19,6 +19,8 @@ const APPVIEW = 'http://appview.test'
 const SHELL = { instance: null }
 const NOTICE = 'This account asked to be seen only by signed-in readers.'
 let calls: string[] = []
+// When set, AppView answers wait for it (a request in flight).
+let hold: Promise<void> | null = null
 
 // Everything a page shows: every shadow root's markup, attributes included.
 function deepHtml(root: Element | ShadowRoot): string {
@@ -60,9 +62,13 @@ beforeEach(() => {
   localStorage.clear()
   calls = []
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
+  hold = null
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
     calls.push(input)
+    // A Mastodon reader's own client may ask its server; it gets nothing.
+    if (input.startsWith('https://example.social/')) return new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } })
     if (!input.startsWith(`${APPVIEW}/xrpc/`) || init?.redirect !== 'error') throw new Error(`unexpected fetch ${input}`)
+    if (hold) await hold
     const url = new URL(input)
     const { status, body } = fx.appviewAnswer(url.pathname.replace('/xrpc/', ''), url.searchParams)
     return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -76,7 +82,22 @@ afterEach(() => {
 const deferredProfile = { kind: 'deferred', appview: APPVIEW, shell: SHELL, handle: '' }
 const deferredThread = { kind: 'deferred', appview: APPVIEW, shell: SHELL, handle: '', statusId: '' }
 
-describe('a deferred profile, signed out', () => {
+// The two readers the browser fallback serves: signed out, and a Mastodon
+// account (signed out of Bluesky). Both get the signed-out guard.
+const READERS = [
+  ['signed out', () => {}],
+  ['a Mastodon account active', () => {
+    users.value = new Map([['bob@example.social', {
+      userKey: 'bob@example.social', server: 'example.social', token: 'T', vapidKey: '', createdAt: 1,
+      account: { id: '1', acct: 'bob', username: 'bob' },
+    } as never]])
+    activeUserKey.value = 'bob@example.social'
+  }],
+] as const
+
+describe.each(READERS)('a deferred profile, %s', (_reader, seat) => {
+  beforeEach(() => seat())
+
   it('first renders the loading shell, then the profile from the AppView', async () => {
     const { el, first } = await mount('page-handle', deferredProfile, '/@alice.example.com')
     await settle(el, () => deepHtml(el).includes('alice plain post'))
@@ -112,7 +133,9 @@ describe('a deferred profile, signed out', () => {
   })
 })
 
-describe('a deferred thread, signed out', () => {
+describe.each(READERS)('a deferred thread, %s', (_reader, seat) => {
+  beforeEach(() => seat())
+
   it('hidden posts are notices; the rest renders; nothing hidden is in the DOM or the data', async () => {
     const { el, first } = await mount('page-handle-statusid', deferredThread, '/@alice.example.com/3kalicefocus')
     await settle(el, () => deepHtml(el).includes('alice thread focus'))
@@ -132,5 +155,54 @@ describe('a deferred thread, signed out', () => {
     await settle(el, () => deepHtml(el).includes('carol reply to hana'))
     expect((el as unknown as { fallback: { handle: string } }).fallback.handle).toBe('')
     for (const s of fx.HANA_SECRETS) expect(deepHtml(el), s).not.toContain(s)
+  })
+})
+
+describe('a late answer after the reader left (#187 review)', () => {
+  it.each([
+    ['a profile opened by DID', 'page-handle', deferredProfile, '/@did:plc:alice'],
+    ['a thread opened by DID', 'page-handle-statusid', deferredThread, '/@did:plc:alice/3kalicefocus'],
+  ] as const)('%s: the old page takes nothing and the address stays where the reader went', async (_name, tag, data, path) => {
+    let release!: () => void
+    hold = new Promise<void>((r) => { release = r })
+    const { el } = await mount(tag, data, path)
+    // The fallback has asked the AppView.
+    for (let i = 0; i < 100 && calls.length === 0; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(calls.length).toBeGreaterThan(0)
+    // The reader goes elsewhere: the router takes the page out.
+    el.remove()
+    history.replaceState(null, '', '/@bob@example.social')
+    release()
+    for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(location.pathname).toBe('/@bob@example.social')
+    expect((el as unknown as { fallback: unknown }).fallback).toBeNull()
+  })
+
+  it('a page still connected but at another address takes nothing either', async () => {
+    let release!: () => void
+    hold = new Promise<void>((r) => { release = r })
+    const { el } = await mount('page-handle', deferredProfile, '/@did:plc:alice')
+    for (let i = 0; i < 100 && calls.length === 0; i++) await new Promise((r) => setTimeout(r, 5))
+    history.replaceState(null, '', '/@carol.example.com')
+    release()
+    for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(location.pathname).toBe('/@carol.example.com')
+    expect((el as unknown as { fallback: unknown }).fallback).toBeNull()
+  })
+})
+
+describe('a failed browser read keeps the address in its message', () => {
+  it('the profile says which account it could not load', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
+    const { el } = await mount('page-handle', deferredProfile, '/@alice.example.com')
+    await settle(el, () => deepHtml(el).includes('Couldn'))
+    expect(deepHtml(el)).toMatch(/Couldn't load profile @(<!--[^>]*-->)*alice\.example\.com/)
+  })
+
+  it('the thread says which post it could not load', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })))
+    const { el } = await mount('page-handle-statusid', deferredThread, '/@alice.example.com/3kalicefocus')
+    await settle(el, () => deepHtml(el).includes('Couldn'))
+    expect(deepHtml(el)).toMatch(/Couldn't load status (<!--[^>]*-->)*3kalicefocus/)
   })
 })

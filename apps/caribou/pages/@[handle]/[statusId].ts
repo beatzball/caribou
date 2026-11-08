@@ -16,7 +16,7 @@ import '../../components/caribou-auth-required.js'
 import '../../components/caribou-thread.js'
 import { enterWithCache } from '../../components/_page-cache.js'
 import {
-  blueskyActor, blueskyPostUri, postRouteOf, decodeSegment, rendersBluesky, replaceDidRoute, routePostId, routeSegment,
+  blueskyActor, blueskyPostUri, postRouteOf, decodeSegment, rendersBluesky, replaceDidRoute, routeKey, routePostId, routeSegment, stillOn,
 } from '../../components/_bluesky-route.js'
 import { asksNoUnauthenticated } from '../../components/_bluesky-moderation.js'
 
@@ -133,16 +133,22 @@ export class HandleStatusPage extends LitroPage {
   // AppView, through the same guard as the server (README, "Bluesky SSR:
   // rate limits").
   private async loadFallback(data: Extract<StatusPageData, { kind: 'deferred' }>, actor: string, rkey: string) {
-    const { publicThread } = await import('../../components/_bluesky-public.js')
     const handle = routeSegment(window.location.pathname)
+    // A late answer is dropped once the reader has left this page.
+    const key = routeKey(window)
+    let next: StatusPageData
     try {
+      const { publicThread } = await import('../../components/_bluesky-public.js')
       const thread = await publicThread(data.appview, actor, rkey)
       const shown = asksNoUnauthenticated(thread.focused.account) ? '' : handle
-      this.fallback = { kind: 'ok', ...thread, shell: data.shell, statusId: rkey, handle: shown }
-      replaceDidRoute(window, shown, thread.focused.account, `/${encodeURIComponent(rkey)}`)
+      next = { kind: 'ok', ...thread, shell: data.shell, statusId: rkey, handle: shown }
     } catch (err) {
-      this.fallback = { kind: 'error', message: String(err), shell: data.shell, statusId: '', handle: '' }
+      // The id is from the address the reader typed: the message keeps it.
+      next = { kind: 'error', message: String(err), shell: data.shell, statusId: rkey, handle }
     }
+    if (!stillOn(this, window, key)) return
+    this.fallback = next
+    if (next.kind === 'ok') replaceDidRoute(window, next.handle, next.focused.account, `/${encodeURIComponent(rkey)}`)
   }
 
   // A revisit paints from the last copy at once. The fresh thread that

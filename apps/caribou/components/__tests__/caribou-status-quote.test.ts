@@ -431,6 +431,9 @@ describe('a quoted post Caribou cannot place (postPath, #187 review)', () => {
     expect(a.getAttribute('href')).toBe('https://pleroma.example/notice/7')
     expect(a.getAttribute('target')).toBe('_blank')
     expect(a.getAttribute('aria-label')).toMatch(/opens this post on its own server in a new tab$/)
+    // The name starts with what the link shows, so a voice command finds it.
+    expect(a.textContent!.trim()).not.toBe('')
+    expect(a.getAttribute('aria-label')!.startsWith(a.textContent!.trim())).toBe(true)
   })
 
   it('with no usable url, the time is not a link', async () => {

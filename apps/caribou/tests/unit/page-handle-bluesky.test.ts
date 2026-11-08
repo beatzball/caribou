@@ -200,6 +200,22 @@ describe('Bluesky SSR data in the client (#185, #186)', () => {
 })
 
 describe('a deferred page with a Bluesky account (#187)', () => {
+  // The signed-in render reads through the reader's own client: the public
+  // AppView the server named is never asked.
+  let appviewCalls: string[] = []
+  beforeEach(() => {
+    appviewCalls = []
+    const real = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith('http://appview.test')) appviewCalls.push(url)
+      return real(input, init)
+    }))
+  })
+  afterEach(() => {
+    expect(appviewCalls).toEqual([])
+  })
+
   it('the profile swaps in the client render, by the address', async () => {
     signIn()
     history.replaceState(null, '', '/@alice.example.com?tab=replies')

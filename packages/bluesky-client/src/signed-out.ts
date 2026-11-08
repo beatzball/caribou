@@ -24,6 +24,12 @@ export interface SignedOutSource {
   xrpc<T>(method: string, params: Record<string, string | undefined>, call: SignedOutCall): Promise<T>
   /** Cleans the HTML of a mapped post and account (the caller's DOMPurify). */
   clean: { status(s: Status): Status; account(a: Account): Account }
+  /**
+   * True for an error that must reach the caller whatever the call: a rate
+   * limit is never turned into "no data" (README, "Signed-out pages"). The
+   * server passes its rate-limit check; without it, nothing is.
+   */
+  mustPropagate?(err: unknown): boolean
 }
 
 // ---------------------------------------------------------------- 8.3
@@ -179,7 +185,10 @@ export async function signedOutLabelDefs(src: SignedOutSource): Promise<LabelDef
       dids: LOGGED_OUT_PREFS.labelers.map((l) => l.did).join(','), detailed: 'true',
     }, 'labelDefs')
     return labelDefsFromServices(data.views as Parameters<typeof labelDefsFromServices>[0])
-  } catch {
+  } catch (err) {
+    // A rate limit reaches the page fetcher, which defers the page. Any
+    // other failure is "not loaded": moderation then covers (fail closed).
+    if (src.mustPropagate?.(err)) throw err
     return null
   }
 }

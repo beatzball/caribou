@@ -17,9 +17,10 @@ import '../components/caribou-auth-required.js'
 import '../components/caribou-profile.js'
 import { enterWithCache } from '../components/_page-cache.js'
 import {
-  blueskyActor, didOfUserKey, decodeSegment, rendersBluesky, replaceDidRoute, routeOf, routeSegment,
+  blueskyActor, didOfUserKey, decodeSegment, rendersBluesky, replaceDidRoute, routeKey, routeOf, routeSegment, stillOn,
 } from '../components/_bluesky-route.js'
 import { NO_UNAUTHENTICATED_NOTE } from '../components/_bluesky-moderation.js'
+import type { SignedOutProfile } from '@beatzball/caribou-bluesky-client/moderation'
 
 type Tab = 'posts' | 'replies' | 'media'
 
@@ -145,20 +146,25 @@ export class HandlePage extends LitroPage {
     const handle = routeSegment(window.location.pathname)
     const actor = blueskyActor(handle)
     if (!actor) return
+    // A late answer is dropped once the reader has left this page.
+    const key = routeKey(window)
     const query = new URLSearchParams(window.location.search)
     const tab = parseTab(query.get('tab'))
-    const { publicProfilePage } = await import('../components/_bluesky-public.js')
+    let next: HandlePageData
+    let page: SignedOutProfile | null = null
     try {
-      const page = await publicProfilePage(data.appview, actor, { tab, cursor: query.get('max_id') ?? undefined })
-      if (page.kind === 'hidden') {
-        this.fallback = { kind: 'hidden', shell: data.shell, handle: '' }
-        return
-      }
-      this.fallback = { ...page, tab, shell: data.shell, handle }
-      replaceDidRoute(window, handle, page.account)
+      const { publicProfilePage } = await import('../components/_bluesky-public.js')
+      page = await publicProfilePage(data.appview, actor, { tab, cursor: query.get('max_id') ?? undefined })
+      next = page.kind === 'hidden'
+        ? { kind: 'hidden', shell: data.shell, handle: '' }
+        : { ...page, tab, shell: data.shell, handle }
     } catch (err) {
-      this.fallback = { kind: 'error', message: String(err), shell: data.shell, handle: '' }
+      // The segment is the address the reader typed: the message keeps it.
+      next = { kind: 'error', message: String(err), shell: data.shell, handle }
     }
+    if (!stillOn(this, window, key)) return
+    this.fallback = next
+    if (page?.kind === 'ok') replaceDidRoute(window, handle, page.account)
   }
 
   // A revisit paints from the last copy at once. The fresh page data that

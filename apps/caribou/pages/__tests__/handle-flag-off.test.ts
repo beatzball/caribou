@@ -30,9 +30,13 @@ describe('/@[handle] with BLUESKY_SSR unset', () => {
     const mp = await import('../../server/lib/mastodon-public.js')
     vi.mocked(ri.resolveInstanceForRoute).mockResolvedValue({ instance: 'mastodon.social', source: 'cookie' })
     vi.mocked(mp.fetchAccountByHandle).mockRejectedValue(new Error('upstream 404'))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const event = { context: { params: { handle: 'alice.example.com' } } } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle].js')
     const result = await pageData.fetcher(event)
+    // No request of any kind: with the flag off, nothing asks the AppView.
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
     expect(result).toMatchObject({ kind: 'error', handle: 'alice.example.com' })
     expect(vi.mocked(mp.fetchAccountByHandle)).toHaveBeenCalledWith('alice.example.com', { instance: 'mastodon.social' })
     // The flag is read before the import.
