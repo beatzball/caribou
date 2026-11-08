@@ -6,12 +6,16 @@ export const TTL = {
   THREAD_CONTEXT:    60_000,
   PROFILE:          300_000,
   PROFILE_STATUSES:  60_000,
+  // The public AppView answers with `max-age=30` (spec 8.1).
+  BLUESKY:           30_000,
+  // Bluesky's label definitions change rarely (spec 7.4: refresh hourly).
+  BLUESKY_LABEL_DEFS: 3_600_000,
 } as const
 
 const lru = new LRUCache<string, { value: unknown; expiresAt: number }>({ max: 5_000 })
 const inflight = new Map<string, Promise<unknown>>()
 
-export async function cachedFetch<T>(url: string, ttlMs: number): Promise<T> {
+export async function cachedFetch<T>(url: string, ttlMs: number, init: Pick<RequestInit, 'redirect'> = {}): Promise<T> {
   const now = Date.now()
   const cached = lru.get(url)
   if (cached && cached.expiresAt > now) return cached.value as T
@@ -21,7 +25,7 @@ export async function cachedFetch<T>(url: string, ttlMs: number): Promise<T> {
 
   const promise = (async () => {
     try {
-      const res = await fetch(url, { headers: { accept: 'application/json' } })
+      const res = await fetch(url, { ...init, headers: { accept: 'application/json' } })
       if (!res.ok) throw new Error(`upstream ${res.status} ${url}`)
       const value = (await res.json()) as T
       lru.set(url, { value, expiresAt: Date.now() + ttlMs })

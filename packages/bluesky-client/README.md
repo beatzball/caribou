@@ -36,13 +36,14 @@ own files; ask in your report for a change in another's.
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
 | `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, recordCard, quote }` | #179 |
-| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, plain data so mappers can call it; `./moderation` re-exports it | #179, #180 |
+| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, `isProvenVisible(actor)` (the signed-out allow-list), plain data so mappers can call them; the root and `./moderation` export them | #179, #180, #186 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
 | `src/map/labels.ts` | `mapLabels(labels) → BlueskyLabel[]` | #177 |
 | `src/client.ts` | `createBlueskyClient(opts) → CaribouClient` (read methods), `BLUESKY_CAPABILITIES` | #177 |
 | `src/errors.ts` | `normalizeXrpcError(err) → CaribouError` | #177 |
 | `src/browser.ts` | the SDK classes, the client and the OAuth glue, for the lazy chunk | #177, #182 |
 | `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
+| `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
 How they fit:
@@ -503,6 +504,19 @@ when there is media".
   signed-out lists (`contentList.filter`) but leaves its thread view alone,
   so `mapEmbed` hides the quoted post itself, on every surface. A reader
   with a Bluesky account active sees the quote.
+- **The signed-out allow-list (spec 8.3):** in a signed-out copy, a quoted
+  post shows only when `isProvenVisible(author)`: the author object is
+  there with a `did:` DID, a string handle and a `labels` array, and no
+  `!no-unauthenticated`. Otherwise the quote is the hidden quote above. A
+  missing author, a partial one, or labels null or not an array count as
+  hidden (fail closed).
+- **A record card's creator (spec 8.3):** in a signed-out copy, a feed,
+  list, starter pack or labeler whose creator is not `isProvenVisible` (the
+  label, or a missing or partial creator) becomes a card with the note "This account asked
+  to be seen only by signed-in readers." (`NO_UNAUTHENTICATED_NOTE`), which
+  links to `https://bsky.app`. Nothing of the record is kept: no name,
+  description, image or handle. A reader with a Bluesky account active
+  sees the card.
 - **One level of quote**, as on Bluesky. A quote inside a quoted post is
   `accepted` with no post, and the quote card shows it as a link. This
   also ends a chain that quotes itself.
@@ -623,13 +637,14 @@ only** (`import type`). So the server render and any client code can import
 the package root without pulling in the SDK. Mappers and the facet renderer
 are pure functions.
 
-`./moderation` and `./browser` are the SDK doors. The server may import
-`./moderation` statically (SSR runs moderation with logged-out defaults).
-The client loads both lazily. `src/oauth.ts` is browser only and loads
-through `./browser`.
+`./moderation`, `./syntax` and `./browser` are the SDK doors. The server may import
+`./moderation` and `./syntax` (SSR runs moderation with logged-out defaults,
+and checks a route's syntax). The client loads `./moderation` and
+`./browser` lazily, and never `./syntax`. `src/oauth.ts` is browser only
+and loads through `./browser`.
 
 `src/__tests__/server-safe.test.ts` fails on a runtime `@atproto` import in
-any module other than those three: a value import, a side-effect import, or a
+any module other than the doors and `src/oauth.ts`: a value import, a side-effect import, or a
 dynamic `import()`. A lazy load of the SDK belongs in a door too, so the
 server-safe modules stay pure and the chunk rule has one place to look.
 

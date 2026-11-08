@@ -4,7 +4,7 @@ import { html, render } from 'lit'
 import '../caribou-status-card.js'
 import '../caribou-app-shell.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
-import { profilePath } from '../_profile-path.js'
+import { postPath, profilePath } from '../_profile-path.js'
 
 // Spy on the real router: the click handler reaches it through a dynamic
 // import, and both import forms must observe the same callable.
@@ -240,6 +240,46 @@ describe('profilePath', () => {
   })
   it('keeps the bare handle when no host is known', () => {
     expect(profilePath('alice', '')).toBe('/@alice')
+  })
+  // Spec 8.4: a bare dotted `/@name` is a Bluesky handle route now.
+  it('with no host, takes the host from the account url', () => {
+    expect(profilePath('first.last', '', 'https://pleroma.example/users/first.last')).toBe('/@first.last@pleroma.example')
+    expect(profilePath('alice', '', 'https://example.social/@alice')).toBe('/@alice@example.social')
+  })
+  it('the order: an acct with a host, then the host given, then the url', () => {
+    expect(profilePath('bob@other.example', 'example.social', 'https://third.example/@bob')).toBe('/@bob@other.example')
+    expect(profilePath('alice', 'example.social', 'https://third.example/@alice')).toBe('/@alice@example.social')
+  })
+  describe('postPath never makes a bare dotted name for a Mastodon post (spec 8.4)', () => {
+    const post = (acct: string, accountUrl?: string, url?: string | null) =>
+      ({ id: '9', account: { acct, ...(accountUrl !== undefined ? { url: accountUrl } : {}) }, ...(url !== undefined ? { url } : {}) })
+
+    it('leaves a local name with no dot, and a name with a host, as they were', () => {
+      expect(postPath(post('alice', 'https://example.social/@alice'))).toBe('/@alice/9')
+      expect(postPath(post('bob@other.example'))).toBe('/@bob@other.example/9')
+    })
+
+    it('a dotted name: the host given first, then the account url\'s host', () => {
+      expect(postPath(post('first.last', 'https://pleroma.example/users/first.last'), 'example.social')).toBe('/@first.last@example.social/9')
+      expect(postPath(post('first.last', 'https://pleroma.example/users/first.last'))).toBe('/@first.last@pleroma.example/9')
+    })
+
+    it.each([
+      ['missing', undefined],
+      ['empty', ''],
+      ['invalid', 'not a url'],
+      ['not http', 'javascript:alert(1)'],
+    ])('a dotted name with no host and an account url %s: the post\'s own url, else no link', (_name, accountUrl) => {
+      expect(postPath(post('first.last', accountUrl, 'https://pleroma.example/notice/9'))).toBe('https://pleroma.example/notice/9')
+      expect(postPath(post('first.last', accountUrl, null))).toBeNull()
+      expect(postPath(post('first.last', accountUrl, ''))).toBeNull()
+      expect(postPath(post('first.last', accountUrl, 'javascript:alert(1)'))).toBeNull()
+    })
+  })
+  it('never makes a bare dotted name: with no host and no url it links to a search', () => {
+    expect(profilePath('first.last', '')).toBe('/search?q=%40first.last')
+    expect(profilePath('first.last', '', 'not a url')).toBe('/search?q=%40first.last')
+    expect(profilePath('first.last', '', 'javascript:alert(1)')).toBe('/search?q=%40first.last')
   })
 })
 

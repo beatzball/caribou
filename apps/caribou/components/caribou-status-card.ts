@@ -182,8 +182,8 @@ interface Cover {
   retry: unknown
 }
 
-export function statusPermalink(s: Parameters<typeof postPath>[0]): string {
-  return postPath(s)
+export function statusPermalink(s: Parameters<typeof postPath>[0], host = ''): string | null {
+  return postPath(s, host)
 }
 
 @customElement('caribou-status-card')
@@ -1034,6 +1034,15 @@ export class CaribouStatusCard extends LitElement {
   // server whose web domain differs from its account domain it names the
   // wrong host, and the profile lookup then fails the way a mistyped handle
   // does.
+  // The time links to the thread page; a Mastodon post Caribou cannot place
+  // on a server links to its own page there, or not at all (`postPath`).
+  private renderPermalink(s: Status, time: unknown): unknown {
+    const href = statusPermalink(s, this.instance || this.shellInstance)
+    if (href === null) return html`<span class="permalink">${time}</span>`
+    if (!href.startsWith('/')) return html`<a class="permalink" href=${href} rel="noopener noreferrer" target="_blank">${time}</a>`
+    return html`<litro-link class="permalink" href=${href}>${time}</litro-link>`
+  }
+
   private profileHref(account: { acct: string; url?: string | null } & Pick<Status['account'], 'bluesky'>): string {
     return accountPath(account, this.instance || this.shellInstance || hostOf(account.url ?? ''))
   }
@@ -1272,9 +1281,7 @@ export class CaribouStatusCard extends LitElement {
                 <strong>${authorName}</strong>
                 <span class="acct">@${display.account.acct}</span>
               </a>
-              <litro-link class="permalink" href=${statusPermalink(display)}>
-                <time datetime=${dt}>${timeLabel}</time>
-              </litro-link>
+              ${this.renderPermalink(display, html`<time datetime=${dt}>${timeLabel}</time>`)}
               ${display.editedAt ? this.renderEdited(display.editedAt) : nothing}
             </header>
             ${warning

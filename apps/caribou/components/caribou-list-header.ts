@@ -191,7 +191,7 @@ export class CaribouListHeader extends LitElement {
         ${a.avatarStatic || a.avatar
           ? html`<img src=${a.avatarStatic || a.avatar} alt="" width="40" height="40" loading="lazy" decoding="async" />`
           : html`<span class="no-avatar" aria-hidden="true"></span>`}
-        <a class="who" href=${profilePath(a.acct, this.server)} @click=${spaClick}>
+        <a class="who" href=${profilePath(a.acct, this.server, a.url)} @click=${spaClick}>
           <strong>${a.displayName || a.username}</strong><span>@${a.acct}</span></a>
         <caribou-button class="remove" variant="secondary"
           @click=${(e: Event) => { void this.onRemove(a, e) }}>Remove<span class="vh"> @${a.acct}</span></caribou-button>

@@ -13,6 +13,9 @@ const mapPostMock = vi.mocked(mapPost)
 const ctx: MapContext = { viewerOf: null, moderatePost: () => { throw new Error('unused') } }
 type Embed = AppBskyFeedDefs.PostView['embed']
 const map = (embed: unknown, postUri: string | undefined = fx.POST_URI) => mapEmbed(embed as Embed, ctx, postUri)
+// A signed-in Bluesky reader: the card builder runs on partial creators too
+// (signed out, those are hidden; see the spec 8.3 tests).
+const mapSignedIn = (embed: unknown) => mapEmbed(embed as Embed, { ...ctx, viewerOf: 'did:plc:reader@bsky' }, fx.POST_URI)
 
 const FALLBACK_TITLE = 'Not supported here — open on bsky.app'
 const NONE: EmbedParts = { mediaAttachments: [], card: null, recordCard: null, quote: null }
@@ -219,6 +222,29 @@ describe('mapEmbed', () => {
       expect(mapPostMock).not.toHaveBeenCalled()
     })
 
+    it.each([
+      ['labels missing', (({ labels: _l, ...a }) => a)(fx.viewRecord.author)],
+      ['labels null', { ...fx.viewRecord.author, labels: null }],
+      ['labels not an array', { ...fx.viewRecord.author, labels: 'x' }],
+      ['no handle', (({ handle: _h, ...a }) => a)(fx.viewRecord.author)],
+    ] as const)('hides the quote when the author\'s labels were not read: %s', (_name, author) => {
+      const record: Record<string, unknown> = { ...fx.viewRecord, author }
+      if (author === undefined) delete record.author
+      expect(map({ ...fx.recordView, record })).toEqual({
+        ...NONE,
+        quote: { state: 'unauthorized', quotedStatus: null, bluesky: { hidden: 'no-unauthenticated' } },
+      })
+      expect(mapPostMock).not.toHaveBeenCalled()
+    })
+
+    it('a quoted record with no author keeps nothing of the post', () => {
+      const { author: _a, ...record } = fx.viewRecord
+      const out = map({ ...fx.recordView, record })
+      expect(out.quote?.quotedStatus ?? null).toBeNull()
+      expect(JSON.stringify(out)).not.toContain(JSON.stringify(fx.viewRecord.value.text).slice(1, -1))
+      expect(mapPostMock).not.toHaveBeenCalled()
+    })
+
     it('shows the quote to a signed-in Bluesky reader', () => {
       const signedIn = { ...ctx, viewerOf: 'did:plc:alice@bsky' as const }
       expect(mapEmbed(hiddenAuthor() as unknown as Embed, signedIn, fx.POST_URI).quote).toEqual({ state: 'accepted', quotedStatus })
@@ -249,11 +275,63 @@ describe('mapEmbed', () => {
     expect(map(view)).toEqual({ ...NONE, recordCard: { ...card, type: 'link', authors: [], embedUrl: '' } })
   })
 
+  describe('a record card whose creator asked to be hidden from signed-out readers (spec 8.3)', () => {
+    const NO_UNAUTH = { src: 'did:plc:alice', uri: 'at://did:plc:alice/app.actor.profile/self', val: '!no-unauthenticated', cts: '2026-01-01T00:00:00.000Z' }
+    const NOTICE = {
+      url: 'https://bsky.app', title: 'This account asked to be seen only by signed-in readers.', description: '',
+      providerName: 'Bluesky', image: null, type: 'link', authors: [], embedUrl: '',
+    }
+    const hidden = <V extends { record: { creator: object } }>(view: V, neg?: boolean): V => ({
+      ...view,
+      record: { ...view.record, creator: { ...view.record.creator, labels: [{ ...NO_UNAUTH, ...(neg ? { neg } : {}) }] } },
+    })
+
+    it.each([
+      ['feed', fx.feedGeneratorView],
+      ['list', fx.listView],
+      ['starter pack', fx.starterPackView],
+      ['labeler', fx.labelerView],
+    ] as const)('a %s becomes the notice card for a signed-out reader, with none of its own text', (_name, view) => {
+      const out = map(hidden(view as typeof fx.listView))
+      expect(out).toEqual({ ...NONE, recordCard: NOTICE })
+      expect(JSON.stringify(out)).not.toMatch(/alice\.example\.com|Alice|Caribou pictures|Herd|Caribou fans/)
+    })
+
+    // Fail closed (spec 8.3): a creator whose labels were not read is
+    // hidden, whatever else it has or lacks.
+    it.each([
+      ['a creator with a DID, no handle and no labels', { did: 'did:plc:alice' }],
+      ['no creator at all', undefined],
+      ['labels null', { did: 'did:plc:alice', handle: 'alice.example.com', labels: null }],
+      ['labels not an array', { did: 'did:plc:alice', handle: 'alice.example.com', labels: { val: 'x' } }],
+      ['a creator with no DID', { handle: 'alice.example.com', labels: [] }],
+      ['a creator that is not an object', 'did:plc:alice'],
+    ] as const)('%s: the notice card, with nothing of the record', (_name, creator) => {
+      for (const view of [fx.feedGeneratorView, fx.listView, fx.starterPackView, fx.labelerView]) {
+        const record: Record<string, unknown> = { ...view.record }
+        if (creator === undefined) delete record.creator
+        else record.creator = creator
+        const out = map({ ...view, record })
+        expect(out).toEqual({ ...NONE, recordCard: NOTICE })
+        expect(JSON.stringify(out)).not.toMatch(/alice\.example\.com|Caribou pictures|Herd|Caribou fans|Only caribou|People who post/)
+      }
+    })
+
+    it('a signed-in Bluesky reader gets the card', () => {
+      const signedIn = { ...ctx, viewerOf: 'did:plc:bob@bsky' as const }
+      expect(mapEmbed(hidden(fx.listView) as unknown as Embed, signedIn, fx.POST_URI).recordCard?.title).toBe('Herd')
+    })
+
+    it('ignores a negated label', () => {
+      expect(map(hidden(fx.listView, true)).recordCard?.title).toBe('Herd')
+    })
+  })
+
   it('encodes the path parts of a record link', () => {
     const feed = { ...fx.feedGeneratorView.record, uri: 'at://did:plc:alice/app.bsky.feed.generator/a?b#c' }
     expect(map({ ...fx.feedGeneratorView, record: feed }).recordCard?.url).toBe('https://bsky.app/profile/did:plc:alice/feed/a%3Fb%23c')
     const pack = { ...fx.starterPackView.record, creator: { did: 'did:plc:alice', handle: 'a/b' } }
-    expect(map({ ...fx.starterPackView, record: pack }).recordCard?.url).toBe('https://bsky.app/starter-pack/a%2Fb/3kpack')
+    expect(mapSignedIn({ ...fx.starterPackView, record: pack }).recordCard?.url).toBe('https://bsky.app/starter-pack/a%2Fb/3kpack')
   })
 
   it('maps recordWithMedia images to a quote plus media', () => {
@@ -309,7 +387,7 @@ describe('mapEmbed', () => {
     ['a quoted record with no cid', { ...fx.recordView, record: { ...fx.viewRecord, cid: undefined } }],
     ['a string', 'embed'],
   ])('gives one fallback card for %s and never throws', (_name, embed) => {
-    const out = map(embed)
+    const out = mapSignedIn(embed)
     expect(cards(out)).toEqual([expect.objectContaining({ title: FALLBACK_TITLE, url: fx.POST_URL, type: 'link' })])
     expect(JSON.parse(JSON.stringify(out))).toEqual(out)
   })
@@ -349,14 +427,14 @@ describe('mapEmbed', () => {
     const pack = { ...fx.starterPackView.record, record: {} }
     expect(map({ ...fx.starterPackView, record: pack }).recordCard?.title).toBe('Starter pack')
     const labeler = { ...fx.labelerView.record, creator: { did: 'did:plc:alice', handle: 'alice.example.com' } }
-    expect(map({ ...fx.labelerView, record: labeler }).recordCard?.title).toBe('alice.example.com')
+    expect(mapSignedIn({ ...fx.labelerView, record: labeler }).recordCard?.title).toBe('alice.example.com')
     const bare = { ...fx.labelerView.record, creator: { did: 'did:plc:alice' } }
-    expect(map({ ...fx.labelerView, record: bare }).recordCard?.title).toBe('did:plc:alice')
+    expect(mapSignedIn({ ...fx.labelerView, record: bare }).recordCard?.title).toBe('did:plc:alice')
   })
 
   it('links a starter pack by DID when the creator has no handle', () => {
     const pack = { ...fx.starterPackView.record, creator: { did: 'did:plc:alice' } }
-    expect(map({ ...fx.starterPackView, record: pack }).recordCard?.url).toBe('https://bsky.app/starter-pack/did:plc:alice/3kpack')
+    expect(mapSignedIn({ ...fx.starterPackView, record: pack }).recordCard?.url).toBe('https://bsky.app/starter-pack/did:plc:alice/3kpack')
   })
 
   it('maps a quoted record with no embeds or counts', () => {
