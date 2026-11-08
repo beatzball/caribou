@@ -1,5 +1,13 @@
 # @beatzball/caribou-state
 
+## 0.4.8
+
+### Patch Changes
+
+- [#225](https://github.com/beatzball/caribou/pull/225) [`e85a68a`](https://github.com/beatzball/caribou/commit/e85a68a16728b922c63dd58cc2a6489f67f525e4) Thanks [@beatzball](https://github.com/beatzball)! - A Bluesky post's `moderation` now stays paired with its `viewerOf` through every cache merge. When the merge keeps the cached `viewerOf` (page data, another account's copy), it keeps the cached decision too. When it clears `viewerOf` (another account's copy with nothing cached, an account change), it drops the decision, so a screen covers the post until a copy for the current reader arrives.
+
+- [#226](https://github.com/beatzball/caribou/pull/226) [`2aaa752`](https://github.com/beatzball/caribou/commit/2aaa752f68a197a7ca1f6a5e73dda7af32f91496) Thanks [@beatzball](https://github.com/beatzball)! - A session is now a Mastodon session or a Bluesky session (`did`, `handle`, `pds`, user key `<did>@bsky`, no token). For a Bluesky session `activeClient` still answers at once: it restores the OAuth session once per sign-in, through a driver the app sets, and every method waits for that. `blueskyRestore` says how the restore is going. A session the SDK calls gone, or any 401, sends `caribou:session-expired`; a network error changes nothing and the next call tries again. `signOutBluesky` waits for the driver to delete the stored tokens (not for the network), then drops the session only while it has the same `generation`; a failed local delete keeps the account. `renewSession` keeps an existing account's new session after a mismatched sign-in. A Bluesky account reloads its handle on each page load. The rules (8 to 12) are in the README.
+
 ## 0.4.7
 
 ### Patch Changes
