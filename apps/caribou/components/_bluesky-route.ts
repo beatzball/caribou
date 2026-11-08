@@ -52,6 +52,15 @@ export function routeSegment(pathname: string): string {
 }
 
 /**
+ * The post id of a `/@<segment>/<id>` address, decoded, or ''. The client
+ * reads it when the page data does not carry it (a deferred page, #187).
+ */
+export function routePostId(pathname: string): string {
+  const m = /^\/@[^/]+\/([^/]+)/.exec(pathname)
+  return m ? decodeSegment(m[1]!) : ''
+}
+
+/**
  * A route segment as both sides read it: percent-decoded once, so
  * `/@did%3Aplc%3Aalice` is `/@did:plc:alice` on the server and in the
  * client. A segment that does not decode (a stray `%`) is ''.
@@ -101,4 +110,19 @@ export function didOfUserKey(userKey: string): string {
  */
 export function rendersBluesky(win: Pick<Window, 'localStorage'> | undefined, client: Pick<CaribouClient, 'capabilities'> | null): boolean {
   return blueskyEnabled(win) && client?.capabilities.network === 'bluesky'
+}
+
+/** Where the reader is: the path and query, as a key for `stillOn`. */
+export function routeKey(win: Pick<Window, 'location'>): string {
+  return `${win.location.pathname}${win.location.search}`
+}
+
+/**
+ * True when a page may still use a result it waited for: it is connected
+ * and the address is the one it started from. A browser fallback (#187)
+ * checks it before it sets its data and before it touches the address bar,
+ * so a late answer never changes another page's address.
+ */
+export function stillOn(el: Element, win: Pick<Window, 'location'>, key: string): boolean {
+  return el.isConnected && routeKey(win) === key
 }

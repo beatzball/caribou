@@ -282,7 +282,9 @@ export function labelDefsFromServices(views: AppBskyLabelerDefs.LabelerViewDetai
 }
 
 // Spec 8.3. One copy, in a server-safe module, so the mappers can call it too.
-export { isNoUnauthenticated } from './no-unauthenticated.js'
+export { isNoUnauthenticated, isProvenVisible } from './no-unauthenticated.js'
+// Signed-out pages (#187): the server's SSR and the browser's fallback.
+export * from './signed-out.js'
 
 /** The active Bluesky reader, as the veil needs it. `null` fields are "not loaded". */
 export interface BlueskyReader {

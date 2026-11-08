@@ -360,3 +360,29 @@ describe('<caribou-status-card> author link', () => {
     expect(goSpy).not.toHaveBeenCalled()
   })
 })
+
+describe('a time link that leaves Caribou (postPath, #187 review)', () => {
+  const dotted = (url: string | null) => post({
+    url, account: { id: '1', acct: 'first.last', username: 'first.last', displayName: 'F', avatar: '', avatarStatic: '', url: '' },
+  })
+
+  it('opens the post on its server in a new tab, and its name says so', async () => {
+    const el = await mount(dotted('https://pleroma.example/notice/1'), '')
+    const a = el.shadowRoot!.querySelector<HTMLAnchorElement>('a.permalink')!
+    expect(a.getAttribute('href')).toBe('https://pleroma.example/notice/1')
+    expect(a.target).toBe('_blank')
+    expect(a.getAttribute('aria-label')).toMatch(/opens this post on its own server in a new tab$/)
+    expect(a.getAttribute('aria-label')).toContain(a.textContent!.trim())
+  })
+
+  it('with no usable url, the time is not a link', async () => {
+    const el = await mount(dotted(null), '')
+    expect(el.shadowRoot!.querySelector('a.permalink, litro-link.permalink')).toBeNull()
+    expect(el.shadowRoot!.querySelector('span.permalink time')).not.toBeNull()
+  })
+
+  it('a link inside Caribou keeps its plain name', async () => {
+    const el = await mount()
+    expect(el.shadowRoot!.querySelector('litro-link.permalink')!.hasAttribute('aria-label')).toBe(false)
+  })
+})

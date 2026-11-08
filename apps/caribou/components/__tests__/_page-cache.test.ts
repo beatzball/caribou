@@ -140,6 +140,12 @@ describe('enterWithCache', () => {
     expect(again.enter).toHaveBeenCalled()
   })
 
+  it('does not keep a deferred page (#187): the revisit asks again in full', async () => {
+    await visit('/@alice.example.com', { kind: 'deferred', appview: 'https://appview.test' })
+    const again = await visit('/@alice.example.com', { kind: 'ok' })
+    expect(again.enter).toHaveBeenCalled()
+  })
+
   it('keeps the good page when the background fetch brings an error or a sign-in prompt', async () => {
     await visit('/local', { kind: 'ok', n: 1 })
     for (const bad of [{ kind: 'error' }, { kind: 'auth-required' }]) {

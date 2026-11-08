@@ -36,7 +36,8 @@ own files; ask in your report for a change in another's.
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
 | `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, recordCard, quote }` | #179 |
-| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, `isProvenVisible(actor)` (the signed-out allow-list), plain data so mappers can call them; the root and `./moderation` export them | #179, #180, #186 |
+| `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, `isProvenVisible(actor)` (the signed-out allow-list), plain data so mappers can call them; the root and `./moderation` export both | #179, #180, #186 |
+| `src/signed-out.ts` | `signedOutProfilePage`, `signedOutThread`, `signedOutLabelDefs` and the guards (`guardActor`, `guardFeedEntry`, `guardThreadNode`, `signedOutStatus`, `hiddenAccount`); `./moderation` re-exports it | #186, #187 |
 | `src/moderation.ts` | `moderate(subject, userDid, prefs, labelDefs) → BlueskyModerationResult` | #180 |
 | `src/map/labels.ts` | `mapLabels(labels) → BlueskyLabel[]` | #177 |
 | `src/client.ts` | `createBlueskyClient(opts) → CaribouClient` (read methods), `BLUESKY_CAPABILITIES` | #177 |
@@ -180,6 +181,32 @@ labeler the reader subscribes to is not on that post yet.
      `moderatePost`, so 2 implies it).
 - A new subscription later breaks rule 3, and the card is covered again
   until a refetch.
+
+## Signed-out pages (`src/signed-out.ts`, #186, #187)
+
+A signed-out profile page or thread from the public AppView, with no
+token. One copy for two callers: the app's server (SSR) and the app's
+browser fallback when the server was rate limited. It runs moderation, so
+it comes through `./moderation`.
+
+- The caller gives a `SignedOutSource`: `xrpc(method, params, call)` (one
+  AppView call; `call` is `profile`, `authorFeed`, `thread` or `labelDefs`,
+  so the server can pick a TTL) and `clean` (its DOMPurify for a post's and
+  an account's HTML).
+- `mustPropagate(err)`, when given, marks errors that must reach the caller
+  from any call. The server passes its rate-limit check: **a rate limit is
+  never turned into "no data"**, so a 429 on the label definitions fails
+  the page (which the app defers) instead of rendering it with every label
+  covered. Any other label-definition failure is `null`.
+- Every author slot is checked by name with `isProvenVisible` before
+  mapping (profile, feed author, reposter, thread posts); a failed one
+  becomes a hidden marker. `mapEmbed` checks quotes and record cards.
+  After mapping, `signedOutStatus` keeps only the id, time and reply link
+  of a hidden item. A hidden profile's feed is never fetched.
+- Moderation uses `LOGGED_OUT_PREFS` and Bluesky's label definitions;
+  `signedOutLabelDefs` answers `null` when they cannot load (fail closed).
+- Any other failure throws; the caller decides (the server defers on a
+  429).
 
 ## Mapping rules (#177)
 

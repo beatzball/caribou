@@ -67,4 +67,24 @@ describe('cachedFetch', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1)
     fetchSpy.mockRestore()
   })
+
+  it('does not cache a 429, and keeps its status and Retry-After', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'retry-after': '7' } }))
+      .mockResolvedValueOnce(new Response('{"v":4}', { status: 200, headers: { 'content-type': 'application/json' } }))
+    const err = await cachedFetch('https://e.com/f', TTL.BLUESKY_PROFILE).catch((e: unknown) => e)
+    const { UpstreamError } = await import('../upstream-cache.js')
+    expect(err).toBeInstanceOf(UpstreamError)
+    expect(err).toMatchObject({ status: 429, retryAfter: '7', message: 'upstream 429 https://e.com/f' })
+    expect((await cachedFetch<{ v: number }>('https://e.com/f', TTL.BLUESKY_PROFILE)).v).toBe(4)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    fetchSpy.mockRestore()
+  })
+
+  it('names a 30 s TTL for each Bluesky page call, and a longer one for label definitions', () => {
+    expect(TTL.BLUESKY_PROFILE).toBe(30_000)
+    expect(TTL.BLUESKY_AUTHOR_FEED).toBe(30_000)
+    expect(TTL.BLUESKY_THREAD).toBe(30_000)
+    expect(TTL.BLUESKY_LABEL_DEFS).toBeGreaterThan(30_000)
+  })
 })

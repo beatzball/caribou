@@ -14,7 +14,7 @@ import {
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
-import { accountPath, postPath } from './_profile-path.js'
+import { accountPath, postPath, outsidePermalinkName } from './_profile-path.js'
 import { findShell } from './_shell.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import {
@@ -1036,10 +1036,15 @@ export class CaribouStatusCard extends LitElement {
   // does.
   // The time links to the thread page; a Mastodon post Caribou cannot place
   // on a server links to its own page there, or not at all (`postPath`).
-  private renderPermalink(s: Status, time: unknown): unknown {
+  private renderPermalink(s: Status, time: unknown, label: string): unknown {
     const href = statusPermalink(s, this.instance || this.shellInstance)
     if (href === null) return html`<span class="permalink">${time}</span>`
-    if (!href.startsWith('/')) return html`<a class="permalink" href=${href} rel="noopener noreferrer" target="_blank">${time}</a>`
+    // The name says where it goes: the visible time first, so a voice
+    // command that names it still works.
+    if (!href.startsWith('/')) {
+      return html`<a class="permalink" href=${href} rel="noopener noreferrer" target="_blank"
+        aria-label=${outsidePermalinkName(label)}>${time}</a>`
+    }
     return html`<litro-link class="permalink" href=${href}>${time}</litro-link>`
   }
 
@@ -1281,7 +1286,7 @@ export class CaribouStatusCard extends LitElement {
                 <strong>${authorName}</strong>
                 <span class="acct">@${display.account.acct}</span>
               </a>
-              ${this.renderPermalink(display, html`<time datetime=${dt}>${timeLabel}</time>`)}
+              ${this.renderPermalink(display, html`<time datetime=${dt}>${timeLabel}</time>`, timeLabel)}
               ${display.editedAt ? this.renderEdited(display.editedAt) : nothing}
             </header>
             ${warning
