@@ -348,3 +348,25 @@ describe('the article class follows the cover shown', () => {
     expect($(el, 'article')!.classList.contains('filtered')).toBe(true)
   })
 })
+
+describe('the settled check keeps tracking after a first run with no fitting decision', () => {
+  const NEW_LABELER = 'did:plc:newlabeler'
+
+  it('card: ownership cover, Retry, then a new subscription re-covers', async () => {
+    agent = fakeAgent()
+    signInBluesky(blueskyClient(agent))
+    // The signed-out copy is not this reader's: covered on the first run.
+    const el = await mount(publicPost(post()))
+    expect($(el, '.status-content')).toBeNull()
+    agent.getPosts.mockResolvedValue({ data: { posts: [asPostView(post())] } })
+    $(el, 'caribou-button.retry')!.click()
+    await settle(el)
+    expect($(el, '.status-content')).not.toBeNull()
+    setBlueskyReader(readerOf({
+      prefs: prefs({ labelers: [{ did: BSKY_LABELER, labels: {} }, { did: LABELER, labels: {} }, { did: NEW_LABELER, labels: {} }] }),
+      defs: { ...DEFS, [NEW_LABELER]: [] },
+    }))
+    await settle(el)
+    expect($(el, '.status-content')).toBeNull()
+  })
+})

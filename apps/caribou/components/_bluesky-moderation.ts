@@ -160,15 +160,22 @@ export function decisionFits(viewerOf: string | null | undefined, reader: string
  * quote and the profile header all ask this. Reads signals, so an effect
  * that calls it follows reader and subscription changes. A decision that is
  * missing is not judged here: the caller covers it as unreadable.
+ *
+ * It reads the same signals on every call, whatever its inputs, before any
+ * early return: an effect that first ran with no decision, or with another
+ * reader's, still hears a later prefs, definitions or check change.
  */
 export function blueskyDecisionSettled(
   owned: { viewerOf?: string | null; moderation?: BlueskyModerationResult | null } | null | undefined,
   client: Pick<CaribouClient, 'userKey' | 'capabilities'> | null,
 ): boolean {
-  if (!owned) return true
+  // Subscribe first (see above). The values are read again below.
+  void blueskyReader.value
+  void check.value
   // Load the check as soon as a Bluesky reader is active, even when this
   // copy is not yet theirs: the reader's copy must not wait a turn for it.
   if (client?.capabilities.network === 'bluesky') ensureCheck()
+  if (!owned) return true
   if (!decisionFits(owned.viewerOf, currentBlueskyReader(client))) return false
   if (!owned.moderation) return true
   return blueskyVeilSettled({

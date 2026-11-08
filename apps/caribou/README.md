@@ -530,7 +530,9 @@ ask `blueskyDecisionSettled` (`components/_bluesky-moderation.ts`) about
 their own newest decision: made for the current reader, and the reader
 veil settled for it (every subscribed labeler covered). Until it says so,
 the surface is covered, locked, with Retry; a new labeler subscription
-covers it again. The quote card reads the quoted post's newest copy from
+covers it again. The check reads the reader and check signals on every call,
+whatever its inputs, so an effect that first ran with no decision or
+another reader's still follows later changes. The quote card reads the quoted post's newest copy from
 the status cache, as the outer card does, and gets the same rules. The
 profile header covers the display name, handle and bio under
 `profileView` (and blurs the avatar and banner by their own contexts); its

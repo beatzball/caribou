@@ -179,11 +179,14 @@ export class CaribouProfileHeader extends LitElement {
     return r && r.account.id === this.account?.id ? r : { account: this.account, viewerOf: this.viewerOf }
   }
 
+  // Calls the shared check every time, with or without an account, so the
+  // effect that runs this always follows the client, the reader and the
+  // check; `willUpdate` covers the Lit properties.
   private syncSettled() {
+    const client = activeClient.value
     const { account, viewerOf } = this.shownAccount()
-    const settled = account?.bluesky
-      ? blueskyDecisionSettled({ viewerOf, moderation: account.bluesky.moderation ?? null }, activeClient.value)
-      : true
+    const owned = account?.bluesky ? { viewerOf, moderation: account.bluesky.moderation ?? null } : null
+    const settled = blueskyDecisionSettled(owned, client)
     if (settled !== this.profileSettled) this.profileSettled = settled
   }
 
@@ -195,6 +198,7 @@ export class CaribouProfileHeader extends LitElement {
     window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: account.id } }))
     const client = activeClient.peek()
     if (!client || client.capabilities.network !== 'bluesky') return
+    const hadFocus = this.shadowRoot?.activeElement?.matches('caribou-button.retry') === true
     this.profileRetrying = true
     try {
       const fresh = await client.lookupAccount(account.id)
@@ -206,6 +210,13 @@ export class CaribouProfileHeader extends LitElement {
     } finally {
       this.profileRetrying = false
     }
+    // It worked: the Retry is gone, so focus goes to the profile it
+    // revealed (its name row).
+    await this.updateComplete
+    const row = this.renderRoot.querySelector<HTMLElement>('.row')
+    if (!hadFocus || !row || this.renderRoot.querySelector('.profile-cover')) return
+    row.setAttribute('tabindex', '-1')
+    row.focus()
   }
 
   private bind() {

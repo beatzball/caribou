@@ -162,10 +162,17 @@ describe('<caribou-profile-header>: the veil (every subscribed labeler covered) 
   const NEW_LABELER = 'did:plc:newlabeler'
   const view = { ...author(ALICE), banner: BANNER, description: 'bio', followersCount: 1, followsCount: 2, postsCount: 3 }
   let getProfile: ReturnType<typeof vi.fn>
+  // What the reader's fetches cover; a test can add a labeler to it later.
+  let covered: string[]
   function signIn() {
     getProfile = vi.fn(async () => ({ data: view }))
-    signInBluesky(blueskyClient(fakeAgent({ getProfile })))
+    covered = [BSKY_LABELER, LABELER]
+    signInBluesky(blueskyClient(fakeAgent({ getProfile }), { covered }))
   }
+  const subscribeToNew = () => setBlueskyReader(readerOf({
+    prefs: prefs({ labelers: [{ did: BSKY_LABELER, labels: {} }, { did: LABELER, labels: {} }, { did: NEW_LABELER, labels: {} }] }),
+    defs: { ...DEFS, [NEW_LABELER]: [] },
+  }))
   const name = (el: Element) => el.shadowRoot!.querySelector('.name')
   const retry = (el: Element) => el.shadowRoot!.querySelector<HTMLElement>('caribou-button.retry')
 
@@ -181,6 +188,40 @@ describe('<caribou-profile-header>: the veil (every subscribed labeler covered) 
     expect(getProfile).toHaveBeenCalledWith({ actor: ALICE })
     expect(name(el)).not.toBeNull()
     expect(blurred(el, 'img.avatar')).toBe(false)
+    // Focus went from the Retry to the profile it revealed.
+    expect(el.shadowRoot!.activeElement).toBe(el.shadowRoot!.querySelector('.row'))
+  })
+
+  it('ownership cover, Retry, then a new subscription re-covers, then a covered copy uncovers', async () => {
+    signIn()
+    // A decision made for another reader.
+    const el = await mount(await lookedUp([], {}), 'did:plc:other@bsky')
+    expect(name(el)).toBeNull()
+    retry(el)!.click()
+    await settle(el)
+    expect(name(el)).not.toBeNull()
+    subscribeToNew()
+    await settle(el)
+    expect(name(el)).toBeNull()
+    // The reader's fetches now cover the new labeler too.
+    covered.push(NEW_LABELER)
+    retry(el)!.click()
+    await settle(el)
+    expect(name(el)).not.toBeNull()
+  })
+
+  it('mounted with no account, given one later, then a new subscription re-covers', async () => {
+    signIn()
+    const el = document.createElement('caribou-profile-header') as CaribouProfileHeader
+    el.viewerOf = READER_KEY
+    document.body.appendChild(el)
+    await settle(el)
+    el.account = await lookedUp([], {})
+    await settle(el)
+    expect(name(el)).not.toBeNull()
+    subscribeToNew()
+    await settle(el)
+    expect(name(el)).toBeNull()
   })
 
   it('a new subscription covers the profile again', async () => {
