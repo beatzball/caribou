@@ -4,7 +4,7 @@ import { effect } from '@preact/signals-core'
 import { activeUserKey, userName, users, type UserSession } from '@beatzball/caribou-state'
 import { spaClick } from './_spa-link.js'
 import { switchToAccount } from './_switch-account.js'
-import { fullHandle, orderAccounts } from './caribou-nav-rail.js'
+import { fullHandle, networkLabel, orderAccounts } from './caribou-nav-rail.js'
 import './caribou-button.js'
 import './caribou-icon.js'
 import './caribou-signout-form.js'
@@ -17,6 +17,10 @@ import './caribou-signout-form.js'
 export class CaribouSettingsAccount extends LitElement {
   static override styles = css`
     :host { display: block; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
     .who { display: flex; align-items: center; gap: var(--space-3); margin: 0 0 var(--space-3); }
     .avatar {
       width: 48px; height: 48px; flex: none; border-radius: 50%; object-fit: cover;
@@ -88,19 +92,19 @@ export class CaribouSettingsAccount extends LitElement {
           <span class="who-text">
             <span class="who-label">Signed in as</span>
             <span class="who-name">${current.account?.displayName || userName(current)}</span>
-            <span class="who-acct">${fullHandle(current)}</span>
+            <span class="who-acct">${fullHandle(current)}${networkLabel(current)}</span>
           </span>
         </p>
         <ul>
           <li><a href="/@me" @click=${spaClick}><caribou-icon name="user"></caribou-icon>Your profile</a></li>
           ${others.map((u) => html`<li><caribou-button class="switch" @click=${() => { void switchToAccount(u.userKey) }}
-            ><caribou-icon name="users"></caribou-icon>Switch to ${fullHandle(u)}</caribou-button></li>`)}
+            ><caribou-icon name="users"></caribou-icon>Switch to ${fullHandle(u)}${networkLabel(u)}</caribou-button></li>`)}
           <li><a href="/?add" @click=${spaClick}><caribou-icon name="userPlus"></caribou-icon>Add account</a></li>
           <li>
             <caribou-signout-form>
               <form action="/api/signout" method="post">
                 <!-- Native: sign-out must work with JavaScript off. -->
-                <button type="submit" class="signout"><caribou-icon name="logOut"></caribou-icon>Sign out of ${fullHandle(current)}</button>
+                <button type="submit" class="signout"><caribou-icon name="logOut"></caribou-icon>Sign out of ${fullHandle(current)}${networkLabel(current)}</button>
               </form>
             </caribou-signout-form>
           </li>

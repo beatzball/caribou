@@ -249,7 +249,7 @@ export class CaribouProfileHeader extends LitElement {
     if (mastodon && !this.instance) return
     let target: Account | null = account
     // A Bluesky DID is the same for every account: nothing to look up.
-    if (mastodon && !this.sameInstance(user.server)) {
+    if (mastodon && !this.sameInstance(user.server ?? '')) {
       try {
         target = await client.lookupAccount(this.fullAcct(account))
       } catch {

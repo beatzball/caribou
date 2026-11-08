@@ -1,4 +1,4 @@
-import { activeUser, activeUserKey, loadFromStorage, switchAccount } from '@beatzball/caribou-state'
+import { activeUser, activeUserKey, isBlueskySession, loadFromStorage, switchAccount } from '@beatzball/caribou-state'
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { ShellInfo } from '../server/lib/page-data-types.js'
 
@@ -12,18 +12,27 @@ const NEUTRAL = new Set(['/home', '/notifications', '/bookmarks', '/local', '/pu
 // so they mean nothing on another one.
 const CURSORS = ['max_id', 'min_id', 'since_id']
 
+// A Bluesky profile or post (spec 8.4): `/@did:…` or `/@<name with a dot>`,
+// with no second `@`, then maybe `/<rkey>`. A DID and an AT URI are global,
+// so the path is kept when the new account is Bluesky.
+const BLUESKY_PATH = /^\/@(?:did:[^/@]+|[^/@]*\.[^/@]*)(?:\/[^/]+)?$/
+
 /**
  * Where to land after the active account changed while the reader was on
  * `path`. `path` may carry a query string; it is kept when the page is kept,
- * less the page cursors when `serverChanged`.
+ * less the page cursors when `serverChanged`. `toBluesky`: the new active
+ * account is Bluesky, which has no `/local` or `/public`.
  */
-export function pathAfterSwitch(path: string, serverChanged = false): string {
+export function pathAfterSwitch(path: string, serverChanged = false, toBluesky = false): string {
   const q = path.indexOf('?')
   const pathname = q < 0 ? path : path.slice(0, q)
+  if (toBluesky && (pathname === '/local' || pathname === '/public')) return '/home'
   const kept = NEUTRAL.has(pathname) || pathname === '/blog' || pathname.startsWith('/blog/')
     // A fully qualified profile (`/@name@host`) is the same person from any
     // server. A post id (`/@name/<id>`) is not: ids are per server.
     || /^\/@[^/@]+@[^/@]+$/.test(pathname)
+    // A Bluesky profile or post: only a Bluesky client can read it.
+    || (toBluesky && BLUESKY_PATH.test(pathname))
   if (!kept) return '/home'
   if (!serverChanged || q < 0) return path
   const params = new URLSearchParams(path.slice(q + 1))
@@ -154,7 +163,7 @@ async function drive(l: Landing): Promise<void> {
     replace('/')
     return
   }
-  let target = pathAfterSwitch(l.deps.path ?? location.pathname + location.search, session.server !== l.from)
+  let target = pathAfterSwitch(l.deps.path ?? location.pathname + location.search, session.server !== l.from, isBlueskySession(session))
   if (!ok) {
     // The account change is already saved, so the page still loads as this
     // account, but never on a page that renders from the cookie's server.
@@ -211,10 +220,11 @@ export async function healInstanceCookie(
   shell: ShellInfo | null,
   deps: { fetch?: typeof fetch } = {},
 ): Promise<boolean> {
-  const session = activeUser.value
-  if (!session || landing || shell?.source !== 'cookie' || !shell.instance) return false
-  if (shell.instance.toLowerCase() === session.server.toLowerCase()) return false
-  const post = setInstanceCookie(session.server, deps.fetch ?? fetch)
+  // A Bluesky session has no server, so no cookie to heal.
+  const server = activeUser.value?.server
+  if (!server || landing || shell?.source !== 'cookie' || !shell.instance) return false
+  if (shell.instance.toLowerCase() === server.toLowerCase()) return false
+  const post = setInstanceCookie(server, deps.fetch ?? fetch)
   const gate = Promise.race([post, new Promise((r) => setTimeout(r, HEAL_WAIT_MS))])
   healing = gate
   try {

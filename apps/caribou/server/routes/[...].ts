@@ -35,6 +35,13 @@ export default defineEventHandler(async (event) => {
 
   const { route: matched, params } = result;
 
+  // The Bluesky callback (spec 5.5): the code is in the fragment, but the
+  // page must not be cached or send the URL on as a referrer.
+  if (matched.path === '/signin/bluesky') {
+    setResponseHeader(event, 'cache-control', 'no-store');
+    setResponseHeader(event, 'referrer-policy', 'no-referrer');
+  }
+
   // Populate route params (e.g. slug from /blog/:slug) on the event context
   // so pageData fetchers can access them via event.context.params.
   event.context.params = { ...event.context.params, ...params };

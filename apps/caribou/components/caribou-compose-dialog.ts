@@ -388,7 +388,7 @@ export class CaribouComposeDialog extends LitElement {
     const user = activeUser.value
     if (client && user) {
       const session = this.session
-      void fetchLimits(client, user.server).then((l) => {
+      void fetchLimits(client, user.server ?? user.userKey).then((l) => {
         this.limits = l
         // A poll made before the limits came in, or kept in a draft from
         // before the server changed them, may be out of range.

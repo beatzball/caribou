@@ -49,6 +49,9 @@ Sources of truth — see file for full signatures.
   what a failure may do to a session. The rules are below.
 - `emitSessionExpired(detail)` — the event a client sends when the network
   says its credentials are gone.
+- `isBlueskySession(s)`, `blueskyUserKey(did)`, `setBlueskyDriver(d)`,
+  `blueskyRestore`, `signOutBluesky(userKey, generation)` — the Bluesky
+  session parts. The rules are below (8 to 12).
 
 **Session rules** (`users.ts`; the handlers are in
 `apps/caribou/components/_unauthorized.ts`)
@@ -95,10 +98,77 @@ session's `generation`.
    `removeActiveUser` remove the entry, its prefs and its drafts.
 7. **A late result writes only to its own sign-in.** `loadActiveAccount`
    stores the account only while the entry has the `generation` it started
-   with. It keeps `expired` as it is.
+   with. It keeps `expired` as it is. For a Mastodon session it loads the
+   account once (while `account` is null). For a Bluesky session it loads it
+   on every page load and also writes the handle from it, so a changed
+   handle shows after the next load.
 
 `loadFromStorage` fills a missing `generation` from the token. So an entry
 stored before these rules keeps its guard: a new sign-in has a new token.
+
+**Bluesky sessions** (`users.ts`, `bluesky-session.ts`; spec 5.5 and 5.6)
+
+A session is a `MastodonSession` or a `BlueskySession`. A Bluesky session
+has `network: 'bluesky'`, `did`, `handle` and `pds`, and no token: the SDK
+keeps the tokens and the DPoP key in IndexedDB under the DID. Its
+`userKey` is `<did>@bsky`. A Mastodon entry has no `network` field
+(entries stored before Bluesky have none either). Rules 1 to 7 hold for
+both networks. These add to them:
+
+8. **`activeClient` stays synchronous.** For a Bluesky session it returns a
+   client at once. `userKey`, `capabilities` and `timelineOrder` answer at
+   once. Every other method waits for one restore of the OAuth session
+   (`oauthClient.restore(did)`), then runs on the real client.
+   `blueskyRestore` is `'idle'`, `'pending'`, `'ready'` or `'failed'`;
+   screens show the splash while it is `'pending'`.
+9. **One restore per sign-in.** The restore is kept by `userKey` and
+   `generation`. `activeClient` makes a new client object each time the
+   active entry changes (for example when its account loads); a new object
+   for the same sign-in uses the same restore, and `blueskyRestore` does not
+   go back to `'pending'`. When the restore succeeds, every later call uses
+   that client. When it fails with a network error, the call fails like any
+   other (rule 5) and the next call tries the restore again. The session is
+   gone when the SDK says so (refresh refused, token revoked, its `deleted`
+   event) or when any request answers 401, with or without a token
+   challenge. Then the client sends `caribou:session-expired` with its own
+   `generation` (rule 3) and every call fails with `unauthorized`. A
+   network error, a timeout or a 5xx is not a 401 and changes nothing. A
+   Bluesky client never sends `caribou:unauthorized`.
+10. **The restore runs only through the driver.** This package never loads
+    the atproto libraries. The app sets a driver (`setBlueskyDriver`) that
+    loads them with a dynamic `import()`. With no driver, every call fails
+    with `unauthorized` and nothing is sent.
+11. **Sign-in checks who signed in.** The DID of the new session must equal
+    the DID the typed handle resolved to (or the typed DID). With a PDS host
+    typed, any account on it may sign in. A sign-in to a DID that is
+    already stored replaces its entry (rule 1), so it clears `expired`.
+    **A failed attempt never changes another account's session.** On a
+    mismatch nothing is added under the typed handle. The SDK has already
+    swapped the code and stored a session for the DID that signed in, and
+    it revoked that DID's earlier session to do so. So:
+    - When that DID is not a Caribou account, the app revokes the new
+      session too. Nothing is stored.
+    - When that DID is already a Caribou account, the new session stays: it
+      is now that account's only session. `renewSession(userKey)` gives the
+      entry a new `generation` and clears `expired` (rule 1). The active
+      account does not change.
+12. **Once sign-out starts for a DID, the SDK's session store refuses
+    every write for that DID until a new sign-in for that DID starts.**
+    `signOutBluesky(userKey, generation)` asks the driver to sign out. The
+    driver marks the DID as signing out, then deletes its stored session
+    (tokens and DPoP key). A delete always works; a write for that DID is
+    dropped, so a refresh that was already running cannot put tokens back,
+    whenever it lands. The server revoke is tried after that, best effort,
+    and the driver does not wait for it. When the driver has answered, the
+    entry, its prefs and its drafts are dropped (rule 6), only while the
+    entry still has that `generation`; the landing goes on only after that.
+    When the local delete itself fails, the driver throws and the entry
+    stays: the account is not shown as signed out while its tokens are
+    still stored. Same tab only; other tabs are #214. The Mastodon
+    `/api/signout` route is not used.
+
+`userName(user)` for a Bluesky session is the loaded account's handle
+(`account.acct`), else the stored `handle` (rule 7 keeps the two in step).
 
 **Stores**
 

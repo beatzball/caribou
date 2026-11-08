@@ -124,11 +124,21 @@ export function withStaleBuildReload<R extends RouteWithAction>(routes: R[], env
   })
 }
 
-/** Reloads on Vite's `vite:preloadError` when a module failed to load. */
+/**
+ * Reloads on Vite's `vite:preloadError` when a module failed to load. Not
+ * while the page is leaving: Firefox fails a dynamic import that is still
+ * loading when the page navigates away (the Bluesky chunk on a Bluesky
+ * page), and a reload then would cancel the reader's own navigation. Caribou
+ * never cancels `beforeunload`, so once it fires the page goes, unless it
+ * comes back from the back-forward cache (`pageshow`).
+ */
 export function installPreloadErrorReload(target: EventTarget, env?: StaleBuildEnv): void {
+  let leaving = false
+  target.addEventListener('beforeunload', () => { leaving = true })
+  target.addEventListener('pageshow', () => { leaving = false })
   target.addEventListener('vite:preloadError', (event) => {
     const err = (event as Event & { payload?: unknown }).payload
-    if (!isModuleLoadError(err)) return
+    if (!isModuleLoadError(err) || leaving) return
     console.error('[caribou] a chunk failed to load; loading the page from the server', err)
     reloadOnce(location.href, env)
   })

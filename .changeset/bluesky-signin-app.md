@@ -1,0 +1,5 @@
+---
+"caribou-app": patch
+---
+
+Behind the Bluesky flag: the sign-in page has two panels, Mastodon and Bluesky, as a real tablist. The Bluesky callback at `/signin/bluesky` sends `no-store` and `no-referrer`, finishes the sign-in once and goes to `/home`. A Bluesky session that ended shows "Your Bluesky session ended. Sign in again." and keeps the page and the drafts. Sign-out of a Bluesky account deletes its tokens and revokes it at its server. Account names in the rail and on /settings are `@handle` for a Bluesky account and say "Bluesky" to assistive technology. A switch or sign-out that lands on a Bluesky account sends `/local` and `/public` to `/home`; a Bluesky profile or post path is kept only when the new account is Bluesky. The session glue feeds the Bluesky reader veil (`setBlueskyReader`) and answers a cover's Retry by loading the label definitions again. With the flag off nothing changes for Mastodon readers, except one fix: a chunk that fails to load because the page is leaving no longer reloads the old page (Firefox), so it cannot cancel the reader's navigation.

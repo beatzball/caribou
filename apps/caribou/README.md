@@ -76,7 +76,12 @@ the `appScriptUrl` option the litro patch adds), so a browser that kept an
 old entry never meets it again. That only works while no chunk imports
 `app.js`: `vite.config.ts` keeps lit-html and Vite's preload helper out of it.
 A tab that stays open across a deploy loads the target URL in full when a
-page chunk fails to load (`components/_stale-build.ts`).
+page chunk fails to load (`components/_stale-build.ts`). Not once the page
+is leaving (`beforeunload`, until `pageshow`): Firefox fails a dynamic import
+still loading when the page navigates away (the Bluesky chunk on a Bluesky
+page), and a reload then would cancel the reader's navigation. WebKit can do
+the same and was seen in CI to fire the failure without that guard catching
+it; a reader who leaves a Bluesky page in its first moment may be sent back.
 During a rolling deploy the HTML of one build can reach the other for its
 entry; any query other than none or exactly this build's `?v=` is answered
 `no-store` (`server/plugins/app-entry-cache.ts`), so no browser keeps the
@@ -547,7 +552,12 @@ moderation settings…" and a Retry, and never a Show button. The check is
 in `./moderation`, so `_bluesky.ts` loads it lazily, the first time a
 Bluesky account is active; until it loads, the card is covered. The reader
 (prefs and label definitions) comes from `setBlueskyReader()`, which the
-session glue (#182) calls; a reader for another account counts as none.
+session glue (`components/_bluesky-session.ts`) calls when the active
+Bluesky client restores; a reader for another account counts as none. A
+cover's Retry fires `caribou:bluesky-moderation-retry`: the glue loads the
+prefs and definitions again (one load at a time), sets the reader, and the
+active client's calls wait for that load, so the card's refetch is judged
+with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
 
 ## Accounts
@@ -570,7 +580,18 @@ state at once and then call `land()` in `components/_switch-account.ts`. That
 one coordinated landing points the instance cookie at the new active
 account's server, then does one full navigation: the same page when it means
 the same for any account (`pathAfterSwitch`), else `/home`; `/` when no account
-is left. Requests that arrive while a landing runs join it. A 401 on an
+is left. When the new active account is Bluesky, `/local` and `/public` go to
+`/home` (Bluesky has neither). A Bluesky profile or post path (`/@did:…`,
+`/@<dotted handle>`, either with `/<rkey>`; spec 8.4) is kept when the new
+account is Bluesky: a DID and an AT URI are global, but only a Bluesky
+client can read them. To a Mastodon account it goes to `/home`. A Bluesky account has no server, so
+no cookie is written for it.
+
+**Account names.** `fullHandle` is `@name@server` for Mastodon and `@handle`
+for Bluesky. A Bluesky account row, in the rail's account menu and on
+/settings, says "Bluesky" in its accessible name (`networkLabel`): the
+network icon is hidden from assistive technology, and `alice@example.social`
+and `alice.example.social` look alike. Mastodon rows do not change. Requests that arrive while a landing runs join it. A 401 on an
 account that is not active removes only that account, with no reload.
 A 401 for an earlier sign-in of an account (`generation`) changes nothing.
 `caribou:session-expired` marks the account expired and changes nothing on

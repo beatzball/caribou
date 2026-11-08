@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  users, activeUserKey, addUserSession, type UserSession,
+  users, activeUserKey, addUserSession, type UserSession, type MastodonSession,
 } from '@beatzball/caribou-state'
 import { resetLanding } from '../_switch-account.js'
 import '../caribou-signout-form.js'
@@ -9,7 +9,7 @@ import type { CaribouSignoutForm } from '../caribou-signout-form.js'
 
 const key = toUserKey('alice', 'example.social')
 
-function sampleSession(): UserSession {
+function sampleSession(): MastodonSession {
   return {
     userKey: key,
     server: 'example.social',

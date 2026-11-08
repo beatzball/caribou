@@ -21,6 +21,7 @@ import { startTheme } from './components/_theme.js'
 import { startChangelogSeen } from './components/_changelog-seen.js'
 import { startShortcuts } from './components/_shortcuts.js'
 import { blueskyEnabled, loadBluesky } from './components/_bluesky.js'
+import { installBlueskyDriver, loadsAccountOn } from './components/_bluesky-session.js'
 import './components/caribou-update-notice.js'
 import { routes } from './routes.generated.js'
 
@@ -31,6 +32,9 @@ if (typeof window !== 'undefined') {
   // status card shows its post once the reader's filters for it are known
   // (`server/lib/reader-veil-head.ts`).
   clearTimeout((window as unknown as { __caribouReaderVeil?: number }).__caribouReaderVeil)
+  // A Bluesky session restores through this driver, which alone loads the
+  // atproto chunk. Set before any client is made.
+  installBlueskyDriver()
   document.getElementById('caribou-reader-stalled')?.remove()
   loadFromStorage()
   // The head script set the theme before the first paint; this keeps it in
@@ -38,7 +42,8 @@ if (typeof window !== 'undefined') {
   startTheme(window, document)
   // A session from sign-in has no account yet. Load it in the background,
   // now and whenever the active user changes.
-  activeUserKey.subscribe(() => { void loadActiveAccount() })
+  // Not on the Bluesky callback page, which leaves for /home at once.
+  if (loadsAccountOn(location.pathname)) activeUserKey.subscribe(() => { void loadActiveAccount() })
   // A client that gets a 401 fires `caribou:unauthorized` with its session.
   // Land as the next stored account, or on `/` when none is left.
   installUnauthorizedHandler(window, (req) => { void land(req) })

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 // put the SDK in the server render and in any client chunk that imports the
 // root statically, outside the lazy `bsky` chunk.
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..')
-const SDK_DOORS = new Set(['moderation.ts', 'browser.ts'])
+const SDK_DOORS = new Set(['moderation.ts', 'browser.ts', 'oauth.ts'])
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {

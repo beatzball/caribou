@@ -70,9 +70,9 @@ export function uiOf(mod: BlueskyModerationResult | null | undefined, context: k
   return ui ?? UNREADABLE
 }
 
-// The reader the veil checks against: prefs and label definitions. The
-// session glue (#182) owns this signal in `_bluesky-session.ts`, same name
-// and shape; once #182 is on main this one is replaced by an import of it.
+// The reader the veil checks against: prefs and label definitions. The one
+// signal for it. The session glue (`_bluesky-session.ts`) sets it when the
+// active Bluesky client restores and after a Retry reloads the definitions.
 export const blueskyReader = signal<BlueskyReader | null>(null)
 // `blueskyCheckSettled`, once `./moderation` has loaded.
 const check = signal<((post: Pick<StatusBluesky, 'viewerOf' | 'moderation'>, r: BlueskyReader | null) => boolean) | null>(null)
