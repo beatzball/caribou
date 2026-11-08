@@ -16,12 +16,15 @@ import '../../components/caribou-auth-required.js'
 import '../../components/caribou-thread.js'
 import { enterWithCache } from '../../components/_page-cache.js'
 import {
-  blueskyActor, blueskyPostUri, postRouteOf, decodeSegment, rendersBluesky, replaceDidRoute, routeSegment,
+  blueskyActor, blueskyPostUri, postRouteOf, decodeSegment, rendersBluesky, replaceDidRoute, routePostId, routeSegment,
 } from '../../components/_bluesky-route.js'
+import { asksNoUnauthenticated } from '../../components/_bluesky-moderation.js'
 
 // `not-found`: a Bluesky route whose DID, handle or record key is not well
-// formed; nothing was fetched (README, "Bluesky SSR").
-export type StatusPageData = (ThreadPageData | { kind: 'not-found' }) & {
+// formed; nothing was fetched (README, "Bluesky SSR"). `deferred`: the
+// public AppView rate limited the server (#187); the page is the loading
+// shell and the browser reads `appview` itself. It keeps no handle or id.
+export type StatusPageData = (ThreadPageData | { kind: 'not-found' } | { kind: 'deferred'; appview: string }) & {
   shell: ShellInfo
   statusId: string
   handle: string
@@ -68,6 +71,7 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
       const shown = bsky.asksHidden(thread.focused.account) ? '' : handle
       return { kind: 'ok', ...thread, shell, statusId, handle: shown }
     } catch (err) {
+      if (bsky.isRateLimited(err)) return { kind: 'deferred', appview: bsky.publicAppView(), shell, statusId: '', handle: '' }
       return { kind: 'error', message: String(err), shell, statusId, handle } as StatusPageData
     }
   }
@@ -105,6 +109,9 @@ export class HandleStatusPage extends LitroPage {
   // A Bluesky thread, rendered on the client (phase 2b; README, "Bluesky
   // views"): the focused post's AT URI. Set after the first render.
   @state() private blueskyUri: string | null = null
+  // A deferred page's thread, read by the browser (#187). Set after the
+  // first render, which is the loading shell the server sent.
+  @state() private fallback: StatusPageData | null = null
 
   protected override firstUpdated() {
     const data = this.serverData as StatusPageData | null
@@ -113,8 +120,28 @@ export class HandleStatusPage extends LitroPage {
       replaceDidRoute(window, data.handle, data.focused.account, `/${encodeURIComponent(data.statusId)}`)
     }
     const actor = blueskyActor(data?.handle || routeSegment(window.location.pathname))
-    if (actor && data?.statusId && rendersBluesky(window, activeClient.value)) {
-      this.blueskyUri = blueskyPostUri(actor, data.statusId)
+    // A deferred page's data has no id: read the address.
+    const statusId = data?.statusId || routePostId(window.location.pathname)
+    if (actor && statusId && rendersBluesky(window, activeClient.value)) {
+      this.blueskyUri = blueskyPostUri(actor, statusId)
+      return
+    }
+    if (actor && statusId && data?.kind === 'deferred') void this.loadFallback(data, actor, statusId)
+  }
+
+  // Signed out, or a Mastodon account: read the thread from the public
+  // AppView, through the same guard as the server (README, "Bluesky SSR:
+  // rate limits").
+  private async loadFallback(data: Extract<StatusPageData, { kind: 'deferred' }>, actor: string, rkey: string) {
+    const { publicThread } = await import('../../components/_bluesky-public.js')
+    const handle = routeSegment(window.location.pathname)
+    try {
+      const thread = await publicThread(data.appview, actor, rkey)
+      const shown = asksNoUnauthenticated(thread.focused.account) ? '' : handle
+      this.fallback = { kind: 'ok', ...thread, shell: data.shell, statusId: rkey, handle: shown }
+      replaceDidRoute(window, shown, thread.focused.account, `/${encodeURIComponent(rkey)}`)
+    } catch (err) {
+      this.fallback = { kind: 'error', message: String(err), shell: data.shell, statusId: '', handle: '' }
     }
   }
 
@@ -128,7 +155,7 @@ export class HandleStatusPage extends LitroPage {
   }
 
   override render() {
-    const data = (this.serverData ?? {
+    const data = (this.fallback ?? this.serverData ?? {
       kind: 'auth-required', shell: { instance: null }, statusId: '', handle: '',
     }) as StatusPageData
     const inst = data.shell.instance ?? ''
@@ -154,6 +181,13 @@ export class HandleStatusPage extends LitroPage {
           <article role="alert">
             Couldn't load status ${data.statusId}.
           </article>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'deferred') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="status" aria-busy="true">Loading…</article>
         </caribou-app-shell>
       `
     }

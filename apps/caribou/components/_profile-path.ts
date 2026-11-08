@@ -70,3 +70,8 @@ export function postPath(post: {
   if (known) return `/@${acct}@${known}/${id}`
   return hostOf(post.url) ? new URL(post.url!).href : null
 }
+
+/** The accessible name of a time link that leaves Caribou (`postPath`). */
+export function outsidePermalinkName(time: string): string {
+  return `${time}, opens this post on its own server in a new tab`
+}

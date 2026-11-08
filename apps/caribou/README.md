@@ -577,7 +577,10 @@ Deploy notes: `docs/deploy.md`, "App env vars for Bluesky".
 
 **What the server fetches.** Only `BLUESKY_PUBLIC_APPVIEW` (default
 `https://public.api.bsky.app`), through `upstream-cache.ts`, with a fixed
-TTL (`TTL.BLUESKY`, 30 s; label definitions `TTL.BLUESKY_LABEL_DEFS`, 1 h).
+TTL per call (`BLUESKY_TTL`): `TTL.BLUESKY_PROFILE`, `TTL.BLUESKY_AUTHOR_FEED`
+and `TTL.BLUESKY_THREAD` are 30 s, the AppView's `max-age`; label
+definitions are `TTL.BLUESKY_LABEL_DEFS`, 1 h. An error or a 429 is never
+cached.
 Never a handle's own domain, never a PDS, and no redirect is followed
 (`redirect: 'error'`). Calls: `app.bsky.actor.getProfile`,
 `app.bsky.feed.getAuthorFeed` (`includePins=false`, the tab's filter, the
@@ -659,6 +662,32 @@ signed-out SSR only if that author's own labels were read and none is
   account), the notice stays, and the first render equals the server's. With
   a Bluesky account active, the page swaps in its own client render after
   hydration, which fetches as the reader and shows the account.
+
+### Bluesky SSR: rate limits (#187)
+
+All signed-out SSR comes from one server address, and the AppView's limit
+is not documented (spec 12.1). So a 429 never becomes an error page.
+
+1. **A 429 defers the page.** When the AppView answers 429, the page data is
+   `{ kind: 'deferred', appview }`, with no handle and no post id (the server
+   did not learn whether the account is hidden). The server render is the
+   loading shell ("Loading…"), and so is the first client render.
+2. **Back off.** After a 429 the server makes no Bluesky SSR fetch until
+   `Retry-After` has passed: whole seconds or an HTTP date, at least 1 s,
+   at most `BACKOFF_MAX_S` (60 s); `BACKOFF_DEFAULT_S` (30 s) when the header
+   is missing or unreadable. Every Bluesky page in that time is `deferred`,
+   with no fetch. A 5xx or a network error is an error page as before, with
+   no back-off.
+3. **The browser reads it.** After hydration, a deferred page reads its
+   route from the address and asks `appview` (the origin the server named)
+   itself. With a Bluesky account active, it swaps in the signed-in client
+   render as any Bluesky page does. Otherwise (signed out, or a Mastodon
+   account) it runs `signedOutProfilePage` / `signedOutThread` from the
+   package (`components/_bluesky-public.ts`): the **same** guard, mapping
+   and moderation as the server, before anything renders, with the
+   browser's DOMPurify for the HTML. The SDK comes in the `bsky` chunk,
+   loaded only on a deferred Bluesky page. A failed browser read is the
+   page's error message.
 
 **The reader check skips Bluesky posts.** `loadReaderViewFrom` asks a
 Mastodon reader's server for its copy of server-rendered posts. It never

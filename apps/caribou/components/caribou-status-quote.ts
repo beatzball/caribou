@@ -11,7 +11,7 @@ import {
   relationshipCache, relationshipKey, statusCache,
 } from '@beatzball/caribou-state'
 import { findShell } from './_shell.js'
-import { accountPath, postPath } from './_profile-path.js'
+import { accountPath, outsidePermalinkName, postPath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import { hashtagOf, sameUrl } from './_post-links.js'
 import { tagPath } from './_tag-path.js'
@@ -448,7 +448,8 @@ export class CaribouStatusQuote extends LitElement {
           ? html`<span class="permalink"><time datetime=${dt}>${when}</time></span>`
           : inApp
           ? html`<a class="permalink" href=${thread} @click=${spaClick}><time datetime=${dt}>${when}</time></a>`
-          : html`<a class="permalink" href=${thread} rel="noopener noreferrer" target="_blank"><time datetime=${dt}>${when}</time></a>`}
+          : html`<a class="permalink" href=${thread} rel="noopener noreferrer" target="_blank"
+              aria-label=${outsidePermalinkName(when)}><time datetime=${dt}>${when}</time></a>`}
       </header>
       ${warning
         ? html`<p class="spoiler">${warning}</p>

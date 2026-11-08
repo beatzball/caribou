@@ -52,6 +52,15 @@ export function routeSegment(pathname: string): string {
 }
 
 /**
+ * The post id of a `/@<segment>/<id>` address, decoded, or ''. The client
+ * reads it when the page data does not carry it (a deferred page, #187).
+ */
+export function routePostId(pathname: string): string {
+  const m = /^\/@[^/]+\/([^/]+)/.exec(pathname)
+  return m ? decodeSegment(m[1]!) : ''
+}
+
+/**
  * A route segment as both sides read it: percent-decoded once, so
  * `/@did%3Aplc%3Aalice` is `/@did:plc:alice` on the server and in the
  * client. A segment that does not decode (a stray `%`) is ''.

@@ -29,8 +29,13 @@ function parseTab(raw: unknown): Tab {
 
 // `hidden`: a Bluesky account that asked not to be seen signed out (spec
 // 8.3); the data has no handle. `not-found`: a Bluesky route whose DID or
-// handle is not well formed; nothing was fetched.
-export type HandlePageData = (ProfilePageData | { kind: 'hidden' } | { kind: 'not-found' }) & { shell: ShellInfo; handle: string }
+// handle is not well formed; nothing was fetched. `deferred`: the public
+// AppView rate limited the server (#187); the page is the loading shell and
+// the browser reads `appview` itself after hydration. No handle either: the
+// server did not learn whether the account is hidden.
+export type HandlePageData = (
+  | ProfilePageData | { kind: 'hidden' } | { kind: 'not-found' } | { kind: 'deferred'; appview: string }
+) & { shell: ShellInfo; handle: string }
 
 export const pageData = definePageData<HandlePageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string }
@@ -60,6 +65,7 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
       if (page.kind === 'hidden') return { kind: 'hidden', shell, handle: '' }
       return { ...page, tab, shell, handle } as HandlePageData
     } catch (err) {
+      if (bsky.isRateLimited(err)) return { kind: 'deferred', appview: bsky.publicAppView(), shell, handle: '' }
       return { kind: 'error', message: String(err), shell, handle } as HandlePageData
     }
   }
@@ -100,6 +106,9 @@ export class HandlePage extends LitroPage {
   // views"): the actor to look up and the segment the links keep. Set
   // after the first render, which matches the server's.
   @state() private bluesky: { actor: string; link: string; tab: Tab } | null = null
+  // A deferred page's data, read by the browser (#187). Set after the
+  // first render, which is the loading shell the server sent.
+  @state() private fallback: HandlePageData | null = null
 
   protected override firstUpdated() {
     const data = this.serverData as HandlePageData | null
@@ -119,10 +128,37 @@ export class HandlePage extends LitroPage {
         return
       }
     }
+    if (data?.kind === 'deferred') {
+      void this.loadFallback(data)
+      return
+    }
     if (data?.handle !== 'me') return
     const userKey = activeUserKey.value
     if (!userKey) return
     this.me = { userKey, tab: parseTab(new URLSearchParams(window.location.search).get('tab')) }
+  }
+
+  // Signed out, or a Mastodon account: read the page from the public
+  // AppView, through the same guard as the server (README, "Bluesky SSR:
+  // rate limits").
+  private async loadFallback(data: Extract<HandlePageData, { kind: 'deferred' }>) {
+    const handle = routeSegment(window.location.pathname)
+    const actor = blueskyActor(handle)
+    if (!actor) return
+    const query = new URLSearchParams(window.location.search)
+    const tab = parseTab(query.get('tab'))
+    const { publicProfilePage } = await import('../components/_bluesky-public.js')
+    try {
+      const page = await publicProfilePage(data.appview, actor, { tab, cursor: query.get('max_id') ?? undefined })
+      if (page.kind === 'hidden') {
+        this.fallback = { kind: 'hidden', shell: data.shell, handle: '' }
+        return
+      }
+      this.fallback = { ...page, tab, shell: data.shell, handle }
+      replaceDidRoute(window, handle, page.account)
+    } catch (err) {
+      this.fallback = { kind: 'error', message: String(err), shell: data.shell, handle: '' }
+    }
   }
 
   // A revisit paints from the last copy at once. The fresh page data that
@@ -133,7 +169,7 @@ export class HandlePage extends LitroPage {
   }
 
   override render() {
-    const data = (this.serverData ?? { kind: 'auth-required', shell: { instance: null }, handle: '' }) as HandlePageData
+    const data = (this.fallback ?? this.serverData ?? { kind: 'auth-required', shell: { instance: null }, handle: '' }) as HandlePageData
     const inst = data.shell.instance ?? ''
     if (this.bluesky) {
       const { actor, link, tab } = this.bluesky
@@ -175,6 +211,13 @@ export class HandlePage extends LitroPage {
       return html`
         <caribou-app-shell instance=${inst}>
           <article role="status">${NO_UNAUTHENTICATED_NOTE}</article>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'deferred') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="status" aria-busy="true">Loading…</article>
         </caribou-app-shell>
       `
     }

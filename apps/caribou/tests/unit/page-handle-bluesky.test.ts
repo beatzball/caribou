@@ -198,3 +198,21 @@ describe('Bluesky SSR data in the client (#185, #186)', () => {
     expect(location.pathname).toBe(`/@${ALICE}`)
   })
 })
+
+describe('a deferred page with a Bluesky account (#187)', () => {
+  it('the profile swaps in the client render, by the address', async () => {
+    signIn()
+    history.replaceState(null, '', '/@alice.example.com?tab=replies')
+    const { first, after } = await renders('page-handle', { kind: 'deferred', appview: 'http://appview.test', shell: SHELL, handle: '' })
+    expect(first).toBe('article role=status aria-busy=true')
+    expect(after).toBe('caribou-profile handle=alice.example.com link-handle= tab=replies')
+  })
+
+  it('the thread swaps in the client render, with the post id from the address', async () => {
+    signIn()
+    history.replaceState(null, '', '/@alice.example.com/3k1')
+    const { first, after } = await renders('page-handle-statusid', { kind: 'deferred', appview: 'http://appview.test', shell: SHELL, handle: '', statusId: '' })
+    expect(first).toBe('article role=status aria-busy=true')
+    expect(after).toBe('caribou-thread statusid=at://alice.example.com/app.bsky.feed.post/3k1')
+  })
+})

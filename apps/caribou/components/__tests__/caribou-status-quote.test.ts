@@ -414,3 +414,28 @@ describe('<caribou-status-card> with a quote', () => {
     expect(el.shadowRoot!.querySelector('caribou-status-quote')).not.toBeNull()
   })
 })
+
+describe('a quoted post Caribou cannot place (postPath, #187 review)', () => {
+  async function mountNoHost(q: Quote) {
+    const el = document.createElement('caribou-status-quote') as CaribouStatusQuote
+    el.quote = q
+    document.body.appendChild(el)
+    await settle(el)
+    return el
+  }
+  const dottedBob = { ...bob, acct: 'first.last', url: '' }
+
+  it('links to the post on its server, with a name that says it opens a new tab', async () => {
+    const el = await mountNoHost(accepted(post('7', { account: dottedBob, url: 'https://pleroma.example/notice/7' })))
+    const a = $(el, 'a.permalink') as HTMLAnchorElement
+    expect(a.getAttribute('href')).toBe('https://pleroma.example/notice/7')
+    expect(a.getAttribute('target')).toBe('_blank')
+    expect(a.getAttribute('aria-label')).toMatch(/opens this post on its own server in a new tab$/)
+  })
+
+  it('with no usable url, the time is not a link', async () => {
+    const el = await mountNoHost(accepted(post('8', { account: dottedBob, url: null })))
+    expect($(el, 'a.permalink')).toBeNull()
+    expect($(el, 'span.permalink time')).not.toBeNull()
+  })
+})
