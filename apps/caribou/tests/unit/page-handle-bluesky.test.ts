@@ -145,3 +145,56 @@ describe('<page-handle-statusid> for a Bluesky route', () => {
     expect((await renders('page-handle-statusid', threadData('alice.example.com'))).after).toBe('article role=alert')
   })
 })
+
+describe('Bluesky SSR data in the client (#185, #186)', () => {
+  const hidden = { kind: 'hidden', shell: SHELL, handle: '' }
+  const okProfile = (handle: string) => ({
+    kind: 'ok', shell: SHELL, handle, tab: 'posts', nextCursor: null, statuses: [],
+    account: {
+      id: ALICE, acct: 'alice.example.com', username: 'alice.example.com', url: '', displayName: 'Alice', note: '',
+      avatar: '', avatarStatic: '', header: '', headerStatic: '', locked: false, fields: [], emojis: [],
+      bot: false, group: false, createdAt: '', statusesCount: 0, followersCount: 0, followingCount: 0, roles: [],
+      bluesky: { did: ALICE, handleInvalid: false, labels: [] },
+    },
+  })
+
+  it('a hidden profile, signed out: the notice, in the first render and after', async () => {
+    history.replaceState(null, '', '/@hana.example.com')
+    const { first, after } = await renders('page-handle', hidden)
+    expect(first).toBe('article role=status')
+    expect(after).toBe('article role=status')
+  })
+
+  it('a hidden profile, with a Bluesky account: the client profile, by the handle in the address', async () => {
+    signIn()
+    history.replaceState(null, '', '/@hana.example.com')
+    const { first, after } = await renders('page-handle', hidden)
+    expect(first).toBe('article role=status')
+    expect(after).toBe('caribou-profile handle=hana.example.com link-handle= tab=posts')
+  })
+
+  it('a hidden profile, with a Mastodon account: still the notice', async () => {
+    users.value = new Map([['bob@example.social', { userKey: 'bob@example.social', server: 'example.social', token: 'T', vapidKey: '', account: {}, createdAt: 1 } as never]])
+    activeUserKey.value = 'bob@example.social'
+    history.replaceState(null, '', '/@hana.example.com')
+    expect((await renders('page-handle', hidden)).after).toBe('article role=status')
+  })
+
+  it('a profile opened by DID shows the handle form in the address bar after the first render', async () => {
+    history.replaceState(null, '', `/@${ALICE}?tab=posts#x`)
+    const { first } = await renders('page-handle', okProfile(ALICE))
+    expect(first).toContain('caribou-profile')
+    expect(location.pathname + location.search + location.hash).toBe('/@alice.example.com?tab=posts#x')
+  })
+
+  it('a profile opened by handle, or with an invalid handle, keeps its address', async () => {
+    history.replaceState(null, '', '/@alice.example.com')
+    await renders('page-handle', okProfile('alice.example.com'))
+    expect(location.pathname).toBe('/@alice.example.com')
+    history.replaceState(null, '', `/@${ALICE}`)
+    const data = okProfile(ALICE)
+    data.account.bluesky.handleInvalid = true
+    await renders('page-handle', data)
+    expect(location.pathname).toBe(`/@${ALICE}`)
+  })
+})

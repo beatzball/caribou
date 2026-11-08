@@ -479,7 +479,7 @@ Mastodon post, account or client renders as before.
   (`/@did:…`, or `/@name` with a dot and no second `@`, spec 8.4) swaps in
   a client-rendered `<caribou-profile>` or `<caribou-thread>`. The thread's
   id is `at://<handle or did>/app.bsky.feed.post/<rkey>`. `/@me` looks the
-  account up by its DID. SSR for these routes is phase 3.
+  account up by its DID. Server rendering is in "Bluesky SSR" below.
 
 **Nav.** With a Bluesky account active the rail hides Local and Public (by
 `capabilities`), and Search and Lists until phase 5 (by network).
@@ -559,6 +559,88 @@ prefs and definitions again (one load at a time), sets the reader, and the
 active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
+
+### Bluesky SSR (#185, #186)
+
+Phase 3. The server paints a Bluesky profile and thread with no token
+(spec 8). `server/lib/bluesky-public.ts` is the one place that fetches
+them.
+
+**The server flag.** The Bluesky flag lives in the browser, so the server
+cannot read it. The server paints Bluesky routes only when the env var
+`BLUESKY_SSR=1` is set. Without it a Bluesky route renders as it did in
+phase 2b, and nothing changes for any reader.
+
+**What the server fetches.** Only `BLUESKY_PUBLIC_APPVIEW` (default
+`https://public.api.bsky.app`), through `upstream-cache.ts`, with a fixed
+TTL (`TTL.BLUESKY`, 30 s; label definitions `TTL.BLUESKY_LABEL_DEFS`, 1 h).
+Never a handle's own domain, never a PDS. Calls: `app.bsky.actor.getProfile`,
+`app.bsky.feed.getAuthorFeed` (`includePins=false`, the tab's filter, the
+`max_id` query as the cursor), `app.bsky.feed.getPostThread`, and
+`app.bsky.labeler.getServices` for Bluesky's labeler.
+
+**Route rules (spec 8.4), in this order.** `routeOf(segment)` in
+`components/_bluesky-route.ts`:
+
+1. `@name@host` (a second `@`): Mastodon, remote account.
+2. `@did:…`: Bluesky, by DID.
+3. `@name` with a dot: Bluesky, by handle.
+4. `@name` with no dot: Mastodon, local to the cookie's server.
+5. `/@<handle or did>/<id>`: a Bluesky post when rule 2 or 3 matched.
+
+Before any fetch the server checks the syntax: the DID, the handle and the
+record key, with `@atproto/syntax` (`@beatzball/caribou-bluesky-client/syntax`).
+A bad one gets a 404 page in the shell and no request.
+
+**Links Caribou builds.** `profilePath` never makes a bare dotted `/@name`
+for a Mastodon account: rule 3 would read it as a Bluesky handle. With no
+host it takes the host from the account's `url`. With no host and no URL, a
+dotted name links to a search for the account.
+
+**A page opened by DID** (`/@did:plc:…`) replaces the address bar with the
+handle form in `firstUpdated`, never in `render`, with `history.replaceState`.
+Not when the handle is `handle.invalid`, and not on a hidden account.
+
+**Moderation.** The server runs `moderate()` with `LOGGED_OUT_PREFS` and
+Bluesky's label definitions, as a signed-out reader's client would. When the
+definitions cannot load, `moderate()` gets `null` and covers every label it
+cannot define (fail closed). The covers, the veil and `noOverride` come from
+the same plain data on the server and in the first client render.
+
+**`!no-unauthenticated` (spec 8.3).** Content from an author appears in
+signed-out SSR only if that author's own labels were read and none is
+`!no-unauthenticated`.
+
+- Per author, everywhere an author's content can appear: the profile, each
+  feed item, the reposter of a repost, a quoted post, the parent and root of a
+  reply, every post in a thread, and a record card's creator.
+- Fail closed. An author object in the AppView's answer with no `labels`
+  array counts as hidden. The server adds the label to it before mapping.
+- The server filters before the data goes into `serverData`. A hidden
+  author's display name, handle, avatar, banner, bio and post text are not
+  in the response at all: not in the body, the title, a meta tag or the
+  page data.
+  - A hidden profile: the page sends the shell and "This account asked to
+    be seen only by signed-in readers." Its posts are not fetched. The page
+    data has no handle.
+  - A hidden post (its author or its reposter is hidden): the item keeps its
+    id, time and reply link, and nothing else. The card renders the notice.
+  - A hidden quoted post: the quote card's notice (`mapEmbed`).
+  - A hidden record card creator: the card is the notice, with no name,
+    description or image (`mapEmbed`).
+  - A feed item's reply parent and root are not in the page data.
+  - A thread opened by a hidden author's handle: the page data does not
+    keep the handle; the client reads it from the address after the first
+    render.
+- In the client: with no Bluesky account active (signed out, or a Mastodon
+  account), the notice stays, and the first render equals the server's. With
+  a Bluesky account active, the page swaps in its own client render after
+  hydration, which fetches as the reader and shows the account.
+
+**The reader check skips Bluesky posts.** `loadReaderViewFrom` asks a
+Mastodon reader's server for its copy of server-rendered posts. It never
+sends a Bluesky post there: the id means nothing to that server, and the
+post would end up "Could not check".
 
 ## Accounts
 

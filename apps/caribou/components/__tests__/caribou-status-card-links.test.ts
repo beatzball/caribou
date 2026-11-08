@@ -4,7 +4,7 @@ import { html, render } from 'lit'
 import '../caribou-status-card.js'
 import '../caribou-app-shell.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
-import { profilePath } from '../_profile-path.js'
+import { postPath, profilePath } from '../_profile-path.js'
 
 // Spy on the real router: the click handler reaches it through a dynamic
 // import, and both import forms must observe the same callable.
@@ -240,6 +240,26 @@ describe('profilePath', () => {
   })
   it('keeps the bare handle when no host is known', () => {
     expect(profilePath('alice', '')).toBe('/@alice')
+  })
+  // Spec 8.4: a bare dotted `/@name` is a Bluesky handle route now.
+  it('with no host, takes the host from the account url', () => {
+    expect(profilePath('first.last', '', 'https://pleroma.example/users/first.last')).toBe('/@first.last@pleroma.example')
+    expect(profilePath('alice', '', 'https://example.social/@alice')).toBe('/@alice@example.social')
+  })
+  it('the order: an acct with a host, then the host given, then the url', () => {
+    expect(profilePath('bob@other.example', 'example.social', 'https://third.example/@bob')).toBe('/@bob@other.example')
+    expect(profilePath('alice', 'example.social', 'https://third.example/@alice')).toBe('/@alice@example.social')
+  })
+  it('a Mastodon post path adds the url host to a dotted local acct, and leaves others as they were', () => {
+    const account = (acct: string, url?: string) => ({ acct, ...(url ? { url } : {}) })
+    expect(postPath({ id: '9', account: account('first.last', 'https://pleroma.example/users/first.last') })).toBe('/@first.last@pleroma.example/9')
+    expect(postPath({ id: '9', account: account('alice', 'https://example.social/@alice') })).toBe('/@alice/9')
+    expect(postPath({ id: '9', account: account('bob@other.example') })).toBe('/@bob@other.example/9')
+  })
+  it('never makes a bare dotted name: with no host and no url it links to a search', () => {
+    expect(profilePath('first.last', '')).toBe('/search?q=%40first.last')
+    expect(profilePath('first.last', '', 'not a url')).toBe('/search?q=%40first.last')
+    expect(profilePath('first.last', '', 'javascript:alert(1)')).toBe('/search?q=%40first.last')
   })
 })
 

@@ -1,0 +1,5 @@
+---
+"caribou-app": patch
+---
+
+The server paints Bluesky profiles and threads signed out, from the public AppView (`BLUESKY_PUBLIC_APPVIEW`), when `BLUESKY_SSR=1` is set; without it nothing changes. Route rules follow spec 8.4: `@name@host` is Mastodon, `@did:…` and a dotted `@name` are Bluesky. A bad handle, DID or record key gets a 404 page and no request. The server runs moderation with the signed-out defaults. An author with `!no-unauthenticated`, or whose labels are missing, never reaches a signed-out page: not the profile, a feed item, a repost or its reposter, a quote, a reply's parent or root, a thread post or a record card. Their name, handle, avatar, banner, bio and text are not in the response at all; the page shows "This account asked to be seen only by signed-in readers." A page opened by DID shows the handle in the address bar after hydration. `profilePath` no longer builds a bare dotted `/@name` for a Mastodon account: it takes the host from the account's URL, or links to a search.

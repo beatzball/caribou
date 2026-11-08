@@ -43,6 +43,7 @@ own files; ask in your report for a change in another's.
 | `src/errors.ts` | `normalizeXrpcError(err) → CaribouError` | #177 |
 | `src/browser.ts` | the SDK classes, the client and the OAuth glue, for the lazy chunk | #177, #182 |
 | `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
+| `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
 How they fit:
@@ -503,6 +504,13 @@ when there is media".
   signed-out lists (`contentList.filter`) but leaves its thread view alone,
   so `mapEmbed` hides the quoted post itself, on every surface. A reader
   with a Bluesky account active sees the quote.
+- **A record card's creator with `!no-unauthenticated` (spec 8.3):** in a
+  signed-out copy, a feed, list, starter pack or labeler whose creator has
+  this label (not negated) becomes a card with the note "This account asked
+  to be seen only by signed-in readers." (`NO_UNAUTHENTICATED_NOTE`), which
+  links to `https://bsky.app`. Nothing of the record is kept: no name,
+  description, image or handle. A reader with a Bluesky account active
+  sees the card.
 - **One level of quote**, as on Bluesky. A quote inside a quoted post is
   `accepted` with no post, and the quote card shows it as a link. This
   also ends a chain that quotes itself.
@@ -623,13 +631,14 @@ only** (`import type`). So the server render and any client code can import
 the package root without pulling in the SDK. Mappers and the facet renderer
 are pure functions.
 
-`./moderation` and `./browser` are the SDK doors. The server may import
-`./moderation` statically (SSR runs moderation with logged-out defaults).
-The client loads both lazily. `src/oauth.ts` is browser only and loads
-through `./browser`.
+`./moderation`, `./syntax` and `./browser` are the SDK doors. The server may import
+`./moderation` and `./syntax` (SSR runs moderation with logged-out defaults,
+and checks a route's syntax). The client loads `./moderation` and
+`./browser` lazily, and never `./syntax`. `src/oauth.ts` is browser only
+and loads through `./browser`.
 
 `src/__tests__/server-safe.test.ts` fails on a runtime `@atproto` import in
-any module other than those three: a value import, a side-effect import, or a
+any module other than the doors and `src/oauth.ts`: a value import, a side-effect import, or a
 dynamic `import()`. A lazy load of the SDK belongs in a door too, so the
 server-safe modules stay pure and the chunk rule has one place to look.
 

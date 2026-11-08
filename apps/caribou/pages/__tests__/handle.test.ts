@@ -197,4 +197,23 @@ describe('/@[handle] pageData', () => {
     expect(vi.mocked(fetchAccountByHandle)).not.toHaveBeenCalled()
     expect(vi.mocked(fetchAccountStatuses)).not.toHaveBeenCalled()
   })
+
+  // README, "Bluesky SSR": without the server flag a Bluesky route renders
+  // as it did before phase 3.
+  it('with BLUESKY_SSR unset, a dotted route takes the Mastodon path as before', async () => {
+    delete process.env.BLUESKY_SSR
+    vi.mocked(resolveInstanceForRoute).mockResolvedValue({ instance: 'mastodon.social', source: 'cookie' })
+    vi.mocked(fetchAccountByHandle).mockRejectedValue(new Error('upstream 404'))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const event = {
+      context: { params: { handle: 'alice.example.com' } },
+      url: '/@alice.example.com',
+    } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
+    const { pageData } = await import('../@[handle].js')
+    const result = await pageData.fetcher(event)
+    expect(result).toMatchObject({ kind: 'error', handle: 'alice.example.com' })
+    expect(vi.mocked(fetchAccountByHandle)).toHaveBeenCalledWith('alice.example.com', { instance: 'mastodon.social' })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    fetchSpy.mockRestore()
+  })
 })

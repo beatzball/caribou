@@ -172,10 +172,10 @@ export function resolvedPath(
     list.length === 1 && others.length === 0 && sameThing(address, list[0]!) ? list[0] : undefined
   const status = (statuses as FoundStatus[]).find(named) ?? lone(statuses as FoundStatus[], accounts)
   const path = status
-    ? `${profilePath(status.account.acct, host)}/${encodedId(status.id)}`
+    ? `${profilePath(status.account.acct, host, status.account.url)}/${encodedId(status.id)}`
     : (() => {
         const account = (accounts as FoundAccount[]).find(named) ?? lone(accounts as FoundAccount[], statuses)
-        return account ? profilePath(account.acct, host) : null
+        return account ? profilePath(account.acct, host, account.url) : null
       })()
   return path !== null && inAppRoute(path) ? path : null
 }

@@ -243,7 +243,7 @@ export class CaribouModerationSettings extends LitElement {
           ${a.avatarStatic || a.avatar
             ? html`<img src=${a.avatarStatic || a.avatar} alt="" width="40" height="40" loading="lazy" decoding="async" />`
             : html`<span class="no-avatar"></span>`}
-          <a class="who" href=${profilePath(a.acct, this.server)} @click=${spaClick}>
+          <a class="who" href=${profilePath(a.acct, this.server, a.url)} @click=${spaClick}>
             <strong>${name}</strong><span>@${a.acct}</span>
           </a>
           <caribou-button variant="secondary" data-action=${on ? spec.off.toLowerCase() : spec.on.toLowerCase()}

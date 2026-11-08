@@ -6,6 +6,10 @@ export const TTL = {
   THREAD_CONTEXT:    60_000,
   PROFILE:          300_000,
   PROFILE_STATUSES:  60_000,
+  // The public AppView answers with `max-age=30` (spec 8.1).
+  BLUESKY:           30_000,
+  // Bluesky's label definitions change rarely (spec 7.4: refresh hourly).
+  BLUESKY_LABEL_DEFS: 3_600_000,
 } as const
 
 const lru = new LRUCache<string, { value: unknown; expiresAt: number }>({ max: 5_000 })

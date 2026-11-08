@@ -249,6 +249,38 @@ describe('mapEmbed', () => {
     expect(map(view)).toEqual({ ...NONE, recordCard: { ...card, type: 'link', authors: [], embedUrl: '' } })
   })
 
+  describe('a record card whose creator asked to be hidden from signed-out readers (spec 8.3)', () => {
+    const NO_UNAUTH = { src: 'did:plc:alice', uri: 'at://did:plc:alice/app.actor.profile/self', val: '!no-unauthenticated', cts: '2026-01-01T00:00:00.000Z' }
+    const NOTICE = {
+      url: 'https://bsky.app', title: 'This account asked to be seen only by signed-in readers.', description: '',
+      providerName: 'Bluesky', image: null, type: 'link', authors: [], embedUrl: '',
+    }
+    const hidden = <V extends { record: { creator: object } }>(view: V, neg?: boolean): V => ({
+      ...view,
+      record: { ...view.record, creator: { ...view.record.creator, labels: [{ ...NO_UNAUTH, ...(neg ? { neg } : {}) }] } },
+    })
+
+    it.each([
+      ['feed', fx.feedGeneratorView],
+      ['list', fx.listView],
+      ['starter pack', fx.starterPackView],
+      ['labeler', fx.labelerView],
+    ] as const)('a %s becomes the notice card for a signed-out reader, with none of its own text', (_name, view) => {
+      const out = map(hidden(view as typeof fx.listView))
+      expect(out).toEqual({ ...NONE, recordCard: NOTICE })
+      expect(JSON.stringify(out)).not.toMatch(/alice\.example\.com|Alice|Caribou pictures|Herd|Caribou fans/)
+    })
+
+    it('a signed-in Bluesky reader gets the card', () => {
+      const signedIn = { ...ctx, viewerOf: 'did:plc:bob@bsky' as const }
+      expect(mapEmbed(hidden(fx.listView) as unknown as Embed, signedIn, fx.POST_URI).recordCard?.title).toBe('Herd')
+    })
+
+    it('ignores a negated label', () => {
+      expect(map(hidden(fx.listView, true)).recordCard?.title).toBe('Herd')
+    })
+  })
+
   it('encodes the path parts of a record link', () => {
     const feed = { ...fx.feedGeneratorView.record, uri: 'at://did:plc:alice/app.bsky.feed.generator/a?b#c' }
     expect(map({ ...fx.feedGeneratorView, record: feed }).recordCard?.url).toBe('https://bsky.app/profile/did:plc:alice/feed/a%3Fb%23c')

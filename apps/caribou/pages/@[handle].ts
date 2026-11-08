@@ -2,7 +2,7 @@ import { html, css } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
-import { getQuery, getRouterParams } from 'h3'
+import { getQuery, getRouterParams, setResponseStatus } from 'h3'
 import { activeClient, activeUserKey } from '@beatzball/caribou-state'
 import { resolveInstanceForRoute } from '../server/lib/resolve-instance.js'
 import { shellInfo } from '../server/lib/shell-info.js'
@@ -15,7 +15,10 @@ import '../components/caribou-app-shell.js'
 import '../components/caribou-auth-required.js'
 import '../components/caribou-profile.js'
 import { enterWithCache } from '../components/_page-cache.js'
-import { blueskyActor, didOfUserKey, rendersBluesky } from '../components/_bluesky-route.js'
+import {
+  blueskyActor, didOfUserKey, rendersBluesky, replaceDidRoute, routeOf, routeSegment,
+} from '../components/_bluesky-route.js'
+import { NO_UNAUTHENTICATED_NOTE } from '../components/_bluesky-moderation.js'
 
 type Tab = 'posts' | 'replies' | 'media'
 
@@ -23,7 +26,10 @@ function parseTab(raw: unknown): Tab {
   return raw === 'replies' || raw === 'media' ? raw : 'posts'
 }
 
-export type HandlePageData = ProfilePageData & { shell: ShellInfo; handle: string }
+// `hidden`: a Bluesky account that asked not to be seen signed out (spec
+// 8.3); the data has no handle. `not-found`: a Bluesky route whose DID or
+// handle is not well formed; nothing was fetched.
+export type HandlePageData = (ProfilePageData | { kind: 'hidden' } | { kind: 'not-found' }) & { shell: ShellInfo; handle: string }
 
 export const pageData = definePageData<HandlePageData>(async (event) => {
   const params = getRouterParams(event) as { handle?: string }
@@ -35,10 +41,28 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   // never performs a public lookup for `me`. It renders a placeholder; the
   // page swaps in the real profile on the client, the way /home does.
   if (handle === 'me') return { kind: 'auth-required', shell, handle } as HandlePageData
-  if (!resolution.instance) return { kind: 'auth-required', shell, handle } as HandlePageData
   const query = getQuery(event)
   const tab = parseTab(query.tab)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
+  // A Bluesky route (spec 8.4; README, "Bluesky SSR"), behind the server flag.
+  const route = routeOf(handle)
+  if (route.network === 'bluesky') {
+    const bsky = await import('../server/lib/bluesky-public.js')
+    if (bsky.blueskySsrEnabled()) {
+      if (!bsky.validActor(route.actor)) {
+        setResponseStatus(event, 404)
+        return { kind: 'not-found', shell, handle: '' }
+      }
+      try {
+        const page = await bsky.fetchBlueskyProfilePage(route.actor, { tab, cursor: maxId })
+        if (page.kind === 'hidden') return { kind: 'hidden', shell, handle: '' }
+        return { ...page, tab, shell, handle } as HandlePageData
+      } catch (err) {
+        return { kind: 'error', message: String(err), shell, handle } as HandlePageData
+      }
+    }
+  }
+  if (!resolution.instance) return { kind: 'auth-required', shell, handle } as HandlePageData
   try {
     const account = await fetchAccountByHandle(handle, { instance: resolution.instance })
     const rawStatuses = await fetchAccountStatuses(account.id, {
@@ -78,6 +102,8 @@ export class HandlePage extends LitroPage {
 
   protected override firstUpdated() {
     const data = this.serverData as HandlePageData | null
+    // Opened by DID: show the handle form in the address bar (spec 8.4).
+    if (data?.kind === 'ok' && data.account.bluesky) replaceDidRoute(window, data.handle, data.account)
     if (rendersBluesky(window, activeClient.value)) {
       const tab = parseTab(new URLSearchParams(window.location.search).get('tab'))
       const key = activeUserKey.value
@@ -85,7 +111,8 @@ export class HandlePage extends LitroPage {
         this.bluesky = { actor: didOfUserKey(key), link: 'me', tab }
         return
       }
-      const actor = blueskyActor(data?.handle ?? '')
+      // A hidden profile's data has no handle: read the address.
+      const actor = blueskyActor(data?.handle || routeSegment(window.location.pathname))
       if (actor) {
         this.bluesky = { actor, link: '', tab }
         return
@@ -143,9 +170,24 @@ export class HandlePage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    if (data.kind === 'hidden') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="status">${NO_UNAUTHENTICATED_NOTE}</article>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'not-found') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="alert">There is no Bluesky account by that name.</article>
+        </caribou-app-shell>
+      `
+    }
+    // A Bluesky profile has no instance: its ids are the same everywhere.
     return html`
       <caribou-app-shell instance=${inst}>
-        <caribou-profile handle=${data.handle} tab=${data.tab} instance=${inst} .initial=${data}></caribou-profile>
+        <caribou-profile handle=${data.handle} tab=${data.tab} instance=${data.account.bluesky ? '' : inst} .initial=${data}></caribou-profile>
       </caribou-app-shell>
     `
   }

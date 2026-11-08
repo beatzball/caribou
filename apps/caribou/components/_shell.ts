@@ -27,5 +27,9 @@ export function loadReaderViewFrom(instance: string, statuses: readonly Status[]
   if (!client || !server || !instance || instance.toLowerCase() !== server.toLowerCase()) return
   // `instance` is a Mastodon server; only a Mastodon client matches it.
   if (client.capabilities.network !== 'mastodon') return
-  void loadReaderView(statuses, client)
+  // A Bluesky post's id means nothing to a Mastodon server, so it is never
+  // sent there (a Bluesky page in a shell whose cookie names this server).
+  const ours = statuses.filter((s) => !s.bluesky && !s.reblog?.bluesky)
+  if (ours.length === 0) return
+  void loadReaderView(ours, client)
 }

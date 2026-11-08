@@ -3,7 +3,7 @@ import { customElement, state } from 'lit/decorators.js'
 import { activeClient } from '@beatzball/caribou-state'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
-import { getRouterParams } from 'h3'
+import { getRouterParams, setResponseStatus } from 'h3'
 import { getInstance } from '../../server/lib/instance-cookie.js'
 import {
   fetchStatus, fetchThreadContext,
@@ -14,9 +14,13 @@ import '../../components/caribou-app-shell.js'
 import '../../components/caribou-auth-required.js'
 import '../../components/caribou-thread.js'
 import { enterWithCache } from '../../components/_page-cache.js'
-import { blueskyActor, blueskyPostUri, rendersBluesky } from '../../components/_bluesky-route.js'
+import {
+  blueskyActor, blueskyPostUri, postRouteOf, rendersBluesky, replaceDidRoute, routeSegment,
+} from '../../components/_bluesky-route.js'
 
-export type StatusPageData = ThreadPageData & {
+// `not-found`: a Bluesky route whose DID, handle or record key is not well
+// formed; nothing was fetched (README, "Bluesky SSR").
+export type StatusPageData = (ThreadPageData | { kind: 'not-found' }) & {
   shell: ShellInfo
   statusId: string
   handle: string
@@ -45,6 +49,27 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
   // ties the home instance to the cookie instead of the URL.
   const cookieHost = await getInstance(event, { storage: getStorage() })
   const shell: ShellInfo = cookieHost ? { instance: cookieHost, source: 'cookie' } : { instance: null }
+  // A Bluesky post (spec 8.4 rule 5), behind the server flag. It needs no
+  // instance: the public AppView answers for every post.
+  const route = postRouteOf(handle, statusId)
+  if (route.network === 'bluesky') {
+    const bsky = await import('../../server/lib/bluesky-public.js')
+    if (bsky.blueskySsrEnabled()) {
+      if (!bsky.validActor(route.actor) || !bsky.validRecordKey(route.rkey)) {
+        setResponseStatus(event, 404)
+        return { kind: 'not-found', shell, statusId: '', handle: '' }
+      }
+      try {
+        const thread = await bsky.fetchBlueskyThread(route.actor, route.rkey)
+        // A hidden author's thread keeps no handle (spec 8.3): the client
+        // reads the address instead.
+        const shown = bsky.asksHidden(thread.focused.account) ? '' : handle
+        return { kind: 'ok', ...thread, shell, statusId, handle: shown }
+      } catch (err) {
+        return { kind: 'error', message: String(err), shell, statusId, handle } as StatusPageData
+      }
+    }
+  }
   if (!cookieHost) {
     return { kind: 'auth-required', shell, statusId, handle } as StatusPageData
   }
@@ -82,7 +107,11 @@ export class HandleStatusPage extends LitroPage {
 
   protected override firstUpdated() {
     const data = this.serverData as StatusPageData | null
-    const actor = blueskyActor(data?.handle ?? '')
+    // Opened by DID: show the handle form in the address bar (spec 8.4).
+    if (data?.kind === 'ok' && data.focused.bluesky) {
+      replaceDidRoute(window, data.handle, data.focused.account, `/${encodeURIComponent(data.statusId)}`)
+    }
+    const actor = blueskyActor(data?.handle || routeSegment(window.location.pathname))
     if (actor && data?.statusId && rendersBluesky(window, activeClient.value)) {
       this.blueskyUri = blueskyPostUri(actor, data.statusId)
     }
@@ -127,9 +156,18 @@ export class HandleStatusPage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    if (data.kind === 'not-found') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="alert">There is no Bluesky post at this address.</article>
+        </caribou-app-shell>
+      `
+    }
+    // A Bluesky thread is keyed by the focused post's AT URI.
+    const id = data.focused.bluesky ? data.focused.id : data.statusId
     return html`
       <caribou-app-shell instance=${inst}>
-        <caribou-thread statusid=${data.statusId} .initial=${data}></caribou-thread>
+        <caribou-thread statusid=${id} .initial=${data}></caribou-thread>
       </caribou-app-shell>
     `
   }

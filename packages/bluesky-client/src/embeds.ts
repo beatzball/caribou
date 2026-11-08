@@ -273,6 +273,15 @@ function recordCard(type: string, record: Obj): PreviewCard {
   }
 }
 
+/** The note that takes the place of an author who asked not to be seen signed out (spec 8.3). */
+export const NO_UNAUTHENTICATED_NOTE = 'This account asked to be seen only by signed-in readers.'
+
+// A record card whose creator asked not to be seen signed out: the note,
+// linking to bsky.app, with nothing from the record.
+function hiddenCreatorCard(): PreviewCard {
+  return card({ url: `${BSKY}`, title: NO_UNAUTHENTICATED_NOTE, description: '', image: null, providerName: 'Bluesky' })
+}
+
 type RecordPart = Pick<EmbedParts, 'recordCard' | 'quote'>
 
 function mapRecordStrict(view: Obj, ctx: MapContext): RecordPart {
@@ -287,8 +296,16 @@ function mapRecordStrict(view: Obj, ctx: MapContext): RecordPart {
       return { recordCard: null, quote: { state: blockedState(record), quotedStatus: null } }
     case 'app.bsky.embed.record#viewDetached':
       return { recordCard: null, quote: { state: 'revoked', quotedStatus: null } }
-    default:
-      return { recordCard: recordCard(type, record), quote: null }
+    default: {
+      const built = recordCard(type, record)
+      // Spec 8.3: a signed-out copy never carries the creator's name, text
+      // or image when the creator asked not to be seen so. A known shape
+      // only: a bad one is still the fallback card.
+      if (ctx.viewerOf === null && isNoUnauthenticated(objOrEmpty(record.creator))) {
+        return { recordCard: hiddenCreatorCard(), quote: null }
+      }
+      return { recordCard: built, quote: null }
+    }
   }
 }
 

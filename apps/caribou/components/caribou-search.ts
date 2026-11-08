@@ -388,7 +388,7 @@ export class CaribouSearch extends LitElement {
   private renderAccount(a: Account, r: Extract<Results, { kind: 'ok' }>) {
     const acct = fullAcct(a.acct, r.host)
     return html`<li class="account" data-account-id=${a.id}>
-      <a class="who" href=${profilePath(a.acct, r.host)} @click=${spaClick}>
+      <a class="who" href=${profilePath(a.acct, r.host, a.url)} @click=${spaClick}>
         <img class="avatar" src=${a.avatarStatic || a.avatar} alt="" width="44" height="44" loading="lazy" decoding="async" />
         <span class="names">
           <span class="name">${a.displayName || a.username}</span>

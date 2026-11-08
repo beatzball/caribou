@@ -7,7 +7,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./moderation": "./src/moderation.ts",
-    "./browser": "./src/browser.ts"
+    "./browser": "./src/browser.ts",
+    "./syntax": "./src/syntax.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -18,6 +19,7 @@
   "dependencies": {
     "@atproto/api": "^0.30.3",
     "@atproto/oauth-client-browser": "^0.5.14",
+    "@atproto/syntax": "^0.7.7",
     "@beatzball/caribou-auth": "workspace:*",
     "@beatzball/caribou-mastodon-client": "workspace:*"
   },

@@ -269,7 +269,7 @@ export class CaribouNotifications extends LitElement {
 
   // `acct` is relative to the user's own server for a local account.
   private profileHref(a: Account): string {
-    return profilePath(a.acct, activeUser.value?.server ?? '')
+    return profilePath(a.acct, activeUser.value?.server ?? '', a.url)
   }
 
   private name(a: Account): string {
