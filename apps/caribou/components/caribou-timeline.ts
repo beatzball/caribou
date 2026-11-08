@@ -89,6 +89,8 @@ export class CaribouTimeline extends LitElement {
   // The store's cursor for the next page, which the no-JS link carries.
   @state() private nextCursor: string | null = null
   @state() private newPostsCount = 0
+  // The new posts are a gap: "Many new posts", and applying replaces.
+  @state() private newPostsGap = false
   // False while nobody is signed in on this device (browsing /local or
   // /public with the instance cookie only). The store then has no client
   // and cannot fetch a page in place.
@@ -196,6 +198,7 @@ export class CaribouTimeline extends LitElement {
       this.hasMore = store.hasMore.value
       this.nextCursor = store.nextCursor.value
       this.newPostsCount = store.newPostsCount.value
+      this.newPostsGap = store.gap.value
       this.canFetch = activeClient.value !== null
     })
     if (this.kind === 'home') {
@@ -312,7 +315,10 @@ export class CaribouTimeline extends LitElement {
     }
     const last = statuses[statuses.length - 1]
     const context = timelineFilterContext(this.kind) ?? ''
-    if (!last) {
+    // A list ends only on a null cursor: an empty page can have more behind
+    // it (README, "Bluesky views"). The empty notice waits for the real end;
+    // until then the anchor below stays, and loads on.
+    if (!last && !hasMore) {
       const empty = this.kind === 'bookmarks' ? 'No bookmarks yet.'
         : this.kind === 'hashtag' ? `No posts with #${this.tag} yet.`
         : this.kind === 'list' ? 'No posts in this list yet.' : 'No posts yet.'
@@ -330,6 +336,7 @@ export class CaribouTimeline extends LitElement {
         ${failed && !failedOlder ? this.renderFailed() : nothing}
         <caribou-new-posts-banner
           .count=${this.newPostsCount}
+          ?many=${this.newPostsGap}
           @apply-new-posts=${this.onApplyNewPosts}
         ></caribou-new-posts-banner>
         <ul>

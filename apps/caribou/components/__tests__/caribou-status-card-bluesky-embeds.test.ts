@@ -54,7 +54,8 @@ function blueskyPost(embed: unknown): Status {
   const bluesky = {
     uri: POST_URI, cid: 'bafy', likeUri: null, repostUri: null, replyRef: null,
     replyDisabled: false, embeddingDisabled: false, labels: [],
-    moderation: { contexts: {}, labelersCovered: [] }, viewerOf: null,
+    // A clean result: every context present, nothing covered.
+    moderation: { contexts: Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView'].map((c) => [c, { filter: false, blur: false, alert: false, inform: false, noOverride: false, reasons: [] }])), labelersCovered: [] }, viewerOf: null,
     recordCard: parts.recordCard,
   } as unknown as StatusBluesky
   return {
