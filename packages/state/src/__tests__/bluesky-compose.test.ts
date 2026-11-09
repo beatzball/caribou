@@ -1,12 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-// Note: a test may replace localStorage.setItem; it is restored by its own flag.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   BlueskyBlobRef, BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
 import { CaribouError } from '@beatzball/caribou-mastodon-client'
 import { emptyDraft, isDraftEmpty, loadDraft, saveDraft, type ComposeDraft } from '../compose.js'
 import {
-  blueskyDraftInput, blueskyRecord, emptyBlueskyDraft, postBlueskyDraft, BLUESKY_SELF_LABELS, DraftNotSaved,
+  blueskyDraftInput, blueskyRecord, emptyBlueskyDraft, postBlueskyDraft, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
 } from '../bluesky-compose.js'
 
 // The client's `BlueskyBlobNotFound`, by shape: state does not import the client package.
@@ -76,6 +75,25 @@ function draft(over: Partial<ComposeDraft> = {}, bsky: Partial<NonNullable<Compo
 
 const noWait = { wait: () => Promise.resolve() }
 
+// Storage that refuses draft writes while `refusing.on` (full or blocked).
+// Restored after every test, so one failing test cannot leak it (review R2-N5).
+const realSetItem = localStorage.setItem.bind(localStorage)
+const refusing = { on: false }
+Object.defineProperty(localStorage, 'setItem', {
+  configurable: true,
+  value: (k: string, v: string) => {
+    if (refusing.on && k.startsWith('caribou.drafts.')) throw new DOMException('full', 'QuotaExceededError')
+    return realSetItem(k, v)
+  },
+})
+afterEach(() => { refusing.on = false })
+
+function deferred<T = void>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
 beforeEach(() => {
   localStorage.clear()
   statusCache.value = new Map()
@@ -141,7 +159,7 @@ describe('the draft contract: what survives', () => {
       sent: { input: 'x', record: { $type: 'app.bsky.feed.post', text: 'kept', createdAt: 't' } },
     })
     saveDraft(KEY, 'reply:at://p1', d)
-    expect(loadDraft(KEY, 'reply:at://p1')).toEqual(d)
+    expect(loadDraft(KEY, 'reply:at://p1')).toEqual({ ...d, rev: expect.any(String) })
   })
 
   it('a draft with only images, or only a pending send, is not empty', () => {
@@ -186,6 +204,8 @@ describe('postBlueskyDraft: one post per click', () => {
   it('a send that times out after the record was written: the retry finds it, and there is one post', async () => {
     const pds = fakePds()
     pds.loseNextAnswer.value = true
+    // The check after the lost answer fails too, so the outcome is unknown.
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     const d = draft({ text: 'once' })
     await expect(postBlueskyDraft(pds.client, 'new', d, noWait)).rejects.toMatchObject({ code: 'unreachable' })
     // The draft kept its rkey and frozen record.
@@ -203,6 +223,7 @@ describe('postBlueskyDraft: one post per click', () => {
   it('a lost answer, then edits, then a retry: the edits are kept with a new rkey', async () => {
     const pds = fakePds()
     pds.loseNextAnswer.value = true
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'first' }), noWait)).rejects.toBeTruthy()
     const edited = { ...loadDraft(KEY, 'new')!, text: 'first, edited' }
     saveDraft(KEY, 'new', edited)
@@ -213,61 +234,93 @@ describe('postBlueskyDraft: one post per click', () => {
     expect(kept.text).toBe('first, edited')
     expect(kept.bluesky!.sent).toBeNull()
     expect(kept.bluesky!.rkey).toBe('3krkey0000002')
-    if (out.kind === 'earlier-posted') expect(out.draft).toEqual(kept)
+    if (out.kind === 'earlier-posted') expect(out.draft).toMatchObject({ text: kept.text, bluesky: kept.bluesky })
   })
 
-  it('record not found: the retry sends the same frozen record with the same rkey, once', async () => {
+  it('a lost answer after the write: the check right after finds it, one post, no retry needed (R1)', async () => {
+    const pds = fakePds()
+    pds.loseNextAnswer.value = true
+    const out = await postBlueskyDraft(pds.client, 'new', draft({ text: 'once' }), noWait)
+    expect(out.kind).toBe('posted')
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3krkey0000001')
+    expect(pds.records.size).toBe(1)
+    expect(loadDraft(KEY, 'new')).toBeNull()
+  })
+
+  it('record not found, no edits: the same record (same createdAt, no new facet lookup) with the same rkey, once', async () => {
     const pds = fakePds()
     pds.failNextBeforeWrite.value = new CaribouError('server_error', 'Bad Gateway', { status: 502 })
     await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'again' }), noWait)).rejects.toBeTruthy()
     const kept = loadDraft(KEY, 'new')!
-    const frozen = kept.bluesky!.sent!.record
+    // The failed create was checked (R1): absent, so the record unfroze.
+    expect(kept.bluesky!.sent).toBeNull()
+    expect(kept.bluesky!.rkey).toBe('3krkey0000001')
     const out = await postBlueskyDraft(pds.client, 'new', kept, noWait)
     expect(out.kind).toBe('posted')
-    expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(2)
-    expect(pds.client.blueskyCreatePost.mock.calls[1]).toEqual([frozen, '3krkey0000001'])
-    // Same createdAt, no second facet lookup.
-    expect(pds.client.blueskyDetectFacets).toHaveBeenCalledTimes(1)
+    expect(pds.client.blueskyCreatePost.mock.calls.map((c) => c[1])).toEqual(['3krkey0000001', '3krkey0000001'])
     expect(pds.records.size).toBe(1)
   })
 
-  it('record not found after edits: the frozen record goes with its rkey, and the edit stays for a new rkey (rule 1)', async () => {
+  it('a pending send, check absent, no edits: the frozen record goes again as it is', async () => {
+    const pds = fakePds()
+    pds.failNextBeforeWrite.value = new CaribouError('unreachable', 'timeout')
+    // The check after the failed create fails too: unknown, so it stays pending.
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'hi #tag' }), noWait)).rejects.toBeTruthy()
+    const kept = loadDraft(KEY, 'new')!
+    const frozen = kept.bluesky!.sent!.record
+    await postBlueskyDraft(pds.client, 'new', kept, noWait)
+    expect(pds.client.blueskyCreatePost.mock.calls[1]).toEqual([frozen, '3krkey0000001'])
+    expect(pds.client.blueskyDetectFacets).toHaveBeenCalledTimes(1)
+  })
+
+  it('record not found after edits: the current draft goes with the same rkey (R2)', async () => {
     const pds = fakePds()
     pds.failNextBeforeWrite.value = new CaribouError('server_error', 'Bad Gateway', { status: 502 })
     await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)).rejects.toBeTruthy()
     const edited = { ...loadDraft(KEY, 'new')!, text: 'v2' }
-    const out = await postBlueskyDraft(pds.client, 'new', edited, noWait)
-    expect(pds.records.get('3krkey0000001')!.text).toBe('v1')
+    saveDraft(KEY, 'new', edited)
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('posted')
+    expect(pds.records.get('3krkey0000001')!.text).toBe('v2')
     expect(pds.records.size).toBe(1)
-    expect(out.kind).toBe('earlier-posted')
-    const kept = loadDraft(KEY, 'new')!
-    expect(kept.text).toBe('v2')
-    expect(kept.bluesky!.rkey).toBe('3krkey0000002')
-    expect(kept.bluesky!.sent).toBeNull()
   })
 
-  it('v1 times out unwritten, the reader edits to v2, v1 lands late: the edit is not lost (review: Fable B1, Codex 2)', async () => {
+  it('offline at the first Post, the reader fixes the text, Post: the fixed text goes public (review R2-N1, probe D)', async () => {
+    const pds = fakePds()
+    pds.failNextBeforeWrite.value = new CaribouError('unreachable', 'Failed to fetch')
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'teh typo' }), noWait)).rejects.toBeTruthy()
+    saveDraft(KEY, 'new', { ...loadDraft(KEY, 'new')!, text: 'the typo, fixed' })
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('posted')
+    expect([...pds.records.values()].map((r) => r.text)).toEqual(['the typo, fixed'])
+  })
+
+  it('v1 times out unwritten (check unknown), the reader edits to v2, v1 lands late: earlier-posted, v2 kept (R2, Fable B1, Codex 2)', async () => {
     const pds = fakePds()
     pds.failNextBeforeWrite.value = new CaribouError('unreachable', 'timeout')
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)).rejects.toBeTruthy()
     const v1 = loadDraft(KEY, 'new')!
     const v1Record = v1.bluesky!.sent!.record
-    const edited = { ...v1, text: 'v2 with my edits' }
-    saveDraft(KEY, 'new', edited)
+    saveDraft(KEY, 'new', { ...v1, text: 'v2 with my edits' })
     pds.client.blueskyGetOwnPost.mockImplementationOnce(async () => {
       pds.records.set('3krkey0000001', v1Record)
       return null
     })
-    await expect(postBlueskyDraft(pds.client, 'new', edited, noWait)).rejects.toMatchObject({ code: 'server_error' })
     const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
     expect([...pds.records.values()].map((r) => r.text)).toEqual(['v1'])
     expect(out.kind).toBe('earlier-posted')
-    expect(loadDraft(KEY, 'new')!.text).toBe('v2 with my edits')
+    const kept = loadDraft(KEY, 'new')!
+    expect(kept.text).toBe('v2 with my edits')
+    expect(kept.bluesky!.sent).toBeNull()
+    expect(kept.bluesky!.rkey).toBe('3krkey0000002')
   })
 
   it('a found record that is not the frozen one is never read as posted', async () => {
     const pds = fakePds()
     pds.loseNextAnswer.value = true
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'mine' }), noWait)).rejects.toBeTruthy()
     pds.records.set('3krkey0000001', { $type: 'app.bsky.feed.post', text: 'other', createdAt: 'x' })
     const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
@@ -275,9 +328,22 @@ describe('postBlueskyDraft: one post per click', () => {
     expect(loadDraft(KEY, 'new')!.text).toBe('mine')
   })
 
-  it('a 400 that is not RecordNotFound sends nothing (rule 1)', async () => {
+  it('a failed check sends nothing: an unknown answer is never "not found" (R1)', async () => {
     const pds = fakePds()
     pds.loseNextAnswer.value = true
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    await expect(postBlueskyDraft(pds.client, 'new', draft(), noWait)).rejects.toMatchObject({ code: 'unreachable' })
+    expect(loadDraft(KEY, 'new')!.bluesky!.sent).not.toBeNull()
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    await expect(postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)).rejects.toMatchObject({ code: 'unreachable' })
+    expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(1)
+    expect(loadDraft(KEY, 'new')!.bluesky!.sent).not.toBeNull()
+  })
+
+  it('a 400 that is not RecordNotFound is "the check failed": nothing is sent (R1)', async () => {
+    const pds = fakePds()
+    pds.loseNextAnswer.value = true
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('not_found', 'AccountDeactivated', { status: 400 }))
     await expect(postBlueskyDraft(pds.client, 'new', draft(), noWait)).rejects.toBeTruthy()
     pds.records.clear()
     pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('not_found', 'AccountDeactivated', { status: 400 }))
@@ -285,37 +351,50 @@ describe('postBlueskyDraft: one post per click', () => {
     expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(1)
   })
 
-  it('storage refuses the freeze: nothing is sent, the caller hears; then one post (rule 2, Codex 1, Fable N1)', async () => {
+  it('a late first write after a check that said absent: the second create fails, the check finds it, one post', async () => {
     const pds = fakePds()
-    const real = localStorage.setItem.bind(localStorage)
-    let refuse = true
-    Object.defineProperty(localStorage, 'setItem', {
-      configurable: true,
-      value: (k: string, v: string) => {
-        if (refuse && k.startsWith('caribou.drafts.')) throw new DOMException('full', 'QuotaExceededError')
-        return real(k, v)
-      },
+    pds.failNextBeforeWrite.value = new CaribouError('unreachable', 'timeout')
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'late' }), noWait)).rejects.toBeTruthy()
+    const kept = loadDraft(KEY, 'new')!
+    pds.client.blueskyGetOwnPost.mockImplementationOnce(async () => {
+      pds.records.set('3krkey0000001', kept.bluesky!.sent!.record)
+      return null
     })
-    const spy = { mockRestore: () => { refuse = false } }
-    pds.loseNextAnswer.value = true
-    const seen: ComposeDraft[] = []
-    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'once' }), { ...noWait, onDraft: (d) => seen.push(d) }))
-      .rejects.toBeInstanceOf(DraftNotSaved)
-    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
-    // Memory still has the rkey and the frozen record.
-    expect(seen.at(-1)!.bluesky!.sent).not.toBeNull()
-    spy.mockRestore()
-    await expect(postBlueskyDraft(pds.client, 'new', seen.at(-1)!, noWait)).rejects.toBeTruthy()
-    await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    const out = await postBlueskyDraft(pds.client, 'new', kept, noWait)
+    expect(out.kind).toBe('posted')
     expect(pds.records.size).toBe(1)
+    expect(loadDraft(KEY, 'new')).toBeNull()
   })
 
-  it('the caller gets the frozen draft before the network (rule 2)', async () => {
+  it('storage refuses every click: nothing sent, the draft comes back unfrozen; then a reload posts once (R3, Codex R2.1, Fable R2-B2)', async () => {
+    const pds = fakePds()
+    saveDraft(KEY, 'new', draft({ text: 'once' }))
+    refusing.on = true
+    let mem = loadDraft(KEY, 'new')!
+    const opts = { ...noWait, onDraft: (d: ComposeDraft) => { mem = d } }
+    pds.loseNextAnswer.value = true
+    for (let i = 0; i < 3; i++) {
+      await expect(postBlueskyDraft(pds.client, 'new', mem, opts)).rejects.toBeInstanceOf(DraftNotSaved)
+      expect(mem.bluesky!.sent).toBeNull()
+    }
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    // Reload: memory is gone, storage works again.
+    refusing.on = false
+    // The answer of this send is lost; the check right after finds it.
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('posted')
+    expect(pds.records.size).toBe(1)
+    expect(loadDraft(KEY, 'new')).toBeNull()
+  })
+
+  it('the caller gets the frozen draft before the network (R3)', async () => {
     const pds = fakePds()
     let atSend: ComposeDraft | null = null
     let latest: ComposeDraft | null = null
     pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
       atSend = latest
+      expect(loadDraft(KEY, 'new')!.bluesky!.sent!.record).toEqual(record)
       pds.records.set(rkey, record)
       return { uri: uriOf(rkey), cid: 'c' }
     })
@@ -324,43 +403,73 @@ describe('postBlueskyDraft: one post per click', () => {
     expect(atSend!.bluesky!.sent).not.toBeNull()
   })
 
-  it('an old send that succeeds keeps a newer edit stored in its slot (rule 3, Codex 4)', async () => {
+  it('reopened and edited during the send, then the old send succeeds: the edit stays, and its Post keeps it (R4, Codex 4)', async () => {
     const pds = fakePds()
-    let release: () => void = () => {}
+    const gate = deferred()
     pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
-      await new Promise<void>((r) => { release = r })
+      await gate.promise
       pds.records.set(rkey, record)
       return { uri: uriOf(rkey), cid: 'c' }
     })
     const sending = postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)
     await new Promise((r) => setTimeout(r, 0))
-    // Closed and reopened: the new dialog loads the stored draft and edits it.
     saveDraft(KEY, 'new', { ...loadDraft(KEY, 'new')!, text: 'v1, edited' })
-    release()
+    gate.resolve()
     await sending
-    const kept = loadDraft(KEY, 'new')!
-    expect(kept.text).toBe('v1, edited')
-    expect(kept.bluesky!.sent).toBeNull()
-    expect(kept.bluesky!.rkey).not.toBe('3krkey0000001')
+    expect(loadDraft(KEY, 'new')!.text).toBe('v1, edited')
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('earlier-posted')
+    expect(pds.records.size).toBe(1)
+    expect(loadDraft(KEY, 'new')!.text).toBe('v1, edited')
   })
 
-  it('an old send leaves another draft in its slot alone (rule 3)', async () => {
+  it('an old send leaves another draft in its slot alone (R4)', async () => {
     const pds = fakePds()
-    let release: () => void = () => {}
+    const gate = deferred()
     pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
-      await new Promise<void>((r) => { release = r })
+      await gate.promise
       pds.records.set(rkey, record)
       return { uri: uriOf(rkey), cid: 'c' }
     })
     const sending = postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)
     await new Promise((r) => setTimeout(r, 0))
     saveDraft(KEY, 'new', draft({ text: 'a new one' }))
-    release()
+    gate.resolve()
     await sending
     expect(loadDraft(KEY, 'new')!.text).toBe('a new one')
   })
 
-  it('a blob refusal unfreezes: the next send freezes a new record with the same rkey', async () => {
+  it('a late blob refusal after the draft was reopened and edited writes nothing over it (R4, Codex R2.2)', async () => {
+    const pds = fakePds()
+    const gate = deferred()
+    pds.client.blueskyCreatePost.mockImplementationOnce(async () => {
+      await gate.promise
+      throw new BlueskyBlobNotFoundLike('Could not find blob: bafkreiimg')
+    })
+    const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }]
+    const sending = postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }, { images: img }), noWait)
+    await new Promise((r) => setTimeout(r, 0))
+    saveDraft(KEY, 'new', { ...loadDraft(KEY, 'new')!, text: 'v2 from reopened editor' })
+    gate.resolve()
+    await expect(sending).rejects.toBeTruthy()
+    expect(loadDraft(KEY, 'new')!.text).toBe('v2 from reopened editor')
+  })
+
+  it('a facet lookup that lands after a reopen and edit: nothing is frozen or sent, the edit stays (R4, Codex R2.3)', async () => {
+    const pds = fakePds()
+    saveDraft(KEY, 'new', draft({ text: 'v1 @alice.example.com' }))
+    const gate = deferred<[]>()
+    pds.client.blueskyDetectFacets.mockImplementationOnce(() => gate.promise)
+    const sending = postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    await new Promise((r) => setTimeout(r, 0))
+    saveDraft(KEY, 'new', draft({ text: 'v2' }))
+    gate.resolve([])
+    await expect(sending).rejects.toBeInstanceOf(DraftChanged)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    expect(loadDraft(KEY, 'new')!.text).toBe('v2')
+  })
+
+  it('a refused first create unfreezes: the next send freezes the current draft on the same rkey', async () => {
     const pds = fakePds()
     pds.failNextBeforeWrite.value = new BlueskyBlobNotFoundLike('Could not find blob: bafkreiimg')
     const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }]
@@ -369,36 +478,31 @@ describe('postBlueskyDraft: one post per click', () => {
     const after = loadDraft(KEY, 'new')!
     expect(after.bluesky!.sent).toBeNull()
     expect(after.bluesky!.rkey).toBe('3krkey0000001')
-    expect(seen.at(-1)).toEqual(after)
+    expect(seen.at(-1)!.bluesky!.sent).toBeNull()
     await postBlueskyDraft(pds.client, 'new', { ...after, text: 'edited after' }, noWait)
     expect(pds.records.get('3krkey0000001')!.text).toBe('edited after')
-    expect(pds.client.blueskyGetOwnPost).not.toHaveBeenCalled()
   })
 
-  it('a failed check sends nothing: an unknown answer is never "not found"', async () => {
+  it('a send in doubt, then the PDS drops the blob, then the reader removes the image: the post goes (R1, R2, Fable R2-B1, Codex R2.4)', async () => {
     const pds = fakePds()
-    pds.loseNextAnswer.value = true
-    await expect(postBlueskyDraft(pds.client, 'new', draft(), noWait)).rejects.toBeTruthy()
-    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
-    await expect(postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)).rejects.toMatchObject({ code: 'unreachable' })
-    expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(1)
-    expect(loadDraft(KEY, 'new')!.bluesky!.sent).not.toBeNull()
-  })
-
-  it('a late first write that lands after the check: the second create fails, and the next retry finds it', async () => {
-    const pds = fakePds()
+    const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }]
     pds.failNextBeforeWrite.value = new CaribouError('unreachable', 'timeout')
-    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'late' }), noWait)).rejects.toBeTruthy()
-    const kept = loadDraft(KEY, 'new')!
-    // The first request reaches the PDS late, after the check said "not found".
-    pds.client.blueskyGetOwnPost.mockImplementationOnce(async () => {
-      pds.records.set('3krkey0000001', kept.bluesky!.sent!.record)
-      return null
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'with photo' }, { images: img }), noWait)).rejects.toBeTruthy()
+    expect(loadDraft(KEY, 'new')!.bluesky!.sent).not.toBeNull()
+    pds.client.blueskyCreatePost.mockImplementation(async (record: BlueskyPostRecord, rkey: string) => {
+      if (JSON.stringify(record).includes('bafkreiimg')) throw new BlueskyBlobNotFoundLike('Could not find blob: bafkreiimg')
+      pds.records.set(rkey, record)
+      return { uri: uriOf(rkey), cid: 'c' }
     })
-    await expect(postBlueskyDraft(pds.client, 'new', kept, noWait)).rejects.toMatchObject({ code: 'server_error' })
+    await expect(postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)).rejects.toMatchObject({ name: 'BlueskyBlobNotFound' })
+    expect(loadDraft(KEY, 'new')!.bluesky!.sent).toBeNull()
+    const stored = loadDraft(KEY, 'new')!
+    saveDraft(KEY, 'new', { ...stored, bluesky: { ...stored.bluesky!, images: [] } })
     const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
     expect(out.kind).toBe('posted')
     expect(pds.records.size).toBe(1)
+    expect(loadDraft(KEY, 'new')).toBeNull()
   })
 })
 

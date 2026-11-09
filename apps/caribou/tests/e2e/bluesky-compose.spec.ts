@@ -16,12 +16,14 @@ interface Pds {
   records: Map<string, Record<string, unknown>>
   /** When true, the next create is written and its answer is lost. */
   loseNextAnswer: boolean
+  /** When true, the next getRecord fails with a 502: the outcome stays unknown. */
+  failNextGet: boolean
 }
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }
 
 async function fixturePds(page: Page): Promise<Pds> {
-  const pds: Pds = { creates: [], gets: [], records: new Map(), loseNextAnswer: false }
+  const pds: Pds = { creates: [], gets: [], records: new Map(), loseNextAnswer: false, failNextGet: false }
   const json = (body: unknown, status = 200) => ({ status, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify(body) })
   // Registered after the auth fixture, so these answer first.
   await page.route(`${PDS}/xrpc/**`, async (route) => {
@@ -43,6 +45,10 @@ async function fixturePds(page: Page): Promise<Pds> {
     if (method === 'com.atproto.repo.getRecord') {
       const rkey = url.searchParams.get('rkey') ?? ''
       pds.gets.push(rkey)
+      if (pds.failNextGet) {
+        pds.failNextGet = false
+        return route.fulfill(json({ error: 'UpstreamFailure', message: 'Bad Gateway' }, 502))
+      }
       const value = pds.records.get(rkey)
       return route.fulfill(value
         ? json({ uri: `at://${ALICE}/app.bsky.feed.post/${rkey}`, cid: CID, value })
@@ -117,6 +123,8 @@ test.describe('Bluesky compose', () => {
     const dialog = await openCompose(page)
     await dialog.getByRole('textbox', { name: 'Post text' }).fill('only once')
     pds.loseNextAnswer = true
+    // The check right after the lost answer fails too: the outcome is unknown.
+    pds.failNextGet = true
     await dialog.getByRole('button', { name: 'Post' }).click()
     await expect(dialog.getByText('The last send did not finish.', { exact: false })).toBeVisible()
 
@@ -126,6 +134,21 @@ test.describe('Bluesky compose', () => {
     await expect(again.getByRole('textbox', { name: 'Post text' })).toHaveValue('only once')
     await again.getByRole('button', { name: 'Post' }).click()
     await expect(again).toBeHidden()
+    expect(pds.creates).toHaveLength(1)
+    // The failed check, then the check after the reload.
+    expect(pds.gets).toEqual([pds.creates[0]!.rkey, pds.creates[0]!.rkey])
+  })
+
+  test('the answer is lost but the check right after finds the post: one post, the dialog closes', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    const pds = await fixturePds(page)
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    await dialog.getByRole('textbox', { name: 'Post text' }).fill('checked at once')
+    pds.loseNextAnswer = true
+    await dialog.getByRole('button', { name: 'Post' }).click()
+    await expect(dialog).toBeHidden()
     expect(pds.creates).toHaveLength(1)
     expect(pds.gets).toEqual([pds.creates[0]!.rkey])
   })

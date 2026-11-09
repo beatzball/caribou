@@ -88,6 +88,12 @@ export interface ComposeDraft {
   poll?: DraftPoll | null
   /** A Bluesky draft's own parts. A Mastodon draft has none. */
   bluesky?: BlueskyDraft
+  /**
+   * The stored revision: every save in this slot makes a new, unique one
+   * (so a cleared and refilled slot never repeats one). A send writes only
+   * while the revision is the one it owns (README, R4).
+   */
+  rev?: string
 }
 
 // A new post and each reply keep their own draft, so opening a reply does
@@ -168,15 +174,34 @@ export function loadDraft(userKey: UserKey, slot: DraftSlot): ComposeDraft | nul
 // An empty draft is removed rather than stored, so a dialog opened and
 // closed again leaves nothing behind.
 export function saveDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft): void {
-  storeDraft(userKey, slot, draft)
+  storeDraftIf(userKey, slot, undefined, draft)
 }
 
-/** `saveDraft`, answering false when storage refused the write. */
-export function storeDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft): boolean {
+/** The revision stored in `slot` now, or null when the slot is empty. */
+export function draftRev(userKey: UserKey, slot: DraftSlot): string | null {
+  const d = readAll(userKey)[slot]
+  return d && typeof d.text === 'string' ? d.rev ?? '' : null
+}
+
+/**
+ * Stores `draft` (null, or an empty draft, clears the slot) only when the
+ * slot's revision is still `expected` (null: an empty slot; undefined: any).
+ * Answers the slot's new revision (null once cleared), or false when the
+ * revision had moved or storage refused the write.
+ */
+export function storeDraftIf(
+  userKey: UserKey, slot: DraftSlot, expected: string | null | undefined, draft: ComposeDraft | null,
+): { rev: string | null } | false {
   const all = readAll(userKey)
-  if (isDraftEmpty(draft)) delete all[slot]
-  else all[slot] = draft
-  return writeAll(userKey, all)
+  const held = all[slot]
+  const current = held && typeof held.text === 'string' ? held.rev ?? '' : null
+  if (expected !== undefined && current !== expected) return false
+  const keep = !!draft && !isDraftEmpty(draft)
+  const rev = newKey()
+  if (keep) all[slot] = { ...draft, rev }
+  else delete all[slot]
+  if (!writeAll(userKey, all)) return false
+  return { rev: keep ? rev : null }
 }
 
 /**

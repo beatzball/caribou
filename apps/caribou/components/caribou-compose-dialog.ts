@@ -4,7 +4,7 @@ import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
-  pollOptions, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftNotSaved,
+  pollOptions, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
 } from '@beatzball/caribou-state'
@@ -323,7 +323,8 @@ export class CaribouComposeDialog extends LitElement {
   // has loaded, and why the reply or quote cannot be sent, if it cannot.
   @state() private quoteTo: Status | null = null
   @state() private bsky: BlueskyBrowser | null = null
-  @state() private blocked: string | null = null
+  // The reply or quote target is gone (`not_found` on the fresh read).
+  @state() private gone: string | null = null
   // A link to an earlier version that a retry found posted (spec 7.2).
   @state() private earlierPosted: string | null = null
   // Images (by their local id) the PDS no longer has and that this page has
@@ -435,7 +436,7 @@ export class CaribouComposeDialog extends LitElement {
     this.editing = null
     this.pending = []
     this.quoteTo = null
-    this.blocked = null
+    this.gone = null
     this.earlierPosted = null
     this.missingBlobs = new Set()
     if (this.isBluesky) {
@@ -570,7 +571,6 @@ export class CaribouComposeDialog extends LitElement {
     // Each image needs a local id for its controls (one stored without it gets one).
     const images = bluesky.images.map((i) => i.id ? i : { ...i, id: crypto.randomUUID() })
     this.draft = { ...(stored ?? emptyDraft({ inReplyToId: inReplyTo?.id ?? null })), bluesky: { ...bluesky, images } }
-    this.checkTarget()
     this.finishOpen()
     if (target) void this.refreshTarget(client, target)
   }
@@ -581,15 +581,13 @@ export class CaribouComposeDialog extends LitElement {
 
   // The second check (#188 owns the buttons): a reply or quote to a post
   // whose author turned it off cannot be sent, whatever opened the dialog.
-  // Blocked when the dialog's own copy **or** the status cache's says so:
-  // neither is known to be newer, and a wrong "allowed" sends what the
-  // author turned off.
-  private checkTarget(): void {
+  // Why this reply or quote cannot be sent, or null. Read live: blocked
+  // when the dialog's own copy **or** the status cache's says the author
+  // turned it off (neither is known to be newer), or when the post is gone.
+  private get blocked(): string | null {
     const replyOff = !!this.replyTo && (!!this.replyTo.bluesky?.replyDisabled || !!cachedCopy(this.replyTo)?.bluesky?.replyDisabled)
     const quoteOff = !!this.quoteTo && (!!this.quoteTo.bluesky?.embeddingDisabled || !!cachedCopy(this.quoteTo)?.bluesky?.embeddingDisabled)
-    this.blocked = replyOff ? REPLY_LIMITED
-      : quoteOff ? QUOTE_LIMITED
-      : this.blocked === REPLY_GONE || this.blocked === QUOTE_GONE ? this.blocked : null
+    return replyOff ? REPLY_LIMITED : quoteOff ? QUOTE_LIMITED : this.gone
   }
 
   private owner(): Owner | null {
@@ -612,12 +610,11 @@ export class CaribouComposeDialog extends LitElement {
       cacheStatus(fresh)
       if (this.replyTo?.id === fresh.id) this.replyTo = fresh
       if (this.quoteTo?.id === fresh.id) this.quoteTo = fresh
-      this.checkTarget()
     } catch (err) {
       if (session !== this.session || client !== this.client) return
       if (err instanceof CaribouError && err.code === 'not_found') {
         // The draft keeps its text; it just cannot be sent there.
-        this.blocked = this.replyTo ? REPLY_GONE : QUOTE_GONE
+        this.gone = this.replyTo ? REPLY_GONE : QUOTE_GONE
       }
     }
   }
@@ -741,6 +738,13 @@ export class CaribouComposeDialog extends LitElement {
 
   private async submit() {
     const client = this.client
+    // A Bluesky reply or quote turned off since the last render: say why
+    // (the cache can change without a render), and show the note.
+    if (client && this.isBluesky && !this.posting && this.blocked) {
+      toast('error', this.blocked)
+      this.requestUpdate()
+      return
+    }
     if (!client || !this.canPost) return
     if (activeUserKey.value !== client.userKey) return
     if (this.editing) return this.saveEdit(client, this.editing)
@@ -777,7 +781,6 @@ export class CaribouComposeDialog extends LitElement {
 
   private async submitBluesky(client: CaribouClient) {
     // The flags as this page knows them now, not as they were at open.
-    this.checkTarget()
     if (this.blocked) {
       toast('error', this.blocked)
       return
@@ -808,7 +811,7 @@ export class CaribouComposeDialog extends LitElement {
       toast('info', done)
     } catch (err) {
       if (!this.owns(owner)) return
-      if (err instanceof DraftNotSaved) toast('error', err.message)
+      if (err instanceof DraftNotSaved || err instanceof DraftChanged) toast('error', err.message)
       else if (err instanceof BlueskyBlobNotFound) await this.recoverBlob(owner, err)
       else toast('error', `Could not post: ${errorText(err).replace(/\.$/, '')}. Post again to retry; it is never sent twice.`)
     } finally {
@@ -823,6 +826,7 @@ export class CaribouComposeDialog extends LitElement {
     const gone = (this.draft.bluesky?.images ?? []).filter((i) => err.cid === null || i.blob.ref.$link === err.cid)
     const missing = new Set(this.missingBlobs)
     const replaced = new Map<string, BlueskyDraftImage>()
+    let uploaded = 0
     for (const img of gone) {
       const file = this.blobFiles.get(img.id)
       if (!file) {
@@ -833,6 +837,7 @@ export class CaribouComposeDialog extends LitElement {
         const blob = await owner.client.blueskyUploadBlob!(file)
         if (!this.owns(owner)) return
         replaced.set(img.id, { ...img, blob, size: blob.size, mime: blob.mimeType })
+        uploaded += 1
       } catch (upErr) {
         if (this.owns(owner)) toast('error', `Upload failed: ${errorText(upErr)}`)
         return
@@ -845,9 +850,12 @@ export class CaribouComposeDialog extends LitElement {
     const b = this.draft.bluesky ?? emptyBlueskyDraft()
     this.draft = { ...this.draft, bluesky: { ...b, images: b.images.map((i) => replaced.get(i.id) ?? i) } }
     saveDraft(owner.client.userKey, owner.slot, this.draft)
+    // R5: say only what happened.
     toast('error', missing.size > 0
       ? 'The server no longer has an image. Remove it and add it again, then post.'
-      : 'An image was uploaded again. Post again to send.')
+      : uploaded > 0
+      ? 'An image was uploaded again. Post again to send.'
+      : 'The server refused an image this post named. Post again to send it without it.')
   }
 
   private keepFile(id: string, file: Blob) {
@@ -935,7 +943,16 @@ export class CaribouComposeDialog extends LitElement {
     this.pending = retry
       ? this.pending.map((p) => p.localId === item.localId ? item : p)
       : [...this.pending, item]
-    const fit = await fitImage(file, this.caps.maxImageBytes ?? 2_000_000)
+    let fit: FitResult
+    try {
+      fit = await fitImage(file, this.caps.maxImageBytes ?? 2_000_000)
+    } catch (err) {
+      // A canvas that refuses to encode: the item goes, with a message.
+      if (!this.owns(owner)) return
+      this.removePending(item.localId)
+      toast('error', `${file.name || 'The file'} could not be prepared: ${errorText(err)}`)
+      return
+    }
     if (!this.owns(owner)) return
     if (!fit.ok) {
       this.removePending(item.localId)

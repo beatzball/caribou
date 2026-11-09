@@ -629,21 +629,26 @@ quotes. On open the dialog reads the post again (`fetchStatus`):
 | `replyDisabled` (reply) or `embeddingDisabled` (quote) on the dialog's own copy **or** on the status cache's copy, checked on open, after the fresh read, and at send. Neither copy is known to be newer, so either one blocks. The fresh read also goes into the cache (`cacheStatus`). | "The author limited replies. You cannot reply to this post." / "The author turned off quotes for this post." Post is off, and a send is refused with that toast. #188 owns the card's buttons; this is the second check. |
 | gone (`not_found`) | "The post you replied to was deleted." (or quoted). The draft keeps its text; Post is off. |
 
-**Sending.** `postBlueskyDraft`, under the four rules in the `packages/state`
-README ("One post per click"). The open draft takes every draft the send
-makes (`onDraft`), the frozen one before the network, so the dialog never
-holds less than storage. Storage refusing the freeze is a toast, "Could not
-save the draft, so the post was not sent.", and nothing is sent. Every
-await in the dialog (fit, upload, re-upload, the target read, the send)
-captures its owner (client, account, slot, dialog session) and checks it
-after; a late answer for a closed, reopened or switched dialog writes
-nothing. After an error the toast says "Post again to retry; it is never
-sent twice." and the dialog shows "The last send did not finish. Post
-checks first, so the post is never sent twice." while the draft has
-`sent`. When the earlier version is the one posted and the reader edited
-since, the dialog stays open with the edits and says "Your earlier version
+**Sending.** `postBlueskyDraft`, under the five rules in the `packages/state`
+README ("One post per click", R1 to R5). The open draft takes every draft
+the send makes (`onDraft`), the frozen one before the network. Storage
+refusing the freeze is a toast, "Could not save the draft, so the post was
+not sent.", nothing is sent, and the open draft is unfrozen, so every later
+Post is refused the same way until storage works. Every await in the dialog
+(fit, upload, re-upload, the target read, the send) captures its owner
+(client, account, slot, dialog session) and checks it after; a late answer
+for a closed, reopened or switched dialog writes nothing. A failed create is
+checked at once (R1): found, the dialog closes as posted; absent, the draft
+is open again with the reader's text; the check failed, the toast says
+"Post again to retry; it is never sent twice." and the dialog shows "The
+last send did not finish. Post checks first, so the post is never sent
+twice." When another version is the one posted (a late first write after an
+edit), the dialog stays open with the edits and says "Your earlier version
 was posted." with a link to it (`/@<did>/<rkey>`) that opens in a new tab,
-so the open dialog does not cover a page change.
+so the open dialog does not cover a page change. After a blob refusal the
+toast says only what happened: an image uploaded again, an image to add
+again, or "The server refused an image this post named." The reply/quote
+block is read live at every render and at every Post.
 Link cards are phase 6: a link is posted as a facet with no card.
 
 Tests: `caribou-compose-dialog-bluesky.test.ts` (limits with emoji,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, loadDraft, saveDraft,
+  activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, loadDraft, saveDraft,
   setBlueskyDriver, statusCache, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
@@ -18,12 +18,36 @@ vi.mock('../_bluesky.js', async (orig) => ({
   loadBluesky: async () => compose,
 }))
 
-const fit = vi.hoisted(() => ({ result: null as null | ((f: Blob) => FitResult) }))
+const fit = vi.hoisted(() => ({ result: null as null | ((f: Blob) => FitResult), gate: null as Promise<void> | null }))
 vi.mock('../_image-fit.js', () => ({
-  fitImage: vi.fn(async (f: Blob) => fit.result
-    ? fit.result(f)
-    : { ok: true, blob: f, width: 4, height: 3, resized: false }),
+  fitImage: vi.fn(async (f: Blob) => {
+    if (fit.gate) await fit.gate
+    return fit.result ? fit.result(f) : { ok: true, blob: f, width: 4, height: 3, resized: false }
+  }),
 }))
+
+// Storage that refuses draft writes while `refusing.on`. Reset after every
+// test, so one failing test cannot leak it (review R2-N5).
+const realSetItem = localStorage.setItem.bind(localStorage)
+const refusing = { on: false }
+Object.defineProperty(localStorage, 'setItem', {
+  configurable: true,
+  value: (k: string, v: string) => {
+    if (refusing.on && k.startsWith('caribou.drafts.')) throw new DOMException('full', 'QuotaExceededError')
+    return realSetItem(k, v)
+  },
+})
+
+// A Mastodon account whose client makes no network call (review R2-N4).
+function signInMastodonOffline(userKey: string) {
+  addUserSession({
+    userKey, server: 'example.social', token: 'T', vapidKey: '', account: null, createdAt: 1,
+  } as unknown as UserSession)
+  const client = activeClient.value!
+  vi.spyOn(client, 'fetchInstance').mockResolvedValue({ configuration: {} } as never)
+  vi.spyOn(client, 'verifyCredentials').mockReturnValue(new Promise(() => {}))
+  return client
+}
 
 const DID = 'did:plc:reader'
 const KEY = blueskyUserKey(DID)
@@ -149,6 +173,8 @@ beforeEach(() => {
   localStorage.clear()
   toasts.length = 0
   fit.result = null
+  fit.gate = null
+  refusing.on = false
   window.addEventListener('caribou:toast', onToast)
 })
 
@@ -239,9 +265,24 @@ describe('Bluesky compose: posting once', () => {
     expect(toasts.at(-1)).toMatchObject({ kind: 'info', message: 'Post published' })
   })
 
+  it('a lost answer after the write: the check right after finds it, and the dialog closes (R1)', async () => {
+    const pds = signInBluesky()
+    pds.loseNext.value = true
+    const el = await mount()
+    await open(el)
+    await type(el, 'only once')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).toHaveBeenCalledOnce()
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3krkey0000001')
+    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    expect(toasts.at(-1)).toMatchObject({ kind: 'info', message: 'Post published' })
+  })
+
   it('the first send times out but the record was written: one post, no second create', async () => {
     const pds = signInBluesky()
     pds.loseNext.value = true
+    // The check after the lost answer fails too: the outcome is unknown.
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     const el = await mount()
     await open(el)
     await type(el, 'only once')
@@ -260,6 +301,8 @@ describe('Bluesky compose: posting once', () => {
   it('a lost answer, then a reload, then the retry: one post', async () => {
     const pds = signInBluesky()
     pds.loseNext.value = true
+    // The check after the lost answer fails too: the outcome is unknown.
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     const el = await mount()
     await open(el)
     await type(el, 'reload me')
@@ -277,6 +320,8 @@ describe('Bluesky compose: posting once', () => {
   it('a lost answer, then an edit: the edit stays, with a link to the posted version', async () => {
     const pds = signInBluesky()
     pds.loseNext.value = true
+    // The check after the lost answer fails too: the outcome is unknown.
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     const el = await mount()
     await open(el)
     await type(el, 'version one')
@@ -383,9 +428,7 @@ describe('Bluesky compose: reply and quote', () => {
   })
 
   it('a Mastodon account cannot quote, and does not open for a Bluesky post', async () => {
-    addUserSession({
-      userKey: 'alice@example.social', server: 'example.social', token: 'T', vapidKey: '', account: null, createdAt: 1,
-    } as unknown as UserSession)
+    signInMastodonOffline('alice@example.social')
     const el = await mount()
     await open(el, { quote: bobPost() })
     expect($<HTMLDialogElement>(el, 'dialog')?.open ?? false).toBe(false)
@@ -494,9 +537,7 @@ describe('Bluesky compose: account and session', () => {
     const el = await mount()
     await open(el)
     await type(el, 'mine')
-    addUserSession({
-      userKey: 'alice@example.social', server: 'example.social', token: 'T', vapidKey: '', account: null, createdAt: 1,
-    } as unknown as UserSession)
+    signInMastodonOffline('alice@example.social')
     await settle(el)
     expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
     expect(loadDraft(KEY, 'new')!.text).toBe('mine')
@@ -581,42 +622,43 @@ describe('review fixes (PR #232)', () => {
     expect(loadDraft(KEY, 'new')!.bluesky!.images.map((i) => i.alt)).toEqual([''])
   })
 
-  it('storage refuses the freeze: a visible refusal and nothing sent; then one post (rule 2, Codex 1, Fable N1)', async () => {
+  it('storage refuses every click: a true refusal each time, nothing sent; storage back, one post (R3, R5, Codex R2.1, Fable R2-B2, probe C)', async () => {
     const pds = signInBluesky()
     const el = await mount()
     await open(el)
     await type(el, 'only once')
-    const real = localStorage.setItem.bind(localStorage)
-    let refuse = true
-    Object.defineProperty(localStorage, 'setItem', {
-      configurable: true,
-      value: (k: string, v: string) => {
-        if (refuse && k.startsWith('caribou.drafts.')) throw new DOMException('full', 'QuotaExceededError')
-        return real(k, v)
-      },
-    })
+    refusing.on = true
     pds.loseNext.value = true
-    await submit(el)
-    expect(toasts.at(-1)).toMatchObject({ kind: 'error', message: 'Could not save the draft, so the post was not sent.' })
+    for (let i = 0; i < 3; i++) {
+      await submit(el)
+      expect(toasts.at(-1)).toMatchObject({ kind: 'error', message: 'Could not save the draft, so the post was not sent.' })
+      expect($(el, '[data-send-unknown]')).toBeNull()
+    }
     expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
-    refuse = false
-    await submit(el)
-    await submit(el)
+    // Reload with storage working again.
+    refusing.on = false
+    el.remove()
+    const again = await mount()
+    await open(again)
+    expect($<HTMLTextAreaElement>(again, 'textarea')!.value).toBe('only once')
+    await submit(again)
     expect(pds.records.size).toBe(1)
-    Object.defineProperty(localStorage, 'setItem', { configurable: true, value: real })
+    expect(loadDraft(KEY, 'new')).toBeNull()
+    await open(again)
+    expect($<HTMLTextAreaElement>(again, 'textarea')!.value).toBe('')
   })
 
-  it('a lost answer with storage refused afterwards: memory keeps the rkey, the retry checks it (rule 2)', async () => {
+  it('a send in doubt, then storage is wiped: memory keeps the rkey, the retry checks it (R3)', async () => {
     const pds = signInBluesky()
     const el = await mount()
     await open(el)
     await type(el, 'kept in memory')
     pds.loseNext.value = true
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     await submit(el)
-    // Storage is wiped (another tab, a cleared site): the open dialog still knows.
     localStorage.clear()
     await submit(el)
-    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3krkey0000001')
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenLastCalledWith('3krkey0000001')
     expect(pds.records.size).toBe(1)
   })
 
@@ -657,9 +699,7 @@ describe('review fixes (PR #232)', () => {
     void submit(el)
     await settle(el)
     // Switch to a Mastodon account and open its composer.
-    addUserSession({
-      userKey: 'bob@example.social', server: 'example.social', token: 'T', vapidKey: '', account: null, createdAt: 1,
-    } as unknown as UserSession)
+    signInMastodonOffline('bob@example.social')
     await settle(el)
     await open(el)
     await type(el, 'bob private draft')
@@ -675,6 +715,7 @@ describe('review fixes (PR #232)', () => {
     const el = await mount()
     await open(el)
     await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
+    await type(el, 'the new post text')
     const gate = deferred<void>()
     pds.client.blueskyUploadBlob.mockImplementationOnce(async (b: Blob) => {
       await gate.promise
@@ -691,6 +732,110 @@ describe('review fixes (PR #232)', () => {
     await settle(el)
     expect(loadDraft(KEY, `reply:${bobPost().id}`)!.bluesky!.images).toHaveLength(0)
     expect($$(el, '[data-bsky-image]')).toHaveLength(0)
+    // The `new` slot keeps its own text: the reply was not saved over it (review R2-N2).
+    expect(loadDraft(KEY, 'new')!.text).toBe('the new post text')
+  })
+
+  it('an upload whose fit or upload lands after close and reopen on another slot adds nothing (rule 4, review R2-N3)', async () => {
+    const pds = signInBluesky()
+    const fitGate = deferred<void>()
+    fit.gate = fitGate.promise
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    await settle(el)
+    await open(el, { inReplyTo: bobPost() })
+    await type(el, 'a reply')
+    fitGate.resolve()
+    await settle(el)
+    expect(pds.client.blueskyUploadBlob).not.toHaveBeenCalled()
+    expect(loadDraft(KEY, `reply:${bobPost().id}`)!.bluesky!.images).toHaveLength(0)
+    expect(loadDraft(KEY, 'new')).toBeNull()
+
+    // The same with the upload itself late.
+    fit.gate = null
+    const upGate = deferred<void>()
+    pds.client.blueskyUploadBlob.mockImplementationOnce(async (b: Blob) => {
+      await upGate.promise
+      return { $type: 'blob' as const, ref: { $link: 'bafklate' }, mimeType: b.type, size: b.size }
+    })
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    await settle(el)
+    await open(el)
+    await addFiles(el, [new File(['img2'], 'dog.jpg', { type: 'image/jpeg' })])
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    await settle(el)
+    await open(el, { inReplyTo: bobPost() })
+    upGate.resolve()
+    await settle(el)
+    expect(loadDraft(KEY, `reply:${bobPost().id}`)!.bluesky!.images).toHaveLength(0)
+    expect(loadDraft(KEY, 'new')).toBeNull()
+  })
+
+  it('checkTarget reads the dialog\'s own copy: a fresh replyDisabled blocks even when the cache says allowed (review R2-N3)', async () => {
+    const pds = signInBluesky()
+    const post = bobPost()
+    pds.client.fetchStatus.mockImplementation(async (id: string) => bobPost({ replyDisabled: true }, id))
+    const el = await mount()
+    await open(el, { inReplyTo: post })
+    // The cache gets the allowed copy back after the fresh read.
+    statusCache.value = new Map([[post.id, post]])
+    await type(el, 'x')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+  })
+
+  it('an image the canvas cannot encode: the pending item goes, with a message (review R2-N6)', async () => {
+    signInBluesky()
+    fit.result = () => { throw new Error('canvas refused') }
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
+    expect($(el, '[data-pending]')).toBeNull()
+    expect(toasts.at(-1)).toMatchObject({ kind: 'error', message: 'cat.jpg could not be prepared: canvas refused' })
+  })
+
+  it('a send in doubt with an image, closed, the PDS drops the blob, reopen: remove the image and the post goes (R1, R2, R5, Fable R2-B1, probe A)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
+    await type(el, 'with photo')
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new CaribouError('unreachable', 'Failed to fetch'))
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'Failed to fetch'))
+    await submit(el)
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    await settle(el)
+    pds.client.blueskyCreatePost.mockImplementation(async (record: BlueskyPostRecord, rkey: string) => {
+      if (JSON.stringify(record).includes('bafkblob1')) throw new BlueskyBlobNotFound('Could not find blob: bafkblob1', 'bafkblob1')
+      pds.records.set(rkey, record)
+      return { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafynew' }
+    })
+    await open(el)
+    await submit(el)
+    expect(toasts.at(-1)!.message).toBe('The server no longer has an image. Remove it and add it again, then post.')
+    expect(postButton(el).disabled).toBe(true)
+    $$(el, '[data-bsky-image] [data-action="remove-media"]')[0]!.click()
+    await settle(el)
+    expect(postButton(el).disabled).toBe(false)
+    await submit(el)
+    expect(pds.records.size).toBe(1)
+    expect([...pds.records.values()][0]!.text).toBe('with photo')
+    expect(toasts.some((t) => t.message === 'An image was uploaded again. Post again to send.')).toBe(false)
+  })
+
+  it('a refusal with no image left to upload says so truthfully (R5)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'text only')
+    // A refusal that names a blob this draft does not have.
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkother', 'bafkother'))
+    await submit(el)
+    expect(toasts.at(-1)!.message).toBe('The server refused an image this post named. Post again to send it without it.')
+    await submit(el)
+    expect(pds.records.size).toBe(1)
   })
 
   it('over the byte limit the reason is visible text, and the counter names it (Fable N5)', async () => {
@@ -706,6 +851,8 @@ describe('review fixes (PR #232)', () => {
   it('"Open it" opens the earlier version in a new tab (Fable N6)', async () => {
     const pds = signInBluesky()
     pds.loseNext.value = true
+    // The check after the lost answer fails too: the outcome is unknown.
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
     const el = await mount()
     await open(el)
     await type(el, 'version one')

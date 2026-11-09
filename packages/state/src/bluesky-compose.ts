@@ -4,8 +4,8 @@ import type {
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 import {
-  clearDraft, loadDraft, saveDraft, storeDraft,
-  type BlueskyDraft, type ComposeDraft, type DraftSlot, type PostedDetail,
+  draftRev, loadDraft, storeDraftIf,
+  type BlueskyDraft, type BlueskySentRecord, type ComposeDraft, type DraftSlot, type PostedDetail,
 } from './compose.js'
 import { activeUserKey } from './users.js'
 
@@ -83,21 +83,33 @@ export interface PostBlueskyOptions {
   /** Waits between tries to read the new post (tests pass a no-op). */
   wait?: (ms: number) => Promise<void>
   /**
-   * Hears every draft the send makes (rule 2): the frozen one before the
-   * network, the unfrozen one after a blob refusal, the kept edits after
-   * `earlier-posted`. The open dialog takes it as its own draft.
+   * Hears every draft the send makes (R3): the frozen one before the
+   * network, the unfrozen one after a refused freeze or a create the check
+   * found absent, the kept edits after `earlier-posted`. The open dialog
+   * takes it as its own draft.
    */
   onDraft?: (draft: ComposeDraft) => void
 }
 
 /**
- * Storage refused the draft with its rkey and frozen record (rule 2), so
- * nothing was sent: without it, a reload could post twice.
+ * Storage refused the frozen draft (R3), so nothing was sent: without it, a
+ * reload could post twice.
  */
 export class DraftNotSaved extends Error {
   constructor() {
     super('Could not save the draft, so the post was not sent.')
     this.name = 'DraftNotSaved'
+  }
+}
+
+/**
+ * Another save came into the slot while the send was getting ready (R4).
+ * Nothing was frozen or sent; the newer draft stays.
+ */
+export class DraftChanged extends Error {
+  constructor() {
+    super('The draft changed while it was being sent, so nothing was sent.')
+    this.name = 'DraftChanged'
   }
 }
 
@@ -111,111 +123,95 @@ function need<K extends keyof CaribouClient>(client: CaribouClient, name: K): No
   return (fn as (...a: unknown[]) => unknown).bind(client) as NonNullable<CaribouClient[K]>
 }
 
-/** The client's `BlueskyBlobNotFound`, by name: this package does not import the client. */
-function isBlobRefused(err: unknown): boolean {
-  return err instanceof Error && err.name === 'BlueskyBlobNotFound'
-}
-
-/** The record on the PDS is the one this send froze (rule 1). */
+/** The record on the PDS is the one this send froze (R1). */
 function sameRecord(a: BlueskyPostRecord, b: BlueskyPostRecord): boolean {
   return a.createdAt === b.createdAt && a.text === b.text
 }
 
 /**
- * Sends a Bluesky draft, at most once. The four rules are in the README,
- * "One post per click". In short: an rkey carries one frozen record until
- * it is resolved; the frozen draft is in memory and storage before the
- * network; a send clears only the stored draft it owns; and only
- * `RecordNotFound` means "not there".
+ * Sends a Bluesky draft, at most once. The rules (R1 to R5) are in the
+ * README, "One post per click".
  */
 export async function postBlueskyDraft(
   client: CaribouClient, slot: DraftSlot, draft: ComposeDraft, opts: PostBlueskyOptions = {},
 ): Promise<BlueskyPostOutcome> {
   const getOwnPost = need(client, 'blueskyGetOwnPost')
   const createPost = need(client, 'blueskyCreatePost')
+  const nextRkey = need(client, 'blueskyNextRkey')
+  const userKey = client.userKey
   const b = draft.bluesky ?? emptyBlueskyDraft()
   const input = blueskyDraftInput(draft)
-
-  // Rule 1: a pending rkey is resolved with its own record, never another.
-  if (b.rkey && b.sent) {
-    const rkey = b.rkey
-    const sent = b.sent
-    let found = await getOwnPost(rkey)
-    if (!found) {
-      // Rule 2: the pending draft is stored before the network too, unless
-      // the slot now holds a draft this send does not own.
-      const stored = loadDraft(client.userKey, slot)
-      if ((!stored || ownsStored(stored, rkey, sent)) && !storeDraft(client.userKey, slot, stored ?? draft)) {
-        throw new DraftNotSaved()
-      }
-      const ref = await createPost(sent.record, rkey)
-      found = { uri: ref.uri, cid: ref.cid, value: sent.record }
+  // R4: the revision this send owns. Every write is conditional on it.
+  let rev = draftRev(userKey, slot)
+  const stillOwned = () => {
+    if (draftRev(userKey, slot) !== rev) throw new DraftChanged()
+  }
+  const write = (next: ComposeDraft | null): boolean => {
+    const out = storeDraftIf(userKey, slot, rev, next)
+    if (out === false) return false
+    rev = out.rev
+    return true
+  }
+  // The found record decides (R1). Edits, or another record, keep the
+  // reader's current draft with a new rkey.
+  const settle = async (found: { uri: string; value: BlueskyPostRecord }, sent: BlueskySentRecord): Promise<BlueskyPostOutcome> => {
+    if (sameRecord(found.value, sent.record) && input === sent.input) {
+      write(null)
+      return posted(client, found.uri, opts)
     }
-    return resolved(client, slot, draft, rkey, sent, found.uri, sameRecord(found.value, sent.record) && input === sent.input, opts)
+    const kept: ComposeDraft = { ...draft, bluesky: { ...b, rkey: await nextRkey(), sent: null } }
+    write(kept)
+    opts.onDraft?.(kept)
+    return { kind: 'earlier-posted', uri: found.uri, draft: kept }
   }
 
-  const rkey = b.rkey ?? await need(client, 'blueskyNextRkey')()
-  const record = blueskyRecord(draft, await need(client, 'blueskyDetectFacets')(draft.text), new Date().toISOString())
-  const sent = { input, record }
+  // R2: a pending send is checked first. A failed check throws: nothing sent.
+  let reuse: BlueskySentRecord | null = null
+  if (b.rkey && b.sent) {
+    const found = await getOwnPost(b.rkey)
+    if (found) return settle(found, b.sent)
+    stillOwned()
+    // Absent: the rkey is unused. Unchanged, the frozen record goes again
+    // as it is; edited, the current draft is frozen on the same rkey.
+    if (b.sent.input === input) reuse = b.sent
+  }
+
+  const rkey = b.rkey ?? await nextRkey()
+  stillOwned()
+  let sent: BlueskySentRecord = reuse ?? { input, record: blueskyRecord(draft, [], '') }
+  if (!reuse) {
+    const facets = await need(client, 'blueskyDetectFacets')(draft.text)
+    stillOwned()
+    sent = { input, record: blueskyRecord(draft, facets, new Date().toISOString()) }
+  }
   const frozen: ComposeDraft = { ...draft, bluesky: { ...b, rkey, sent } }
-  // Rule 2: memory, then storage, then the network.
+  const unfrozen: ComposeDraft = { ...draft, bluesky: { ...b, rkey, sent: null } }
+
+  // R3: durable before the network, read back to confirm.
+  if (!write(frozen) || loadDraft(userKey, slot)?.bluesky?.sent?.record.createdAt !== sent.record.createdAt) {
+    opts.onDraft?.(unfrozen)
+    throw new DraftNotSaved()
+  }
   opts.onDraft?.(frozen)
-  if (!storeDraft(client.userKey, slot, frozen)) throw new DraftNotSaved()
+
   let ref
   try {
-    ref = await createPost(record, rkey)
+    ref = await createPost(sent.record, rkey)
   } catch (err) {
-    if (isBlobRefused(err)) {
-      // The PDS refused this exact record: the rkey is unused (README).
-      const open: ComposeDraft = { ...frozen, bluesky: { ...frozen.bluesky!, sent: null } }
-      opts.onDraft?.(open)
-      settleStored(client, slot, rkey, sent, open)
+    // R1: only the check decides. A failed check leaves the send pending.
+    let found
+    try {
+      found = await getOwnPost(rkey)
+    } catch {
+      throw err
     }
+    if (found) return settle(found, sent)
+    // Absent: the rkey is unused. Unfreeze, keeping the current draft.
+    write(unfrozen)
+    opts.onDraft?.(unfrozen)
     throw err
   }
-  return resolved(client, slot, frozen, rkey, sent, ref.uri, true, opts)
-}
-
-type Sent = { input: string; record: BlueskyPostRecord }
-
-/** Rule 3: the stored draft is still this send's (same rkey and frozen record). */
-function ownsStored(stored: ComposeDraft | null, rkey: string, sent: Sent): stored is ComposeDraft {
-  const sb = stored?.bluesky
-  return !!sb && sb.rkey === rkey && !!sb.sent && sameRecord(sb.sent.record, sent.record)
-}
-
-/** Replaces the stored draft only while this send owns it (rule 3). */
-function settleStored(client: CaribouClient, slot: DraftSlot, rkey: string, sent: Sent, next: ComposeDraft): void {
-  if (ownsStored(loadDraft(client.userKey, slot), rkey, sent)) saveDraft(client.userKey, slot, next)
-}
-
-/**
- * The rkey holds a post now. `unchanged`: it is the frozen record and the
- * caller's draft has no edits since the freeze. Edits, in the caller's
- * draft or in the stored one, are kept with a new rkey.
- */
-async function resolved(
-  client: CaribouClient, slot: DraftSlot, draft: ComposeDraft, rkey: string,
-  sent: Sent, uri: string, unchanged: boolean, opts: PostBlueskyOptions,
-): Promise<BlueskyPostOutcome> {
-  let fresh: string | null = null
-  const freshRkey = async () => (fresh ??= await need(client, 'blueskyNextRkey')())
-  const reopen = async (d: ComposeDraft): Promise<ComposeDraft> =>
-    ({ ...d, bluesky: { ...(d.bluesky ?? emptyBlueskyDraft()), rkey: await freshRkey(), sent: null } })
-
-  const stored = loadDraft(client.userKey, slot)
-  if (ownsStored(stored, rkey, sent)) {
-    if (blueskyDraftInput(stored) === sent.input && unchanged) clearDraft(client.userKey, slot)
-    else saveDraft(client.userKey, slot, await reopen(blueskyDraftInput(stored) === sent.input ? draft : stored))
-  }
-  if (!unchanged) {
-    const kept = await reopen(draft)
-    // An empty slot takes the edits; another draft in it is left alone.
-    if (!loadDraft(client.userKey, slot)) saveDraft(client.userKey, slot, kept)
-    opts.onDraft?.(kept)
-    return { kind: 'earlier-posted', uri, draft: kept }
-  }
-  return posted(client, uri, opts)
+  return settle({ uri: ref.uri, value: sent.record }, sent)
 }
 
 async function posted(client: CaribouClient, uri: string, opts: PostBlueskyOptions): Promise<BlueskyPostOutcome> {
