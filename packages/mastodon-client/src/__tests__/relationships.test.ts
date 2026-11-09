@@ -4,6 +4,14 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import { createCaribouClient } from '../create-client.js'
 import { server } from './fixtures/server.js'
 import { handlers } from './fixtures/handlers.js'
+import { isWriteAck } from '../refs.js'
+import type { RelationshipWriteAck, StatusWriteAck } from '../types.js'
+// Mastodon always answers the whole post or relationship, never an ack.
+function whole<T extends object>(r: T | StatusWriteAck | RelationshipWriteAck): T {
+  if (isWriteAck(r)) throw new Error('Mastodon answered an ack')
+  return r
+}
+
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers(...handlers))
@@ -49,7 +57,7 @@ describe('CaribouClient relationships', () => {
       return HttpResponse.json(relationship(String(params.id), { following: true }))
     }))
     const c = createCaribouClient(userKey, sessionSource())
-    const rel = await c.follow({ id: '42' })
+    const rel = whole(await c.follow({ id: '42' }))
     expect(calls).toEqual(['42'])
     expect(rel.following).toBe(true)
   })
@@ -61,7 +69,7 @@ describe('CaribouClient relationships', () => {
       return HttpResponse.json(relationship(String(params.id)))
     }))
     const c = createCaribouClient(userKey, sessionSource())
-    const rel = await c.unfollow({ id: '42' })
+    const rel = whole(await c.unfollow({ id: '42' }))
     expect(calls).toEqual(['42'])
     expect(rel.following).toBe(false)
   })
@@ -81,10 +89,10 @@ describe('CaribouClient relationships', () => {
       }),
     )
     const c = createCaribouClient(userKey, sessionSource())
-    const [a, b] = await Promise.all([c.follow({ id: '42' }), c.unfollow({ id: '42' })])
+    const [a, b] = (await Promise.all([c.follow({ id: '42' }), c.unfollow({ id: '42' })])).map(whole)
     expect(calls.sort()).toEqual(['follow', 'unfollow'])
-    expect(a.following).toBe(true)
-    expect(b.following).toBe(false)
+    expect(a!.following).toBe(true)
+    expect(b!.following).toBe(false)
   })
 
   it('normalizes an error and reports 401 as unauthorized', async () => {

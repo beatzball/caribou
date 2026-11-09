@@ -114,6 +114,11 @@ function hostOf(url: string): string {
 // A status id is minted per instance, so the key is the instance the status
 // came from plus its id: another instance's post with the same id stays
 // collapsed. A keep-alive empties itself when the active account changes.
+// Why Reply or Quote is off on a Bluesky post (spec 9). The composer
+// checks the same flags again on submit.
+const REPLY_LIMITED = 'The author limited replies'
+const QUOTE_LIMITED = 'The author turned off quotes'
+
 const openedWarnings = createKeepAlive<boolean>(500)
 // Posts hidden by a filter's warning that the reader showed. Same rules.
 const shownFiltered = createKeepAlive<boolean>(500)
@@ -725,7 +730,7 @@ export class CaribouStatusCard extends LitElement {
       void setBlock(account, false, opts)
       return
     }
-    const ok = await confirmBlock(account.acct)
+    const ok = await confirmBlock(account.acct, resourceNetwork(account))
     // The account changed while the question was open: this id is not the
     // new account's to block.
     if (ok && stillOwner(owner)) void this.moderate('blocked', owner, () => setBlock(account, true, opts))
@@ -866,11 +871,29 @@ export class CaribouStatusCard extends LitElement {
     void showStatusHistory(owner.client, post.id)
   }
 
+  // A Bluesky post's own limits, from its newest copy: why Reply or Quote
+  // is off, or '' when it is not. A Mastodon post has none.
+  private limits(post: Status): { reply: string; quote: string } {
+    const own = this.status?.reblog ?? this.status
+    const b = this.liveBluesky !== undefined && post.id === own?.id ? this.liveBluesky : post.bluesky
+    return {
+      reply: b?.replyDisabled ? REPLY_LIMITED : '',
+      quote: b?.embeddingDisabled ? QUOTE_LIMITED : '',
+    }
+  }
+
+  // A post whose author limited replies never opens a composer.
   private onReply = () => {
-    if (!this.canAct || !this.status) return
-    window.dispatchEvent(new CustomEvent('caribou:compose', {
-      detail: { inReplyTo: this.status.reblog ?? this.status },
-    }))
+    const post = this.status?.reblog ?? this.status
+    if (!this.canAct || !post || this.limits(post).reply) return
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { inReplyTo: post } }))
+  }
+
+  // Bluesky only. The composer checks the post's limits again on submit.
+  private onQuote = () => {
+    const post = this.status?.reblog ?? this.status
+    if (!this.canAct || !post?.bluesky || this.limits(post).quote) return
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { quote: post } }))
   }
 
   private onFavourite = () => {
@@ -911,12 +934,16 @@ export class CaribouStatusCard extends LitElement {
     // the hint a mouse user reads in the title.
     const describe = (...parts: string[]) => parts.filter(Boolean).join('. ')
     const hint = (verb: string) => off ? `${signIn} ${verb}` : ''
+    // The post's own limits (Bluesky) say why, when signing in would not help.
+    const limits = this.limits(post)
+    const replyHint = limits.reply || hint('reply')
+    const quoteHint = limits.quote || hint('quote')
     return html`
       <div class="actions" role="group" aria-label="Post actions">
         <caribou-icon-button class="reply" variant="ghost" icon="messageCircle" label="Reply"
-          count=${count(f.repliesCount)} hint=${hint('reply')}
-          description=${describe(plural(f.repliesCount, 'reply', 'replies'), hint('reply'))}
-          ?soft-disabled=${off}
+          count=${count(f.repliesCount)} hint=${replyHint}
+          description=${describe(plural(f.repliesCount, 'reply', 'replies'), replyHint)}
+          ?soft-disabled=${off || !!limits.reply}
           @click=${this.onReply}></caribou-icon-button>
         <caribou-icon-button class="boost" variant="ghost" icon="repeat2" label=${f.reblogged ? 'Undo boost' : 'Boost'}
           pressed=${f.reblogged ? 'true' : 'false'}
@@ -935,6 +962,10 @@ export class CaribouStatusCard extends LitElement {
           hint=${hint('bookmark')} description=${hint('bookmark')}
           ?soft-disabled=${off}
           @click=${this.onBookmark}></caribou-icon-button>
+        ${post.bluesky ? html`<caribou-icon-button class="quote" variant="ghost" icon="quote" label="Quote"
+          hint=${quoteHint} description=${quoteHint}
+          ?soft-disabled=${off || !!limits.quote}
+          @click=${this.onQuote}></caribou-icon-button>` : nothing}
         ${this.mine ? this.renderOwnMenu() : this.canAct && !this.ownPost ? this.renderMenu(post) : nothing}
       </div>
     `

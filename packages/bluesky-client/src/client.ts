@@ -7,6 +7,7 @@ import {
   type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type Status,
   type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
+import { createActions, type BlueskyActionsAgent } from './actions.js'
 import { labelersCoveredBy } from './content-labelers.js'
 import { BlueskyBlobNotFound, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
@@ -50,7 +51,7 @@ export type BlueskyAgent = Pick<Agent,
       graph: Pick<Agent['app']['bsky']['graph'], 'getMutes' | 'getBlocks'>
     }
   }
-}
+} & BlueskyActionsAgent
 
 /**
  * What an AppView answer established for moderation: the labelers whose
@@ -519,18 +520,8 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     fetchBlocks: (params) => accountPage('blocks', params),
     fetchFilters: async () => [],
 
-    favourite: notYet('like', '#188'),
-    unfavourite: notYet('unlike', '#188'),
-    reblog: notYet('repost', '#188'),
-    unreblog: notYet('undo repost', '#188'),
-    bookmark: notYet('bookmark', '#188'),
-    unbookmark: notYet('remove bookmark', '#188'),
-    follow: notYet('follow', '#188'),
-    unfollow: notYet('unfollow', '#188'),
-    mute: notYet('mute', '#188'),
-    unmute: notYet('unmute', '#188'),
-    block: notYet('block', '#188'),
-    unblock: notYet('unblock', '#188'),
+    // Like, repost, bookmark, follow, mute, block (#188; README, "Actions").
+    ...createActions(agent, write),
 
     fetchTag: notYet('hashtags', '#193'),
     followTag: notYet('hashtags', '#193'),

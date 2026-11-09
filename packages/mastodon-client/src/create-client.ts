@@ -2,7 +2,7 @@ import { createRestAPIClient, type mastodon } from 'masto'
 import type {
   Account, AccountCredentials, AccountRef, BlueskyBlobRef, BlueskyFacet, BlueskyOwnPost, BlueskyPostRecord, BlueskyStrongRef, Capabilities, Filter, Instance, List, ListRepliesPolicy,
   MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
-  Status, StatusEdit, StatusRef, StatusSource, StatusVisibility, Tag,
+  Status, StatusEdit, StatusRef, StatusWriteAck, RelationshipWriteAck, StatusSource, StatusVisibility, Tag,
 } from './types.js'
 // Loads masto-mapping's correction to masto's declarations (see there).
 import type {} from './masto-mapping.js'
@@ -58,24 +58,26 @@ export interface CaribouClient {
   // Status actions. Each takes the post's ref (`statusRef`) and resolves to
   // the post itself as the server now has it, never the reblog wrapper
   // `reblog` creates. The result carries the record refs the write made.
-  favourite(ref: StatusRef): Promise<Status>
-  unfavourite(ref: StatusRef): Promise<Status>
-  reblog(ref: StatusRef): Promise<Status>
-  unreblog(ref: StatusRef): Promise<Status>
-  bookmark(ref: StatusRef): Promise<Status>
-  unbookmark(ref: StatusRef): Promise<Status>
+  // Bluesky answers a `StatusWriteAck` instead: no post, only the slot.
+  favourite(ref: StatusRef): Promise<Status | StatusWriteAck>
+  unfavourite(ref: StatusRef): Promise<Status | StatusWriteAck>
+  reblog(ref: StatusRef): Promise<Status | StatusWriteAck>
+  unreblog(ref: StatusRef): Promise<Status | StatusWriteAck>
+  bookmark(ref: StatusRef): Promise<Status | StatusWriteAck>
+  unbookmark(ref: StatusRef): Promise<Status | StatusWriteAck>
 
   // Relationships (follow / unfollow). Each write takes the account's ref
   // (`accountRef`), so an undo can name the record the earlier write made.
+  // Bluesky answers a `RelationshipWriteAck`: the flags and refs it changed.
   fetchRelationships(accountIds: readonly string[]): Promise<Relationship[]>
-  follow(ref: AccountRef): Promise<Relationship>
-  unfollow(ref: AccountRef): Promise<Relationship>
+  follow(ref: AccountRef): Promise<Relationship | RelationshipWriteAck>
+  unfollow(ref: AccountRef): Promise<Relationship | RelationshipWriteAck>
   // Mute and block. Each resolves to the relationship as the server now has
   // it. A mute hides the account's notifications too.
-  mute(ref: AccountRef): Promise<Relationship>
-  unmute(ref: AccountRef): Promise<Relationship>
-  block(ref: AccountRef): Promise<Relationship>
-  unblock(ref: AccountRef): Promise<Relationship>
+  mute(ref: AccountRef): Promise<Relationship | RelationshipWriteAck>
+  unmute(ref: AccountRef): Promise<Relationship | RelationshipWriteAck>
+  block(ref: AccountRef): Promise<Relationship | RelationshipWriteAck>
+  unblock(ref: AccountRef): Promise<Relationship | RelationshipWriteAck>
   /** The muted accounts, newest first. Pages by the cursor in `nextCursor`. */
   fetchMutes(params?: { cursor?: string; limit?: number }): Promise<AccountPage>
   /** The blocked accounts, newest first. Pages by the cursor in `nextCursor`. */

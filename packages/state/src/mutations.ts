@@ -1,4 +1,4 @@
-import { statusRef, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
+import { isWriteAck, statusRef, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
 import { statusCache } from './caches.js'
 import { inflight } from './inflight.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -108,6 +108,13 @@ async function toggle(action: StatusAction, status: Status, opts: MutationOpts =
   try {
     const fresh = await client[method](ref)
     if (generation !== ownerGeneration()) return
+    if (isWriteAck(fresh)) {
+      // Bluesky answers no post: the flag and the record from the write,
+      // and the count stays as the click left it (README, "Bluesky acks").
+      writePost(id, (post) => withRecord({ ...post, [flag]: fresh.on }, record, record ? fresh.record : undefined))
+      finish(fresh.on, record ? fresh.record : null)
+      return
+    }
     writePost(id, (post) => withRecord({
       ...post,
       [flag]: fresh[flag],

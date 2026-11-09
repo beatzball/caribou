@@ -374,6 +374,28 @@ reader can act on a resource only when the active client's network is
 the resource's (`canActOn`). A Mastodon post also needs the reader's
 server, as before.
 
+## Bluesky acks (#188)
+
+A Bluesky write answers an ack, not the post or the relationship
+(bluesky-client README, "Actions"). The rules above still hold; only the
+commit step differs.
+
+- **Status actions (`mutations.ts`).** The ack's `on` sets the flag and
+  its `record` sets the record ref (`likeUri`, `repostUri`; a bookmark
+  has none). The count stays as the click left it: the ack has no count,
+  and the next reader's copy brings one by the merge rule. The slot is
+  finished with the ack's flag and record. Rollback, the in-flight guard
+  (one click is one write) and the account check (`ownerGeneration`: an
+  ack that lands after an account change writes nothing) are as for
+  Mastodon.
+- **Relationships (`relationships.ts`).** The ack's flags and record refs
+  go over the last answer (`queue.confirmed`); every other field stays.
+  With nothing cached, the ack alone is the relationship. The next write
+  builds its ref from that, so an unfollow names the follow record the
+  follow made.
+- **Mastodon** still answers the whole post or relationship, and that path
+  is unchanged.
+
 ## Bluesky drafts (#189, spec 7.2)
 
 `bluesky-compose.ts`, over the drafts in `compose.ts`.

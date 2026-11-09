@@ -4,6 +4,14 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import { createCaribouClient } from '../create-client.js'
 import { server } from './fixtures/server.js'
 import { handlers } from './fixtures/handlers.js'
+import { isWriteAck } from '../refs.js'
+import type { RelationshipWriteAck, StatusWriteAck } from '../types.js'
+// Mastodon always answers the whole post or relationship, never an ack.
+function whole<T extends object>(r: T | StatusWriteAck | RelationshipWriteAck): T {
+  if (isWriteAck(r)) throw new Error('Mastodon answered an ack')
+  return r
+}
+
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers(...handlers))
@@ -33,7 +41,7 @@ describe('CaribouClient mute and block', () => {
       body = await request.json()
       return HttpResponse.json(relationship(String(params.id), { muting: true, muting_notifications: true }))
     }))
-    const rel = await createCaribouClient(userKey, sessionSource()).mute({ id: '7' })
+    const rel = whole(await createCaribouClient(userKey, sessionSource()).mute({ id: '7' }))
     expect(rel.muting).toBe(true)
     expect(rel.mutingNotifications).toBe(true)
     expect(body).toEqual({ notifications: true })

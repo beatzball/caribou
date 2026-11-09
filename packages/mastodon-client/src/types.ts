@@ -539,6 +539,31 @@ export interface AccountRef {
   bluesky?: RelationshipBluesky
 }
 
+/**
+ * What a status action answers when the server sends no post back
+ * (Bluesky). It says only what the write left: whether the action is on,
+ * and the record it made (`null` after an undo, and always for a
+ * bookmark). The count is not known; the screen keeps its own.
+ */
+export interface StatusWriteAck {
+  ack: true
+  id: string
+  on: boolean
+  record: string | null
+}
+
+/**
+ * What a follow, mute or block answers when the server sends no
+ * relationship back (Bluesky): the flags the write set, and the record
+ * refs it made or removed. Fields it does not name are unchanged.
+ */
+export interface RelationshipWriteAck {
+  ack: true
+  id: string
+  flags: Partial<Pick<Relationship, 'following' | 'muting' | 'mutingNotifications' | 'blocking'>>
+  bluesky?: Partial<RelationshipBluesky>
+}
+
 // ------------------------------------------------------------------ lists
 
 export type ListRepliesPolicy = 'followed' | 'list' | 'none'

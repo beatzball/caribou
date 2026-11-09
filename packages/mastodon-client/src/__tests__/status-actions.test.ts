@@ -5,6 +5,14 @@ import { createCaribouClient } from '../create-client.js'
 import { server } from './fixtures/server.js'
 import { handlers } from './fixtures/handlers.js'
 import { makeStatus } from './fixtures/status.js'
+import { isWriteAck } from '../refs.js'
+import type { RelationshipWriteAck, StatusWriteAck } from '../types.js'
+// Mastodon always answers the whole post or relationship, never an ack.
+function whole<T extends object>(r: T | StatusWriteAck | RelationshipWriteAck): T {
+  if (isWriteAck(r)) throw new Error('Mastodon answered an ack')
+  return r
+}
+
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers(...handlers))
@@ -38,7 +46,7 @@ describe('CaribouClient status actions', () => {
         return HttpResponse.json({ ...makeStatus(String(params.id)), ...patch })
       }))
       const c = createCaribouClient(userKey, sessionSource())
-      const s = await c[method]({ id: '110' })
+      const s = whole(await c[method]({ id: '110' }))
       expect(calls).toEqual(['POST 110'])
       expect(s.id).toBe('110')
       expect(s[field]).toBe(Object.values(patch)[0])
@@ -51,7 +59,7 @@ describe('CaribouClient status actions', () => {
       reblog: { ...makeStatus(String(params.id)), reblogged: true, reblogs_count: 1 },
     })))
     const c = createCaribouClient(userKey, sessionSource())
-    const s = await c.reblog({ id: '110' })
+    const s = whole(await c.reblog({ id: '110' }))
     expect(s.id).toBe('110')
     expect(s.reblogged).toBe(true)
     expect(s.reblogsCount).toBe(1)
@@ -70,11 +78,11 @@ describe('CaribouClient status actions', () => {
       }),
     )
     const c = createCaribouClient(userKey, sessionSource())
-    const [a, b, d] = await Promise.all([c.favourite({ id: '110' }), c.favourite({ id: '110' }), c.unfavourite({ id: '110' })])
+    const [a, b, d] = (await Promise.all([c.favourite({ id: '110' }), c.favourite({ id: '110' }), c.unfavourite({ id: '110' })])).map(whole)
     expect(hits).toBe(3)
-    expect(a.favourited).toBe(true)
-    expect(b.favourited).toBe(true)
-    expect(d.favourited).toBe(false)
+    expect(a!.favourited).toBe(true)
+    expect(b!.favourited).toBe(true)
+    expect(d!.favourited).toBe(false)
   })
 
   it('normalizes a server error and reports 401 as unauthorized', async () => {

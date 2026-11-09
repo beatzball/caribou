@@ -177,7 +177,7 @@ export class CaribouModerationSettings extends LitElement {
     if (!client) return
     const on = !this.isOn(kind, account)
     if (kind === 'blocks' && on) {
-      const ok = await confirmBlock(account.acct)
+      const ok = await confirmBlock(account.acct, client.capabilities.network)
       if (!ok || activeUserKey.peek() !== userKey || this.loadedFor !== client) return
     }
     void KINDS[kind].write(account, on, client)

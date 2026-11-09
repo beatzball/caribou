@@ -1,7 +1,8 @@
 import { signal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
-  accountRef, type AccountRef, type CaribouClient, type Account, type Relationship,
+  accountRef, isWriteAck, type AccountRef, type CaribouClient, type Account, type Relationship,
+  type RelationshipWriteAck,
 } from '@beatzball/caribou-mastodon-client'
 import { activeClient, activeUserKey } from './users.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -95,7 +96,7 @@ function shown(q: Queue, id: string): Relationship | undefined {
 
 function enqueue(
   client: CaribouClient, accountId: string, patch: RelationshipFlags,
-  call: (client: CaribouClient, ref: AccountRef) => Promise<Relationship>, failure: string,
+  call: (client: CaribouClient, ref: AccountRef) => Promise<Relationship | RelationshipWriteAck>, failure: string,
 ): Promise<boolean> {
   const key = relationshipKey(client.userKey, accountId)
   let q = queues.get(key)
@@ -114,7 +115,8 @@ function enqueue(
   const start = async () => {
     let ok = true
     try {
-      queue.confirmed = await call(client, accountRef(accountId, queue.confirmed))
+      const answer = await call(client, accountRef(accountId, queue.confirmed))
+      queue.confirmed = isWriteAck(answer) ? withAck(queue.confirmed, accountId, answer) : answer
     } catch {
       ok = false
       // The reader moved to another account meanwhile: this account's
@@ -132,6 +134,21 @@ function enqueue(
   const run = idle ? start() : queue.tail.then(start)
   queue.tail = run
   return run
+}
+
+// A Bluesky write answers only what it changed: its flags and record refs
+// go over the last answer, and every other field stays as it was.
+function withAck(
+  confirmed: Relationship | undefined, accountId: string, ack: RelationshipWriteAck,
+): Relationship {
+  const base = confirmed ?? ({ id: accountId } as Relationship)
+  return {
+    ...base,
+    ...ack.flags,
+    ...(ack.bluesky
+      ? { bluesky: { followUri: null, blockUri: null, ...base.bluesky, ...ack.bluesky } }
+      : {}),
+  }
 }
 
 /** The relationship the cache shows, waiting writes included. */
@@ -235,7 +252,7 @@ type AccountHandle = Pick<Account, 'id' | 'acct'>
 // the cache already shows (a second Mute) sends nothing.
 function writeFlags(
   account: AccountHandle, flag: 'muting' | 'blocking', on: boolean, patch: RelationshipFlags,
-  call: (client: CaribouClient, ref: AccountRef) => Promise<Relationship>,
+  call: (client: CaribouClient, ref: AccountRef) => Promise<Relationship | RelationshipWriteAck>,
   failure: string, opts: RelationshipOpts,
 ): Promise<boolean> {
   const client = (opts.clientSource ?? defaultSource)()

@@ -65,4 +65,21 @@ describe('confirmDialog', () => {
     part(el, 'caribou-button.cancel').click()
     expect(await answer).toBe(false)
   })
+
+  it('a Mastodon block does not talk about public blocks', async () => {
+    const answer = confirmBlock('bob', 'mastodon')
+    const el = await opened()
+    expect(el.shadowRoot!.textContent).not.toMatch(/public/i)
+    part(el, 'caribou-button.cancel').click()
+    await answer
+  })
+
+  it('a Bluesky block says blocks on Bluesky are public', async () => {
+    const answer = confirmBlock('bob.example.com', 'bluesky')
+    const el = await opened()
+    expect(part(el, 'h2').textContent).toBe('Block @bob.example.com?')
+    expect(el.shadowRoot!.textContent).toContain('Blocks on Bluesky are public.')
+    part(el, 'caribou-button.confirm').click()
+    expect(await answer).toBe(true)
+  })
 })

@@ -293,7 +293,7 @@ export class CaribouProfileHeader extends LitElement {
       void setBlock(target, false, opts)
       return
     }
-    const ok = await confirmBlock(target.acct)
+    const ok = await confirmBlock(target.acct, resourceNetwork(target))
     // The target's id belongs to the server of the account that asked.
     if (ok && activeUserKey.peek() === userKey && this.target === target) void setBlock(target, true, opts)
   }
