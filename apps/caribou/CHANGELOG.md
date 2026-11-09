@@ -1,5 +1,16 @@
 # caribou-app
 
+## 0.10.10
+
+### Patch Changes
+
+- [#230](https://github.com/beatzball/caribou/pull/230) [`e70b6d7`](https://github.com/beatzball/caribou/commit/e70b6d7c2b3f2d40edf62820cb8ee15bba75847d) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky SSR has a named 30 s TTL for each page call (profile, author feed, thread); errors and 429s are never cached. When the public AppView answers 429, the page is a loading shell with no account data, the server makes no Bluesky fetch until `Retry-After` has passed (at most 60 s, 30 s when missing), and the browser reads the page from the AppView itself through the same signed-out guard as the server, or as the active Bluesky account. A 429 on any call, label definitions included, defers the page. A browser read that answers after the reader left is dropped, and the page cache never keeps a deferred page. A Mastodon post link that leaves Caribou now says in its name that it opens the post on its own server in a new tab.
+
+- [#228](https://github.com/beatzball/caribou/pull/228) [`a9931de`](https://github.com/beatzball/caribou/commit/a9931deafacaa9aa23e75b0e362abcc1bb0be52b) Thanks [@beatzball](https://github.com/beatzball)! - The server paints Bluesky profiles and threads signed out, from the public AppView (`BLUESKY_PUBLIC_APPVIEW`, no redirects followed), when `BLUESKY_SSR=1` is set; without it nothing changes, and the SDK is not loaded. With it, every reader gets these pages for Bluesky routes. Route rules follow spec 8.4: `@name@host` is Mastodon, `@did:…` and a dotted `@name` are Bluesky; the server decodes the segment as the client does. A bad handle, DID or record key gets a 404 page and no request. The server runs moderation with the signed-out defaults. An author shows signed out only when its labels were read and none is `!no-unauthenticated`: a missing or partial author, or labels that are null or not an array, is hidden, at every place (profile, feed item, reposter, quote, reply parent and root, thread post, record card creator). Their name, handle, avatar, banner, bio and text are not in the response at all; the page shows "This account asked to be seen only by signed-in readers." A page opened by DID shows the handle in the address bar after hydration. Mastodon profile and post links never use a bare dotted `/@name`: they take a known host, then the account URL's host; with neither, a profile links to a search, and a post links to its own page or is not a link. The reader check no longer sends Bluesky posts to a Mastodon server.
+
+- Updated dependencies [[`e70b6d7`](https://github.com/beatzball/caribou/commit/e70b6d7c2b3f2d40edf62820cb8ee15bba75847d), [`a9931de`](https://github.com/beatzball/caribou/commit/a9931deafacaa9aa23e75b0e362abcc1bb0be52b)]:
+  - @beatzball/caribou-bluesky-client@0.1.2
+
 ## 0.10.9
 
 ### Patch Changes
