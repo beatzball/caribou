@@ -176,8 +176,12 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   const { userKey, agent, moderation } = opts
   const dedup = createDedup()
 
-  // The labelers the agent sends in `atproto-accept-labelers` now.
+  // The labelers the agent sends in `atproto-accept-labelers` now. Rule 2
+  // holds only for a signed-in agent, whose reads go through its PDS to the
+  // AppView. An agent with no session (the public host, which ignores the
+  // request header) counts as sending none.
   function sending(): unknown[] {
+    if (!agent.did) return []
     return [...agent.appLabelers ?? [], ...agent.labelers ?? []]
   }
 

@@ -4,6 +4,8 @@ import {
   beginSignIn, completeSignIn, parseSignInInput, restoreClient, signOut, resolveHandle, notifySessionDeleted, NoCallbackParams, SignInCancelled, ForeignCallback,
   InvalidSignInInput, SessionGone, SignInMismatch, StorageUnavailable, BLUESKY_SCOPE,
 } from '../oauth.js'
+import { BSKY_LABELER_DID } from '@atproto/api'
+import { blueskyCheckSettled } from '../moderation.js'
 import { fixture } from './_helpers.js'
 
 const ALICE = 'did:plc:aliceaaaaaaaaaaaaaaaaaaa'
@@ -248,6 +250,71 @@ describe('restoreClient', () => {
     expect(again.labelDefs).toEqual({})
     expect(out.prefs).toBe(again.prefs)
     expect(out.labelDefs).toBe(again.labelDefs)
+  })
+
+  // Codex's case (#235): labeler L's definitions loaded, then L is taken
+  // down. The AppView drops L from a later answer, and the browser cannot
+  // read the header that says so. The content shows until the next
+  // definitions check; that check finds no view for L and covers again.
+  it('a labeler taken down after its definitions loaded: shown until the next check, covered after it', async () => {
+    const L = 'did:web:labeler.example.com'
+    const service = (did: string) => ({
+      $type: 'app.bsky.labeler.defs#labelerViewDetailed',
+      uri: `at://${did}/app.bsky.labeler.service/self`, cid: 'bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm',
+      creator: { did, handle: 'labeler.example.com' }, policies: { labelValues: [] }, indexedAt: '2026-01-01T00:00:00.000Z',
+    })
+    let lUp = true
+    const sent: (string | null)[] = []
+    const session = fakeSession(ALICE, {
+      'app.bsky.actor.getPreferences': () => json({ preferences: [{ $type: 'app.bsky.actor.defs#labelersPref', labelers: [{ did: L }] }] }),
+      'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
+      'app.bsky.labeler.getServices': () => json({ views: [service(BSKY_LABELER_DID), ...lUp ? [service(L)] : []] }),
+      // No `atproto-content-labelers`: the browser cannot read it.
+      'app.bsky.actor.getProfile': () => json({ did: BOB, handle: 'bob.example.com' }),
+    })
+    const handler = session.fetchHandler as unknown as ReturnType<typeof vi.fn>
+    const inner = handler.getMockImplementation()!
+    handler.mockImplementation(async (path: string, init?: RequestInit) => {
+      sent.push(new Headers(init?.headers).get('atproto-accept-labelers'))
+      return inner(path, init)
+    })
+    const out = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired: () => {}, key: 'TD' })
+    const reader = () => ({ userKey, prefs: out.prefs, labelDefs: out.labelDefs })
+    const settled = async () => {
+      const a = await out.client.lookupAccount(`bob.example.com${sent.length}`)
+      return blueskyCheckSettled({ viewerOf: userKey, moderation: a.bluesky!.moderation! }, reader())
+    }
+    expect(Object.keys(out.labelDefs!)).toEqual(expect.arrayContaining([BSKY_LABELER_DID, L]))
+    expect(await settled()).toBe(true)
+    expect(sent.at(-1)).toContain(L)
+
+    // L is taken down. The next answer still names nothing: shown, as before.
+    lUp = false
+    expect(await settled()).toBe(true)
+
+    // The next definitions check finds no view for L: covered.
+    const after = await out.recheckLabelers()
+    expect(Object.keys(after.labelDefs!)).toEqual([BSKY_LABELER_DID])
+    expect(out.labelDefs).toBe(after.labelDefs)
+    expect(await settled()).toBe(false)
+  })
+
+  it('recheckLabelers: a failed check keeps the definitions; a 401 ends the session', async () => {
+    let services: () => Response = () => json({ views: [] })
+    const session = fakeSession(ALICE, {
+      'app.bsky.actor.getPreferences': () => json({ preferences: [] }),
+      'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
+      'app.bsky.labeler.getServices': () => services(),
+    })
+    const onExpired = vi.fn()
+    const out = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired, key: 'RC' })
+    const defs = out.labelDefs
+    services = () => json({ error: 'x' }, 502)
+    expect((await out.recheckLabelers()).labelDefs).toBe(defs)
+    expect(onExpired).not.toHaveBeenCalled()
+    services = () => json({ error: 'AuthRequired' }, 401)
+    await out.recheckLabelers()
+    expect(onExpired).toHaveBeenCalled()
   })
 
   it('a 401 without a token challenge expires the session too', async () => {

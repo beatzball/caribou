@@ -45,7 +45,12 @@ function setup(o: { labelers?: string[]; headers?: Headers; fail?: boolean } = {
     labelers: o.labelers ?? [BSKY_LABELER_DID, OTHER],
     getTimeline: vi.fn(answer({ feed: [{ post: post(1) }], cursor: 'c' })),
     getAuthorFeed: vi.fn(answer({ feed: [{ post: post(2) }], cursor: 'c' })),
-    getPostThread: vi.fn(answer({ thread: { $type: 'app.bsky.feed.defs#threadViewPost', post: post(3), replies: [{ $type: 'app.bsky.feed.defs#threadViewPost', post: post(4) }] } })),
+    // Two ancestors, and a reply with a reply of its own.
+    getPostThread: vi.fn(answer({ thread: {
+      $type: 'app.bsky.feed.defs#threadViewPost', post: post(3),
+      parent: { $type: 'app.bsky.feed.defs#threadViewPost', post: post(2), parent: { $type: 'app.bsky.feed.defs#threadViewPost', post: post(1) } },
+      replies: [{ $type: 'app.bsky.feed.defs#threadViewPost', post: post(4), replies: [{ $type: 'app.bsky.feed.defs#threadViewPost', post: post(6) }] }],
+    } })),
     getPosts: vi.fn(async ({ uris }: { uris: string[] }) => answer({ posts: uris.map((u) => ({ ...post(0), uri: u })) })()),
     getProfile: vi.fn(answer(profileView())),
     listNotifications: vi.fn(answer(fixture<unknown>('notifications-page.json'))),
@@ -73,7 +78,13 @@ const READS: [string, (c: ReturnType<typeof setup>['client']) => Promise<Bluesky
   ['Following (getTimeline)', async (c) => (await c.fetchTimeline('home')).map(postOf)],
   ['Following catch-up', async (c) => (await c.fetchTimeline('home', { sinceId: 'gone' })).map(postOf)],
   ['author feed (getAuthorFeed)', async (c) => (await c.fetchAccountStatuses('did:plc:bob', { tab: 'posts' })).map(postOf)],
-  ['thread (getPostThread)', async (c) => { const t = await c.fetchThread('at://x'); return t.descendants.map(postOf) }],
+  ['thread (getPostThread)', async (c) => {
+    const t = await c.fetchThread('at://x')
+    // Both ancestors, the reply and the reply to it.
+    expect(t.ancestors).toHaveLength(2)
+    expect(t.descendants).toHaveLength(2)
+    return [...t.ancestors, ...t.descendants].map(postOf)
+  }],
   ['fetchStatus (getPosts)', async (c) => [postOf(await c.fetchStatus('at://did:plc:bob/app.bsky.feed.post/p9'))]],
   ['fetchStatuses (getPosts)', async (c) => (await c.fetchStatuses(['at://a/app.bsky.feed.post/1'])).map(postOf)],
   ['bookmarks (getBookmarks)', async (c) => (await c.fetchTimeline('bookmarks')).map(postOf)],
@@ -177,7 +188,53 @@ describe('what keeps the cover', () => {
   })
 })
 
+describe('what the request sent', () => {
+  it('an agent with no session counts as sending none (rule 2 is for the signed-in agent only)', async () => {
+    const { client, agent } = setup()
+    ;(agent as { did?: string }).did = undefined
+    const [s] = await client.fetchTimeline('home')
+    expect(postOf(s!).labelersCovered).toEqual([])
+    expect(settled(postOf(s!))).toBe(false)
+  })
+
+  it("counts Agent.appLabelers: Bluesky's labeler is sent from there", async () => {
+    // Only the reader's labeler is configured; Bluesky's comes from appLabelers.
+    const { client } = setup({ labelers: [OTHER] })
+    const [s] = await client.fetchTimeline('home')
+    expect(postOf(s!).labelersCovered).toEqual([BSKY_LABELER_DID, OTHER])
+    expect(settled(postOf(s!))).toBe(true)
+  })
+})
+
 describe('a result from several answers keeps what every answer covered', () => {
+  it('a Following catch-up that meets its anchor on a later page', async () => {
+    const { client, agent } = setup()
+    agent.getTimeline
+      .mockImplementationOnce(async () => ({ data: { feed: [{ post: post(1) }], cursor: 'c1' }, headers: header(BSKY_LABELER_DID) }))
+      .mockImplementationOnce(async () => ({ data: { feed: [{ post: post(2) }, { post: post(3) }], cursor: 'c2' }, headers: header(`${BSKY_LABELER_DID}, ${OTHER}`) }))
+    const res = await client.fetchTimeline('home', { sinceId: post(3).uri })
+    expect(agent.getTimeline).toHaveBeenCalledTimes(2)
+    expect(res.nextCursor).toBeNull()
+    expect(res).toHaveLength(3)
+    for (const s of res) expect(postOf(s).labelersCovered).toEqual([BSKY_LABELER_DID])
+  })
+
+  it('a notifications catch-up that meets its anchor on a later page', async () => {
+    const { client, agent } = setup()
+    const all = fixture<{ notifications: { uri: string }[] }>('notifications-page.json').notifications
+    agent.listNotifications
+      .mockImplementationOnce(async () => ({ data: { cursor: 'c', notifications: all.slice(0, 2) }, headers: header(BSKY_LABELER_DID) }))
+      .mockImplementationOnce(async () => ({ data: { notifications: all }, headers: header(`${BSKY_LABELER_DID}, ${OTHER}`) }))
+    const res = await client.fetchNotifications({ sinceId: all.at(-1)!.uri })
+    expect(agent.listNotifications).toHaveBeenCalledTimes(2)
+    expect(res.nextCursor).toBeNull()
+    expect(res.length).toBeGreaterThan(0)
+    for (const n of res) {
+      expect(authorOf(n.account).labelersCovered).toEqual([BSKY_LABELER_DID])
+      expect(settled(authorOf(n.account))).toBe(false)
+    }
+  })
+
   it('a Following catch-up over several pages', async () => {
     const { client, agent } = setup()
     agent.getTimeline

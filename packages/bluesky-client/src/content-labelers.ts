@@ -18,15 +18,6 @@ export function parseContentLabelers(value: unknown): string[] {
   return out
 }
 
-/** The labelers an XRPC answer covered, from its headers (any case). */
-export function labelersCoveredBy(headers: Record<string, string | undefined> | undefined): string[] {
-  if (!headers) return []
-  for (const [k, v] of Object.entries(headers)) {
-    if (k.toLowerCase() === CONTENT_LABELERS_HEADER) return parseContentLabelers(v)
-  }
-  return []
-}
-
 /**
  * The most labelers Caribou counts from one request's
  * `atproto-accept-labelers` (README, "Labeler coverage"). The AppView

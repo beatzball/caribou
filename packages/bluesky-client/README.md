@@ -203,7 +203,11 @@ The rule, for one answer:
    in `atproto-accept-labelers`, because the request succeeded. Only the
    first `ACCEPTED_LABELERS_LIMIT` (20) distinct DIDs, in the order sent,
    count. The SDK sends `Agent.appLabelers` (Bluesky's, `;redact`) first,
-   then `agent.labelers` (`configureLabelers`).
+   then `agent.labelers` (`configureLabelers`). This holds only for the
+   signed-in agent, whose reads go through its PDS to the AppView. No read
+   through `answer()` may go to the public host (`public.api.bsky.app`): it
+   answers 200 and ignores the request header. An agent with no session
+   (no `did`) counts as sending none.
 3. **A failed request** gives no answer, so it gives no coverage.
 4. **A labeler that is not covered keeps the cover** (fail closed), as
    before.
@@ -214,8 +218,10 @@ Why 20: the AppView source does not cap the list it accepts
 `bluesky-social/atproto` at `0849c24`). The only limit on record is the
 Bluesky app's `MAX_LABELERS = 20` (`bluesky-social/social-app`,
 `src/lib/constants.ts`), which it checks when a reader subscribes. Caribou
-counts no labeler past it, so a reader with more than 20 keeps the cover on
-the rest.
+counts no labeler past it. So a reader with more than 20 distinct labelers
+(Bluesky's included) has every Bluesky post and profile covered, and Retry
+does not help: veil rule 3 needs every subscribed labeler covered. The
+Bluesky app does not let a reader subscribe to more.
 
 What the request sent is read twice: when the read starts and when its
 answer lands. Only a labeler in both counts, so a `configureLabelers` call
@@ -225,6 +231,34 @@ The AppView also drops a requested labeler that does not exist or is taken
 down (`createContext`). Coverage from rule 2 still names it. That labeler
 has no `getServices` view, so it has no label definitions, and veil rule 1
 keeps the cover.
+
+**Definitions are checked again** (`recheckLabelers`), so a labeler taken
+down after its definitions loaded loses them. A check asks `getServices`
+for the labelers the prefs name. A labeler it has no view for loses its
+definitions at once, and veil rule 1 covers again. A failed check changes
+nothing (a 401 ends the session). The definitions load or are checked:
+
+- on every account restore and every `reloadModeration` (a cover's Retry);
+- when the app comes back to the foreground, unless a load or check ran in
+  the last minute (`FOREGROUND_RECHECK_MIN_MS`);
+- every 10 minutes while the page is visible (`LABELER_RECHECK_MS`, in
+  `apps/caribou/components/_bluesky-session.ts`).
+
+**The window that stays.** Between a takedown and the next check (at most
+10 minutes of visible time), content that only that labeler would have
+labeled can show uncovered. A taken-down labeler's labels are served to no
+client, so the Bluesky app shows the same content.
+
+**Known gap: PDS read-after-write.** Just after the reader posts a reply or
+a quote, the AppView may not have indexed it yet. The PDS then builds the
+answer itself and fetches the parents or the quoted post from the AppView
+without `atproto-accept-labelers` (`packages/pds/src/api/app/bsky/feed/getPostThread.ts`
+and `packages/pds/src/read-after-write/viewer.ts` in `bluesky-social/atproto`
+at `0849c24`). The AppView then applies its default labelers only. Caribou
+cannot see this (`Atproto-Upstream-Lag` is not exposed either), so rule 2
+counts the reader's own labelers as covered for those posts. It lasts only
+until the AppView indexes the new post, and it touches only the post the
+reader just replied to or quoted.
 
 **Each answer carries its own coverage.** A result built from several
 answers keeps only the labelers every one of them covered: a catch-up
@@ -238,8 +272,8 @@ It applies to every signed-in read that moderates: `home` (`getTimeline`),
 (`getPostThread`), `fetchStatus` and `fetchStatuses` (`getPosts`),
 `bookmarks` (`getBookmarks`), `lookupAccount` and `verifyCredentials`
 (`getProfile`), `fetchMutes` and `fetchBlocks`, and `fetchNotifications`.
-An agent without `labelers` (a test double) sent none, so rule 2 covers
-none.
+An agent without `labelers` or without a session sent none, so rule 2
+covers none.
 
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 
@@ -565,8 +599,9 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   `getLabelerServices` for every subscribed labeler plus Bluesky's. Either
   that fails is `null`, which `moderate()` treats as missing (fail closed).
   `restoreClient` answers them with the client, for the reader veil, and
-  `reloadModeration()`, which loads both again (a cover's Retry); the
-  client's later decisions use the new ones.
+  `reloadModeration()`, which loads both again (a cover's Retry), and
+  `recheckLabelers()`, which checks the definitions again ("Labeler
+  coverage"); the client's later decisions use the new ones.
 - **The deleted event.** One listener per DID and sign-in (`opts.key`): a
   restore for a new sign-in drops the listeners of earlier ones. The SDK's
   `onSessionDeleted` (here or in another tab) makes the client check: it calls
