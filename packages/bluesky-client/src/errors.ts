@@ -53,3 +53,17 @@ export function normalizeXrpcError(err: unknown): CaribouError {
   }
   return new CaribouError('unknown', err instanceof Error ? err.message : String(err))
 }
+
+/**
+ * The PDS does not have a blob the post names (spec 7.2): it may drop an
+ * upload no record used for a while. `cid` is the missing blob, when the
+ * message names it. Compose uploads the file again, or asks for it.
+ */
+export class BlueskyBlobNotFound extends CaribouError {
+  readonly cid: string | null
+  constructor(message: string, cid: string | null) {
+    super('not_found', message, { status: 400 })
+    this.name = 'BlueskyBlobNotFound'
+    this.cid = cid
+  }
+}

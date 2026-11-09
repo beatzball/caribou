@@ -6,9 +6,12 @@ import { expect, test, type Page } from '@playwright/test'
 // statically, so every Mastodon page downloads it.
 //
 // The test reads every script the page fetched and looks for atproto's own
-// code by a lexicon id it carries, not by the chunk's file name: without the
-// group the chunk has another name, and that is the case to catch.
-const ATPROTO_MARKER = 'com.atproto.repo.createRecord'
+// code by a lexicon ref it carries, not by the chunk's file name: without the
+// group the chunk has another name, and that is the case to catch. The ref
+// form (`lex:…`) is only in the SDK's lexicon table: Caribou's own client
+// code calls `agent.com.atproto.repo.createRecord` (#189), which is in the
+// main bundle and is not the libraries.
+const ATPROTO_MARKER = 'lex:com.atproto.repo.strongRef'
 
 async function scriptsFetched(page: Page, path: string): Promise<{ url: string; body: string }[]> {
   const scripts: Promise<{ url: string; body: string }>[] = []

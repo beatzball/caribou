@@ -560,6 +560,77 @@ active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
 
+### Bluesky compose (#189)
+
+`<caribou-compose-dialog>` with a Bluesky account active. Every rule here
+applies only when the dialog's client is Bluesky; Mastodon compose is as
+before. The draft and the retry rules are in `packages/state` README
+("Bluesky drafts"), the client's calls in `packages/bluesky-client` README
+("Compose").
+
+**Controls.** No visibility, no poll, no content-warning text (by
+`capabilities`). "Add images" takes images only (`accept="image/*"`), at
+most 4. The counter shows graphemes left out of 300. Post is off when the
+text is over 300 graphemes **or** over 3000 bytes, counted with the SDK's
+`RichText` (`countPost`), as the PDS counts. The SDK loads through
+`loadBluesky()` when the dialog opens; until it has, Post is off. A post
+may have no text when it has an image or a quote. When over the byte
+limit, the live region says "Over the 3000 byte limit".
+
+**Images** (`components/_image-fit.ts`). Each picked file goes through
+`fitImage(file, 2 MB)`:
+
+- not an image: refused, "… is not an image."
+- at most 2 MB: uploaded as it is; its size is read for `aspectRatio`.
+- over 2 MB: drawn on a canvas and encoded as JPEG, long side 2000 px at
+  quality 0.9, 0.8, 0.7, then the long side × 0.8 each round, until it is at
+  most 2 MB. Below a 400 px long side it is refused: "… is too large, even
+  made smaller. Pick an image under 2 MB." A transparent image gets a white
+  ground (JPEG has no transparency).
+- over 2 MB and unreadable: refused.
+
+The upload is the fitted image, never the original. The alt text field is
+the draft's: it goes in the post's embed, with no server call. The page
+keeps each uploaded file in memory by its blob's CID. When the PDS answers
+`BlueskyBlobNotFound` (it dropped an upload no post used yet), the dialog
+uploads that file again and asks the reader to post again; an image with no
+file (after a reload) shows "Not on the server any more. Remove it and add
+it again." and Post stays off until it is removed.
+
+**Labels instead of a content warning** (spec 7.4). With at least one
+image, a `<caribou-menu>` "Label this media" (anchored, the shared menu's
+focus rules) lists Adult, Nudity and Graphic. Each is a toggle button with
+`aria-pressed`; the menu's name lists the labels on. Labels go in the
+record only with images.
+
+**Reply and quote.** `caribou:compose` with `inReplyTo` (a Bluesky post) or
+`quote`. The draft takes the strong refs from the post (`reply.root` from
+its `replyRef.root`, else the post). No mentions are typed into a Bluesky
+reply: a mention is addressed by DID, never by handle text (#177's note).
+The dialog opens only when the post's network is the active account's: a
+Mastodon account never opens for a Bluesky post, and only a Bluesky account
+quotes. On open the dialog reads the post again (`fetchStatus`):
+
+| the post | the dialog |
+|---|---|
+| `replyDisabled` (reply) or `embeddingDisabled` (quote), on open, on the fresh copy, or in the status cache at send | "The author limited replies. You cannot reply to this post." / "The author turned off quotes for this post." Post is off, and a send is refused with that toast. #188 owns the card's buttons; this is the second check. |
+| gone (`not_found`) | "The post you replied to was deleted." (or quoted). The draft keeps its text; Post is off. |
+
+**Sending.** `postBlueskyDraft`. After an error the toast says "Post again to
+retry; it is never sent twice." and the dialog shows "The last send did not
+finish. Post checks first, so the post is never sent twice." while the
+stored draft has `sent`. When a retry finds the earlier version posted and
+the reader edited since, the dialog stays open with the edits and says
+"Your earlier version was posted." with a link to it (`/@<did>/<rkey>`).
+Link cards are phase 6: a link is posted as a facet with no card.
+
+Tests: `caribou-compose-dialog-bluesky.test.ts` (limits with emoji,
+combining marks, CJK and a link; one post after a lost answer, a reload and
+an edit; reply and quote refs; the flags; images, alt text, labels, resize,
+the 4-image cap and blob recovery); `_image-fit.test.ts`;
+`tests/e2e/bluesky-compose.spec.ts` (the real SDK against a fixture PDS: the
+counter, a TID rkey, facets, and a lost answer across a reload is one post).
+
 ### Bluesky SSR (#185, #186)
 
 Phase 3. The server paints a Bluesky profile and thread with no token

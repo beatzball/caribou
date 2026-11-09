@@ -452,6 +452,44 @@ export interface StatusBluesky {
   recordCard?: PreviewCard | null
 }
 
+// ------------------------------------------------------- bluesky compose
+//
+// What Bluesky compose writes (#189, spec 7.2). JSON shapes, so a draft in
+// localStorage keeps them as they are sent.
+
+/** A blob the PDS has, in its JSON form (`uploadBlob` answers it). */
+export interface BlueskyBlobRef {
+  $type: 'blob'
+  ref: { $link: string }
+  mimeType: string
+  size: number
+}
+
+/** A facet as the `app.bsky.richtext.facet` lexicon writes it. */
+export interface BlueskyFacet {
+  index: { byteStart: number; byteEnd: number }
+  features: ({ $type: string } & Record<string, unknown>)[]
+}
+
+/** An `app.bsky.feed.post` record, as compose sends it. */
+export interface BlueskyPostRecord {
+  $type: 'app.bsky.feed.post'
+  text: string
+  facets?: BlueskyFacet[]
+  reply?: { root: BlueskyStrongRef; parent: BlueskyStrongRef }
+  embed?: { $type: string } & Record<string, unknown>
+  labels?: { $type: 'com.atproto.label.defs#selfLabels'; values: { val: string }[] }
+  langs?: string[]
+  createdAt: string
+}
+
+/** A post record read back from the reader's own PDS. */
+export interface BlueskyOwnPost {
+  uri: string
+  cid: string
+  value: BlueskyPostRecord
+}
+
 // ---------------------------------------------------------- relationship
 
 export interface Relationship {

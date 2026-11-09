@@ -9,6 +9,7 @@ import {
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { createBlueskyClient, type BlueskyAgent } from './client.js'
+import { detectFacets, nextRkey } from './compose.js'
 import { normalizeXrpcError } from './errors.js'
 import { labelDefsFromServices, moderate, type LabelDefs } from './moderation.js'
 
@@ -372,6 +373,7 @@ export async function restoreClient(
     // Any 401 ends the session (README: "401"), not only the challenged
     // one the SDK deletes the session for.
     onUnauthorized: opts.onExpired,
+    compose: { nextRkey, detectFacets: (text) => detectFacets(agent, text) },
     ...(opts.onMapError ? { onMapError: opts.onMapError } : {}),
   })
   const out: RestoredClient = {

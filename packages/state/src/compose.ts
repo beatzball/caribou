@@ -1,5 +1,7 @@
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, MediaAttachmentType, Status, StatusVisibility } from '@beatzball/caribou-mastodon-client'
+import type {
+  BlueskyBlobRef, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, MediaAttachmentType, Status, StatusVisibility,
+} from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 
 export interface DraftMedia {
@@ -25,6 +27,44 @@ export interface DraftPoll {
   hideTotals: boolean
 }
 
+/** An image a Bluesky draft holds: the PDS has the blob, so a reload does not upload it again. */
+export interface BlueskyDraftImage {
+  blob: BlueskyBlobRef
+  mime: string
+  size: number
+  /** Alt text. It goes in the post's embed; Bluesky keeps none on the blob. */
+  alt: string
+  aspectRatio: { width: number; height: number } | null
+  /** The name of the file the reader picked, for the controls' names. */
+  name?: string
+}
+
+/**
+ * The exact record a send wrote, or tried to, frozen before the request
+ * (spec 7.2). `input` is `blueskyDraftInput` of the draft it was made
+ * from, so a retry can tell whether the reader edited since.
+ */
+export interface BlueskySentRecord {
+  input: string
+  record: BlueskyPostRecord
+}
+
+/**
+ * What a Bluesky draft holds beside `text` (spec 7.2; rules in the README,
+ * "Bluesky drafts"). Plain JSON, kept in the account's drafts.
+ */
+export interface BlueskyDraft {
+  reply: { root: BlueskyStrongRef; parent: BlueskyStrongRef } | null
+  quote: BlueskyStrongRef | null
+  /** Self-labels from the label menu. Sent only with images. */
+  labels: string[]
+  images: BlueskyDraftImage[]
+  /** The record key, picked before the first send and kept until the post is known. */
+  rkey: string | null
+  /** Set from just before a send until its outcome is known. */
+  sent: BlueskySentRecord | null
+}
+
 export interface ComposeDraft {
   text: string
   spoilerText: string
@@ -41,6 +81,8 @@ export interface ComposeDraft {
   language?: string | null
   /** A poll. Mastodon refuses a post with both a poll and media. */
   poll?: DraftPoll | null
+  /** A Bluesky draft's own parts. A Mastodon draft has none. */
+  bluesky?: BlueskyDraft
 }
 
 // A new post and each reply keep their own draft, so opening a reply does
@@ -48,7 +90,8 @@ export interface ComposeDraft {
 // `redraft:<key>` holds a delete-and-redraft opened while its own slot held
 // an unsent draft. The deleted post exists nowhere else, so it is stored
 // like any draft, beside the one it must not overwrite.
-export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}`
+// A Bluesky quote keeps its own draft too, `quote:<uri>`.
+export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}` | `quote:${string}`
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'
@@ -74,6 +117,8 @@ export function emptyDraft(init: Partial<ComposeDraft> = {}): ComposeDraft {
 export function isDraftEmpty(d: ComposeDraft): boolean {
   return d.text.trim() === '' && d.spoilerText.trim() === '' && d.media.length === 0
     && !(d.poll?.options.some((o) => o.trim() !== '') ?? false)
+    // A Bluesky send whose outcome is not known yet is kept, whatever it holds.
+    && (d.bluesky?.images.length ?? 0) === 0 && !d.bluesky?.sent
 }
 
 /** The options a poll sends: the filled ones, trimmed. */

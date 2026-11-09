@@ -374,6 +374,78 @@ reader can act on a resource only when the active client's network is
 the resource's (`canActOn`). A Mastodon post also needs the reader's
 server, as before.
 
+## Bluesky drafts (#189, spec 7.2)
+
+`bluesky-compose.ts`, over the drafts in `compose.ts`.
+
+**What a Bluesky draft holds.** `ComposeDraft.text` (and `language` from a
+redraft), plus `bluesky`:
+
+| field | what |
+|---|---|
+| `reply` | `{ root, parent }` strong refs (`uri` + `cid`). `parent` is the post replied to; `root` is its `replyRef.root`, or the post itself when it is a top post. |
+| `quote` | the quoted post's strong ref, or `null` |
+| `images` | per image: the blob ref `uploadBlob` answered, its type and size, its alt text, its `aspectRatio` (or `null` when the browser could not read it), the file name |
+| `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `nudity` Nudity, `graphic-media` Graphic) |
+| `rkey` | the record key, picked (`blueskyNextRkey`) before the first send |
+| `sent` | the exact record a send wrote or tried to, frozen with its facets and `createdAt`, and the input it was made from (`blueskyDraftInput`) |
+
+Facets are not kept on their own: they are made from the text at send
+time (`blueskyDetectFacets`, which resolves mentions to DIDs) and frozen in
+`sent.record`. Slots: `new`, `reply:<parent uri>`, `quote:<quoted uri>`.
+
+**The record** (`blueskyRecord`): `text`; `facets` when there are any;
+`reply`; `embed` is `app.bsky.embed.images` (each image with its `alt` and
+`aspectRatio`), `app.bsky.embed.record` for a quote, or
+`app.bsky.embed.recordWithMedia` for both; `labels` as
+`com.atproto.label.defs#selfLabels`, only the menu's values, in menu order,
+and **only with images** (the menu labels media, spec 7.4); `langs` from a
+redraft's language; `createdAt`.
+
+**What survives.** All of it is plain JSON in `caribou.drafts.<userKey>`.
+
+| event | the draft |
+|---|---|
+| reload | kept whole: text, refs, blob refs, alt text, labels, `rkey`, `sent`. The file behind an image is not (memory only); its blob ref is. |
+| account switch | kept under its own account; the dialog closes (it posts only as the account it opened for). |
+| session expiry | kept (rule: an expiry keeps drafts). A send that failed with the expiry keeps `sent`, so the retry after signing in again checks first. |
+| sign-out | removed with the account's other drafts. |
+| a 401 that removes a Mastodon session | kept (#215 tracks letting a reader delete it). |
+
+`isDraftEmpty` is false for a draft with images or with `sent`, so a quote
+with no text, or a send in doubt, is never dropped as empty.
+
+**One post per click** (`postBlueskyDraft`):
+
+1. A draft with `rkey` and `sent` has a send whose outcome is unknown. Ask
+   the PDS first (`blueskyGetOwnPost(rkey)`).
+   - Found, and the draft's input equals `sent.input`: it went through.
+     Clear the draft. Nothing is sent.
+   - Found, and the reader edited since: keep the edits with a **new** rkey
+     and no `sent`, and answer `earlier-posted` with the found post's URI.
+     Nothing is sent.
+   - Not found: send again with the **same** rkey: the same frozen record
+     when nothing changed (same `createdAt`, no new facet lookup), else a
+     new one made from the edited draft.
+   - The check failed (network, 5xx): throw. Nothing is sent.
+2. Before `createPost`, the draft is stored with `rkey` and the new `sent`.
+3. Any error leaves that stored draft and is thrown. The caller keeps its
+   open draft in step with the stored one (`loadDraft`), or the next
+   keystroke would drop `sent`.
+4. A late first write that lands after a "not found" check makes the second
+   `createPost` fail (a used rkey is a 500), so it is never two posts; the
+   next retry finds the record.
+5. Posted: clear the draft, then read the post (`fetchStatus`, 3 tries a
+   second apart, as the AppView lags). Cache it and send `caribou:posted`
+   only while the client's account is still the active one. A post the
+   AppView does not have yet answers `posted` with `status: null`.
+
+Tests (`bluesky-compose.test.ts`): a timeout after the write, then a retry,
+is one post; a lost answer, a reload, a retry; a lost answer, an edit, a
+retry keeps the edit with a new rkey; not found sends the frozen record
+once with the same rkey; a failed check sends nothing; a late first write;
+an answer after an account switch tells no screen.
+
 ## Gotchas
 
 - **Don't mutate cache Maps directly.** Direct `.set` skips the signal-write
