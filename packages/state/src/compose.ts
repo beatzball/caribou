@@ -75,8 +75,17 @@ export interface BlueskyDraft {
    * may still be up. The dialog checks when it opens the draft.
    */
   sourceMaybeLive?: boolean
-  /** A staged redraft only: when it was staged (ms), so an old one can go. */
+  /**
+   * A staged redraft only: when it was staged (ms). After a day with its
+   * post still up, it is shown as a normal redraft (README, rule E).
+   */
   stagedAt?: number
+  /**
+   * Set the first time a staged redraft can be seen: revealed, opened or
+   * moved to `redraft:`. An exposed draft is a normal draft for good: only
+   * its send or the reader removes it (README, rule E).
+   */
+  exposed?: boolean
 }
 
 export interface ComposeDraft {
@@ -182,7 +191,7 @@ function writeAll(userKey: UserKey, all: Partial<Record<DraftSlot, ComposeDraft>
 export function loadDraft(userKey: UserKey, slot: DraftSlot): ComposeDraft | null {
   const d = readAll(userKey)[slot]
   if (!d || typeof d.text !== 'string') return null
-  return emptyDraft(d)
+  return withRevealed(userKey, slot, emptyDraft(d))
 }
 
 // An empty draft is removed rather than stored, so a dialog opened and
@@ -225,7 +234,8 @@ export function storeDraftIf(
  */
 export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
   for (const [slot, d] of Object.entries(readAll(userKey))) {
-    const kept = slot.startsWith('redraft:') || revealed.has(`${userKey}\u0000${slot}`)
+    const kept = slot.startsWith('redraft:')
+      || (slot.startsWith('staged:') && (!!d?.bluesky?.exposed || revealed.has(`${userKey}\u0000${slot}`)))
     if (kept && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
       return slot as DraftSlot
     }
@@ -234,12 +244,37 @@ export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
 }
 
 // `staged:` slots whose delete is decided but that could not be renamed
-// (storage refused): found by `findRedraftSlot` in this page all the same.
-const revealed = new Set<string>()
+// (storage refused), with the fields storage could not take (`exposed`,
+// the outcome's `sourceMaybeLive`). This page reads the slot with them.
+const revealed = new Map<string, Partial<BlueskyDraft>>()
 
-/** Lets `findRedraftSlot` find a `staged:` slot whose rename failed. */
-export function revealDraftSlot(userKey: UserKey, slot: DraftSlot): void {
-  revealed.add(`${userKey}\u0000${slot}`)
+function withRevealed(userKey: UserKey, slot: DraftSlot, d: ComposeDraft): ComposeDraft {
+  const over = revealed.get(`${userKey}\u0000${slot}`)
+  return over && d.bluesky ? { ...d, bluesky: { ...d.bluesky, ...over } } : d
+}
+
+/**
+ * Reveals a `staged:` slot whose rename failed: it is exposed (rule E),
+ * and `findRedraftSlot` finds it. `patch` (the outcome's mark) is kept in
+ * this page, and stored too when storage takes it, with `exposed`.
+ */
+export function revealDraftSlot(userKey: UserKey, slot: DraftSlot, patch: Partial<BlueskyDraft> = {}): void {
+  const key = `${userKey}\u0000${slot}`
+  revealed.set(key, { ...revealed.get(key), ...patch, exposed: true })
+  const held = loadDraft(userKey, slot)
+  if (held) storeDraftIf(userKey, slot, held.rev ?? '', held)
+}
+
+/** Changes the page-only fields of a revealed slot (no-op for any other). */
+export function patchRevealed(userKey: UserKey, slot: DraftSlot, patch: Partial<BlueskyDraft>): void {
+  const key = `${userKey}\u0000${slot}`
+  const over = revealed.get(key)
+  if (over) revealed.set(key, { ...over, ...patch })
+}
+
+/** Tests only: forget the page-only reveals, as a reload does. */
+export function _testOnlyForgetRevealed(): void {
+  revealed.clear()
 }
 
 /**
@@ -260,7 +295,7 @@ export function renameDraftIf(
   // Rebuilt in order, so the map keeps its shape and its size.
   const next: Partial<Record<DraftSlot, ComposeDraft>> = {}
   for (const [slot, d] of Object.entries(all) as Array<[DraftSlot, ComposeDraft]>) {
-    if (slot === from) next[to] = { ...patch(held), rev }
+    if (slot === from) next[to] = { ...patch(withRevealed(userKey, from, held as ComposeDraft)), rev }
     else next[slot] = d
   }
   if (!writeAll(userKey, next)) return false
@@ -272,7 +307,7 @@ export function renameDraftIf(
 export function storedDrafts(userKey: UserKey): Array<[DraftSlot, ComposeDraft]> {
   const out: Array<[DraftSlot, ComposeDraft]> = []
   for (const [slot, d] of Object.entries(readAll(userKey))) {
-    if (d && typeof d.text === 'string') out.push([slot as DraftSlot, emptyDraft(d)])
+    if (d && typeof d.text === 'string') out.push([slot as DraftSlot, withRevealed(userKey, slot as DraftSlot, emptyDraft(d))])
   }
   return out
 }

@@ -587,7 +587,9 @@ export class CaribouComposeDialog extends LitElement {
       this.targetsChecking += 1
       try {
         const fresh = await client.fetchStatus(ref.uri)
-        if (session !== this.session || client !== this.client) return
+        // The account too: a switch closes the dialog, but `this.client`
+        // clears only with the close event, a task later.
+        if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
         cacheStatus(fresh)
         if (kind === 'reply') this.replyTo = fresh
         else this.quoteTo = fresh
@@ -676,6 +678,12 @@ export class CaribouComposeDialog extends LitElement {
     // Each image needs a local id for its controls (one stored without it gets one).
     const images = bluesky.images.map((i) => i.id ? i : { ...i, id: crypto.randomUUID() })
     this.draft = { ...(stored ?? emptyDraft({ inReplyToId: inReplyTo?.id ?? null })), bluesky: { ...bluesky, images } }
+    // A staged redraft opened (a refused rename): exposed for good (rule E).
+    // Stored now, even when this page already shows it exposed.
+    if (this.draftKey.startsWith('staged:') && this.draft.bluesky) {
+      this.draft = { ...this.draft, bluesky: { ...this.draft.bluesky!, exposed: true } }
+      saveDraft(client.userKey, this.draftKey, this.draft)
+    }
     this.finishOpen()
     this.ensureRkey()
     if (target) void this.refreshTarget(client, target, inReplyTo ? 'reply' : 'quote')
@@ -756,7 +764,7 @@ export class CaribouComposeDialog extends LitElement {
     const session = this.session
     try {
       const fresh = await client.fetchStatus(target.id)
-      if (session !== this.session || client !== this.client) return
+      if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
       // The page's other copies learn the flags too.
       cacheStatus(fresh)
       if (this.replyTo?.id === fresh.id) this.replyTo = fresh

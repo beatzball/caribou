@@ -428,7 +428,25 @@ describe('<caribou-status-card> own Bluesky post', () => {
     expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([first])
     expect(loadDraft(KEY, first)!.text).toBe('hello, plus what the reader wrote')
     expect((events.at(-1)!.detail as { blueskyRedraft: { slot: DraftSlot } }).blueskyRedraft.slot).toBe(first)
-    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted again.' })
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted. If it is still up, use Delete.' })
+  })
+
+  it('the stored redraft opens when a composer can: the toast says so (R4-N2, R4-N4)', async () => {
+    signIn()
+    const kept = emptyDraft({ text: 'kept', bluesky: { reply: null, quote: null, labels: [], images: [], rkey: 'k', sent: null, source: URI } })
+    saveDraft(KEY, `redraft:${kept.idempotencyKey}`, kept)
+    // A composer that opens it.
+    const opens = (e: Event) => { (e as CustomEvent<{ opened?: boolean }>).detail.opened = true }
+    window.addEventListener('caribou:compose', opens)
+    try {
+      const el = await mount(post())
+      item(el, 'redraft')!.click()
+      await settle(el)
+    } finally {
+      window.removeEventListener('caribou:compose', opens)
+    }
+    expect(pds.blueskyGetOwnPost).not.toHaveBeenCalled()
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'You already have a redraft of this post, so it opens. The post was not deleted. If it is still up, use Delete.' })
   })
 
   it('a switch during the upload: no delete (R3-N4)', async () => {
@@ -451,17 +469,19 @@ describe('<caribou-status-card> own Bluesky post', () => {
     expect(storedDrafts(KEY)).toEqual([])
   })
 
-  it('plain Delete removes a staged redraft of the post that a closed tab left (R3-N2)', async () => {
+  it('plain Delete removes no draft, staged or not (rule E)', async () => {
     signIn()
     const left = emptyDraft({ text: 'left behind', bluesky: { reply: null, quote: null, labels: [], images: [], rkey: 'x', sent: null, source: URI, stagedAt: Date.now() } })
     saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const shown = emptyDraft({ text: 'shown and edited', bluesky: { reply: null, quote: null, labels: [], images: [], rkey: 'y', sent: null, source: URI, exposed: true } })
+    saveDraft(KEY, `staged:${shown.idempotencyKey}`, shown)
     const el = await mount(post())
     item(el, 'delete')!.click()
     await settle(el)
     confirmYes()
     await settle(el)
     expect(pds.blueskyDeletePost).toHaveBeenCalledWith(URI)
-    expect(storedDrafts(KEY)).toEqual([])
+    expect(storedDrafts(KEY).map(([, d]) => d.text).sort()).toEqual(['left behind', 'shown and edited'])
   })
 
   it.each([

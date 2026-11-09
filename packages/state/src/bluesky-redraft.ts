@@ -7,7 +7,7 @@ import type {
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 import {
-  draftRev, emptyDraft, isDraftEmpty, loadDraft, renameDraftIf, revealDraftSlot, storeDraftIf, storedDrafts,
+  draftRev, emptyDraft, isDraftEmpty, loadDraft, patchRevealed, renameDraftIf, revealDraftSlot, storeDraftIf, storedDrafts,
   type BlueskyDraftImage, type ComposeDraft, type DraftSlot,
 } from './compose.js'
 import { emptyBlueskyDraft } from './bluesky-compose.js'
@@ -68,35 +68,36 @@ export const NOTHING_KEPT = 'Nothing in this post can be kept in a draft. Use De
 const staging = new Set<string>()
 const stagingKey = (userKey: UserKey, slot: DraftSlot) => `${userKey}\u0000${slot}`
 
-/** A staged draft whose post is still up is removed after this long. */
+/**
+ * A staged draft a closed tab left, whose post is still up, is shown as a
+ * normal redraft (with the "still up" note) once it is this old. Younger,
+ * another tab may still be deleting for it.
+ */
 export const STAGED_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
+// Exposed (rule E): a draft the reader can see or has edited. Only its
+// send or the reader removes it.
+function exposed(slot: DraftSlot, d: ComposeDraft): boolean {
+  return slot.startsWith('redraft:') || !!d.bluesky?.exposed
+}
+
 /**
- * The stored `redraft:` slot made from the post `source`, or null. The
- * stored redraft wins: a new redraft of the same post opens it instead
- * (it may hold the reader's edits).
+ * The stored redraft made from the post `source` (a `redraft:` slot, or an
+ * exposed `staged:` one), or null. The stored redraft wins: a new redraft
+ * of the same post opens it instead (it may hold the reader's edits).
  */
 export function findRedraftOf(userKey: UserKey, source: string): DraftSlot | null {
   for (const [slot, d] of storedDrafts(userKey)) {
-    if (slot.startsWith('redraft:') && d.bluesky?.source === source && !isDraftEmpty(d)) return slot
+    if (exposed(slot, d) && d.bluesky?.source === source && !isDraftEmpty(d)) return slot
   }
   return null
 }
 
-/**
- * Removes the staged drafts of `source` that this tab is not deleting for
- * (a tab closed before their delete went out). Plain Delete calls this:
- * the reader wanted the post gone, not a redraft of it.
- */
-export async function dropStagedRedraftsOf(userKey: UserKey, source: string): Promise<void> {
-  for (const [slot, d] of storedDrafts(userKey)) {
-    if (!slot.startsWith('staged:') || staging.has(stagingKey(userKey, slot)) || d.bluesky?.source !== source) continue
-    await dropStaged(userKey, slot, d.rev ?? '')
-  }
-}
-
-// Removes a staged draft (revision-checked) and the bytes under its final slot.
+// Rule E, case 3: removes an unexposed staged copy (revision-checked) and
+// the bytes under its final slot. Only a redraft's own flow calls this.
 async function dropStaged(userKey: UserKey, slot: DraftSlot, rev: string): Promise<void> {
+  const d = loadDraft(userKey, slot)
+  if (!d || exposed(slot, d)) return
   const target: DraftSlot = `redraft:${slot.slice('staged:'.length)}`
   if (storeDraftIf(userKey, slot, rev, null) && !loadDraft(userKey, target)) await removeDraftFiles(userKey, target)
 }
@@ -373,7 +374,9 @@ export async function discardBlueskyRedraft(stored: StoredBlueskyRedraft): Promi
 }
 
 /**
- * Follows the delete's outcome. Failed: the staged draft is removed
+ * Follows the delete's outcome. Deleted: other unexposed staged copies of
+ * the same post that no flow of this tab runs (a closed tab's) go too, so
+ * the text cannot come back a second time. Failed: the staged draft is removed
  * (`discardBlueskyRedraft`). Deleted or unknown: it is renamed to its
  * `redraft:<key>` slot in place, where a new post finds it; unknown marks
  * it `sourceMaybeLive`. When a redraft of the same post is stored already,
@@ -390,7 +393,15 @@ export async function settleBlueskyRedraft(
     return null
   }
   staging.delete(stagingKey(stored.userKey, stored.slot))
-  return promote(stored.userKey, stored.slot, outcome === 'unknown')
+  const at = await promote(stored.userKey, stored.slot, outcome === 'unknown')
+  const source = stored.draft.bluesky?.source
+  if (outcome === 'deleted' && source) {
+    for (const [slot, d] of storedDrafts(stored.userKey)) {
+      if (slot === at || !slot.startsWith('staged:') || staging.has(stagingKey(stored.userKey, slot)) || d.bluesky?.source !== source) continue
+      await dropStaged(stored.userKey, slot, d.rev ?? '')
+    }
+  }
+  return at
 }
 
 async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): Promise<DraftSlot | null> {
@@ -402,7 +413,8 @@ async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): P
   const source = draft.bluesky?.source
   const kept = source ? findRedraftOf(userKey, source) : null
   if (kept && kept !== target) {
-    // The stored redraft wins: it may hold the reader's edits.
+    // The stored redraft wins: it may hold the reader's edits. This copy
+    // goes only while unexposed (rule E).
     await dropStaged(userKey, slot, rev)
     const held = loadDraft(userKey, kept)
     if (held?.bluesky && held.bluesky.sourceMaybeLive !== maybeLive) {
@@ -412,12 +424,13 @@ async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): P
   }
   const renamed = renameDraftIf(userKey, slot, rev, target, (d) => {
     const { stagedAt: _, ...b } = d.bluesky ?? emptyBlueskyDraft()
-    return { ...d, bluesky: { ...b, sourceMaybeLive: maybeLive } }
+    return { ...d, bluesky: { ...b, sourceMaybeLive: maybeLive, exposed: true } }
   })
   if (renamed) return target
-  // Storage refused even the rename: the staged slot stays, found by a new
-  // post in this page; its bytes are under `redraft:<key>` (`draftFilesSlot`).
-  revealDraftSlot(userKey, slot)
+  // Storage refused even the rename: the staged slot stays, exposed, with
+  // the outcome's mark, found by a new post; its bytes are under
+  // `redraft:<key>` (`draftFilesSlot`).
+  revealDraftSlot(userKey, slot, { sourceMaybeLive: maybeLive })
   return slot
 }
 
@@ -436,7 +449,7 @@ export async function recoverStagedRedrafts(client: CaribouClient): Promise<Draf
   const userKey = client.userKey
   const moved: DraftSlot[] = []
   for (const [slot, d] of storedDrafts(userKey)) {
-    if (!slot.startsWith('staged:') || staging.has(stagingKey(userKey, slot))) continue
+    if (!slot.startsWith('staged:') || exposed(slot, d) || staging.has(stagingKey(userKey, slot))) continue
     const source = d.bluesky?.source
     if (!source || !client.blueskyGetOwnPost) continue
     let own: Awaited<ReturnType<NonNullable<CaribouClient['blueskyGetOwnPost']>>>
@@ -448,22 +461,27 @@ export async function recoverStagedRedrafts(client: CaribouClient): Promise<Draf
     if (generation !== ownerGeneration()) return moved
     // Another tab may have moved or removed it meanwhile.
     if (staging.has(stagingKey(userKey, slot))) continue
-    if (own) {
-      const at = d.bluesky?.stagedAt
-      if (typeof at !== 'number' || Date.now() - at > STAGED_MAX_AGE_MS) await dropStaged(userKey, slot, d.rev ?? '')
-      continue
-    }
+    // Still up and young: another tab may be deleting for it; ask again
+    // next time. Still up and a day old: shown as a normal redraft, with
+    // the "still up" note; the reader decides (rule E). Gone: moved.
+    const stagedAt = d.bluesky?.stagedAt
+    if (own && typeof stagedAt === 'number' && Date.now() - stagedAt <= STAGED_MAX_AGE_MS) continue
     const kept = source ? findRedraftOf(userKey, source) : null
-    const at = await promote(userKey, slot, false)
+    const at = await promote(userKey, slot, !!own)
     // A stored redraft that won is not news.
     if (at && !kept) moved.push(at)
   }
   return moved
 }
 
+/** Tests only: forget this tab's running flows, as another tab sees them. */
+export function _testOnlyForgetStaging(): void {
+  staging.clear()
+}
+
 /** True when the account has staged redrafts this tab is not deleting for. */
 export function hasOrphanStagedRedrafts(userKey: UserKey): boolean {
-  return storedDrafts(userKey).some(([slot]) => slot.startsWith('staged:') && !staging.has(stagingKey(userKey, slot)))
+  return storedDrafts(userKey).some(([slot, d]) => slot.startsWith('staged:') && !exposed(slot, d) && !staging.has(stagingKey(userKey, slot)))
 }
 
 /**
@@ -484,6 +502,7 @@ export async function checkRedraftSource(client: CaribouClient, slot: DraftSlot)
   }
   if (generation !== ownerGeneration()) return null
   if (own && own.uri === source) return true
+  patchRevealed(client.userKey, slot, { sourceMaybeLive: false })
   const now = loadDraft(client.userKey, slot)
   if (now?.bluesky) storeDraftIf(client.userKey, slot, now.rev ?? '', { ...now, bluesky: { ...now.bluesky, sourceMaybeLive: false } })
   return false

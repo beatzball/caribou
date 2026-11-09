@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, getDraftFiles, loadDraft,
   putDraftFiles, saveDraft, _testOnlyClearDraftFiles, type DraftSlot, findRedraftSlot,
-  ownerGeneration, settleBlueskyRedraft, storeBlueskyRedraft, storedDrafts,
+  ownerGeneration, settleBlueskyRedraft, storeBlueskyRedraft, storedDrafts, _testOnlyForgetRevealed,
   setBlueskyDriver, statusCache, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
@@ -1562,6 +1562,114 @@ describe('Bluesky redraft', () => {
     await submit(el)
     for (let i = 0; i < 20; i++) await settle(el)
     expect(await pds.client.blueskyUploadBlob.mock.calls.at(-1)![0].text()).toBe('re OLD')
+  })
+
+  // A browser fires the dialog's close event a task after close(); happy-dom
+  // fires it at once. This holds it, as a browser would.
+  function holdClose(el: CaribouComposeDialog): () => void {
+    const dlg = $<HTMLDialogElement>(el, 'dialog')!
+    const close = dlg.close.bind(dlg)
+    let queued: (() => void) | null = null
+    dlg.close = () => { queued = close }
+    return () => queued?.()
+  }
+
+  it.each(['an uncached target', 'a refresh of the shown target'])(
+    'a switch, then %s answers before the close event: nothing is cached (Codex R4-2)', async (kind) => {
+      const pds = signInBluesky()
+      const read = deferred<Status>()
+      pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+      const el = await mount()
+      if (kind === 'an uncached target') {
+        await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+        await openRedraft(el)
+      } else {
+        await open(el, { inReplyTo: bobPost() })
+      }
+      expect(pds.client.fetchStatus).toHaveBeenCalled()
+      statusCache.value = new Map()
+      const fireClose = holdClose(el)
+      activeUserKey.value = 'did:plc:other@bsky'
+      read.resolve(bobPost())
+      await settle(el)
+      expect(statusCache.value.has(PARENT.uri)).toBe(false)
+      fireClose()
+    })
+
+  it('an unknown delete whose rename storage refused: the fallback opens with the "still up" note (Codex R4-3)', async () => {
+    const pds = signInBluesky()
+    pds.records.set('3kold', { $type: 'app.bsky.feed.post', text: 'old', createdAt: 't' } as BlueskyPostRecord)
+    const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async () => null }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    let el: CaribouComposeDialog
+    try {
+      expect(await settleBlueskyRedraft(stored, 'unknown')).toBe(stored.slot)
+      el = await mount()
+      await open(el)
+      for (let i = 0; i < 5; i++) await settle(el)
+    } finally {
+      spy.mockRestore()
+    }
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect($(el, '[data-source-live]')).not.toBeNull()
+  })
+
+  it('a revealed fallback opened after storage is back: no recovery under it, the edit stays, and it is found after a reload (rule E, Fable P17)', async () => {
+    const pds = signInBluesky()
+    const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async () => null }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    try {
+      await settleBlueskyRedraft(stored, 'deleted')
+    } finally {
+      spy.mockRestore()
+    }
+    let el = await mount()
+    await open(el)
+    for (let i = 0; i < 5; i++) await settle(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect(toasts.map((t) => t.message).join(' ')).not.toContain('earlier visit')
+    await type(el, 'from the deleted post, plus an edit')
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    expect(storedDrafts(KEY).map(([slot, d]) => [slot, d.text])).toEqual([[stored.slot, 'from the deleted post, plus an edit']])
+    // A reload: the page-only reveal is gone; the stored exposed flag finds it.
+    _testOnlyForgetRevealed()
+    el.remove()
+    el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post, plus an edit')
+  })
+
+  it('a revealed fallback that is only opened is exposed for good: found after a reload with no edit (rule E)', async () => {
+    const pds = signInBluesky()
+    const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async () => null }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    try {
+      await settleBlueskyRedraft(stored, 'deleted')
+    } finally {
+      spy.mockRestore()
+    }
+    let el = await mount()
+    await open(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    _testOnlyForgetRevealed()
+    el.remove()
+    el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
   })
 
   it('a cleared mark stays cleared in the open draft: its next save does not bring it back (R3-N5)', async () => {

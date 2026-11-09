@@ -706,7 +706,8 @@ delete and redraft". The rule: nothing can be lost after the delete.
   1. A redraft of this post is stored already (a delete in doubt kept
      it): it opens instead, and nothing is read, uploaded or deleted.
      "You already have a redraft of this post, so it opens. The post was
-     not deleted again." (state README, rule D4).
+     not deleted. If it is still up, use Delete." (state README, rule
+     D4).
   2. The card reads the record, its images and its reply and quote
      targets. A failure: "Could not read this post, so it was not
      deleted." The record is not there: "This post is already deleted."
@@ -733,8 +734,7 @@ delete and redraft". The rule: nothing can be lost after the delete.
      detail). When it cannot open (another composer is open), a toast
      says "Your redraft is saved. It opens the next time you write a new
      post."
-- **Plain Delete** of a Bluesky post also removes a staged redraft of it
-  that a closed tab left (state README).
+- **Plain Delete** removes no draft (state README, rule E).
 - **The dialog** opens a stored Bluesky slot like a Bluesky new post: its
   refs, images, labels and rkey. It loads the slot's image bytes from
   IndexedDB for the previews and for blob recovery (after a close, a

@@ -11,7 +11,7 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, dropStagedRedraftsOf, findRedraftOf, forgetDeletedStatus,
+  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, findRedraftOf, forgetDeletedStatus,
   readBlueskyRedraft, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
   type BlueskyRedraftSource, type DraftSlot, type PreparedImage,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
@@ -910,10 +910,7 @@ export class CaribouStatusCard extends LitElement {
       confirmLabel: 'Delete',
     })
     if (!ok || !stillOwner(owner)) return
-    if (!await this.deleteAndMoveFocus(owner, post)) return
-    toast('info', 'Post deleted')
-    // A redraft a closed tab staged for this post is not wanted now.
-    if (post.bluesky) void dropStagedRedraftsOf(owner.client.userKey, post.bluesky.uri)
+    if (await this.deleteAndMoveFocus(owner, post)) toast('info', 'Post deleted')
   }
 
   // Deletes the post, then opens a new one with what it had. Boosts,
@@ -965,8 +962,8 @@ export class CaribouStatusCard extends LitElement {
       }
       window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
       toast('info', detail.opened
-        ? 'You already have a redraft of this post, so it opens. The post was not deleted again.'
-        : 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted again.')
+        ? 'You already have a redraft of this post, so it opens. The post was not deleted. If it is still up, use Delete.'
+        : 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted. If it is still up, use Delete.')
       return
     }
     this.redraftNote = 'Reading the post…'

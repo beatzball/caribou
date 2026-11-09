@@ -616,6 +616,10 @@ edit, so a redraft deletes the post and opens a new draft with what it
 had. Everything that can fail happens **before** the delete, and the
 draft is stored durably first. The order:
 
+0. **A stored redraft wins** (rule D4 below). First of all, before any
+   read: when a redraft of the same post is stored already
+   (`findRedraftOf`; a delete in doubt kept it), it opens. Nothing is
+   read, uploaded or deleted.
 1. **Read** (`readBlueskyRedraft`). The record from the reader's PDS
    (`blueskyGetOwnPost`), not the AppView copy: it has the text as typed,
    the exact refs and blob CIDs. Each image's bytes (`blueskyGetBlob`),
@@ -626,10 +630,7 @@ draft is stored durably first. The order:
    failed). Any read failing except a target's throws: nothing is
    deleted. The record not there throws `BlueskyRedraftGone`: the post is
    already deleted (the card drops it, app README).
-2. **Ask.** First, when a `redraft:` slot of the same post is stored
-   already (`findRedraftOf`; a delete in doubt kept it), that one wins:
-   it opens, and nothing is uploaded or deleted (rule D4 below). Then,
-   when the draft would be empty (no text, no image, no
+2. **Ask.** When the draft would be empty (no text, no image, no
    quote: a post that is only a link card, a video or a feed card,
    `redraftKeepsSomething`), there is no confirm and no delete: "Nothing
    in this post can be kept in a draft. Use Delete." Else the card's
@@ -657,7 +658,9 @@ draft is stored durably first. The order:
      and it throws. A post with no images does not use IndexedDB.
 4. **Delete** (`deleteOwnStatusOutcome`, rules above), then
    `settleBlueskyRedraft` follows the outcome:
-   - deleted → the draft is renamed to `redraft:<key>`; step 5.
+   - deleted → the draft is renamed to `redraft:<key>`; other unexposed
+     staged copies of the same post that no flow of this tab runs (a
+     closed tab's) are removed (rule E, case 3); step 5.
    - failed → the staged draft and its bytes are removed
      (`discardBlueskyRedraft`): the post is still there.
    - unknown → the draft is renamed to `redraft:<key>`, marked
@@ -671,8 +674,24 @@ draft is stored durably first. The order:
    (`findRedraftSlot`); a toast says so when the reader is still on that
    account.
 
+**Rule E: when Caribou removes a draft.** Only in these cases:
+
+1. The send that posted it.
+2. The reader discards it.
+3. An **unexposed** staged copy, removed by its **own** redraft flow:
+   its delete was refused, or a stored redraft of the same post won (D4),
+   or a redraft of the same post was deleted (the closed tab's copy).
+
+**Exposed** (`bluesky.exposed`, stored with the draft) is set the first
+time a staged copy can be seen: revealed as a fallback, opened, or
+renamed to `redraft:`. A `redraft:` slot is always exposed. An exposed
+draft is a normal draft for good, and only cases 1 and 2 remove it. No
+other cleanup exists: plain Delete removes no draft, and age removes no
+draft. A removal is revision-checked, and never touches a staged slot
+that a flow of this tab is running for.
+
 **Rule: a staged redraft is hidden until the delete is decided.** No
-composer opens a `staged:` slot (`findRedraftSlot` skips it), so the
+composer opens an unexposed `staged:` slot (`findRedraftSlot` skips it), so the
 reader cannot edit it while the delete runs. The outcome moves it or
 removes it. The removal is revision-checked, like every other draft
 write: only the revision the store wrote is removed. So nothing the
@@ -689,13 +708,17 @@ that renames the slot in place (`renameDraftIf`), never a second copy.
 The staged draft already holds `sourceMaybeLive: false`, so the rename
 only changes values. The image bytes are stored under `redraft:<key>`
 from the start (`draftFilesSlot` maps a `staged:` slot to it), so they do
-not move. If storage refuses even the rename, the `staged:` slot stays,
-and a new post in this page finds it (`revealDraftSlot`); its bytes load
-by their real key.
+not move. If storage refuses even the rename, the `staged:` slot stays
+and is revealed (`revealDraftSlot`): exposed, with the outcome's
+`sourceMaybeLive`. This page keeps both in memory, and stores them as
+soon as storage takes a write (the reveal tries at once; opening the
+slot stores them). A new post finds it (`findRedraftSlot` takes an
+exposed `staged:` slot), after a reload too once the flag is stored; its
+bytes load by their real key.
 
-**Rule D4: the stored redraft wins.** A `redraft:` slot of the same post
-(the same `bluesky.source`) may hold the reader's edits, so it is never
-replaced. The card looks for it before the confirm: found → it opens,
+**Rule D4: the stored redraft wins.** A stored redraft of the same post
+(the same `bluesky.source`: a `redraft:` slot, or an exposed `staged:`
+one) may hold the reader's edits, so it is never replaced. The card looks for it before the confirm: found → it opens,
 "You already have a redraft of this post…", and nothing is read,
 uploaded or deleted. Found later (the delete's outcome, or a closed
 tab's staged draft): the new staged copy and its bytes go, and the
@@ -707,15 +730,19 @@ delete in doubt) is checked when the dialog opens it
 (`checkRedraftSource`, `getRecord`): still up → the dialog shows a note;
 gone → the mark is cleared.
 
-**A tab closed during the delete.** Its draft stays in `staged:<key>`.
-When a new post opens and the account has staged drafts this tab is not
-deleting for (`hasOrphanStagedRedrafts`), `recoverStagedRedrafts` asks
-`getRecord` for each source: gone → the draft moves to `redraft:<key>`
-(it opens with the next new post, and a toast says so); still up → it
-stays hidden (the post still has the text), and is removed once it is
-older than a day (`stagedAt`, `STAGED_MAX_AGE_MS`); no answer → it is
-tried again next time. Plain Delete of its post removes it too
-(`dropStagedRedraftsOf`): the reader wanted the post gone.
+**A tab closed during the delete.** Its draft stays in `staged:<key>`,
+unexposed. When a new post opens and the account has unexposed staged
+drafts this tab is not deleting for (`hasOrphanStagedRedrafts`),
+`recoverStagedRedrafts` asks `getRecord` for each source:
+- gone → the draft moves to `redraft:<key>` (unless a stored redraft of
+  the post wins); it opens with the next new post, and a toast says so;
+- still up, staged less than a day ago (`stagedAt`, set by the store,
+  `STAGED_MAX_AGE_MS`) → it stays hidden: another tab may still be
+  deleting for it. It is asked about again next time;
+- still up and a day old → it moves to `redraft:<key>`, exposed, marked
+  `sourceMaybeLive`, so the dialog shows "The post this redraft came from
+  is still up…". The reader decides. It is not asked about again;
+- no answer → it is tried again next time.
 
 **Account switch.** Each step checks the account after its await
 (`ownerGeneration`), and before any write, caches included: a reply or
