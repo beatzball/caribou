@@ -109,6 +109,43 @@ link is one: avatar, name and acct are children of one `<a class="author">`.
 Build every profile path with `profilePath` from `components/_profile-path.ts`;
 it adds the instance host to a local acct.
 
+**A refused remote profile.** On `/@name@host` the server asks `host` with
+no token. Some servers refuse this server (often by its address) while they
+answer a reader's own server.
+
+1. **A refusal is not a dead end.** When `host` answers 401 or 403, and only
+   then (`isRefusal` in `server/lib/upstream-cache.ts`), the page data is
+   `{ kind: 'refused', host }`. Nothing from `host` is in it. A 404, a 429, a
+   5xx or a network error is an error page as before. The server keeps a
+   refusal for `REFUSAL_TTL_MS` (60 s) per URL, so it does not ask a refusing
+   host again on every visit.
+2. **Server render equals first client render.** Both are the loading shell
+   ("Loading…"), as for a deferred Bluesky page. The data comes after
+   hydration. The page cache never keeps a refused page.
+3. **Signed in (a Mastodon account active).** The page renders
+   `<caribou-profile>` with no `initial` and no `instance`. The profile looks
+   the account up by `name@host` on the reader's server. When that lookup is
+   a 404 (the server has not seen the account), it asks
+   `/api/v2/search?resolve=true&type=accounts`. It reads that server's
+   statuses by that server's own id, as on `/@me`. Those ids belong to the
+   reader's server, so the header and each card get that server as their
+   `instance`: their links and actions are the reader's server's. When
+   neither call finds the account, the profile says "Couldn't find", names
+   the handle and links to the account on `host`. Only a 404 means not
+   found. Any other failure of either call (a 500, a network error) says
+   "Couldn't load", with the handle, the same link and a Retry: the account
+   can exist. The "Older posts" link carries a home id
+   on a `host` address: opened in a new tab, the server sends that id to
+   `host`, is refused again, and the page shows page one (as on `/@me`).
+4. **A bare `/@name`.** The cookie host can refuse too. The reader's server
+   then looks up `name@<cookie host>`, never the bare name: it may have its
+   own account by that name. The links keep `/@name`.
+5. **Signed out, or no Mastodon account.** The page says that `host` does
+   not allow Caribou to show the profile, asks for a Mastodon account, and
+   links to the account's own page on `host`. The loading text and the
+   message are one live region; only its text changes.
+6. **Every error message names the handle.**
+
 **Links inside a post body** are the author's server HTML; never rewrite them.
 `<caribou-status-card>` has one delegated click on `.status-content`: a plain
 click on a mention that matches `status.mentions` opens `/@acct@host` in

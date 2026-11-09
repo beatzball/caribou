@@ -27,13 +27,27 @@ export class UpstreamError extends Error {
   }
 }
 
+// A server that will not answer this one (a 401 or a 403): often it blocks
+// the server's address or asks for a token for every read. The request
+// itself is fine, so a reader's own server may still answer it (app README,
+// "A refused remote profile").
+export function isRefusal(err: unknown): boolean {
+  return err instanceof UpstreamError && (err.status === 401 || err.status === 403)
+}
+
 const lru = new LRUCache<string, { value: unknown; expiresAt: number }>({ max: 5_000 })
 const inflight = new Map<string, Promise<unknown>>()
+// A refusal is kept this long, by URL (host and path): a host that refused
+// this server is not asked again on every visit, Back or tab click.
+export const REFUSAL_TTL_MS = 60_000
+const refusals = new LRUCache<string, { error: UpstreamError; expiresAt: number }>({ max: 1_000 })
 
 export async function cachedFetch<T>(url: string, ttlMs: number, init: Pick<RequestInit, 'redirect'> = {}): Promise<T> {
   const now = Date.now()
   const cached = lru.get(url)
   if (cached && cached.expiresAt > now) return cached.value as T
+  const refused = refusals.get(url)
+  if (refused && refused.expiresAt > now) throw refused.error
 
   const existing = inflight.get(url)
   if (existing) return existing as Promise<T>
@@ -41,8 +55,13 @@ export async function cachedFetch<T>(url: string, ttlMs: number, init: Pick<Requ
   const promise = (async () => {
     try {
       const res = await fetch(url, { ...init, headers: { accept: 'application/json' } })
-      // Never cached: an error or a 429 is asked again next time.
-      if (!res.ok) throw new UpstreamError(res.status, res.headers.get('retry-after'), url)
+      // Never cached: an error or a 429 is asked again next time. Only a
+      // refusal is kept, for REFUSAL_TTL_MS.
+      if (!res.ok) {
+        const error = new UpstreamError(res.status, res.headers.get('retry-after'), url)
+        if (isRefusal(error)) refusals.set(url, { error, expiresAt: Date.now() + REFUSAL_TTL_MS })
+        throw error
+      }
       const value = (await res.json()) as T
       lru.set(url, { value, expiresAt: Date.now() + ttlMs })
       return value

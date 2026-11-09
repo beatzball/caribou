@@ -90,12 +90,13 @@ const kindOf = (data: unknown) => (data as { kind?: unknown } | null)?.kind
 
 // An error page is never kept: the next visit should try again in full.
 // Nor is a deferred page (a Bluesky page the server was rate limited on,
-// #187): it is only a loading shell, and the browser reads its data. And
+// #187), or a refused one (a remote server refused this one): each is only
+// a loading shell, and the browser reads its data. And
 // a working page is never replaced by a page that is not: a slow network or
 // a lost cookie must not turn the reader's list into an error or a sign-in
 // prompt behind their back.
 function worthKeeping(next: unknown, kept: Snapshot | undefined): boolean {
-  if (next == null || kindOf(next) === 'error' || kindOf(next) === 'deferred') return false
+  if (next == null || kindOf(next) === 'error' || kindOf(next) === 'deferred' || kindOf(next) === 'refused') return false
   return !(kindOf(kept?.data) === 'ok' && kindOf(next) !== 'ok')
 }
 

@@ -87,4 +87,38 @@ describe('cachedFetch', () => {
     expect(TTL.BLUESKY_THREAD).toBe(30_000)
     expect(TTL.BLUESKY_LABEL_DEFS).toBeGreaterThan(30_000)
   })
+
+  describe('a refusal (401 or 403) is kept for REFUSAL_TTL_MS', () => {
+    const answer = (status: number) => new Response('{}', { status, headers: { 'content-type': 'application/json' } })
+
+    it.each([401, 403])('a %i is not asked again inside the window, and is asked again after it', async (status) => {
+      const mod = await import('../upstream-cache.js')
+      let now = 1_000_000
+      const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => answer(status))
+      const url = `https://refuses.example/r${status}`
+      await expect(cachedFetch(url, TTL.PROFILE)).rejects.toMatchObject({ status })
+      now += mod.REFUSAL_TTL_MS - 1
+      await expect(cachedFetch(url, TTL.PROFILE)).rejects.toMatchObject({ status })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      now += 2
+      await expect(cachedFetch(url, TTL.PROFILE)).rejects.toMatchObject({ status })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+      // Another path on the same host is its own entry.
+      await expect(cachedFetch('https://refuses.example/other', TTL.PROFILE)).rejects.toMatchObject({ status })
+      expect(fetchSpy).toHaveBeenCalledTimes(3)
+      expect(mod.REFUSAL_TTL_MS).toBe(60_000)
+      fetchSpy.mockRestore()
+      clock.mockRestore()
+    })
+
+    it.each([404, 429, 500])('a %i is asked again at once', async (status) => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => answer(status))
+      const url = `https://e.com/again${status}`
+      await expect(cachedFetch(url, TTL.PROFILE)).rejects.toMatchObject({ status })
+      await expect(cachedFetch(url, TTL.PROFILE)).rejects.toMatchObject({ status })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+      fetchSpy.mockRestore()
+    })
+  })
 })

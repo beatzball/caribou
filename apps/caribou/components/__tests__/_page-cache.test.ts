@@ -146,6 +146,12 @@ describe('enterWithCache', () => {
     expect(again.enter).toHaveBeenCalled()
   })
 
+  it('does not keep a refused page (a remote server refused this one): the revisit asks again in full', async () => {
+    await visit('/@carol@refuses.example', { kind: 'refused', host: 'refuses.example' })
+    const again = await visit('/@carol@refuses.example', { kind: 'ok' })
+    expect(again.enter).toHaveBeenCalled()
+  })
+
   it('keeps the good page when the background fetch brings an error or a sign-in prompt', async () => {
     await visit('/local', { kind: 'ok', n: 1 })
     for (const bad of [{ kind: 'error' }, { kind: 'auth-required' }]) {
