@@ -161,16 +161,19 @@ describe('fetchNotifications: filters, paging, seen hint', () => {
 
   it('says the newest time it read, skipped ones included, and whether any was unread', async () => {
     const { agent, client } = setup()
-    expect((await client.fetchNotifications()).bluesky).toEqual({ newestAt: '2026-11-07T12:00:00.000Z', unread: true })
+    expect((await client.fetchNotifications()).bluesky).toEqual({
+      newestAt: '2026-11-07T12:00:00.000Z', newestUri: 'at://did:plc:bob/app.bsky.feed.like/3lblike1', unread: true,
+    })
     // The newest one is a reason Caribou skips: its time still counts.
     agent.listNotifications.mockResolvedValue({ data: { notifications: [
       raw(0, 'verified', { isRead: false }), raw(1, 'follow'),
     ] } })
     const res = await client.fetchNotifications()
     expect(res).toHaveLength(1)
-    expect(res.bluesky).toEqual({ newestAt: raw(0).indexedAt, unread: true })
+    // The raw top is the skipped one: a new one there changes the anchor.
+    expect(res.bluesky).toEqual({ newestAt: raw(0).indexedAt, newestUri: raw(0).uri, unread: true })
     agent.listNotifications.mockResolvedValue({ data: { notifications: [] } })
-    expect((await client.fetchNotifications()).bluesky).toEqual({ newestAt: null, unread: false })
+    expect((await client.fetchNotifications()).bluesky).toEqual({ newestAt: null, newestUri: null, unread: false })
   })
 })
 

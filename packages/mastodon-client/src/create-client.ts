@@ -270,7 +270,8 @@ export type AccountPage = Page<Account>
  * was unread (the seen hint for `updateSeen`).
  */
 export type NotificationPage = Page<Notification> & {
-  bluesky?: { newestAt: string | null; unread: boolean }
+  /** `newestUri`: the URI of the notification at `newestAt` (the raw top). */
+  bluesky?: { newestAt: string | null; newestUri?: string | null; unread: boolean }
 }
 
 // Mastodon ids are numbers in a string; a longer one is newer. Comparing

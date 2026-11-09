@@ -55,6 +55,8 @@ export interface NotificationsStore {
 
 export interface BlueskySeenHint {
   newestAt: string | null
+  /** The URI at `newestAt`: with it, the raw top the list has read. */
+  newestUri?: string | null
   unread: boolean
 }
 
@@ -102,7 +104,9 @@ function laterHint(a: BlueskySeenHint | null, b: BlueskySeenHint | undefined): B
   if (!b) return a
   if (!a) return { ...b }
   const newer = b.newestAt !== null && (a.newestAt === null || Date.parse(b.newestAt) > Date.parse(a.newestAt))
-  return { newestAt: newer ? b.newestAt : a.newestAt, unread: a.unread || b.unread }
+  return newer
+    ? { newestAt: b.newestAt, newestUri: b.newestUri ?? null, unread: a.unread || b.unread }
+    : { newestAt: a.newestAt, newestUri: a.newestUri ?? null, unread: a.unread || b.unread }
 }
 
 const EMPTY_PAGE = (): NotificationPage => Object.assign([] as Notification[], { nextCursor: null })
@@ -238,10 +242,17 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   // a first page with rows may replace the list: an empty one must not
   // bring back a cursor the list has already read past.
   let firstApplied = false
+  // Bluesky: the raw top of the last first page read (time and URI,
+  // skipped reasons included). An empty first page whose raw top changed has
+  // new notifications behind it: its cursor is used.
+  let rawTop: string | null = null
+  const rawTopOf = (p: NotificationPage): string | null =>
+    p.bluesky?.newestAt ? `${p.bluesky.newestAt}\n${p.bluesky.newestUri ?? ''}` : null
 
   // The first page replaces the list. Only the client's cursor ends it.
   function applyFirst(first: Awaited<ReturnType<typeof fetchFirst>>, source: CopySource) {
     firstApplied = true
+    rawTop = rawTopOf(first.page)
     bluesky.value = first.bluesky
     seen.value = first.bluesky ? laterHint(null, first.page.bluesky) : null
     if (first.grouped) {
@@ -355,7 +366,8 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
         if (!current(mine, owner)) return
         if ((serverGroups.value?.length ?? 0) > 0 || items.value.length > 0) return
         const rows = firstPage.grouped ? firstPage.grouped.notificationGroups.length : firstPage.page.length
-        if (firstApplied && rows === 0) {
+        const sameTop = rawTopOf(firstPage.page) === rawTop
+        if (firstApplied && rows === 0 && sameTop) {
           if (firstPage.bluesky) seen.value = laterHint(seen.value, firstPage.page.bluesky)
         } else {
           restart()

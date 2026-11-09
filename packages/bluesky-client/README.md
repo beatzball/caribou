@@ -399,9 +399,10 @@ in `src/client.ts` reads a page. Both are server-safe.
 - **Paging:** `nextCursor` is the AppView `cursor`, passed back as it came.
   An empty AppView page ends the list (`null`). A page whose every
   notification was skipped is empty **with** its cursor: it is not the end.
-- **Seen hint:** each page has `bluesky: { newestAt, unread }`: the newest
-  `indexedAt` on the AppView page, skipped ones included, and whether any
-  notification on it has `isRead: false`. The store uses it for
+- **Seen hint:** each page has `bluesky: { newestAt, newestUri, unread }`:
+  the newest `indexedAt` on the AppView page, skipped ones included, the URI
+  of that notification (the raw top), and whether any notification on it
+  has `isRead: false`. The store uses it for
   `updateSeen` (`packages/state` README, "Notifications").
 - **Catch-up (`sinceId`, `sinceAt`):** no `since_id` here either. As for the
   timeline (seam 7), the client pages from the top, at most 3 pages of 50,
@@ -410,7 +411,10 @@ in `src/client.ts` reads a page. Both are server-safe.
   time). The time matters: an unlike or an unfollow deletes the anchor, and
   without it a small account would read its whole list on every poll, and a
   large one would see a false gap. One at the same time as the anchor is
-  read; the store drops the ones it holds. Matched before any skip. Met: the
+  read; the store drops the ones it holds. The time stop trusts the AppView
+  to send the list newest first by `indexedAt`, as it does: one newer row
+  below an older one would not be read until a reload. Matched before any
+  skip. Met: the
   answer is everything above it and `nextCursor` is `null`. Not met:
   everything it read, and the cursor after the last page (`null` when the
   list ended). The store calls that a gap.

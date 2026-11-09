@@ -10,6 +10,7 @@ import '../caribou-notifications.js'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 import type { CaribouNotifications } from '../caribou-notifications.js'
+import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
 
 // The notifications page for a Bluesky account (state README,
 // "Notifications"): grouped by the store, links without a host, and
@@ -18,6 +19,18 @@ import type { CaribouNotifications } from '../caribou-notifications.js'
 const CAPS = { network: 'bluesky', readLagMs: 60_000, edit: false } as unknown as Capabilities
 const alice = blueskyUserKey('did:plc:alice')
 const POST = 'at://did:plc:alice/app.bsky.feed.post/p1'
+
+// Bluesky's own labeler, the one every reader subscribes to.
+const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
+
+// The reader veil's inputs, loaded for Alice (README, "Bluesky views").
+function readerLoaded() {
+  setBlueskyReader({
+    userKey: alice,
+    prefs: { adultContentEnabled: false, labels: {}, labelers: [], mutedWords: [], hiddenPosts: [] },
+    labelDefs: { [BSKY_LABELER]: [] },
+  })
+}
 
 const CONTEXTS = ['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView']
 type Ui = { filter: boolean; blur: boolean; alert: boolean; inform: boolean; noOverride: boolean; reasons: { label: string; source: string; name: string }[] }
@@ -28,7 +41,8 @@ const CLEAN: Ui = { filter: false, blur: false, alert: false, inform: false, noO
 function decision(over: Partial<Record<string, Partial<Ui>>> = {}) {
   return {
     contexts: Object.fromEntries(CONTEXTS.map((c) => [c, { ...CLEAN, ...over[c] }])),
-    labelersCovered: [],
+    // Fetched as the reader with Bluesky's labeler covered: settled.
+    labelersCovered: [BSKY_LABELER],
   }
 }
 
@@ -96,9 +110,11 @@ async function mount(): Promise<CaribouNotifications> {
   const el = document.createElement('caribou-notifications') as CaribouNotifications
   document.body.appendChild(el)
   await vi.waitFor(() => expect(fetchNotifications).toHaveBeenCalled())
-  await flush()
-  await el.updateComplete
-  await flush()
+  await _testOnlyVeilLoaded()
+  for (let i = 0; i < 3; i++) {
+    await flush()
+    await el.updateComplete
+  }
   return el
 }
 
@@ -107,6 +123,8 @@ const lineText = (li: Element) => li.querySelector('.line > span')?.textContent?
 
 beforeEach(() => {
   setBlueskyDriver(driver)
+  _testOnlyResetBlueskyVeil()
+  readerLoaded()
   resetBlueskySeen()
   fetchNotifications.mockReset()
   updateSeen.mockReset()
@@ -260,23 +278,29 @@ describe('caribou-notifications, Bluesky: authors, provenance, Show all, an empt
   it('a Mastodon reader gets no live buttons on a Bluesky post from the list', async () => {
     fetchNotifications.mockResolvedValue(page([n(1, 'mention', '2026-11-07T12:00:00.000Z')], { newestAt: '2026-11-07T12:00:00.000Z', unread: false }))
     const el = await mount()
-    await vi.waitFor(() => expect(statusCache.value.get(POST)?.bluesky).toBeTruthy())
+    await vi.waitFor(() => expect(statusCache.value.get(POST)?.bluesky?.viewerOf).toBe(alice))
     el.remove()
-    // A Mastodon account becomes active; the cached Bluesky post is shown.
+    // A Mastodon account becomes active. It sees the post as a public copy
+    // (a decision for no reader), so the card is not covered and draws its
+    // actions; they must not be live.
     const masto = toUserKey('carol', 'example.social')
     users.value = new Map([...users.value, [masto, {
       userKey: masto, server: 'example.social', token: 'T', vapidKey: '', generation: 'M', account: null, createdAt: 1,
     }]])
     activeUserKey.value = masto
+    const cached = statusCache.value.get(POST)!
+    // Its own public decision (made for no reader), as page data has.
+    const publicCopy = { ...cached, bluesky: { ...cached.bluesky!, viewerOf: null, moderation: decision() as never } }
+    statusCache.value = new Map([...statusCache.value, [POST, publicCopy]])
     const card = document.createElement('caribou-status-card') as CaribouStatusCard
-    card.status = statusCache.value.get(POST)!
+    card.status = publicCopy
+    card.instance = 'example.social'
     document.body.appendChild(card)
-    for (let i = 0; i < 4; i++) { await flush(); await card.updateComplete }
-    // The copy's decision is the Bluesky reader's, so the card covers it
-    // (fail closed). Whatever it shows, no action is live, and a click
-    // reaches no client.
+    for (let i = 0; i < 4; i++) { await _testOnlyVeilLoaded(); await flush(); await card.updateComplete }
+    expect(card.shadowRoot!.querySelector('.cover')).toBeNull()
     const favourite = vi.spyOn(activeClient.value!, 'favourite')
     const buttons = [...card.shadowRoot!.querySelectorAll('.actions caribou-icon-button')] as (HTMLElement & { updateComplete: Promise<unknown> })[]
+    expect(buttons.length).toBeGreaterThanOrEqual(4)
     for (const b of buttons) {
       await b.updateComplete
       const inner = b.shadowRoot!.querySelector('button')!
@@ -318,6 +342,128 @@ describe('caribou-notifications, Bluesky: reasons named like Object members, thr
       expect(el.shadowRoot!.querySelector('[role="alert"]')).toBeNull()
     } finally {
       driver.restore = restore
+    }
+  })
+})
+
+describe('caribou-notifications, Bluesky: the veil, notices and focus', () => {
+  const ended = { newestAt: null, unread: false }
+
+  it('an author whose decision is not settled yet is covered, with a blurred face', async () => {
+    _testOnlyResetBlueskyVeil()
+    // No reader loaded: nothing can be settled.
+    fetchNotifications.mockResolvedValue(page([n(1, 'follow', '2026-11-07T12:00:00.000Z', BOB)], ended))
+    const el = await mount()
+    expect(lineText(rows(el)[0]!)).toBe('Someone (checking your moderation settings) followed you')
+    expect(el.shadowRoot!.innerHTML).not.toContain('bob.example.com')
+    // Once the reader loads, the name shows.
+    readerLoaded()
+    await vi.waitFor(() => expect(lineText(rows(el)[0]!)).toBe('Bob followed you'))
+  })
+
+  it('an author with no decision is covered (fail closed), and a covered face is blurred', async () => {
+    const NONE = { ...account('did:plc:none', 'none.example.com', 'None'), bluesky: { did: 'did:plc:none', handleInvalid: false } }
+    fetchNotifications.mockResolvedValue(page([
+      n(1, 'favourite', '2026-11-07T12:00:00.000Z', NONE as never),
+      n(2, 'favourite', '2026-11-07T11:00:00.000Z', CAROL),
+    ], ended))
+    const el = await mount()
+    expect(lineText(rows(el)[0]!)).toBe('Someone (Content warning (moderation failed)) and Carol liked your post')
+    const faces = [...rows(el)[0]!.querySelectorAll('.avatars img')]
+    expect(faces.map((img) => img.classList.contains('blurred'))).toEqual([true, false])
+  })
+
+  it('a covered author\'s face is blurred, even when its avatar decision is clean', async () => {
+    const COVERED = account('did:plc:cov', 'cov.example.com', 'Covered', decision({
+      contentList: { blur: true, reasons: [{ label: 'spoiler', source: 'did:plc:labeler', name: 'Spoiler' }] },
+    }))
+    fetchNotifications.mockResolvedValue(page([
+      n(1, 'favourite', '2026-11-07T12:00:00.000Z', COVERED),
+      n(2, 'favourite', '2026-11-07T11:00:00.000Z', CAROL),
+    ], ended))
+    const el = await mount()
+    const faces = [...rows(el)[0]!.querySelectorAll('.avatars img')]
+    expect(faces.map((img) => img.classList.contains('blurred'))).toEqual([true, false])
+  })
+
+  it('a list whose every author is filtered says it is empty, from what is left', async () => {
+    const HIDDEN = account('did:plc:hid', 'hid.example.com', 'Hidden', decision({ contentList: { filter: true } }))
+    fetchNotifications.mockResolvedValue(page([n(1, 'follow', '2026-11-07T12:00:00.000Z', HIDDEN)], ended))
+    const el = await mount()
+    expect(rows(el)).toHaveLength(0)
+    expect(el.shadowRoot!.querySelector('ul.rows')).toBeNull()
+    expect(el.shadowRoot!.querySelector('.notice')?.textContent).toContain('No notifications yet.')
+  })
+
+  it('a list with rows: Load older that ends it shows "No older notifications." and focuses it', async () => {
+    fetchNotifications.mockImplementation(async (p) => p?.cursor
+      ? page([], ended, null)
+      : page([n(1, 'follow', '2026-11-07T12:00:00.000Z', BOB)], ended, 'more'))
+    const el = await mount()
+    const more = el.shadowRoot!.querySelector('.more caribou-button') as HTMLElement
+    more.focus()
+    more.click()
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('.notice.end')).not.toBeNull())
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('.notice.end')!.textContent).toBe('No older notifications.')
+    expect(el.shadowRoot!.activeElement).toBe(el.shadowRoot!.querySelector('.notice.end'))
+  })
+
+  it('focus the reader moved while Load older was out stays where it is', async () => {
+    let release!: (p: NotificationPage) => void
+    fetchNotifications.mockImplementation(async (p) => p?.cursor
+      ? new Promise<NotificationPage>((r) => { release = r })
+      : page([n(1, 'follow', '2026-11-07T12:00:00.000Z', BOB)], ended, 'more'))
+    const el = await mount()
+    const more = el.shadowRoot!.querySelector('.more caribou-button') as HTMLElement
+    more.focus()
+    more.click()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const link = rows(el)[0]!.querySelector('.line a') as HTMLAnchorElement
+    link.focus()
+    release(page([], ended, null))
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('.notice.end')).not.toBeNull())
+    await el.updateComplete
+    await flush()
+    expect(el.shadowRoot!.activeElement).toBe(link)
+  })
+
+  it('Retry starts over: the end notice from an earlier Load older goes', async () => {
+    let fail = false
+    fetchNotifications.mockImplementation(async (p) => {
+      if (fail) throw new Error('offline')
+      return p?.cursor ? page([], ended, null) : page([], ended, 'more')
+    })
+    const el = await mount()
+    ;(el.shadowRoot!.querySelector('.more caribou-button') as HTMLElement).click()
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('.notice.end')).not.toBeNull())
+    // A load fails: the list shows Retry.
+    fail = true
+    ;(el as unknown as { onRetry: () => void }).onRetry()
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('[role="alert"] caribou-button')).not.toBeNull())
+    fail = false
+    fetchNotifications.mockImplementation(async () => page([], ended, null))
+    ;(el.shadowRoot!.querySelector('[role="alert"] caribou-button') as HTMLElement).click()
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('[role="alert"]')).toBeNull())
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('.notice')?.textContent).toContain('No notifications yet.')
+    expect(el.shadowRoot!.querySelector('.notice.end')).toBeNull()
+  })
+
+  it('a real poll with nothing new does not send updateSeen again', async () => {
+    const pollMs = (customElements.get('caribou-notifications') as unknown as { pollMs: number }).pollMs
+    ;(customElements.get('caribou-notifications') as unknown as { pollMs: number }).pollMs = 20
+    try {
+      fetchNotifications.mockImplementation(async (p) => p?.sinceId
+        ? page([], { newestAt: null, unread: false }, null)
+        : page([n(1, 'mention', '2026-11-07T12:00:00.000Z')], { newestAt: '2026-11-07T12:00:00.000Z', unread: true }))
+      await mount()
+      await vi.waitFor(() => expect(updateSeen).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(fetchNotifications.mock.calls.filter(([p]) => p?.sinceId).length).toBeGreaterThanOrEqual(2))
+      await flush()
+      expect(updateSeen).toHaveBeenCalledTimes(1)
+    } finally {
+      ;(customElements.get('caribou-notifications') as unknown as { pollMs: number }).pollMs = pollMs
     }
   })
 })

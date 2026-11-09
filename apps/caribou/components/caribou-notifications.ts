@@ -10,7 +10,7 @@ import {
   type NotificationFilter, type NotificationGroup, type NotificationsStore,
 } from '@beatzball/caribou-state'
 import { accountPath } from './_profile-path.js'
-import { coverNote, uiOf, UNREADABLE } from './_bluesky-moderation.js'
+import { blueskyDecisionSettled, coverNote, uiOf, UNREADABLE } from './_bluesky-moderation.js'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
@@ -33,6 +33,9 @@ const LINES: Partial<Record<string, { icon: IconName; text: string }>> = {
   poll:           { icon: 'chartColumn', text: 'ran a poll that has ended' },
   update:         { icon: 'squarePen',   text: 'edited a post you interacted with' },
 }
+
+// An author whose decision is not settled yet (the reader veil).
+const CHECKING_AUTHOR = 'checking your moderation settings'
 
 // Bluesky says like and repost, not favourite and boost.
 const BLUESKY_LINES: Partial<Record<string, { icon: IconName; text: string }>> = {
@@ -129,6 +132,10 @@ export class CaribouNotifications extends LitElement {
   // A Load older click ended the list: the end notice shows and takes focus,
   // so focus does not fall to the body with the removed button.
   @state() private endedHere = false
+  // Bumped when the reader veil's inputs change (reader, prefs, label
+  // definitions, the check): author decisions are judged again.
+  @state() private veilTick = 0
+  private disposeVeil: (() => void) | null = null
 
   private store: NotificationsStore | null = null
   private disposeBindings: (() => void) | null = null
@@ -168,6 +175,12 @@ export class CaribouNotifications extends LitElement {
       this.whoRequest.clear()
       untracked(() => this.open(this.filter))
     })
+    // `blueskyDecisionSettled` reads the veil's signals; following it here
+    // renders the authors again when any of them changes.
+    this.disposeVeil = effect(() => {
+      blueskyDecisionSettled(null, activeClient.value)
+      untracked(() => { this.veilTick++ })
+    })
     this.disposeSilenced = effect(() => {
       const prefix = `${this.session.value?.userKey ?? ''} `
       const ids = new Set<string>()
@@ -185,6 +198,8 @@ export class CaribouNotifications extends LitElement {
     this.disposeSession = null
     this.disposeSilenced?.()
     this.disposeSilenced = null
+    this.disposeVeil?.()
+    this.disposeVeil = null
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.close()
     super.disconnectedCallback()
@@ -291,15 +306,31 @@ export class CaribouNotifications extends LitElement {
 
   private onRetry = () => {
     const store = this.store
+    this.endedHere = false
     if (store) void store.load().then(() => this.markSeen(store))
   }
+
+  // Focus is still the reader's "Load older" (or fell to the body when the
+  // button went): only then may the end notice take it.
+  private focusIsFree(): boolean {
+    const outer = document.activeElement
+    if (outer === null || outer === document.body) return true
+    if (outer !== this) return false
+    const inner = this.shadowRoot?.activeElement ?? null
+    return inner === null || inner.closest('.more') !== null
+  }
+
   private onMore = async () => {
     const store = this.store
     if (!store) return
     await store.loadMore()
-    if (store !== this.store || store.hasMore.peek()) return
+    if (store !== this.store || store.hasMore.peek() || !this.focusIsFree()) {
+      if (store === this.store && !store.hasMore.peek()) this.endedHere = true
+      return
+    }
     this.endedHere = true
     await this.updateComplete
+    if (!this.focusIsFree()) return
     ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
   }
 
@@ -317,9 +348,19 @@ export class CaribouNotifications extends LitElement {
   // (spec 7.4): `contentList` filters the author out or covers the name,
   // `avatar` blurs the face. No decision fails closed. A Mastodon account
   // has none of this.
+  // The decision counts only once it is settled for this reader, as on the
+  // card and the profile header (`blueskyDecisionSettled`: made for this
+  // reader, every subscribed labeler covered). Until then the author is
+  // covered. The list belongs to one sign-in, so its decisions are that
+  // reader's.
   private authorUi(a: Account): { filter: boolean; cover: string | null; blurAvatar: boolean } {
     if (!a.bluesky) return { filter: false, cover: null, blurAvatar: false }
+    void this.veilTick
     const mod = a.bluesky.moderation ?? null
+    const reader = this.session.peek()?.userKey ?? null
+    if (mod && !blueskyDecisionSettled({ viewerOf: reader, moderation: mod }, activeClient.peek())) {
+      return { filter: false, cover: CHECKING_AUTHOR, blurAvatar: true }
+    }
     const list = mod ? uiOf(mod, 'contentList')! : UNREADABLE
     const avatar = mod ? uiOf(mod, 'avatar')! : UNREADABLE
     return { filter: list.filter, cover: list.blur ? coverNote(list) : null, blurAvatar: avatar.blur }
@@ -498,17 +539,22 @@ export class CaribouNotifications extends LitElement {
     // An empty page with a cursor is not the end (a Bluesky page of only
     // skipped notifications): older ones are still in reach.
     const empty = FILTERS.find((f) => f.value === this.filter)!.empty
-    if (this.items.length === 0 && !this.hasMore) {
-      return html`<div class=${this.endedHere ? 'notice end' : 'notice'} tabindex=${this.endedHere ? '-1' : nothing}>${empty}</div>`
-    }
-    // Muted, blocked and (Bluesky) filtered authors leave their rows.
+    // Muted, blocked and (Bluesky) filtered authors leave their rows. The
+    // notices go by what is left.
     const hidden = new Set(this.silenced)
     for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
+    const shown = withoutSilencedAccounts(this.items, hidden)
+    if (shown.length === 0 && !this.hasMore) {
+      return html`<div>
+        ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
+        <div class=${this.endedHere ? 'notice end' : 'notice'} tabindex=${this.endedHere ? '-1' : nothing}>${empty}</div>
+      </div>`
+    }
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      ${this.items.length === 0
+      ${shown.length === 0
         ? html`<div class="notice">Nothing to show here yet. Older notifications may follow.</div>`
-        : html`<ul class="rows">${repeat(withoutSilencedAccounts(this.items, hidden), (g) => g.key, (g) => this.renderItem(g))}</ul>`}
+        : html`<ul class="rows">${repeat(shown, (g) => g.key, (g) => this.renderItem(g))}</ul>`}
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
         : this.endedHere ? html`<div class="notice end" tabindex="-1">No older notifications.</div>` : nothing}

@@ -426,12 +426,19 @@ whose first page is empty with a cursor says "Nothing to show here yet.
 Older notifications may follow." with "Load older", not "No notifications
 yet": only a null cursor ends a list. When a "Load older" click ends the
 list, focus moves to the end notice ("No notifications yet." or "No older
-notifications."), not to the body. Each Bluesky author gets the reader's
-decision (spec 7.4): `contentList` filter → the author leaves the row (a
-row with nobody left goes, as for a mute); `contentList` blur → "Someone
-(Content warning: …)" with no link and a blurred face; `avatar` blur → a
-blurred face. An author with no decision is covered (fail closed). A
-mention's post is moderated by its card, as everywhere.
+notifications."), not to the body, but only when focus is still on "Load
+older" (or fell to the body) after the answer and the render: a reader who
+moved on keeps their focus. This end notice is for Mastodon lists too.
+Retry starts over and drops it. The notices go by the rows left after
+mutes, blocks and filters. Each Bluesky author gets the reader's decision
+(spec 7.4), and only once it is settled for that reader, as on the card
+and the profile header (`blueskyDecisionSettled`); until then the author
+is "Someone (checking your moderation settings)" with a blurred face.
+Settled: `contentList` filter → the author leaves the row (a row with
+nobody left goes, as for a mute); `contentList` blur → "Someone (Content
+warning: …)" with no link and a blurred face; `avatar` blur → a blurred
+face. An author with no decision is covered (fail closed). A mention's post
+is moderated by its card, as everywhere.
 `tests/e2e/bluesky-notifications.spec.ts` runs it against the fixture PDS.
 
 **The changelog is part of the build.** `scripts/write-changelog.mjs`

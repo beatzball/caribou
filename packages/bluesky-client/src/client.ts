@@ -264,15 +264,19 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
   // The seen hint: the newest time on the AppView's pages, skipped ones
   // included, and whether any was unread.
-  function seenHint(raw: readonly NotificationView[]): { newestAt: string | null; unread: boolean } {
+  function seenHint(raw: readonly NotificationView[]): { newestAt: string | null; newestUri: string | null; unread: boolean } {
     let newestAt: string | null = null
+    let newestUri: string | null = null
     let unread = false
     for (const n of raw) {
       const at = typeof n?.indexedAt === 'string' && !Number.isNaN(Date.parse(n.indexedAt)) ? n.indexedAt : null
-      if (at && (newestAt === null || Date.parse(at) > Date.parse(newestAt))) newestAt = at
+      if (at && (newestAt === null || Date.parse(at) > Date.parse(newestAt))) {
+        newestAt = at
+        newestUri = typeof n.uri === 'string' ? n.uri : null
+      }
       if (n?.isRead === false) unread = true
     }
-    return { newestAt, unread }
+    return { newestAt, newestUri, unread }
   }
 
   async function notificationPage(raw: readonly NotificationView[], cursor: string | null): Promise<NotificationPage> {

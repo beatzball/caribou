@@ -421,8 +421,15 @@ made before it (a "Load older" in flight) writes nothing: no old rows, no
 old cursor. The request it drops no longer holds the list as loading.
 
 **A poll on an empty list** loads the first page only until a first page
-has come in. After that, an empty first page changes nothing: it must not
-bring back "Load older" for a list that has already read to its end.
+has come in. After that, an empty first page keeps the list as it is only
+when its **raw top** is the one the list last read: the newest `indexedAt`
+and its URI on the AppView page, skipped reasons included (`seen.newestAt`
+and `seen.newestUri`). Then nothing new came in, and "Load older" does not
+come back for a list that has already read to its end. When the raw top
+changed, new notifications arrived, maybe all of kinds Caribou skips, with
+shown ones behind them: the page replaces the list (a new generation) and
+its cursor is used, so "Load older" reaches them. Mastodon pages have no raw
+top; an empty Mastodon page has no cursor anyway.
 
 **Unread badge.** `unreadNotificationCount` is the one count the nav rail
 reads. `startUnreadNotifications()` follows the active session (for

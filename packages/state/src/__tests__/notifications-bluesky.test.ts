@@ -194,7 +194,7 @@ describe('the store: Bluesky', () => {
     expect(store.groups.value.map((g) => `${g.type}:${g.count}`)).toEqual(['mention:1', 'favourite:2'])
     // The cached post keeps its network, its viewer and its moderation.
     expect(statusCache.value.get(POST)?.bluesky).toMatchObject({ uri: POST, viewerOf: alice, moderation: MODERATION })
-    expect(store.seen.value).toEqual({ newestAt: '2026-11-07T12:00:00.000Z', unread: true })
+    expect(store.seen.value).toMatchObject({ newestAt: '2026-11-07T12:00:00.000Z', unread: true })
   })
 
   it('a poll asks from the newest one shown and merges what is above it', async () => {
@@ -214,7 +214,7 @@ describe('the store: Bluesky', () => {
       types: [], sinceId: n(2, 'favourite', '', 'did:plc:zzz').id, sinceAt: '2026-11-07T12:00:00.000Z',
     })
     expect(store.groups.value.map((g) => [g.key, g.count])).toEqual([[likeKey, 2], [expect.stringMatching(/^ungrouped-/), 1]])
-    expect(store.seen.value).toEqual({ newestAt: '2026-11-07T13:00:00.000Z', unread: true })
+    expect(store.seen.value).toMatchObject({ newestAt: '2026-11-07T13:00:00.000Z', unread: true })
     // The poll does not touch Load older.
     expect(store.hasMore.value).toBe(true)
   })
@@ -267,6 +267,66 @@ describe('the store: Bluesky', () => {
     expect(store.hasMore.value).toBe(false)
   })
 
+  it('an ended all-skipped list: a changed raw top brings Load older back, and it reaches the follow on page 2', async () => {
+    const OLD = { newestAt: '2026-11-07T08:00:00.000Z', newestUri: 'at://did:plc:bob/app.bsky.feed.like/skipped-old', unread: false }
+    const NEW = { newestAt: '2026-11-08T08:00:00.000Z', newestUri: 'at://did:plc:bob/app.bsky.feed.like/skipped-new', unread: true }
+    let changed = false
+    const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams) => {
+      if (p?.cursor === 'new-older') return page([n(1, 'follow', '2026-11-08T07:00:00.000Z')], null)
+      // Page 1 is only reasons Caribou skips.
+      return changed ? page([], 'new-older', NEW) : page([], null, OLD)
+    })
+    const { client } = bskyClient(fetchNotifications)
+    const store = createNotificationsStore({ clientSource: () => client })
+    await store.load()
+    expect(store.hasMore.value).toBe(false)
+    // The same raw top again: the list stays ended.
+    await store.poll()
+    expect(store.hasMore.value).toBe(false)
+    changed = true
+    await store.poll()
+    expect(store.hasMore.value).toBe(true)
+    await store.loadMore()
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], cursor: 'new-older' })
+    expect(store.groups.value.map((g) => g.type)).toEqual(['follow'])
+  })
+
+  it('a poll that fills an empty list starts a new generation: an older Load older answer writes nothing', async () => {
+    let release!: (p: NotificationPage) => void
+    let filled = false
+    const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams): Promise<NotificationPage> => {
+      if (p?.cursor === 'c1') return new Promise((r) => { release = r })
+      return filled ? page([n(5, 'mention', '2026-11-08T10:00:00.000Z')], 'fresh') : page([], 'c1')
+    })
+    const { client } = bskyClient(fetchNotifications)
+    const store = createNotificationsStore({ clientSource: () => client })
+    await store.load()
+    const older = store.loadMore()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    filled = true
+    await store.poll()
+    release(page([n(0, 'mention', '2026-11-01T08:00:00.000Z')], 'stale'))
+    await older
+    expect(store.groups.value.map((g) => g.newestId)).toEqual([n(5, 'mention', '').id])
+    await store.loadMore()
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], cursor: 'fresh' })
+  })
+
+  it('load() starts over: after it, a poll on an empty list loads the first page again', async () => {
+    const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams) => p?.cursor ? page([], null) : page([], 'c1'))
+    const { client } = bskyClient(fetchNotifications)
+    const store = createNotificationsStore({ clientSource: () => client })
+    await store.load()
+    await store.loadMore()
+    expect(store.hasMore.value).toBe(false)
+    // A failed load leaves no first page in: the poll fills it in.
+    fetchNotifications.mockImplementationOnce(async () => { throw new Error('offline') })
+    await store.load()
+    fetchNotifications.mockImplementation(async (p?: FetchNotificationsParams) => p?.cursor ? page([], null) : page([], 'c2'))
+    await store.poll()
+    expect(store.hasMore.value).toBe(true)
+  })
+
   it('a poll whose catch-up met nothing new keeps the rows Load older brought in', async () => {
     const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams) => {
       if (p?.sinceId) return page([], null)
@@ -289,7 +349,7 @@ describe('the store: Bluesky', () => {
     const store = createNotificationsStore({ clientSource: () => client })
     await store.load()
     await store.loadMore()
-    expect(store.seen.value).toEqual({ newestAt: '2026-11-07T08:00:00.000Z', unread: false })
+    expect(store.seen.value).toMatchObject({ newestAt: '2026-11-07T08:00:00.000Z', unread: false })
   })
 
   it('a Mastodon list has no seen hint', async () => {
