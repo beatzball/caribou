@@ -4,7 +4,7 @@ import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
-  pollOptions, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS,
+  pollOptions, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
 } from '@beatzball/caribou-state'
@@ -21,7 +21,6 @@ import { draftMediaOf, POLL_EDIT_REFUSED } from './_redraft.js'
 import './caribou-menu.js'
 import { loadBluesky, type BlueskyBrowser } from './_bluesky.js'
 import { fitImage, type FitResult } from './_image-fit.js'
-import { spaClick } from './_spa-link.js'
 
 /**
  * What `caribou:compose` asks for: a new post, a reply to `inReplyTo`, an
@@ -49,14 +48,17 @@ const QUOTE_GONE = 'The post you quoted was deleted.'
 /** A reader-facing reason an image was not added. */
 function fitRefusal(name: string, reason: Exclude<FitResult, { ok: true }>['reason']): string {
   if (reason === 'not-image') return `${name} is not an image. A Bluesky post takes images only.`
-  if (reason === 'unreadable') return `${name} could not be read, and it is over 2 MB.`
+  if (reason === 'unreadable') return `${name} could not be read as an image.`
   return `${name} is too large, even made smaller. Pick an image under 2 MB.`
 }
 
-/** The newest copy of a post this page has, for its latest viewer flags. */
-function newestCopy(post: Status): Status {
-  return statusCache.peek().get(post.id) ?? post
+/** The status cache's copy of a post, if it has one. */
+function cachedCopy(post: Status): Status | undefined {
+  return statusCache.peek().get(post.id)
 }
+
+/** Who a late answer belongs to (rule 4, `packages/state` README). */
+interface Owner { client: CaribouClient; session: number; slot: DraftSlot }
 
 /** `/@<did>/<rkey>` for `at://<did>/app.bsky.feed.post/<rkey>` (spec 8.4). */
 function ownPostPath(uri: string): string {
@@ -297,7 +299,7 @@ export class CaribouComposeDialog extends LitElement {
     @media (pointer: coarse) {
       .poll .settings select, .poll .check { min-block-size: 44px; }
     }
-    .poll .problem { color: var(--danger); }
+    .poll .problem, .note.problem { color: var(--danger); }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
@@ -324,10 +326,11 @@ export class CaribouComposeDialog extends LitElement {
   @state() private blocked: string | null = null
   // A link to an earlier version that a retry found posted (spec 7.2).
   @state() private earlierPosted: string | null = null
-  // Images the PDS no longer has and that this page has no file for.
+  // Images (by their local id) the PDS no longer has and that this page has
+  // no file for.
   @state() private missingBlobs = new Set<string>()
-  // The file behind each uploaded blob, by CID, so a dropped blob can go up
-  // again, and its preview. Memory only: a reload keeps the blob refs.
+  // The file behind each uploaded image, by its local id, so a dropped blob
+  // can go up again, and its preview. Memory only: a reload keeps the blob refs.
   private blobFiles = new Map<string, Blob>()
   private blobPreviews = new Map<string, string>()
 
@@ -564,7 +567,9 @@ export class CaribouComposeDialog extends LitElement {
     )
     // No mentions are typed into a Bluesky reply: the author is in the
     // reply's refs, and a mention is addressed by DID, never by handle.
-    this.draft = { ...(stored ?? emptyDraft({ inReplyToId: inReplyTo?.id ?? null })), bluesky }
+    // Each image needs a local id for its controls (one stored without it gets one).
+    const images = bluesky.images.map((i) => i.id ? i : { ...i, id: crypto.randomUUID() })
+    this.draft = { ...(stored ?? emptyDraft({ inReplyToId: inReplyTo?.id ?? null })), bluesky: { ...bluesky, images } }
     this.checkTarget()
     this.finishOpen()
     if (target) void this.refreshTarget(client, target)
@@ -576,12 +581,25 @@ export class CaribouComposeDialog extends LitElement {
 
   // The second check (#188 owns the buttons): a reply or quote to a post
   // whose author turned it off cannot be sent, whatever opened the dialog.
+  // Blocked when the dialog's own copy **or** the status cache's says so:
+  // neither is known to be newer, and a wrong "allowed" sends what the
+  // author turned off.
   private checkTarget(): void {
-    const reply = this.replyTo ? newestCopy(this.replyTo) : null
-    const quote = this.quoteTo ? newestCopy(this.quoteTo) : null
-    this.blocked = reply?.bluesky?.replyDisabled ? REPLY_LIMITED
-      : quote?.bluesky?.embeddingDisabled ? QUOTE_LIMITED
+    const replyOff = !!this.replyTo && (!!this.replyTo.bluesky?.replyDisabled || !!cachedCopy(this.replyTo)?.bluesky?.replyDisabled)
+    const quoteOff = !!this.quoteTo && (!!this.quoteTo.bluesky?.embeddingDisabled || !!cachedCopy(this.quoteTo)?.bluesky?.embeddingDisabled)
+    this.blocked = replyOff ? REPLY_LIMITED
+      : quoteOff ? QUOTE_LIMITED
       : this.blocked === REPLY_GONE || this.blocked === QUOTE_GONE ? this.blocked : null
+  }
+
+  private owner(): Owner | null {
+    return this.client ? { client: this.client, session: this.session, slot: this.draftKey } : null
+  }
+
+  // Rule 4: a late answer acts only while its dialog, account and slot are the same.
+  private owns(o: Owner): boolean {
+    return this.client === o.client && this.session === o.session && this.draftKey === o.slot
+      && activeUserKey.peek() === o.client.userKey
   }
 
   // Reads the post again: its flags may have changed, or it may be gone.
@@ -590,6 +608,8 @@ export class CaribouComposeDialog extends LitElement {
     try {
       const fresh = await client.fetchStatus(target.id)
       if (session !== this.session || client !== this.client) return
+      // The page's other copies learn the flags too.
+      cacheStatus(fresh)
       if (this.replyTo?.id === fresh.id) this.replyTo = fresh
       if (this.quoteTo?.id === fresh.id) this.quoteTo = fresh
       this.checkTarget()
@@ -677,6 +697,7 @@ export class CaribouComposeDialog extends LitElement {
     const b = this.draft.bluesky
     const count = this.bskyCount
     if (!b || !count || !this.bsky || this.blocked || this.missingBlobs.size > 0) return false
+    if (b.images.length > this.caps.maxImages) return false
     const hasContent = this.draft.text.trim() !== '' || b.images.length > 0 || b.quote !== null
     return hasContent && this.bsky.postFits(count) && this.pending.length === 0 && !this.posting
   }
@@ -762,13 +783,16 @@ export class CaribouComposeDialog extends LitElement {
       return
     }
     const done = this.replyTo ? 'Reply posted' : 'Post published'
-    const session = this.session
-    const slot = this.draftKey
+    const owner = this.owner()!
     this.posting = true
     this.earlierPosted = null
     try {
-      const out = await postBlueskyDraft(client, slot, this.draft)
-      if (client !== this.client || session !== this.session) {
+      const out = await postBlueskyDraft(client, owner.slot, this.draft, {
+        // Rule 2: the open draft takes every draft the send makes, the
+        // frozen one first, so it never holds less than storage.
+        onDraft: (d) => { if (this.owns(owner)) this.draft = d },
+      })
+      if (!this.owns(owner)) {
         toast('info', out.kind === 'posted' ? done : 'Your earlier version was posted.')
         return
       }
@@ -783,52 +807,52 @@ export class CaribouComposeDialog extends LitElement {
       this.close()
       toast('info', done)
     } catch (err) {
-      if (client !== this.client || session !== this.session) return
-      // The stored draft now has the rkey and the frozen record: keep the
-      // open one in step, or the next keystroke would drop them.
-      this.draft = loadDraft(client.userKey, slot) ?? this.draft
-      if (err instanceof BlueskyBlobNotFound) await this.recoverBlob(client, err)
+      if (!this.owns(owner)) return
+      if (err instanceof DraftNotSaved) toast('error', err.message)
+      else if (err instanceof BlueskyBlobNotFound) await this.recoverBlob(owner, err)
       else toast('error', `Could not post: ${errorText(err).replace(/\.$/, '')}. Post again to retry; it is never sent twice.`)
     } finally {
-      if (session === this.session) this.posting = false
+      if (owner.session === this.session) this.posting = false
     }
   }
 
   // The PDS dropped an image no post used yet (spec 7.2). Upload it again
-  // from the file this page still has, or ask for the file again.
-  private async recoverBlob(client: CaribouClient, err: BlueskyBlobNotFound) {
-    const images = this.draft.bluesky?.images ?? []
-    const gone = images.filter((i) => err.cid === null || i.blob.ref.$link === err.cid)
+  // from the file this page still has, or ask for the file again. Each
+  // await rechecks the owner (rule 4).
+  private async recoverBlob(owner: Owner, err: BlueskyBlobNotFound) {
+    const gone = (this.draft.bluesky?.images ?? []).filter((i) => err.cid === null || i.blob.ref.$link === err.cid)
     const missing = new Set(this.missingBlobs)
-    let replaced = images
+    const replaced = new Map<string, BlueskyDraftImage>()
     for (const img of gone) {
-      const file = this.blobFiles.get(img.blob.ref.$link)
+      const file = this.blobFiles.get(img.id)
       if (!file) {
-        missing.add(img.blob.ref.$link)
+        missing.add(img.id)
         continue
       }
       try {
-        const blob = await client.blueskyUploadBlob!(file)
-        this.keepFile(blob.ref.$link, file)
-        replaced = replaced.map((i) => i === img ? { ...i, blob, size: blob.size, mime: blob.mimeType } : i)
+        const blob = await owner.client.blueskyUploadBlob!(file)
+        if (!this.owns(owner)) return
+        replaced.set(img.id, { ...img, blob, size: blob.size, mime: blob.mimeType })
       } catch (upErr) {
-        toast('error', `Upload failed: ${errorText(upErr)}`)
+        if (this.owns(owner)) toast('error', `Upload failed: ${errorText(upErr)}`)
         return
       }
     }
+    if (!this.owns(owner)) return
     this.missingBlobs = missing
     // Not `patchBluesky`: the editor is read-only while posting, and this
     // runs inside the send.
-    this.draft = { ...this.draft, bluesky: { ...(this.draft.bluesky ?? emptyBlueskyDraft()), images: replaced } }
-    saveDraft(client.userKey, this.draftKey, this.draft)
+    const b = this.draft.bluesky ?? emptyBlueskyDraft()
+    this.draft = { ...this.draft, bluesky: { ...b, images: b.images.map((i) => replaced.get(i.id) ?? i) } }
+    saveDraft(owner.client.userKey, owner.slot, this.draft)
     toast('error', missing.size > 0
       ? 'The server no longer has an image. Remove it and add it again, then post.'
       : 'An image was uploaded again. Post again to send.')
   }
 
-  private keepFile(cid: string, file: Blob) {
-    this.blobFiles.set(cid, file)
-    if (!this.blobPreviews.has(cid)) this.blobPreviews.set(cid, URL.createObjectURL(file))
+  private keepFile(id: string, file: Blob) {
+    this.blobFiles.set(id, file)
+    if (!this.blobPreviews.has(id)) this.blobPreviews.set(id, URL.createObjectURL(file))
   }
 
   private onSubmit = (e: SubmitEvent) => {
@@ -850,7 +874,8 @@ export class CaribouComposeDialog extends LitElement {
 
   private onFiles = (e: Event) => {
     const input = e.target as HTMLInputElement
-    const room = this.limits.maxMedia - this.draft.media.length - this.pending.length
+    const attached = this.isBluesky ? this.draft.bluesky?.images.length ?? 0 : this.draft.media.length
+    const room = this.limits.maxMedia - attached - this.pending.length
     const files = [...(input.files ?? [])]
     input.value = ''
     if (files.length > room) toast('error', `You can attach up to ${this.limits.maxMedia} files.`)
@@ -901,8 +926,9 @@ export class CaribouComposeDialog extends LitElement {
   // An image is made small enough first (`fitImage`), then uploaded as a
   // blob. Its alt text lives in the draft and goes in the post's embed.
   private async uploadBluesky(file: File, retry?: PendingMedia) {
-    const client = this.client
-    if (!client?.blueskyUploadBlob) return
+    const owner = this.owner()
+    const client = owner?.client
+    if (!owner || !client?.blueskyUploadBlob) return
     const item: PendingMedia = retry
       ? { ...retry, state: 'uploading' }
       : { localId: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), description: '', state: 'uploading' }
@@ -910,7 +936,7 @@ export class CaribouComposeDialog extends LitElement {
       ? this.pending.map((p) => p.localId === item.localId ? item : p)
       : [...this.pending, item]
     const fit = await fitImage(file, this.caps.maxImageBytes ?? 2_000_000)
-    if (client !== this.client) return
+    if (!this.owns(owner)) return
     if (!fit.ok) {
       this.removePending(item.localId)
       toast('error', fitRefusal(file.name || 'The file', fit.reason))
@@ -918,33 +944,36 @@ export class CaribouComposeDialog extends LitElement {
     }
     try {
       const blob = await client.blueskyUploadBlob(fit.blob)
-      if (client !== this.client) return
+      if (!this.owns(owner)) return
       const current = this.pending.find((p) => p.localId === item.localId)
       if (!current) return
       this.pending = this.pending.filter((p) => p !== current)
       URL.revokeObjectURL(current.previewUrl)
-      this.keepFile(blob.ref.$link, fit.blob)
+      const id = crypto.randomUUID()
+      this.keepFile(id, fit.blob)
       const image: BlueskyDraftImage = {
-        blob, mime: blob.mimeType, size: blob.size, alt: current.description,
+        id, blob, mime: blob.mimeType, size: blob.size, alt: current.description,
         aspectRatio: fit.width > 0 && fit.height > 0 ? { width: fit.width, height: fit.height } : null,
         ...(file.name ? { name: file.name } : {}),
       }
       this.patchBluesky({ images: [...(this.draft.bluesky?.images ?? []), image] })
     } catch (err) {
+      if (!this.owns(owner)) return
       this.pending = this.pending.map((p) => p.localId === item.localId ? { ...p, state: 'failed' } : p)
       toast('error', `Upload failed: ${errorText(err)}`)
     }
   }
 
-  private removeBlueskyImage(cid: string) {
+  // By the image's local id: the same file picked twice is two images.
+  private removeBlueskyImage(id: string) {
     const missing = new Set(this.missingBlobs)
-    missing.delete(cid)
+    missing.delete(id)
     this.missingBlobs = missing
-    const url = this.blobPreviews.get(cid)
+    const url = this.blobPreviews.get(id)
     if (url) URL.revokeObjectURL(url)
-    this.blobPreviews.delete(cid)
-    this.blobFiles.delete(cid)
-    this.patchBluesky({ images: (this.draft.bluesky?.images ?? []).filter((i) => i.blob.ref.$link !== cid) })
+    this.blobPreviews.delete(id)
+    this.blobFiles.delete(id)
+    this.patchBluesky({ images: (this.draft.bluesky?.images ?? []).filter((i) => i.id !== id) })
   }
 
   private toggleLabel(value: string) {
@@ -1083,6 +1112,8 @@ export class CaribouComposeDialog extends LitElement {
     const bskyCount = bluesky ? this.bskyCount : null
     const count = bluesky ? bskyCount?.graphemes ?? 0 : this.count
     const overBytes = bskyCount !== null && this.caps.maxBytes !== null && bskyCount.bytes > this.caps.maxBytes
+    // Graphemes can be under the limit while bytes are over: say why.
+    const byteLimitText = `Over the ${this.caps.maxBytes ?? 0}-byte limit`
     const over = count > this.limits.maxChars || overBytes
     const images = bluesky ? d.bluesky?.images ?? [] : []
     const mediaCount = (bluesky ? images.length : d.media.length) + this.pending.length
@@ -1115,7 +1146,7 @@ export class CaribouComposeDialog extends LitElement {
             </div>` : nothing}
           ${this.blocked ? html`<p class="note problem" data-compose-blocked role="status">${this.blocked}</p>` : nothing}
           ${this.earlierPosted ? html`<p class="note" data-earlier-posted role="status">Your earlier version was posted.
-            <a href=${this.earlierPosted} @click=${spaClick}>Open it</a>. Your edits are still here; Post sends them as a new post.</p>` : nothing}
+            <a href=${this.earlierPosted} target="_blank" rel="noopener">Open it</a> (in a new tab). Your edits are still here; Post sends them as a new post.</p>` : nothing}
           ${bluesky && d.bluesky?.sent && !this.earlierPosted ? html`<p class="note" data-send-unknown>The last send did not finish. Post checks first, so the post is never sent twice.</p>` : nothing}
           ${this.keptRedraft ? html`
             <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
@@ -1142,20 +1173,20 @@ export class CaribouComposeDialog extends LitElement {
           : !editing && mediaCount > 0 ? html`
             <ul class="media" aria-label="Attachments">
               ${images.map((img, i) => {
-                const cid = img.blob.ref.$link
+                const id = img.id
                 const label = mediaLabel(img.name, 'image', i + 1)
-                const preview = this.blobPreviews.get(cid)
+                const preview = this.blobPreviews.get(id)
                 return html`
-                <li data-bsky-image=${cid}>
+                <li data-bsky-image=${id}>
                   ${preview ? html`<img src=${preview} alt="">` : html`<div class="file">${img.name ?? 'image'}</div>`}
-                  ${this.missingBlobs.has(cid) ? html`<span class="state" data-state="failed" role="status">Not on the server any more. Remove it and add it again.</span>` : nothing}
+                  ${this.missingBlobs.has(id) ? html`<span class="state" data-state="failed" role="status">Not on the server any more. Remove it and add it again.</span>` : nothing}
                   <input type="text" placeholder="Describe for people who can’t see it"
                     aria-label="Alt text for ${label}" ?readonly=${busy} .value=${img.alt}
                     @input=${(e: Event) => this.patchBluesky({
-                      images: (this.draft.bluesky?.images ?? []).map((x) => x.blob.ref.$link === cid
+                      images: (this.draft.bluesky?.images ?? []).map((x) => x.id === id
                         ? { ...x, alt: (e.target as HTMLInputElement).value } : x),
                     })}>
-                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeBlueskyImage(cid)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
+                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeBlueskyImage(id)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
                 </li>`
               })}
               ${d.media.map((m, i) => {
@@ -1227,10 +1258,11 @@ export class CaribouComposeDialog extends LitElement {
             </select>` : nothing}
             ${caps.visibility && editing ? html`<span class="note" id="compose-visibility-note">Visibility cannot change.</span>` : nothing}
             <span class="spacer"></span>
+            ${overBytes ? html`<span class="note problem" data-byte-limit>${byteLimitText}</span>` : nothing}
             <span class="count" ?data-over=${over}
-              aria-label=${`${this.limits.maxChars - count} characters left`}>${this.limits.maxChars - count}</span>
+              aria-label=${`${this.limits.maxChars - count} characters left${overBytes ? `, ${byteLimitText.toLowerCase()}` : ''}`}>${this.limits.maxChars - count}</span>
             <!-- Announces only when the limit is crossed, not every keystroke. -->
-            <span class="visually-hidden" aria-live="polite" data-limit-status>${overBytes ? `Over the ${this.caps.maxBytes} byte limit` : over ? 'Over the character limit' : ''}</span>
+            <span class="visually-hidden" aria-live="polite" data-limit-status>${overBytes ? byteLimitText : over ? 'Over the character limit' : ''}</span>
             <caribou-button variant="primary" type="submit" class="post" data-action="post"
               ?disabled=${!this.canPost && !busy} ?loading=${busy}>
               ${submitLabel}

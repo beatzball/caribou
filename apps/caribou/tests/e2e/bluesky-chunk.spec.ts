@@ -12,6 +12,11 @@ import { expect, test, type Page } from '@playwright/test'
 // code calls `agent.com.atproto.repo.createRecord` (#189), which is in the
 // main bundle and is not the libraries.
 const ATPROTO_MARKER = 'lex:com.atproto.repo.strongRef'
+// A second marker for `@atproto/common-web` (#189 uses its TID): the TID
+// base32 alphabet. `@atproto/api`'s marker alone would miss a leak of only it.
+const COMMON_WEB_MARKER = '234567abcdefghijklmnopqrstuvwxyz'
+
+const isAtproto = (body: string) => body.includes(ATPROTO_MARKER) || body.includes(COMMON_WEB_MARKER)
 
 async function scriptsFetched(page: Page, path: string): Promise<{ url: string; body: string }[]> {
   const scripts: Promise<{ url: string; body: string }>[] = []
@@ -28,13 +33,16 @@ async function scriptsFetched(page: Page, path: string): Promise<{ url: string; 
 test('a Mastodon page does not request the atproto libraries', async ({ page }) => {
   const scripts = await scriptsFetched(page, '/')
   expect(scripts.length).toBeGreaterThan(0)
-  expect(scripts.filter((s) => s.body.includes(ATPROTO_MARKER)).map((s) => s.url)).toEqual([])
+  expect(scripts.filter((s) => isAtproto(s.body)).map((s) => s.url)).toEqual([])
 })
 
 test('with the Bluesky flag on, the libraries arrive in the bsky chunk', async ({ page }) => {
   // The control: proves the marker finds the libraries when they do load.
   await page.addInitScript(() => localStorage.setItem('caribou.flag.bluesky', '1'))
   const scripts = await scriptsFetched(page, '/')
-  const atproto = scripts.filter((s) => s.body.includes(ATPROTO_MARKER)).map((s) => new URL(s.url).pathname)
+  const atproto = scripts.filter((s) => isAtproto(s.body)).map((s) => new URL(s.url).pathname)
   expect(atproto).toEqual([expect.stringMatching(/\/bsky-[\w-]+\.js$/)])
+  // The control for the second marker: the TID code is in the bsky chunk.
+  const commonWeb = scripts.filter((s) => s.body.includes(COMMON_WEB_MARKER)).map((s) => new URL(s.url).pathname)
+  expect(commonWeb).toEqual([expect.stringMatching(/\/bsky-[\w-]+\.js$/)])
 })

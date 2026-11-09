@@ -29,6 +29,11 @@ export interface DraftPoll {
 
 /** An image a Bluesky draft holds: the PDS has the blob, so a reload does not upload it again. */
 export interface BlueskyDraftImage {
+  /**
+   * A local id for the controls. Not the CID: the same file picked twice
+   * has the same CID and is still two images.
+   */
+  id: string
   blob: BlueskyBlobRef
   mime: string
   size: number
@@ -142,12 +147,15 @@ function readAll(userKey: UserKey): Partial<Record<DraftSlot, ComposeDraft>> {
   }
 }
 
-function writeAll(userKey: UserKey, all: Partial<Record<DraftSlot, ComposeDraft>>): void {
+// False when storage refused the write (full or blocked).
+function writeAll(userKey: UserKey, all: Partial<Record<DraftSlot, ComposeDraft>>): boolean {
   try {
     if (Object.keys(all).length === 0) localStorage.removeItem(storageKey(userKey))
     else localStorage.setItem(storageKey(userKey), JSON.stringify(all))
+    return true
   } catch {
     // Storage full or blocked: the draft lives on in the open dialog.
+    return false
   }
 }
 
@@ -160,10 +168,15 @@ export function loadDraft(userKey: UserKey, slot: DraftSlot): ComposeDraft | nul
 // An empty draft is removed rather than stored, so a dialog opened and
 // closed again leaves nothing behind.
 export function saveDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft): void {
+  storeDraft(userKey, slot, draft)
+}
+
+/** `saveDraft`, answering false when storage refused the write. */
+export function storeDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft): boolean {
   const all = readAll(userKey)
   if (isDraftEmpty(draft)) delete all[slot]
   else all[slot] = draft
-  writeAll(userKey, all)
+  return writeAll(userKey, all)
 }
 
 /**

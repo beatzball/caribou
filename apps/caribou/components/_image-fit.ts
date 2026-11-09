@@ -26,10 +26,12 @@ const QUALITIES = [0.9, 0.8, 0.7]
 const SHRINK = 0.8
 
 /**
- * The image as it can be uploaded: the file itself when it fits, else a
- * JPEG made smaller, step by step (quality first, then size), until it is at
- * most `maxBytes`. Refused when it is not an image, cannot be read and is too
- * large, or is still too large at the smallest size.
+ * The image as it can be uploaded: always a new JPEG drawn on a canvas, so
+ * no EXIF data (GPS position included) reaches the PDS, where a blob is
+ * public, and the type is one Bluesky shows. Step by step (quality first,
+ * then size) until it is at most `maxBytes`. Refused when it is not an
+ * image, cannot be read (it then cannot be cleaned either), or is still too
+ * large at the smallest size. An animated GIF keeps its first frame only.
  */
 export async function fitImage(file: Blob, maxBytes: number, codec: ImageCodec = canvasCodec): Promise<FitResult> {
   if (!file.type.startsWith('image/')) return { ok: false, reason: 'not-image' }
@@ -37,22 +39,20 @@ export async function fitImage(file: Blob, maxBytes: number, codec: ImageCodec =
   try {
     img = await codec.decode(file)
   } catch {
-    // The PDS takes it as it is; only its aspect ratio is unknown.
-    return file.size <= maxBytes
-      ? { ok: true, blob: file, width: 0, height: 0, resized: false }
-      : { ok: false, reason: 'unreadable' }
+    return { ok: false, reason: 'unreadable' }
   }
   try {
-    if (file.size <= maxBytes) return { ok: true, blob: file, width: img.width, height: img.height, resized: false }
     const long = Math.max(img.width, img.height)
-    for (let side = Math.min(long, START_SIDE); side >= MIN_SIDE; side = Math.floor(side * SHRINK)) {
+    for (let side = Math.min(long, START_SIDE); side >= Math.min(MIN_SIDE, long); side = Math.floor(side * SHRINK)) {
       const scale = side / long
       const w = Math.max(1, Math.round(img.width * scale))
       const h = Math.max(1, Math.round(img.height * scale))
       for (const quality of QUALITIES) {
         const blob = await img.encode(w, h, quality)
-        if (blob.size <= maxBytes) return { ok: true, blob, width: w, height: h, resized: true }
+        if (blob.size <= maxBytes) return { ok: true, blob, width: w, height: h, resized: w !== img.width || h !== img.height }
       }
+      // A small image has no smaller size to try.
+      if (side <= MIN_SIDE) break
     }
     return { ok: false, reason: 'too-large' }
   } finally {

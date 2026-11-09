@@ -415,36 +415,79 @@ redraft's language; `createdAt`.
 `isDraftEmpty` is false for a draft with images or with `sent`, so a quote
 with no text, or a send in doubt, is never dropped as empty.
 
-**One post per click** (`postBlueskyDraft`):
+**One post per click** (`postBlueskyDraft`). Four rules. Every path in the
+send follows them; a new path must too.
 
-1. A draft with `rkey` and `sent` has a send whose outcome is unknown. Ask
-   the PDS first (`blueskyGetOwnPost(rkey)`).
-   - Found, and the draft's input equals `sent.input`: it went through.
-     Clear the draft. Nothing is sent.
-   - Found, and the reader edited since: keep the edits with a **new** rkey
-     and no `sent`, and answer `earlier-posted` with the found post's URI.
-     Nothing is sent.
-   - Not found: send again with the **same** rkey: the same frozen record
-     when nothing changed (same `createdAt`, no new facet lookup), else a
-     new one made from the edited draft.
-   - The check failed (network, 5xx): throw. Nothing is sent.
-2. Before `createPost`, the draft is stored with `rkey` and the new `sent`.
-3. Any error leaves that stored draft and is thrown. The caller keeps its
-   open draft in step with the stored one (`loadDraft`), or the next
-   keystroke would drop `sent`.
-4. A late first write that lands after a "not found" check makes the second
-   `createPost` fail (a used rkey is a 500), so it is never two posts; the
-   next retry finds the record.
-5. Posted: clear the draft, then read the post (`fetchStatus`, 3 tries a
-   second apart, as the AppView lags). Cache it and send `caribou:posted`
-   only while the client's account is still the active one. A post the
-   AppView does not have yet answers `posted` with `status: null`.
+**Rule 1: an rkey is bound to one frozen record until it is resolved.**
+Once a send freezes a record (`sent`) under an rkey, that rkey only ever
+carries that record. An edit never moves a new record onto it. The rkey is
+*resolved* when Caribou knows what the PDS has at it.
+
+- A draft with `rkey` and `sent` is *pending*. Before anything else is sent,
+  ask the PDS: `blueskyGetOwnPost(rkey)`.
+- Found, and `found.value` is the frozen record (same `createdAt` and
+  `text`): it went through.
+  - The draft has no edits since (`blueskyDraftInput` equals `sent.input`):
+    `posted`. Nothing is sent.
+  - The draft has edits: `earlier-posted`. The edits stay with a **new**
+    rkey and no `sent`. Nothing is sent.
+- Found, but a different record: `earlier-posted`, as above. (Only a bug or
+  another app could put it there; the reader's text is never dropped.)
+- Not found: send **the frozen record again, with the same rkey**, whatever
+  the reader edited since. Then resolve as "found": no edits → `posted`;
+  edits → `earlier-posted`, the edits kept with a new rkey for the next Post.
+  This is the choice for "not found and edited": the old rkey is resolved by
+  writing its own record, so a late first write can never be mistaken for
+  the edit, and the edit is never lost. The cost: the reader's earlier
+  version is the one posted, and the dialog says so.
+- Only `RecordNotFound` from the PDS means "not found". Any other answer
+  (a 404, `AccountDeactivated`, `AccountTakedown`, a 5xx, a network error)
+  throws, and nothing is sent.
+- A send refused with `BlueskyBlobNotFound` resolves the rkey as *unused*:
+  the PDS refused that exact record, and any earlier send of it named the
+  same missing blob, so it was refused too (a blob a post names is never
+  dropped). `sent` is cleared and the rkey kept; the next send freezes a new
+  record for it.
+
+**Rule 2: recovery info is in memory before the network.** The new draft,
+with its rkey and frozen record, goes to the caller (`opts.onDraft`) and to
+storage (`storeDraft`) before `createPost` starts. If storage refuses the
+write, the send is refused with `DraftNotSaved` ("Could not save the draft,
+so the post was not sent."), and nothing is sent: without the stored rkey a
+reload could post twice. Every later change the send makes to the draft
+(unfreeze, edits kept with a new rkey) goes to `onDraft` too, so the open
+dialog never holds an older copy than storage.
+
+**Rule 3: a send clears only what it owns.** When an rkey resolves, the
+send looks at the draft **stored** in its slot now, not the one it started
+with:
+
+- stored with the same rkey and no edits since the freeze: cleared;
+- stored with the same rkey and edits: kept with a new rkey and no `sent`;
+- anything else (another rkey, no `sent`, nothing): left alone.
+
+So a dialog closed and reopened during the send, then edited, keeps its edit.
+
+**Rule 4: every await rechecks ownership.** The dialog captures its owner
+(client, account, slot, dialog session) before each await (fit, upload,
+re-upload, `recoverBlob`, the target read, the send) and checks it after,
+before it touches its state or storage. A late answer for an owner that is
+gone writes nothing.
+
+After `posted`, the post is read back (`fetchStatus`, 3 tries a second
+apart, as the AppView lags). It is cached and `caribou:posted` is sent only
+while the client's account is still the active one. A post the AppView does
+not have yet answers `posted` with `status: null`.
 
 Tests (`bluesky-compose.test.ts`): a timeout after the write, then a retry,
 is one post; a lost answer, a reload, a retry; a lost answer, an edit, a
 retry keeps the edit with a new rkey; not found sends the frozen record
-once with the same rkey; a failed check sends nothing; a late first write;
-an answer after an account switch tells no screen.
+once with the same rkey; not found and edited, with a late first write,
+keeps the edit (rule 1); a failed check sends nothing; a 400 that is not
+`RecordNotFound` sends nothing; storage refuses the freeze: nothing sent,
+then one post (rule 2); a newer stored draft survives an old send's success
+(rule 3); a blob refusal unfreezes; an answer after an account switch tells
+no screen.
 
 ## Gotchas
 

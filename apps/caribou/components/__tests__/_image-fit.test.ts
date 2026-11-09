@@ -25,12 +25,17 @@ function file(size: number, type = 'image/jpeg') {
 }
 
 describe('fitImage', () => {
-  it('keeps an image at or under the limit as it is, with its size', async () => {
-    const { codec: c, encode } = codec(800, 600)
-    const f = file(MAX)
+  it('re-encodes every image, even one under the limit, so EXIF and GPS data are dropped (Fable N4)', async () => {
+    const { codec: c, encode } = codec(800, 600, 0.5)
+    const f = file(1000, 'image/heic')
     const out = await fitImage(f, MAX, c)
-    expect(out).toEqual({ ok: true, blob: f, width: 800, height: 600, resized: false })
-    expect(encode).not.toHaveBeenCalled()
+    expect(out.ok).toBe(true)
+    if (!out.ok) return
+    expect(out.blob).not.toBe(f)
+    expect(out.blob.type).toBe('image/jpeg')
+    expect([out.width, out.height]).toEqual([800, 600])
+    expect(out.resized).toBe(false)
+    expect(encode).toHaveBeenCalledWith(800, 600, 0.9)
   })
 
   it('re-encodes an image over the limit until it is under, as JPEG', async () => {
@@ -66,10 +71,9 @@ describe('fitImage', () => {
     await expect(fitImage(file(3_000_000), MAX, c)).resolves.toEqual({ ok: false, reason: 'unreadable' })
   })
 
-  it('keeps an unreadable image under the limit, with no size', async () => {
+  it('refuses an unreadable image even under the limit: it cannot be cleaned', async () => {
     const { codec: c } = codec(1, 1, 1, { fail: true })
-    const f = file(1000)
-    await expect(fitImage(f, MAX, c)).resolves.toEqual({ ok: true, blob: f, width: 0, height: 0, resized: false })
+    await expect(fitImage(file(1000), MAX, c)).resolves.toEqual({ ok: false, reason: 'unreadable' })
   })
 
   it('refuses a file that is not an image', async () => {

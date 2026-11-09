@@ -1,12 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+// Note: a test may replace localStorage.setItem; it is restored by its own flag.
 import type {
   BlueskyBlobRef, BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
 import { CaribouError } from '@beatzball/caribou-mastodon-client'
 import { emptyDraft, isDraftEmpty, loadDraft, saveDraft, type ComposeDraft } from '../compose.js'
 import {
-  blueskyDraftInput, blueskyRecord, emptyBlueskyDraft, postBlueskyDraft, BLUESKY_SELF_LABELS,
+  blueskyDraftInput, blueskyRecord, emptyBlueskyDraft, postBlueskyDraft, BLUESKY_SELF_LABELS, DraftNotSaved,
 } from '../bluesky-compose.js'
+
+// The client's `BlueskyBlobNotFound`, by shape: state does not import the client package.
+class BlueskyBlobNotFoundLike extends CaribouError {
+  readonly cid = 'bafkreiimg'
+  constructor(message: string) {
+    super('not_found', message, { status: 400 })
+    this.name = 'BlueskyBlobNotFound'
+  }
+}
 import { statusCache } from '../caches.js'
 import { activeUserKey, users } from '../users.js'
 
@@ -89,7 +99,7 @@ describe('the record', () => {
 
   it('images go in embed.images, with alt text and aspect ratio', () => {
     const r = blueskyRecord(draft({}, {
-      images: [{ blob: BLOB, mime: 'image/jpeg', size: 1000, alt: 'a cat', aspectRatio: { width: 4, height: 3 } }],
+      images: [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1000, alt: 'a cat', aspectRatio: { width: 4, height: 3 } }],
     }), [], 't')
     expect(r.embed).toEqual({
       $type: 'app.bsky.embed.images',
@@ -101,7 +111,7 @@ describe('the record', () => {
     expect(blueskyRecord(draft({}, { quote: QUOTED }), [], 't').embed)
       .toEqual({ $type: 'app.bsky.embed.record', record: QUOTED })
     const both = blueskyRecord(draft({}, {
-      quote: QUOTED, images: [{ blob: BLOB, mime: 'image/jpeg', size: 1000, alt: '', aspectRatio: null }],
+      quote: QUOTED, images: [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1000, alt: '', aspectRatio: null }],
     }), [], 't')
     expect(both.embed).toEqual({
       $type: 'app.bsky.embed.recordWithMedia',
@@ -111,7 +121,7 @@ describe('the record', () => {
   })
 
   it('self-labels go on a post with images, only from the menu, in menu order', () => {
-    const img = [{ blob: BLOB, mime: 'image/jpeg', size: 1000, alt: '', aspectRatio: null }]
+    const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1000, alt: '', aspectRatio: null }]
     const r = blueskyRecord(draft({}, { images: img, labels: ['graphic-media', 'nonsense', 'porn'] }), [], 't')
     expect(r.labels).toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'porn' }, { val: 'graphic-media' }] })
     expect(BLUESKY_SELF_LABELS.map((l) => l.value)).toEqual(['porn', 'nudity', 'graphic-media'])
@@ -126,7 +136,7 @@ describe('the draft contract: what survives', () => {
   it('a reload keeps text, refs, blob refs, alt, labels, rkey and the frozen record', () => {
     const d = draft({ text: 'kept' }, {
       reply: { root: ROOT, parent: PARENT }, quote: QUOTED, labels: ['nudity'],
-      images: [{ blob: BLOB, mime: 'image/jpeg', size: 1000, alt: 'alt', aspectRatio: { width: 1, height: 1 }, name: 'a.jpg' }],
+      images: [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1000, alt: 'alt', aspectRatio: { width: 1, height: 1 }, name: 'a.jpg' }],
       rkey: '3krkey0000001',
       sent: { input: 'x', record: { $type: 'app.bsky.feed.post', text: 'kept', createdAt: 't' } },
     })
@@ -135,7 +145,7 @@ describe('the draft contract: what survives', () => {
   })
 
   it('a draft with only images, or only a pending send, is not empty', () => {
-    expect(isDraftEmpty(draft({ text: '' }, { images: [{ blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }] }))).toBe(false)
+    expect(isDraftEmpty(draft({ text: '' }, { images: [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }] }))).toBe(false)
     expect(isDraftEmpty(draft({ text: '' }, { rkey: 'k', sent: { input: '', record: { $type: 'app.bsky.feed.post', text: '', createdAt: 't' } } }))).toBe(false)
     expect(isDraftEmpty(draft({ text: '' }))).toBe(true)
   })
@@ -144,7 +154,7 @@ describe('the draft contract: what survives', () => {
     const a = draft({ text: 'a' })
     expect(blueskyDraftInput(a)).toBe(blueskyDraftInput(draft({ text: 'a' })))
     expect(blueskyDraftInput(a)).not.toBe(blueskyDraftInput(draft({ text: 'b' })))
-    const img = [{ blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }]
+    const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }]
     const withImg = blueskyDraftInput(draft({ text: 'a' }, { images: img }))
     expect(withImg).not.toBe(blueskyDraftInput(a))
     expect(withImg).not.toBe(blueskyDraftInput(draft({ text: 'a' }, { images: img, labels: ['porn'] })))
@@ -221,14 +231,148 @@ describe('postBlueskyDraft: one post per click', () => {
     expect(pds.records.size).toBe(1)
   })
 
-  it('record not found after edits: the edited record goes with the same rkey', async () => {
+  it('record not found after edits: the frozen record goes with its rkey, and the edit stays for a new rkey (rule 1)', async () => {
     const pds = fakePds()
     pds.failNextBeforeWrite.value = new CaribouError('server_error', 'Bad Gateway', { status: 502 })
     await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)).rejects.toBeTruthy()
     const edited = { ...loadDraft(KEY, 'new')!, text: 'v2' }
-    await postBlueskyDraft(pds.client, 'new', edited, noWait)
-    expect(pds.records.get('3krkey0000001')!.text).toBe('v2')
+    const out = await postBlueskyDraft(pds.client, 'new', edited, noWait)
+    expect(pds.records.get('3krkey0000001')!.text).toBe('v1')
     expect(pds.records.size).toBe(1)
+    expect(out.kind).toBe('earlier-posted')
+    const kept = loadDraft(KEY, 'new')!
+    expect(kept.text).toBe('v2')
+    expect(kept.bluesky!.rkey).toBe('3krkey0000002')
+    expect(kept.bluesky!.sent).toBeNull()
+  })
+
+  it('v1 times out unwritten, the reader edits to v2, v1 lands late: the edit is not lost (review: Fable B1, Codex 2)', async () => {
+    const pds = fakePds()
+    pds.failNextBeforeWrite.value = new CaribouError('unreachable', 'timeout')
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)).rejects.toBeTruthy()
+    const v1 = loadDraft(KEY, 'new')!
+    const v1Record = v1.bluesky!.sent!.record
+    const edited = { ...v1, text: 'v2 with my edits' }
+    saveDraft(KEY, 'new', edited)
+    pds.client.blueskyGetOwnPost.mockImplementationOnce(async () => {
+      pds.records.set('3krkey0000001', v1Record)
+      return null
+    })
+    await expect(postBlueskyDraft(pds.client, 'new', edited, noWait)).rejects.toMatchObject({ code: 'server_error' })
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect([...pds.records.values()].map((r) => r.text)).toEqual(['v1'])
+    expect(out.kind).toBe('earlier-posted')
+    expect(loadDraft(KEY, 'new')!.text).toBe('v2 with my edits')
+  })
+
+  it('a found record that is not the frozen one is never read as posted', async () => {
+    const pds = fakePds()
+    pds.loseNextAnswer.value = true
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'mine' }), noWait)).rejects.toBeTruthy()
+    pds.records.set('3krkey0000001', { $type: 'app.bsky.feed.post', text: 'other', createdAt: 'x' })
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('earlier-posted')
+    expect(loadDraft(KEY, 'new')!.text).toBe('mine')
+  })
+
+  it('a 400 that is not RecordNotFound sends nothing (rule 1)', async () => {
+    const pds = fakePds()
+    pds.loseNextAnswer.value = true
+    await expect(postBlueskyDraft(pds.client, 'new', draft(), noWait)).rejects.toBeTruthy()
+    pds.records.clear()
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('not_found', 'AccountDeactivated', { status: 400 }))
+    await expect(postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)).rejects.toBeTruthy()
+    expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(1)
+  })
+
+  it('storage refuses the freeze: nothing is sent, the caller hears; then one post (rule 2, Codex 1, Fable N1)', async () => {
+    const pds = fakePds()
+    const real = localStorage.setItem.bind(localStorage)
+    let refuse = true
+    Object.defineProperty(localStorage, 'setItem', {
+      configurable: true,
+      value: (k: string, v: string) => {
+        if (refuse && k.startsWith('caribou.drafts.')) throw new DOMException('full', 'QuotaExceededError')
+        return real(k, v)
+      },
+    })
+    const spy = { mockRestore: () => { refuse = false } }
+    pds.loseNextAnswer.value = true
+    const seen: ComposeDraft[] = []
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'once' }), { ...noWait, onDraft: (d) => seen.push(d) }))
+      .rejects.toBeInstanceOf(DraftNotSaved)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    // Memory still has the rkey and the frozen record.
+    expect(seen.at(-1)!.bluesky!.sent).not.toBeNull()
+    spy.mockRestore()
+    await expect(postBlueskyDraft(pds.client, 'new', seen.at(-1)!, noWait)).rejects.toBeTruthy()
+    await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(pds.records.size).toBe(1)
+  })
+
+  it('the caller gets the frozen draft before the network (rule 2)', async () => {
+    const pds = fakePds()
+    let atSend: ComposeDraft | null = null
+    let latest: ComposeDraft | null = null
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
+      atSend = latest
+      pds.records.set(rkey, record)
+      return { uri: uriOf(rkey), cid: 'c' }
+    })
+    await postBlueskyDraft(pds.client, 'new', draft(), { ...noWait, onDraft: (d) => { latest = d } })
+    expect(atSend!.bluesky!.rkey).toBe('3krkey0000001')
+    expect(atSend!.bluesky!.sent).not.toBeNull()
+  })
+
+  it('an old send that succeeds keeps a newer edit stored in its slot (rule 3, Codex 4)', async () => {
+    const pds = fakePds()
+    let release: () => void = () => {}
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
+      await new Promise<void>((r) => { release = r })
+      pds.records.set(rkey, record)
+      return { uri: uriOf(rkey), cid: 'c' }
+    })
+    const sending = postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)
+    await new Promise((r) => setTimeout(r, 0))
+    // Closed and reopened: the new dialog loads the stored draft and edits it.
+    saveDraft(KEY, 'new', { ...loadDraft(KEY, 'new')!, text: 'v1, edited' })
+    release()
+    await sending
+    const kept = loadDraft(KEY, 'new')!
+    expect(kept.text).toBe('v1, edited')
+    expect(kept.bluesky!.sent).toBeNull()
+    expect(kept.bluesky!.rkey).not.toBe('3krkey0000001')
+  })
+
+  it('an old send leaves another draft in its slot alone (rule 3)', async () => {
+    const pds = fakePds()
+    let release: () => void = () => {}
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
+      await new Promise<void>((r) => { release = r })
+      pds.records.set(rkey, record)
+      return { uri: uriOf(rkey), cid: 'c' }
+    })
+    const sending = postBlueskyDraft(pds.client, 'new', draft({ text: 'v1' }), noWait)
+    await new Promise((r) => setTimeout(r, 0))
+    saveDraft(KEY, 'new', draft({ text: 'a new one' }))
+    release()
+    await sending
+    expect(loadDraft(KEY, 'new')!.text).toBe('a new one')
+  })
+
+  it('a blob refusal unfreezes: the next send freezes a new record with the same rkey', async () => {
+    const pds = fakePds()
+    pds.failNextBeforeWrite.value = new BlueskyBlobNotFoundLike('Could not find blob: bafkreiimg')
+    const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null }]
+    const seen: ComposeDraft[] = []
+    await expect(postBlueskyDraft(pds.client, 'new', draft({}, { images: img }), { ...noWait, onDraft: (d) => seen.push(d) })).rejects.toBeTruthy()
+    const after = loadDraft(KEY, 'new')!
+    expect(after.bluesky!.sent).toBeNull()
+    expect(after.bluesky!.rkey).toBe('3krkey0000001')
+    expect(seen.at(-1)).toEqual(after)
+    await postBlueskyDraft(pds.client, 'new', { ...after, text: 'edited after' }, noWait)
+    expect(pds.records.get('3krkey0000001')!.text).toBe('edited after')
+    expect(pds.client.blueskyGetOwnPost).not.toHaveBeenCalled()
   })
 
   it('a failed check sends nothing: an unknown answer is never "not found"', async () => {

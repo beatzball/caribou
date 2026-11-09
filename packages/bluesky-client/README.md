@@ -495,9 +495,11 @@ never fails a post.
 
 - Writes and `getOwnPost` skip the read dedup: two sends are two requests.
 - Errors go through `normalizeXrpcError`; a 401 calls `onUnauthorized`.
-- **`getOwnPost` answers `null` only for "not found".** A network error, a
-  timeout or a 5xx throws: an unknown answer is never read as "not there",
-  or a retry could post twice.
+- **`getOwnPost` answers `null` only for the XRPC error `RecordNotFound`.**
+  Anything else throws: a network error, a timeout, a 5xx, a 404, a 400
+  such as `AccountDeactivated` or `AccountTakedown`, or a 400 whose message
+  says "not found". An unknown answer is never read as "not there", or a
+  retry could send on it.
 - **A used `rkey`** gives a plain 500 from the PDS (spec 7.2: the repo layer
   throws "There is already a value at key"). The client does not try to
   read it; it is `server_error`, and the retry rule finds the record.

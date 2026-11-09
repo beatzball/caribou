@@ -44,6 +44,7 @@ function fakeBluesky() {
   const records = new Map<string, BlueskyPostRecord>()
   let n = 0
   let blobs = 0
+  const cids = new Map<string, string>()
   const loseNext = { value: false }
   const client = {
     userKey: KEY,
@@ -51,7 +52,12 @@ function fakeBluesky() {
     timelineOrder: () => null,
     blueskyNextRkey: vi.fn(async () => `3krkey${String(++n).padStart(7, '0')}`),
     blueskyDetectFacets: vi.fn(async () => []),
-    blueskyUploadBlob: vi.fn(async (b: Blob) => ({ $type: 'blob' as const, ref: { $link: `bafkblob${++blobs}` }, mimeType: b.type || 'image/jpeg', size: b.size })),
+    // Like a real PDS: the CID follows the bytes, so the same file gives the same CID.
+    blueskyUploadBlob: vi.fn(async (b: Blob) => {
+      const bytes = await b.text()
+      if (!cids.has(bytes)) cids.set(bytes, `bafkblob${++blobs}`)
+      return { $type: 'blob' as const, ref: { $link: cids.get(bytes)! }, mimeType: b.type || 'image/jpeg', size: b.size }
+    }),
     blueskyCreatePost: vi.fn(async (record: BlueskyPostRecord, rkey: string) => {
       if (records.has(rkey)) throw new CaribouError('server_error', 'Internal Server Error', { status: 500 })
       records.set(rkey, record)
@@ -193,7 +199,7 @@ describe('Bluesky compose: limits, counted as the PDS counts', () => {
     await type(el, '👨‍👩‍👧‍👦'.repeat(300))
     expect($(el, '.count')!.textContent).toBe('0')
     expect(postButton(el).disabled).toBe(true)
-    expect($(el, '[data-limit-status]')!.textContent).toBe('Over the 3000 byte limit')
+    expect($(el, '[data-limit-status]')!.textContent).toBe('Over the 3000-byte limit')
   })
 
   it('long combining sequences: few graphemes, too many bytes', async () => {
@@ -457,25 +463,27 @@ describe('Bluesky compose: images, alt text and labels', () => {
     await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
     pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkblob1', 'bafkblob1'))
     await submit(el)
+    // The same bytes again: the same CID, as a real PDS answers (review N8).
     expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(2)
-    expect(loadDraft(KEY, 'new')!.bluesky!.images[0]!.blob.ref.$link).toBe('bafkblob2')
+    expect(loadDraft(KEY, 'new')!.bluesky!.images[0]!.blob.ref.$link).toBe('bafkblob1')
     await submit(el)
     expect(pds.records.size).toBe(1)
+    expect(pds.client.blueskyCreatePost.mock.calls.map((c) => c[1])).toEqual(['3krkey0000001', '3krkey0000001'])
     const sent = [...pds.records.values()][0]!
-    expect((sent.embed as unknown as { images: { image: { ref: { $link: string } } }[] }).images[0]!.image.ref.$link).toBe('bafkblob2')
+    expect((sent.embed as unknown as { images: { image: { ref: { $link: string } } }[] }).images[0]!.image.ref.$link).toBe('bafkblob1')
   })
 
   it('after a reload a dropped blob has no file: it asks for the image again', async () => {
     const pds = signInBluesky()
     saveDraft(KEY, 'new', emptyDraft({
       text: 'old photo',
-      bluesky: emptyBlueskyDraft({ images: [{ blob: { $type: 'blob', ref: { $link: 'bafkold' }, mimeType: 'image/jpeg', size: 9 }, mime: 'image/jpeg', size: 9, alt: 'old', aspectRatio: null, name: 'old.jpg' }] }),
+      bluesky: emptyBlueskyDraft({ images: [{ id: 'old1', blob: { $type: 'blob', ref: { $link: 'bafkold' }, mimeType: 'image/jpeg', size: 9 }, mime: 'image/jpeg', size: 9, alt: 'old', aspectRatio: null, name: 'old.jpg' }] }),
     }))
     pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkold', 'bafkold'))
     const el = await mount()
     await open(el)
     await submit(el)
-    expect($(el, '[data-bsky-image="bafkold"] .state')!.textContent).toContain('Not on the server any more')
+    expect($(el, '[data-bsky-image] .state')!.textContent).toContain('Not on the server any more')
     expect(postButton(el).disabled).toBe(true)
   })
 })
@@ -492,5 +500,220 @@ describe('Bluesky compose: account and session', () => {
     await settle(el)
     expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
     expect(loadDraft(KEY, 'new')!.text).toBe('mine')
+  })
+})
+
+function $$(el: CaribouComposeDialog, sel: string) {
+  return [...el.shadowRoot!.querySelectorAll<HTMLElement>(sel)]
+}
+
+function deferred<T>() {
+  let resolve!: (v: T) => void
+  const promise = new Promise<T>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
+describe('review fixes (PR #232)', () => {
+  it('3 images, then a second pick of 3: at most 4 (Codex 6, Fable B3)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [0, 1, 2].map((i) => new File([`a${i}`], `a${i}.jpg`, { type: 'image/jpeg' })))
+    await addFiles(el, [0, 1, 2].map((i) => new File([`b${i}`], `b${i}.jpg`, { type: 'image/jpeg' })))
+    expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(4)
+    expect(loadDraft(KEY, 'new')!.bluesky!.images).toHaveLength(4)
+  })
+
+  it('a stored draft over 4 images cannot be posted', async () => {
+    const pds = signInBluesky()
+    const img = (i: number) => ({ id: `i${i}`, blob: { $type: 'blob' as const, ref: { $link: `bafk${i}` }, mimeType: 'image/jpeg', size: 1 }, mime: 'image/jpeg', size: 1, alt: '', aspectRatio: null })
+    saveDraft(KEY, 'new', emptyDraft({ text: 'five', bluesky: emptyBlueskyDraft({ images: [0, 1, 2, 3, 4].map(img) }) }))
+    const el = await mount()
+    await open(el)
+    expect(postButton(el).disabled).toBe(true)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+  })
+
+  it('cache allows replies, the fresh read says replyDisabled: blocked, and the cache takes the fresh copy (Codex 5, Fable B2)', async () => {
+    const pds = signInBluesky()
+    const post = bobPost()
+    statusCache.value = new Map([[post.id, post]])
+    pds.client.fetchStatus.mockImplementation(async (id: string) => bobPost({ replyDisabled: true }, id))
+    const el = await mount()
+    await open(el, { inReplyTo: post })
+    await type(el, 'let me in')
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The author limited replies. You cannot reply to this post.')
+    expect(statusCache.peek().get(post.id)!.bluesky!.replyDisabled).toBe(true)
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+  })
+
+  it('the fresh read allows quotes, a cache copy still says embeddingDisabled: blocked', async () => {
+    const pds = signInBluesky()
+    const post = bobPost()
+    pds.client.fetchStatus.mockImplementation(async (id: string) => {
+      // The card's copy changes while the read is out.
+      statusCache.value = new Map([[id, bobPost({ embeddingDisabled: true }, id)]])
+      return bobPost({}, id)
+    })
+    const el = await mount()
+    await open(el, { quote: post })
+    // The fresh copy went into the cache, so the next check reads it there.
+    statusCache.value = new Map([[post.id, bobPost({ embeddingDisabled: true })]])
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+  })
+
+  it('the same file picked twice is two images: removing one keeps the other (Fable N2)', async () => {
+    signInBluesky()
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [new File(['same'], 'cat.jpg', { type: 'image/jpeg' })])
+    await addFiles(el, [new File(['same'], 'cat.jpg', { type: 'image/jpeg' })])
+    expect(loadDraft(KEY, 'new')!.bluesky!.images).toHaveLength(2)
+    const alts = $$(el, '[data-bsky-image] input') as HTMLInputElement[]
+    alts[0]!.value = 'first'
+    alts[0]!.dispatchEvent(new Event('input'))
+    await settle(el)
+    expect(loadDraft(KEY, 'new')!.bluesky!.images.map((i) => i.alt)).toEqual(['first', ''])
+    $$(el, '[data-bsky-image] [data-action="remove-media"]')[0]!.click()
+    await settle(el)
+    expect(loadDraft(KEY, 'new')!.bluesky!.images.map((i) => i.alt)).toEqual([''])
+  })
+
+  it('storage refuses the freeze: a visible refusal and nothing sent; then one post (rule 2, Codex 1, Fable N1)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'only once')
+    const real = localStorage.setItem.bind(localStorage)
+    let refuse = true
+    Object.defineProperty(localStorage, 'setItem', {
+      configurable: true,
+      value: (k: string, v: string) => {
+        if (refuse && k.startsWith('caribou.drafts.')) throw new DOMException('full', 'QuotaExceededError')
+        return real(k, v)
+      },
+    })
+    pds.loseNext.value = true
+    await submit(el)
+    expect(toasts.at(-1)).toMatchObject({ kind: 'error', message: 'Could not save the draft, so the post was not sent.' })
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    refuse = false
+    await submit(el)
+    await submit(el)
+    expect(pds.records.size).toBe(1)
+    Object.defineProperty(localStorage, 'setItem', { configurable: true, value: real })
+  })
+
+  it('a lost answer with storage refused afterwards: memory keeps the rkey, the retry checks it (rule 2)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'kept in memory')
+    pds.loseNext.value = true
+    await submit(el)
+    // Storage is wiped (another tab, a cleared site): the open dialog still knows.
+    localStorage.clear()
+    await submit(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3krkey0000001')
+    expect(pds.records.size).toBe(1)
+  })
+
+  it('close and reopen during the send, edit, then the old send succeeds: the edit is still stored (rule 3, Codex 4)', async () => {
+    const pds = signInBluesky()
+    const gate = deferred<void>()
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
+      await gate.promise
+      pds.records.set(rkey, record)
+      return { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafynew' }
+    })
+    const el = await mount()
+    await open(el)
+    await type(el, 'v1')
+    void submit(el)
+    await settle(el)
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    await settle(el)
+    await open(el)
+    await type(el, 'v1 and more')
+    gate.resolve()
+    await settle(el)
+    expect(loadDraft(KEY, 'new')!.text).toBe('v1 and more')
+  })
+
+  it('a re-upload that lands after an account switch writes nothing (rule 4, Codex 3, Fable N3)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
+    await type(el, 'alice text')
+    const gate = deferred<void>()
+    pds.client.blueskyUploadBlob.mockImplementationOnce(async (b: Blob) => {
+      await gate.promise
+      return { $type: 'blob' as const, ref: { $link: 'bafkblob1' }, mimeType: b.type, size: b.size }
+    })
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkblob1', 'bafkblob1'))
+    void submit(el)
+    await settle(el)
+    // Switch to a Mastodon account and open its composer.
+    addUserSession({
+      userKey: 'bob@example.social', server: 'example.social', token: 'T', vapidKey: '', account: null, createdAt: 1,
+    } as unknown as UserSession)
+    await settle(el)
+    await open(el)
+    await type(el, 'bob private draft')
+    gate.resolve()
+    await settle(el)
+    expect(loadDraft(KEY, 'new')!.text).toBe('alice text')
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('bob private draft')
+    expect($$(el, '[data-bsky-image]')).toHaveLength(0)
+  })
+
+  it('a re-upload that lands after close and reopen on another slot writes nothing (rule 4)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await addFiles(el, [new File(['img'], 'cat.jpg', { type: 'image/jpeg' })])
+    const gate = deferred<void>()
+    pds.client.blueskyUploadBlob.mockImplementationOnce(async (b: Blob) => {
+      await gate.promise
+      return { $type: 'blob' as const, ref: { $link: 'bafkblob1' }, mimeType: b.type, size: b.size }
+    })
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkblob1', 'bafkblob1'))
+    void submit(el)
+    await settle(el)
+    $<HTMLDialogElement>(el, 'dialog')!.close()
+    await settle(el)
+    await open(el, { inReplyTo: bobPost() })
+    await type(el, 'a reply')
+    gate.resolve()
+    await settle(el)
+    expect(loadDraft(KEY, `reply:${bobPost().id}`)!.bluesky!.images).toHaveLength(0)
+    expect($$(el, '[data-bsky-image]')).toHaveLength(0)
+  })
+
+  it('over the byte limit the reason is visible text, and the counter names it (Fable N5)', async () => {
+    signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, `a${'́'.repeat(50)}`.repeat(30))
+    expect($(el, '[data-byte-limit]')!.textContent).toBe('Over the 3000-byte limit')
+    expect($(el, '[data-byte-limit]')!.classList.contains('visually-hidden')).toBe(false)
+    expect($(el, '.count')!.getAttribute('aria-label')).toBe('270 characters left, over the 3000-byte limit')
+  })
+
+  it('"Open it" opens the earlier version in a new tab (Fable N6)', async () => {
+    const pds = signInBluesky()
+    pds.loseNext.value = true
+    const el = await mount()
+    await open(el)
+    await type(el, 'version one')
+    await submit(el)
+    await type(el, 'version two')
+    await submit(el)
+    const a = $(el, '[data-earlier-posted] a')!
+    expect(a.getAttribute('target')).toBe('_blank')
+    expect(a.getAttribute('rel')).toBe('noopener')
   })
 })

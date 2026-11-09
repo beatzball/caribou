@@ -4,7 +4,7 @@ import type {
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 import {
-  clearDraft, saveDraft,
+  clearDraft, loadDraft, saveDraft, storeDraft,
   type BlueskyDraft, type ComposeDraft, type DraftSlot, type PostedDetail,
 } from './compose.js'
 import { activeUserKey } from './users.js'
@@ -82,6 +82,23 @@ export type BlueskyPostOutcome =
 export interface PostBlueskyOptions {
   /** Waits between tries to read the new post (tests pass a no-op). */
   wait?: (ms: number) => Promise<void>
+  /**
+   * Hears every draft the send makes (rule 2): the frozen one before the
+   * network, the unfrozen one after a blob refusal, the kept edits after
+   * `earlier-posted`. The open dialog takes it as its own draft.
+   */
+  onDraft?: (draft: ComposeDraft) => void
+}
+
+/**
+ * Storage refused the draft with its rkey and frozen record (rule 2), so
+ * nothing was sent: without it, a reload could post twice.
+ */
+export class DraftNotSaved extends Error {
+  constructor() {
+    super('Could not save the draft, so the post was not sent.')
+    this.name = 'DraftNotSaved'
+  }
 }
 
 // The AppView can lag behind the PDS; a few tries before giving up on it.
@@ -94,19 +111,22 @@ function need<K extends keyof CaribouClient>(client: CaribouClient, name: K): No
   return (fn as (...a: unknown[]) => unknown).bind(client) as NonNullable<CaribouClient[K]>
 }
 
+/** The client's `BlueskyBlobNotFound`, by name: this package does not import the client. */
+function isBlobRefused(err: unknown): boolean {
+  return err instanceof Error && err.name === 'BlueskyBlobNotFound'
+}
+
+/** The record on the PDS is the one this send froze (rule 1). */
+function sameRecord(a: BlueskyPostRecord, b: BlueskyPostRecord): boolean {
+  return a.createdAt === b.createdAt && a.text === b.text
+}
+
 /**
- * Sends a Bluesky draft, at most once (spec 7.2):
- *
- * 1. A draft with a `sent` record has a send whose outcome is unknown. Ask
- *    the PDS for that rkey first. Found, with no edits since: the post went
- *    through. Found, with edits: keep them with a new rkey and send nothing
- *    (`earlier-posted`). Not found: send again with the same rkey. A failed
- *    check sends nothing.
- * 2. Before a send, the rkey and the exact record are stored in the draft.
- * 3. Any error leaves the draft as stored, `sent` included, and is thrown.
- *
- * Posted: the draft is cleared. The post is read back, cached and announced
- * (`caribou:posted`) only while the client's account is still the active one.
+ * Sends a Bluesky draft, at most once. The four rules are in the README,
+ * "One post per click". In short: an rkey carries one frozen record until
+ * it is resolved; the frozen draft is in memory and storage before the
+ * network; a send clears only the stored draft it owns; and only
+ * `RecordNotFound` means "not there".
  */
 export async function postBlueskyDraft(
   client: CaribouClient, slot: DraftSlot, draft: ComposeDraft, opts: PostBlueskyOptions = {},
@@ -115,34 +135,90 @@ export async function postBlueskyDraft(
   const createPost = need(client, 'blueskyCreatePost')
   const b = draft.bluesky ?? emptyBlueskyDraft()
   const input = blueskyDraftInput(draft)
-  const pending = b.rkey && b.sent ? { rkey: b.rkey, sent: b.sent } : null
 
-  if (pending) {
-    const found = await getOwnPost(pending.rkey)
-    if (found) {
-      if (pending.sent.input === input) return posted(client, slot, found.uri, opts)
-      const kept: ComposeDraft = {
-        ...draft, bluesky: { ...b, rkey: await need(client, 'blueskyNextRkey')(), sent: null },
+  // Rule 1: a pending rkey is resolved with its own record, never another.
+  if (b.rkey && b.sent) {
+    const rkey = b.rkey
+    const sent = b.sent
+    let found = await getOwnPost(rkey)
+    if (!found) {
+      // Rule 2: the pending draft is stored before the network too, unless
+      // the slot now holds a draft this send does not own.
+      const stored = loadDraft(client.userKey, slot)
+      if ((!stored || ownsStored(stored, rkey, sent)) && !storeDraft(client.userKey, slot, stored ?? draft)) {
+        throw new DraftNotSaved()
       }
-      saveDraft(client.userKey, slot, kept)
-      return { kind: 'earlier-posted', uri: found.uri, draft: kept }
+      const ref = await createPost(sent.record, rkey)
+      found = { uri: ref.uri, cid: ref.cid, value: sent.record }
     }
+    return resolved(client, slot, draft, rkey, sent, found.uri, sameRecord(found.value, sent.record) && input === sent.input, opts)
   }
 
   const rkey = b.rkey ?? await need(client, 'blueskyNextRkey')()
-  // Not found and no edits: the same frozen record. Else a new one.
-  const record = pending && pending.sent.input === input
-    ? pending.sent.record
-    : blueskyRecord(draft, await need(client, 'blueskyDetectFacets')(draft.text), new Date().toISOString())
-  saveDraft(client.userKey, slot, { ...draft, bluesky: { ...b, rkey, sent: { input, record } } })
-  const ref = await createPost(record, rkey)
-  return posted(client, slot, ref.uri, opts)
+  const record = blueskyRecord(draft, await need(client, 'blueskyDetectFacets')(draft.text), new Date().toISOString())
+  const sent = { input, record }
+  const frozen: ComposeDraft = { ...draft, bluesky: { ...b, rkey, sent } }
+  // Rule 2: memory, then storage, then the network.
+  opts.onDraft?.(frozen)
+  if (!storeDraft(client.userKey, slot, frozen)) throw new DraftNotSaved()
+  let ref
+  try {
+    ref = await createPost(record, rkey)
+  } catch (err) {
+    if (isBlobRefused(err)) {
+      // The PDS refused this exact record: the rkey is unused (README).
+      const open: ComposeDraft = { ...frozen, bluesky: { ...frozen.bluesky!, sent: null } }
+      opts.onDraft?.(open)
+      settleStored(client, slot, rkey, sent, open)
+    }
+    throw err
+  }
+  return resolved(client, slot, frozen, rkey, sent, ref.uri, true, opts)
 }
 
-async function posted(
-  client: CaribouClient, slot: DraftSlot, uri: string, opts: PostBlueskyOptions,
+type Sent = { input: string; record: BlueskyPostRecord }
+
+/** Rule 3: the stored draft is still this send's (same rkey and frozen record). */
+function ownsStored(stored: ComposeDraft | null, rkey: string, sent: Sent): stored is ComposeDraft {
+  const sb = stored?.bluesky
+  return !!sb && sb.rkey === rkey && !!sb.sent && sameRecord(sb.sent.record, sent.record)
+}
+
+/** Replaces the stored draft only while this send owns it (rule 3). */
+function settleStored(client: CaribouClient, slot: DraftSlot, rkey: string, sent: Sent, next: ComposeDraft): void {
+  if (ownsStored(loadDraft(client.userKey, slot), rkey, sent)) saveDraft(client.userKey, slot, next)
+}
+
+/**
+ * The rkey holds a post now. `unchanged`: it is the frozen record and the
+ * caller's draft has no edits since the freeze. Edits, in the caller's
+ * draft or in the stored one, are kept with a new rkey.
+ */
+async function resolved(
+  client: CaribouClient, slot: DraftSlot, draft: ComposeDraft, rkey: string,
+  sent: Sent, uri: string, unchanged: boolean, opts: PostBlueskyOptions,
 ): Promise<BlueskyPostOutcome> {
-  clearDraft(client.userKey, slot)
+  let fresh: string | null = null
+  const freshRkey = async () => (fresh ??= await need(client, 'blueskyNextRkey')())
+  const reopen = async (d: ComposeDraft): Promise<ComposeDraft> =>
+    ({ ...d, bluesky: { ...(d.bluesky ?? emptyBlueskyDraft()), rkey: await freshRkey(), sent: null } })
+
+  const stored = loadDraft(client.userKey, slot)
+  if (ownsStored(stored, rkey, sent)) {
+    if (blueskyDraftInput(stored) === sent.input && unchanged) clearDraft(client.userKey, slot)
+    else saveDraft(client.userKey, slot, await reopen(blueskyDraftInput(stored) === sent.input ? draft : stored))
+  }
+  if (!unchanged) {
+    const kept = await reopen(draft)
+    // An empty slot takes the edits; another draft in it is left alone.
+    if (!loadDraft(client.userKey, slot)) saveDraft(client.userKey, slot, kept)
+    opts.onDraft?.(kept)
+    return { kind: 'earlier-posted', uri, draft: kept }
+  }
+  return posted(client, uri, opts)
+}
+
+async function posted(client: CaribouClient, uri: string, opts: PostBlueskyOptions): Promise<BlueskyPostOutcome> {
   const wait = opts.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   const stillActive = () => activeUserKey.peek() === client.userKey
   let status: Status | null = null

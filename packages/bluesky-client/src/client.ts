@@ -91,10 +91,13 @@ export function blobRefJson(blob: unknown): BlueskyBlobRef {
   return { $type: 'blob', ref: { $link: link }, mimeType: b.mimeType, size: b.size }
 }
 
-/** `getRecord` answers a missing record with 400 `RecordNotFound`. */
+/**
+ * `getRecord` answers a missing record with 400 `RecordNotFound`. Only that
+ * means "not there": a 404, a deactivated or taken-down account, or any
+ * other answer is not proof, and a retry must not send on it.
+ */
 function isRecordMissing(err: unknown): boolean {
-  const e = err as { status?: unknown; error?: unknown }
-  return e?.error === 'RecordNotFound' || e?.status === 404 || normalizeXrpcError(err).code === 'not_found'
+  return (err as { error?: unknown } | null)?.error === 'RecordNotFound'
 }
 
 /** The PDS answers a post that names an unknown blob with 400 `BlobNotFound`. */

@@ -83,6 +83,17 @@ describe('blueskyGetOwnPost', () => {
     await expect(client.blueskyGetOwnPost!('k')).resolves.toBeNull()
   })
 
+  it.each([
+    ['a 404', xrpcError(404, 'NotFound', 'Not Found')],
+    ['AccountDeactivated', xrpcError(400, 'AccountDeactivated', 'Account is deactivated')],
+    ['AccountTakedown', xrpcError(400, 'AccountTakedown', 'Account has been taken down')],
+    ['a 400 that says not found', xrpcError(400, 'InvalidRequest', 'Repo not found')],
+  ])('throws on %s: only RecordNotFound means not there', async (_name, err) => {
+    const { client, repo } = setup()
+    repo.getRecord.mockRejectedValueOnce(err)
+    await expect(client.blueskyGetOwnPost!('k')).rejects.toBeTruthy()
+  })
+
   it('throws on a network error: an unknown answer is never "not found"', async () => {
     const { client, repo } = setup()
     repo.getRecord.mockRejectedValueOnce(Object.assign(new Error('fetch failed'), { status: 1 }))
