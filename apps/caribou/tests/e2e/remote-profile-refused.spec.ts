@@ -66,6 +66,13 @@ const HOME_ACCOUNT = {
 }
 const BOB = { ...HOME_ACCOUNT, id: 'b1', username: 'bob', acct: 'bob', display_name: 'Bob', url: 'https://example.social/@bob' }
 
+const RELATIONSHIP = {
+  id: HOME_ACCOUNT.id, following: false, showing_reblogs: false, notifying: false, languages: [],
+  followed_by: false, blocking: false, blocked_by: false, muting: false,
+  muting_notifications: false, requested: false, requested_by: false,
+  domain_blocking: false, endorsed: false, note: '',
+}
+
 function homePost(id: string, content: string) {
   return {
     id, uri: `https://refuses.example/@carol/${id}`, url: `https://refuses.example/@carol/${id}`,
@@ -74,6 +81,31 @@ function homePost(id: string, content: string) {
     reblogs_count: 0, favourites_count: 0, replies_count: 0,
     favourited: false, reblogged: false, bookmarked: false, language: 'en',
   }
+}
+
+// Every answer from the fake home server carries these, as a real server's
+// do: Firefox and WebKit log a cross-origin request with no answer.
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+}
+const homeJson = (body: unknown) => ({ status: 200, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
+// The reader's home server. Each path the page asks for has an answer here;
+// anything else is recorded and answered with a 404, and the test fails on it.
+async function homeServer(page: Page, answers: Record<string, (url: URL) => unknown>): Promise<string[]> {
+  const unexpected: string[] = []
+  await page.route('https://example.social/**', (route) => {
+    const req = route.request()
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
+    const url = new URL(req.url())
+    const answer = answers[url.pathname]
+    if (answer) return route.fulfill(homeJson(answer(url)))
+    unexpected.push(`${req.method()} ${url.pathname}`)
+    return route.fulfill({ status: 404, headers: { ...CORS, 'content-type': 'application/json' }, body: '{"error":"Record not found"}' })
+  })
+  return unexpected
 }
 
 function trackErrors(page: Page): string[] {
@@ -135,16 +167,24 @@ test('signed in: the profile and its posts, through the reader\'s own server', a
     localStorage.setItem('caribou.activeUserKey', JSON.stringify(session.userKey))
   }, BOB)
   const lookups: string[] = []
-  await page.route('https://example.social/api/v1/accounts/lookup*', (route) => {
-    lookups.push(new URL(route.request().url()).searchParams.get('acct') ?? '')
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(HOME_ACCOUNT) })
-  })
   const pages: (string | null)[] = []
-  await page.route('https://example.social/api/v1/accounts/home-99/statuses*', (route) => {
-    const u = new URL(route.request().url())
-    pages.push(u.searchParams.get('max_id'))
-    const body = u.searchParams.get('max_id') ? [] : [homePost('h2', '<p>carol newest</p>'), homePost('h1', '<p>carol older</p>')]
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
+  const relationshipIds: string[] = []
+  const unexpected = await homeServer(page, {
+    '/api/v1/accounts/lookup': (u) => {
+      lookups.push(u.searchParams.get('acct') ?? '')
+      return HOME_ACCOUNT
+    },
+    '/api/v1/accounts/home-99/statuses': (u) => {
+      pages.push(u.searchParams.get('max_id'))
+      return u.searchParams.get('max_id') ? [] : [homePost('h2', '<p>carol newest</p>'), homePost('h1', '<p>carol older</p>')]
+    },
+    // The profile header asks how the reader relates to carol, by home id.
+    '/api/v1/accounts/relationships': (u) => {
+      relationshipIds.push(...u.searchParams.getAll('id[]'))
+      return [RELATIONSHIP]
+    },
+    // The nav rail's unread badge.
+    '/api/v1/notifications': () => [],
   })
   await page.goto(`${base}${PATH}`)
   await settled(page)
@@ -155,11 +195,13 @@ test('signed in: the profile and its posts, through the reader\'s own server', a
   await expect(page.locator('caribou-profile-tabs a', { hasText: 'media' })).toHaveAttribute('href', `${PATH}?tab=media`)
   await expect(page.getByText(/does not allow/)).toHaveCount(0)
   // Paging asks the home server for the page after its own last id.
-  await page.mouse.wheel(0, 3000)
+  await page.locator('caribou-profile a[rel="next"]').scrollIntoViewIfNeeded()
   await expect(page.locator('caribou-profile a[rel="next"]')).toHaveCount(0)
   expect(pages).toEqual([null, 'h1'])
   expect(lookups.length).toBeGreaterThan(0)
   expect(lookups.every((acct) => acct === 'carol@refuses.example')).toBe(true)
+  expect(relationshipIds.every((id) => id === HOME_ACCOUNT.id)).toBe(true)
   expect(asked).toEqual([])
+  expect(unexpected).toEqual([])
   expect(errors).toEqual([])
 })

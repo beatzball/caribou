@@ -179,8 +179,8 @@ const refused = { kind: 'refused', host: 'refuses.example', shell: SHELL, handle
 describe('the page for a refused profile', () => {
   // The reader's home server, example.social. `lookup` and `search` say
   // what it knows about carol@refuses.example.
-  let lookup = 200
-  let search: unknown[] = []
+  let lookup: number | 'network' = 200
+  let search: unknown[] | number = []
   beforeEach(() => {
     lookup = 200
     search = []
@@ -190,9 +190,14 @@ describe('the page for a refused profile', () => {
       const url = new URL(href)
       if (url.host !== 'example.social') throw new Error(`unexpected fetch ${href}`)
       if (url.pathname === '/api/v1/accounts/lookup') {
+        if (lookup === 'network') throw new TypeError('Failed to fetch')
         return lookup === 200 ? json(200, HOME_CAROL) : json(lookup, { error: 'Record not found' })
       }
-      if (url.pathname === '/api/v2/search') return json(200, { accounts: search, statuses: [], hashtags: [] })
+      if (url.pathname === '/api/v2/search') {
+        return typeof search === 'number'
+          ? json(search, { error: 'boom' })
+          : json(200, { accounts: search, statuses: [], hashtags: [] })
+      }
       if (url.pathname === `/api/v1/accounts/${HOME_CAROL.id}/statuses`) return json(200, [BOOST, OWN])
       return json(200, [])
     }))
@@ -280,6 +285,41 @@ describe('the page for a refused profile', () => {
     expect(shownText(el)).toContain("Couldn't find @carol@refuses.example")
     expect(deepAll(el, 'a[href="https://refuses.example/@carol"]').length).toBe(1)
     expect(shownText(el)).not.toContain('Loading…')
+    expect(rejections).toEqual([])
+  })
+
+  // Only a 404 means "not found". A fault says it could not load, names the
+  // handle, and offers a Retry.
+  for (const [what, fault] of [['a 500', 500], ['a network failure', 'network']] as const) {
+    it(`signed in, the home lookup fails with ${what}: "Couldn't load", the handle, and a Retry`, async () => {
+      signIn()
+      lookup = fault
+      const { el } = mount(refused, '/@carol@refuses.example')
+      await settle(el, () => shownText(el).includes("Couldn't load"))
+      expect(shownText(el)).toContain("Couldn't load @carol@refuses.example from your server.")
+      expect(shownText(el)).not.toContain("Couldn't find")
+      expect(deepAll(el, 'a[href="https://refuses.example/@carol"]').length).toBe(1)
+      expect(calls.some((u) => u.includes('/api/v2/search'))).toBe(false)
+      expect(rejections).toEqual([])
+      lookup = 200
+      const retry = deepAll(el, 'caribou-button[data-action="retry"]')
+      expect(retry.length).toBe(1)
+      ;(retry[0] as HTMLElement).click()
+      await settle(el, () => shownText(el).includes('post 5001'))
+      expect(shownText(el)).toContain('Carol Home')
+      expect(shownText(el)).not.toContain("Couldn't load")
+    })
+  }
+
+  it('signed in, the lookup is a 404 and the search fails: "Couldn\'t load", not "Couldn\'t find"', async () => {
+    signIn()
+    lookup = 404
+    search = 500
+    const { el } = mount(refused, '/@carol@refuses.example')
+    await settle(el, () => shownText(el).includes("Couldn't load"))
+    expect(shownText(el)).toContain("Couldn't load @carol@refuses.example from your server.")
+    expect(shownText(el)).not.toContain("Couldn't find")
+    expect(deepAll(el, 'caribou-button[data-action="retry"]').length).toBe(1)
     expect(rejections).toEqual([])
   })
 

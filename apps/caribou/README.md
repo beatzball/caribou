@@ -130,8 +130,11 @@ answer a reader's own server.
    statuses by that server's own id, as on `/@me`. Those ids belong to the
    reader's server, so the header and each card get that server as their
    `instance`: their links and actions are the reader's server's. When
-   neither call finds the account, the profile says so, names the handle and
-   links to the account on `host`. The "Older posts" link carries a home id
+   neither call finds the account, the profile says "Couldn't find", names
+   the handle and links to the account on `host`. Only a 404 means not
+   found. Any other failure of either call (a 500, a network error) says
+   "Couldn't load", with the handle, the same link and a Retry: the account
+   can exist. The "Older posts" link carries a home id
    on a `host` address: opened in a new tab, the server sends that id to
    `host`, is refused again, and the page shows page one (as on `/@me`).
 4. **A bare `/@name`.** The cookie host can refuse too. The reader's server
