@@ -139,8 +139,10 @@ test('signed in: the profile and its posts, through the reader\'s own server', a
     lookups.push(new URL(route.request().url()).searchParams.get('acct') ?? '')
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(HOME_ACCOUNT) })
   })
+  const pages: (string | null)[] = []
   await page.route('https://example.social/api/v1/accounts/home-99/statuses*', (route) => {
     const u = new URL(route.request().url())
+    pages.push(u.searchParams.get('max_id'))
     const body = u.searchParams.get('max_id') ? [] : [homePost('h2', '<p>carol newest</p>'), homePost('h1', '<p>carol older</p>')]
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
   })
@@ -152,6 +154,10 @@ test('signed in: the profile and its posts, through the reader\'s own server', a
   await expect(page.locator('caribou-profile-tabs a[aria-current="page"]')).toHaveText('posts')
   await expect(page.locator('caribou-profile-tabs a', { hasText: 'media' })).toHaveAttribute('href', `${PATH}?tab=media`)
   await expect(page.getByText(/does not allow/)).toHaveCount(0)
+  // Paging asks the home server for the page after its own last id.
+  await page.mouse.wheel(0, 3000)
+  await expect(page.locator('caribou-profile a[rel="next"]')).toHaveCount(0)
+  expect(pages).toEqual([null, 'h1'])
   expect(lookups.length).toBeGreaterThan(0)
   expect(lookups.every((acct) => acct === 'carol@refuses.example')).toBe(true)
   expect(asked).toEqual([])

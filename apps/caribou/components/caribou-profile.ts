@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { effect } from '@preact/signals-core'
-import { canActOn, resourceNetwork, type Account, type Status } from '@beatzball/caribou-mastodon-client'
+import { canActOn, resourceNetwork, type Account, type CaribouClient, type Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, createAccountCache, createProfileStore,
   type ProfileStore, type ProfileTab,
@@ -21,6 +21,18 @@ export interface ProfileInitial {
   tab: ProfileTab
 }
 
+// A remote account the reader's server has not seen yet: a search with
+// `resolve` makes the server fetch it. Only an exact match counts.
+async function resolveAccount(client: CaribouClient | null, handle: string): Promise<Account | null> {
+  if (!client || !handle.includes('@')) return null
+  try {
+    const found = await client.search({ q: handle, type: 'accounts', resolve: true, limit: 1 })
+    return found.accounts.find((a) => a.acct.toLowerCase() === handle.toLowerCase()) ?? null
+  } catch {
+    return null
+  }
+}
+
 function sameItems(a: readonly Status[], b: readonly Status[]): boolean {
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
@@ -34,7 +46,9 @@ export class CaribouProfile extends LitElement {
     ul { list-style: none; margin: 0; padding: 0; }
     /* A card hidden by a filter, a mute or a block takes its row with it. */
     li:has(> caribou-status-card[hidden]) { display: none; }
-    .loading { padding: var(--space-4); color: var(--fg-muted); }
+    .loading, .missing { padding: var(--space-4); color: var(--fg-muted); }
+    .missing { margin: 0; }
+    .missing a { color: var(--accent); overflow-wrap: anywhere; }
     a[rel="next"] { display: block; padding: var(--space-4); color: var(--fg-muted); text-align: center; }
   `
 
@@ -78,6 +92,9 @@ export class CaribouProfile extends LitElement {
   // client looked it up, or null for the server's copy (README, "A decision
   // belongs to one reader").
   @state() private accountViewerOf: string | null = null
+  // The reader's server found no account by this handle, by lookup or by
+  // search: the profile is a message, never "Loading…" forever.
+  @state() private missing = false
 
   private store: ProfileStore | null = null
   private dispose: (() => void) | null = null
@@ -132,11 +149,20 @@ export class CaribouProfile extends LitElement {
       const server = activeUser.value?.server ?? ''
       const cache = createAccountCache(clientSource)
       this.accountViewerOf = clientSource()?.userKey ?? null
-      account = await cache.lookup(this.handle.replace(/^@/, ''))
+      const handle = this.handle.replace(/^@/, '')
+      account = await cache.lookup(handle).catch(async (err: unknown) =>
+        // Lookup knows only accounts the server has seen. A remote one it
+        // has not seen is a 404; a search with `resolve` fetches it, as the
+        // search page does.
+        (err as { code?: string }).code === 'not_found' ? resolveAccount(clientSource(), handle) : null)
       this.accountServer = server
       if (account) {
         store = createProfileStore(account.id, this.tab, { clientSource })
         await store.load()
+      } else if (clientSource()) {
+        // Only a reader's server can say it found nothing; with no client
+        // nothing was asked.
+        this.missing = true
       }
     }
     if (!store) return
@@ -236,8 +262,19 @@ export class CaribouProfile extends LitElement {
     if (this.canFetch) e.preventDefault()
   }
 
+  // The handle, and a link to the account on its own server when it has one.
+  private renderMissing() {
+    const handle = this.handle.replace(/^@/, '')
+    const [name, host] = handle.split('@')
+    return html`<p class="missing" role="alert">
+      Couldn't find @${handle} from your server.
+      ${host ? html`<a href=${`https://${host}/@${encodeURIComponent(name ?? '')}`} rel="noopener noreferrer">Open it on ${host}</a>.` : nothing}
+    </p>`
+  }
+
   override render() {
     const account = this.live ? this.account : (this.initial?.account ?? null)
+    if (!account && this.missing) return this.renderMissing()
     if (!account) return html`<div class="loading">Loading…</div>`
     const statuses = this.live ? this.statuses : (this.initial?.statuses ?? [])
     // The cursor is opaque: the link carries it as the page named it, never
@@ -265,7 +302,7 @@ export class CaribouProfile extends LitElement {
         <ul>
           ${repeat(statuses, (s) => s.id, (s) => html`<li
             ><caribou-status-card variant="timeline" data-status-id=${s.id} .status=${s}
-              filter-context="account"></caribou-status-card
+              instance=${this.instance || this.accountServer} filter-context="account"></caribou-status-card
           ></li>`)}
         </ul>
         ${nextHref

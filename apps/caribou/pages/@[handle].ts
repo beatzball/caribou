@@ -104,6 +104,7 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
 export class HandlePage extends LitroPage {
   static override styles = [pageReset, css`
     article { padding: 1rem; color: var(--fg-muted); }
+    .refused a { color: var(--accent); overflow-wrap: anywhere; }
   `]
 
   // On /@me: the signed-in user and the tab from the address bar. The server
@@ -220,42 +221,39 @@ export class HandlePage extends LitroPage {
       `
     }
     if (data.kind === 'refused' && this.refused === 'home') {
-      // No `initial` and no `instance`: the profile looks the account up by
-      // `name@host` through the reader's client, as on /@me, and pages it by
-      // that server's ids. The links keep the remote route.
+      // No `initial` and no `instance`: the profile looks the account up
+      // through the reader's client, as on /@me, and pages it by that
+      // server's ids. A bare name is looked up as `name@<host>`, never bare:
+      // the reader's server may have its own account by that name. The
+      // links keep the address the reader opened.
       const tab = parseTab(new URLSearchParams(window.location.search).get('tab'))
+      const lookup = data.handle.includes('@') ? data.handle : `${data.handle}@${data.host}`
       return html`
         <caribou-app-shell instance=${inst}>
-          <caribou-profile handle=${data.handle} tab=${tab}></caribou-profile>
-        </caribou-app-shell>
-      `
-    }
-    if (data.kind === 'refused' && this.refused === 'out') {
-      const name = data.handle.replace(/^@/, '').split('@')[0] ?? ''
-      return html`
-        <caribou-app-shell instance=${inst}>
-          <article role="status">
-            ${data.host} does not allow Caribou to show this profile.
-            Sign in to see it through your own server, or
-            <a href=${`https://${data.host}/@${encodeURIComponent(name)}`} rel="noopener noreferrer">open @${data.handle} on ${data.host}</a>.
-          </article>
+          <caribou-profile handle=${lookup} link-handle=${data.handle} tab=${tab}></caribou-profile>
         </caribou-app-shell>
       `
     }
     if (data.kind === 'refused') {
+      // One live region, the same node from "Loading…" to the message: only
+      // its text changes, so a screen reader announces it.
+      const name = data.handle.replace(/^@/, '').split('@')[0] ?? ''
+      const message = this.refused === 'out'
+        ? html`<span>${data.host} does not allow Caribou to show this profile.
+            Sign in with a Mastodon account to see it through your own server, or
+            <a href=${`https://${data.host}/@${encodeURIComponent(name)}`} rel="noopener noreferrer">open @${data.handle} on ${data.host}</a>.</span>`
+        : 'Loading…'
       return html`
         <caribou-app-shell instance=${inst}>
-          <article role="status" aria-busy="true">Loading…</article>
+          <article class="refused" role="status" aria-busy=${this.refused === 'out' ? 'false' : 'true'}>${message}</article>
         </caribou-app-shell>
       `
     }
     if (data.kind === 'error') {
-      // The address is the fallback: the message always names the account.
-      const handle = data.handle || (typeof window === 'undefined' ? '' : routeSegment(window.location.pathname))
       return html`
         <caribou-app-shell instance=${inst}>
           <article role="alert">
-            Couldn't load profile @${handle}.
+            Couldn't load profile @${data.handle}.
           </article>
         </caribou-app-shell>
       `
