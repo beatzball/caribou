@@ -1,5 +1,24 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.1.3
+
+### Patch Changes
+
+- [#236](https://github.com/beatzball/caribou/pull/236) [`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f) Thanks [@beatzball](https://github.com/beatzball)! - Add like, repost, bookmark, follow, mute and block, with their undos. An undo deletes only the record its ref names, in the reader repo. With no ref, it reads the reader view first. It never guesses a record. Unblock and Unmute refuse a block or mute that comes from a list. The client picks the rkey, so a lost answer never makes a second record. `mapRelationship` keeps the list URIs. A blocked profile read leaves the follow unknown, since the AppView hides it, and `blockUri` keeps only a block record URI.
+
+- [#232](https://github.com/beatzball/caribou/pull/232) [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0) Thanks [@beatzball](https://github.com/beatzball)! - Add the compose writes: `blueskyCreatePost` with a chosen rkey, `blueskyGetOwnPost`, `blueskyUploadBlob`, `blueskyDetectFacets` and `blueskyNextRkey`, plus `countPost` from the SDK's `RichText` and `BlueskyBlobNotFound`.
+
+- [#235](https://github.com/beatzball/caribou/pull/235) [`c8344a4`](https://github.com/beatzball/caribou/commit/c8344a4a5939ee33876feff78cd636ff5c0333f1) Thanks [@beatzball](https://github.com/beatzball)! - Every signed-in read now sets labeler coverage, so a clean post or profile is no longer stuck under "checking your moderation settings". A browser cannot read `atproto-content-labelers`. When the header is missing, coverage is the labelers the request sent in `atproto-accept-labelers`, at most 20. A result built from several answers keeps only what every answer covered.
+
+  `restoreClient` also answers `recheckLabelers()`: it checks the label definitions again, and a labeler `getServices` no longer answers for loses them, so the cover comes back. An agent with no session counts as sending no labelers.
+
+- [#231](https://github.com/beatzball/caribou/pull/231) [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1) Thanks [@beatzball](https://github.com/beatzball)! - `fetchNotifications` reads `listNotifications`: like, repost, follow, mention, reply and quote map to Caribou types; every other reason, and a notification whose post is gone, is skipped and never throws. Posts come from `getPosts` with provenance and moderation. A page carries the AppView cursor and a seen hint. `sinceId` pages from the top until it meets that notification. New `getUnreadCount` and `updateSeen`. Reasons are looked up in a `Map`, so names like `constructor` are skipped. Catch-up also stops at the first notification older than `sinceAt`, so a deleted anchor is not read past. The seen hint also names the raw top's URI (`newestUri`). Notification authors and posts carry the labeler coverage their own answer named (`atproto-content-labelers`), so the reader veil can settle for them. The signed-in moderation source is now `readerModerationSource` (in `./moderation`), and `BlueskyModerationSource` takes an optional `coverage`.
+
+- [#237](https://github.com/beatzball/caribou/pull/237) [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc) Thanks [@beatzball](https://github.com/beatzball)! - Add `blueskyDeletePost(uri)` (deleteRecord, only for a post in the reader's own repo; a delete with no clear answer is decided by `getRecord`, and `BlueskyDeleteUnknown` is thrown when that check fails too) and `blueskyGetBlob(cid)`. `deleteStatus` and `fetchStatusSource` now name the Bluesky methods to use.
+
+- Updated dependencies [[`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f), [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0), [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1), [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc)]:
+  - @beatzball/caribou-mastodon-client@0.4.7
+
 ## 0.1.2
 
 ### Patch Changes

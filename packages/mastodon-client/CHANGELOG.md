@@ -1,5 +1,17 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.7
+
+### Patch Changes
+
+- [#236](https://github.com/beatzball/caribou/pull/236) [`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f) Thanks [@beatzball](https://github.com/beatzball)! - Add `StatusWriteAck`, `RelationshipWriteAck` and `isWriteAck`. A status or relationship write may now answer an ack (Bluesky) instead of the whole post or relationship. Mastodon still answers the whole object. `RelationshipBluesky` gets `blockingByList` and `mutingByList`, and `accountRef` carries them.
+
+- [#232](https://github.com/beatzball/caribou/pull/232) [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0) Thanks [@beatzball](https://github.com/beatzball)! - Add the Bluesky compose types (`BlueskyPostRecord`, `BlueskyBlobRef`, `BlueskyFacet`, `BlueskyOwnPost`) and the optional Bluesky compose methods on `CaribouClient`. The Mastodon client does not change.
+
+- [#231](https://github.com/beatzball/caribou/pull/231) [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1) Thanks [@beatzball](https://github.com/beatzball)! - Notification pages now carry `nextCursor`: the last id for single notifications, the oldest id covered for grouped ones, and null for an empty page. `cursor` is sent as `max_id`. The client interface gains optional `getUnreadCount` and `updateSeen` (Bluesky only) and `Notification.bluesky`. Requests to Mastodon do not change. `FetchNotificationsParams` gains `sinceAt` (Bluesky only).
+
+- [#237](https://github.com/beatzball/caribou/pull/237) [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc) Thanks [@beatzball](https://github.com/beatzball)! - Two optional Bluesky methods on `CaribouClient`: `blueskyDeletePost` and `blueskyGetBlob`. The Mastodon client does not change.
+
 ## 0.4.6
 
 ### Patch Changes
