@@ -1,4 +1,4 @@
-import type { AccountRef, Relationship, Status, StatusRef } from './types.js'
+import type { AccountRef, Relationship, RelationshipWriteAck, Status, StatusRef, StatusWriteAck } from './types.js'
 
 /** The ref a status action sends for this post. A Mastodon post gives only its id. */
 export function statusRef(status: Pick<Status, 'id' | 'bluesky'>): StatusRef {
@@ -16,5 +16,19 @@ export function accountRef(
 ): AccountRef {
   const b = relationship?.bluesky
   if (!b) return { id: accountId }
-  return { id: accountId, bluesky: { followUri: b.followUri, blockUri: b.blockUri } }
+  return {
+    id: accountId,
+    bluesky: {
+      followUri: b.followUri, blockUri: b.blockUri,
+      ...(b.blockingByList !== undefined ? { blockingByList: b.blockingByList } : {}),
+      ...(b.mutingByList !== undefined ? { mutingByList: b.mutingByList } : {}),
+    },
+  }
+}
+
+/** True for a Bluesky write's ack, false for a whole post or relationship. */
+export function isWriteAck<T extends object>(
+  result: T | StatusWriteAck | RelationshipWriteAck,
+): result is StatusWriteAck | RelationshipWriteAck {
+  return (result as { ack?: unknown }).ack === true
 }

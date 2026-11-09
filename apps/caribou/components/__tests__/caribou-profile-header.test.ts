@@ -205,6 +205,24 @@ describe('<caribou-profile-header> follow button', () => {
     expect(unfollow).toHaveBeenCalledWith({ id: '42' })
   })
 
+  // State README, A1 and R2-1: an unknown follow shows no Follow choice.
+  it('a cached relationship with no follow field ({ id, muting: true }) shows no follow button, but keeps the menu', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockReturnValue(new Promise(() => {}))
+    relationshipCache.value = new Map([[`${client.userKey} 42`, { id: '42', muting: true } as Relationship]])
+    const el = await mountWith(ACCOUNT)
+    expect(button(el)).toBeNull()
+    expect(el.shadowRoot!.querySelector('.badge.muted')?.textContent).toBe('Muted')
+  })
+
+  it('a known block with the follow unknown (a read made while blocked) still shows Unblock', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'fetchRelationships').mockResolvedValue([{ id: '42', blocking: true, followedBy: false } as Relationship])
+    const el = await mountWith(ACCOUNT)
+    expect(button(el)?.dataset.state).toBe('blocked')
+    expect(button(el)?.textContent).toBe('Unblock')
+  })
+
   it('says "Follows you" when the account follows the reader', async () => {
     const client = signIn()
     vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel({ followedBy: true })])

@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit'
 import { customElement, property } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import { activeUserKey } from '@beatzball/caribou-state'
+import type { Network } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
 
@@ -102,11 +103,19 @@ export async function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   }
 }
 
-/** The question every Block asks first. */
-export function confirmBlock(acct: string): Promise<boolean> {
+/** Said in every Bluesky block confirm (spec 9): a block is a public record. */
+export const BLUESKY_BLOCK_PUBLIC = 'Blocks on Bluesky are public. Anyone can see that you blocked this account.'
+
+/**
+ * The question every Block asks first. A Bluesky block says it is public;
+ * a Mastodon block's text is as it was.
+ */
+export function confirmBlock(acct: string, network: Network = 'mastodon'): Promise<boolean> {
   return confirmDialog({
     title: `Block @${acct}?`,
-    message: `@${acct} will no longer be able to follow you or see your posts, and you will no longer see theirs.`,
+    message: network === 'bluesky'
+      ? `@${acct} will no longer be able to follow you, reply to you or quote you, and you will no longer see each other's posts. ${BLUESKY_BLOCK_PUBLIC}`
+      : `@${acct} will no longer be able to follow you or see your posts, and you will no longer see theirs.`,
     confirmLabel: 'Block',
   })
 }

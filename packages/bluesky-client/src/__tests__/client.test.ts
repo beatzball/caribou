@@ -382,7 +382,7 @@ describe('errors and later features', () => {
     expect(onUnauthorized).not.toHaveBeenCalled()
   })
 
-  it.each(['favourite', 'reblog', 'bookmark', 'follow', 'block', 'createStatus', 'search', 'fetchGroupedNotifications', 'fetchLists', 'fetchTag', 'votePoll', 'editStatus'] as const)(
+  it.each(['createStatus', 'search', 'fetchGroupedNotifications', 'fetchLists', 'fetchTag', 'votePoll', 'editStatus'] as const)(
     '%s is not here yet', async (method) => {
       const { client } = setup()
       const call = (client[method] as () => Promise<unknown>)()

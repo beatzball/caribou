@@ -55,14 +55,34 @@ describe('mapRelationship', () => {
       id: 'did:plc:alice', following: true, showingReblogs: true, notifying: false, followedBy: true,
       blocking: false, blockedBy: false, muting: false, mutingNotifications: false, requested: false,
       domainBlocking: false, endorsed: false, note: null, requestedBy: false,
-      bluesky: { followUri: 'at://did:plc:reader/app.bsky.graph.follow/3lreaderfollow', blockUri: null },
+      bluesky: { followUri: 'at://did:plc:reader/app.bsky.graph.follow/3lreaderfollow', blockUri: null, blockingByList: null, mutingByList: null },
     })
   })
 
   it('counts a block by list as blocking, with no record to delete', () => {
     const list = { uri: 'at://did:plc:reader/app.bsky.graph.list/3l', name: 'l', purpose: 'app.bsky.graph.defs#modlist', cid: 'c' }
-    const r = mapRelationship({ did: 'did:plc:bob', handle: 'bob.example.com', viewer: { blockingByList: list, muted: true, mutedByList: list } })
-    expect(r).toMatchObject({ blocking: true, muting: true, mutingNotifications: true, bluesky: { blockUri: null } })
+    // As the AppView sends it: `blocking` holds the list's URI.
+    const r = mapRelationship({ did: 'did:plc:bob', handle: 'bob.example.com', viewer: { blocking: list.uri, blockingByList: list, muted: true, mutedByList: list } })
+    expect(r).toMatchObject({ blocking: true, muting: true, mutingNotifications: true, bluesky: { blockUri: null, blockingByList: list.uri, mutingByList: list.uri } })
+  })
+
+  it('keeps a personal block record when a list blocks the account too', () => {
+    const list = { uri: 'at://did:plc:reader/app.bsky.graph.list/3l', name: 'l', purpose: 'app.bsky.graph.defs#modlist', cid: 'c' }
+    const block = 'at://did:plc:reader/app.bsky.graph.block/3b'
+    const r = mapRelationship({ did: 'did:plc:bob', handle: 'bob.example.com', viewer: { blocking: block, blockingByList: list } })
+    expect(r.bluesky).toMatchObject({ blockUri: block, blockingByList: list.uri })
+  })
+
+  // R2-1: the AppView hides the follow while either side blocks.
+  it.each([
+    ['the reader blocks', { blocking: 'at://did:plc:reader/app.bsky.graph.block/3b' }],
+    ['a list blocks', { blocking: 'at://did:plc:reader/app.bsky.graph.list/3l', blockingByList: { uri: 'at://did:plc:reader/app.bsky.graph.list/3l', name: 'l', purpose: 'app.bsky.graph.defs#modlist', cid: 'c' } }],
+    ['the account blocks the reader', { blockedBy: true }],
+  ])('leaves the follow unknown when %s', (_, viewer) => {
+    const r = mapRelationship({ did: 'did:plc:bob', handle: 'bob.example.com', viewer })
+    expect('following' in r).toBe(false)
+    expect(r.bluesky && 'followUri' in r.bluesky).toBe(false)
+    expect(r.blocking || r.blockedBy).toBe(true)
   })
 
   it('keeps the block record, and reads reposts-only mutes as hidden reposts', () => {
