@@ -389,6 +389,20 @@ in `src/client.ts` reads a page. Both are server-safe.
 - **Posts:** the client reads every post the page names with `getPosts`, 25
   URIs per request, each URI once. They map with `mapPost`, so each one has
   its `network`, `viewerOf` and moderation, as in a feed (spec 11, seam 4).
+- **Labeler coverage (spec 7.4, rule 3 of the veil):** each decision carries
+  the labelers its own answer covered, from that answer's
+  `atproto-content-labelers` header (`parseContentLabelers`: each DID, its
+  parameters dropped; missing or unreadable is `[]`). Authors take the
+  `listNotifications` answer's; posts take their `getPosts` answer's. A
+  catch-up over several answers keeps only the labelers every one of them
+  covered. Nothing is assumed: no header, no coverage, and the veil does not
+  settle. The moderation source takes it as `coverage`
+  (`BlueskyModerationSource.post(view, coverage)` / `profile(view,
+  coverage)`); the signed-in client's source is `readerModerationSource`
+  (`./moderation`), which `restoreClient` uses. **Only notifications pass
+  coverage so far.** Every other read (Following, profiles, threads,
+  bookmarks, `lookupAccount`) passes none, so those decisions never settle
+  for a signed-in reader yet (a follow-up).
 - **Fields:** `id` = the notification's `uri` (the like, repost, follow or
   post record). `createdAt` = `indexedAt`. `account` = the author, with its
   moderation. `groupKey` = the `uri` (the store groups Bluesky

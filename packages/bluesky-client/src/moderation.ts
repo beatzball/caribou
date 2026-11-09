@@ -275,6 +275,33 @@ function decide(
 }
 
 /** `getServices?dids=…&detailed=true` → definitions keyed by labeler DID. */
+/**
+ * The signed-in client's moderation source (`restoreClient`): the reader's
+ * DID, and their prefs and definitions as they are now (null: not loaded,
+ * fail closed). The coverage a read passes on is the answer's own
+ * (`atproto-content-labelers`); a read that passes none settles nothing.
+ */
+export function readerModerationSource(
+  did: string,
+  inputs: () => { prefs: ModerationPrefs | null; labelDefs: LabelDefs | null },
+): {
+  post(view: AppBskyFeedDefs.PostView, coverage?: ModerateOptions): BlueskyModerationResult
+  profile(view: AppBskyActorDefs.ProfileView | AppBskyActorDefs.ProfileViewBasic | AppBskyActorDefs.ProfileViewDetailed, coverage?: ModerateOptions): BlueskyModerationResult
+} {
+  const opts = (c: ModerateOptions | undefined): ModerateOptions =>
+    c?.labelersCovered ? { labelersCovered: c.labelersCovered } : {}
+  return {
+    post: (view, coverage) => {
+      const { prefs, labelDefs } = inputs()
+      return moderate({ kind: 'post', view }, did, prefs, labelDefs, opts(coverage))
+    },
+    profile: (view, coverage) => {
+      const { prefs, labelDefs } = inputs()
+      return moderate({ kind: 'profile', view }, did, prefs, labelDefs, opts(coverage))
+    },
+  }
+}
+
 export function labelDefsFromServices(views: AppBskyLabelerDefs.LabelerViewDetailed[]): LabelDefs {
   const out: LabelDefs = {}
   for (const view of views) out[view.creator.did] = interpretLabelValueDefinitions(view)

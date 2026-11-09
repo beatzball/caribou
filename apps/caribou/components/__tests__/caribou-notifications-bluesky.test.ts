@@ -5,6 +5,7 @@ import {
   unreadNotificationCount, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import { createBlueskyClient, type BlueskyAgent } from '@beatzball/caribou-bluesky-client/browser'
+import { readerModerationSource } from '@beatzball/caribou-bluesky-client/moderation'
 import { toUserKey } from '@beatzball/caribou-auth'
 import '../caribou-notifications.js'
 import '../caribou-status-card.js'
@@ -465,5 +466,66 @@ describe('caribou-notifications, Bluesky: the veil, notices and focus', () => {
     } finally {
       ;(customElements.get('caribou-notifications') as unknown as { pollMs: number }).pollMs = pollMs
     }
+  })
+})
+
+// Through the production source: the real client and `readerModerationSource`
+// (what `restoreClient` uses), the SDK's moderation and the real veil. The
+// coverage comes only from the answer's `atproto-content-labelers` header.
+describe('caribou-notifications, Bluesky: authors through the production moderation source', () => {
+  const author = { did: 'did:plc:bob', handle: 'bob.example.com', displayName: 'Bob', labels: [] }
+  const follow = {
+    uri: 'at://did:plc:bob/app.bsky.graph.follow/f1', cid: 'c', author, reason: 'follow',
+    record: {}, isRead: true, indexedAt: '2026-11-07T12:00:00.000Z', labels: [],
+  }
+
+  async function withRealClient(headers: Record<string, string>, run: (el: CaribouNotifications) => Promise<void>) {
+    const agent = {
+      did: 'did:plc:alice',
+      listNotifications: vi.fn(async () => ({ data: { notifications: [follow] }, headers })),
+      getPosts: vi.fn(async () => ({ data: { posts: [] }, headers })),
+    }
+    const restore = driver.restore
+    driver.restore = async (s) => createBlueskyClient({
+      userKey: s.userKey, agent: agent as unknown as BlueskyAgent,
+      moderation: readerModerationSource('did:plc:alice', () => ({
+        prefs: { adultContentEnabled: false, labels: {}, labelers: [], mutedWords: [], hiddenPosts: [] },
+        labelDefs: { [BSKY_LABELER]: [] },
+      })),
+    })
+    try {
+      const el = document.createElement('caribou-notifications') as CaribouNotifications
+      document.body.appendChild(el)
+      await vi.waitFor(() => expect(rows(el)).toHaveLength(1))
+      await _testOnlyVeilLoaded()
+      await flush()
+      await el.updateComplete
+      await run(el)
+    } finally {
+      driver.restore = restore
+    }
+  }
+
+  it('a clean author shows their real name and link once the reader is settled', async () => {
+    await withRealClient({ 'atproto-content-labelers': `${BSKY_LABELER};redact` }, async (el) => {
+      await vi.waitFor(() => expect(lineText(rows(el)[0]!)).toBe('Bob followed you'))
+      expect(rows(el)[0]!.querySelector('.line a')?.getAttribute('href')).toBe('/@bob.example.com')
+    })
+  })
+
+  it('an answer without coverage keeps the author covered', async () => {
+    await withRealClient({}, async (el) => {
+      await flush()
+      expect(lineText(rows(el)[0]!)).toBe('Someone (checking your moderation settings) followed you')
+      expect(rows(el)[0]!.querySelector('.line a')).toBeNull()
+    })
+  })
+
+  it('reader inputs not loaded keep the author covered, even with coverage', async () => {
+    _testOnlyResetBlueskyVeil()
+    await withRealClient({ 'atproto-content-labelers': BSKY_LABELER }, async (el) => {
+      await flush()
+      expect(lineText(rows(el)[0]!)).toBe('Someone (checking your moderation settings) followed you')
+    })
   })
 })
