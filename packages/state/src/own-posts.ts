@@ -44,6 +44,29 @@ function replaceInBoosts(post: Status): void {
   if (out) statusCache.value = out
 }
 
+/**
+ * Drops the reader's post from every list, as a delete does: the post and
+ * each boost of it go from the cache, and its id is marked deleted. For a
+ * post found already deleted (a Bluesky redraft read). Answers what went.
+ */
+export function forgetDeletedStatus(status: Status): Map<string, Status> {
+  const id = (status.reblog ?? status).id
+  const removed = new Map<string, Status>()
+  batch(() => {
+    const cache = statusCache.peek()
+    const next = new Map(cache)
+    for (const [key, s] of cache) {
+      if (key === id || s.reblog?.id === id) {
+        removed.set(key, s)
+        next.delete(key)
+      }
+    }
+    statusCache.value = next
+    deletedStatusIds.value = new Set([...deletedStatusIds.peek(), id])
+  })
+  return removed
+}
+
 /** How a delete ended (README, "Bluesky delete and redraft"). */
 export type DeleteOutcome =
   | { kind: 'deleted'; gone: Status; stale: boolean }
@@ -73,19 +96,7 @@ export async function deleteOwnStatusOutcome(
   const post = status.reblog ?? status
   const id = post.id
   const generation = ownerGeneration()
-  const removed = new Map<string, Status>()
-  batch(() => {
-    const cache = statusCache.peek()
-    const next = new Map(cache)
-    for (const [key, s] of cache) {
-      if (key === id || s.reblog?.id === id) {
-        removed.set(key, s)
-        next.delete(key)
-      }
-    }
-    statusCache.value = next
-    deletedStatusIds.value = new Set([...deletedStatusIds.peek(), id])
-  })
+  const removed = forgetDeletedStatus(post)
   try {
     // Bluesky's delete answers nothing; the post as the reader saw it is the answer.
     const gone = post.bluesky && client.blueskyDeletePost

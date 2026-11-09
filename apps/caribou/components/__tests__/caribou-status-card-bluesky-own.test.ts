@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueskyOwnPost, BlueskyPostRecord, Capabilities, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, blueskyUserKey, deletedStatusIds, findRedraftSlot, getDraftFiles, loadDraft,
-  setBlueskyDriver, statusCache, users, _testOnlyClearDraftFiles, type BlueskyDriver, type DraftSlot, type UserSession,
+  saveDraft, emptyDraft, setBlueskyDriver, statusCache, storedDrafts, users, _testOnlyClearDraftFiles,
+  type BlueskyDriver, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
 import { BLUESKY_CAPABILITIES } from '@beatzball/caribou-bluesky-client'
 import '../caribou-status-card.js'
@@ -197,10 +198,13 @@ describe('<caribou-status-card> own Bluesky post', () => {
     signIn()
     const el = await mount(post())
     // The draft is stored before the delete is sent.
+    // Staged, where no composer finds it until the delete answers (D1).
     let storedAtDelete: string | null = null
+    let foundAtDelete: DraftSlot | null = null
     pds.blueskyDeletePost.mockImplementationOnce(async (uri: string) => {
       calls.push(`delete ${uri}`)
-      storedAtDelete = loadDraft(KEY, findRedraftSlot(KEY)!)?.text ?? null
+      storedAtDelete = storedDrafts(KEY).find(([slot]) => slot.startsWith('staged:'))?.[1].text ?? null
+      foundAtDelete = findRedraftSlot(KEY)
     })
     item(el, 'redraft')!.click()
     await settle(el)
@@ -210,15 +214,21 @@ describe('<caribou-status-card> own Bluesky post', () => {
     await settle(el)
     expect(calls).toEqual(['read 3kold', 'blob bafkA', `fetch ${PARENT.uri}`, 'upload re abc', 'rkey', `delete ${URI}`])
     expect(storedAtDelete).toBe('hello')
+    expect(foundAtDelete).toBeNull()
     expect(events).toHaveLength(1)
     const detail = events[0]!.detail as { blueskyRedraft: { userKey: string; slot: DraftSlot } }
     expect(detail.blueskyRedraft.userKey).toBe(KEY)
+    // Moved where a new post finds it.
+    expect(detail.blueskyRedraft.slot).toMatch(/^redraft:/)
+    expect(findRedraftSlot(KEY)).toBe(detail.blueskyRedraft.slot)
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([detail.blueskyRedraft.slot])
     const d = loadDraft(KEY, detail.blueskyRedraft.slot)!
     expect(d.text).toBe('hello')
     expect(d.language).toBe('en')
     expect(d.bluesky!.reply).toEqual({ root: PARENT, parent: PARENT })
     expect(d.bluesky!.rkey).toBe('3knewkey00001')
     expect(d.bluesky!.images.map((i) => [i.alt, i.blob.ref.$link])).toEqual([['a cat', 'bafkNEW']])
+    expect(d.bluesky!.source).toBe(URI)
     const files = await getDraftFiles(KEY, detail.blueskyRedraft.slot)
     expect(await files[d.bluesky!.images[0]!.id]!.text()).toBe('re abc')
   })
@@ -352,5 +362,132 @@ describe('<caribou-status-card> own Bluesky post', () => {
     await settle(el)
     expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
     expect(events).toEqual([])
+  })
+  it('a draft written while the delete runs is not erased when the delete is refused (D1, Codex 1)', async () => {
+    signIn()
+    const el = await mount(post())
+    let refuse!: (e: unknown) => void
+    pds.blueskyDeletePost.mockImplementationOnce(() => new Promise<void>((_, rej) => { refuse = rej }))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    expect(pds.blueskyDeletePost).toHaveBeenCalled()
+    // A new post opened now does not find the staged redraft: it gets "new".
+    expect(findRedraftSlot(KEY)).toBeNull()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'written meanwhile' }))
+    refuse(new Error('400'))
+    await settle(el)
+    expect(loadDraft(KEY, 'new')!.text).toBe('written meanwhile')
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual(['new'])
+    expect(statusCache.value.has(URI)).toBe(true)
+  })
+
+  it('a post with no text and only a link card is not deleted: nothing could be kept (D3)', async () => {
+    signIn()
+    const external = { ...RECORD, text: '', reply: undefined, embed: { $type: 'app.bsky.embed.external', external: { uri: 'https://example.com', title: 't', description: '' } } }
+    pds.blueskyGetOwnPost.mockResolvedValue({ uri: URI, cid: 'bafyold', value: external as unknown as BlueskyPostRecord })
+    const el = await mount(post())
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(confirmEl()?.shadowRoot?.querySelector('dialog[open]') ?? null).toBeNull()
+    expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
+    expect(storedDrafts(KEY)).toEqual([])
+    expect(toasts).toEqual([{ kind: 'info', message: 'Nothing in this post can be kept in a draft. Use Delete.' }])
+    expect(statusCache.value.has(URI)).toBe(true)
+  })
+
+  it('a post already deleted: "This post is already deleted." and the card goes (N1)', async () => {
+    signIn()
+    pds.blueskyGetOwnPost.mockResolvedValue(null)
+    const el = await mount(post())
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
+    expect(statusCache.value.has(URI)).toBe(false)
+    expect(deletedStatusIds.value.has(URI)).toBe(true)
+    expect(toasts).toEqual([{ kind: 'info', message: 'This post is already deleted.' }])
+  })
+
+  it('a second redraft after a delete in doubt replaces the first stored draft (N2)', async () => {
+    signIn()
+    const el = await mount(post())
+    pds.blueskyDeletePost.mockRejectedValueOnce(Object.assign(new Error('?'), { name: 'BlueskyDeleteUnknown' }))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    const first = findRedraftSlot(KEY)
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    expect(pds.blueskyDeletePost).toHaveBeenCalledTimes(2)
+    const slots = storedDrafts(KEY).map(([slot]) => slot)
+    expect(slots).toHaveLength(1)
+    expect(slots[0]).not.toBe(first)
+  })
+
+  it.each([
+    ['a menu label on a post with no images', { ...RECORD, embed: undefined, labels: { values: [{ val: 'porn' }] } }, () => {}, 'Its labels are not kept.'],
+    ['the quoted post gone', { ...RECORD, reply: undefined, embed: { $type: 'app.bsky.embed.record', record: { uri: 'at://did:plc:carol/app.bsky.feed.post/q1', cid: 'bafyq' } } },
+      () => { pds.fetchStatus.mockRejectedValue(Object.assign(new Error('gone'), { code: 'not_found' })) },
+      'The post it quotes is gone, so the redraft cannot be posted with the quote.'],
+    ['the quoted post with quotes off', { ...RECORD, reply: undefined, embed: { $type: 'app.bsky.embed.record', record: { uri: 'at://did:plc:carol/app.bsky.feed.post/q1', cid: 'bafyq' } } },
+      () => { pds.fetchStatus.mockImplementation(async (id: string) => post({ id, uri: id }, { uri: id, embeddingDisabled: true })) },
+      'The author of the post it quotes turned off quotes, so the redraft cannot be posted with the quote.'],
+    ['a reply to a post with replies limited', RECORD,
+      () => { pds.fetchStatus.mockImplementation(async (id: string) => post({ id, uri: id }, { uri: id, replyDisabled: true })) },
+      'The author of the post it replies to limited replies, so the redraft cannot be posted as a reply.'],
+  ])('the question names %s', async (_, record, setup, sentence) => {
+    signIn()
+    pds.blueskyGetOwnPost.mockResolvedValue({ uri: URI, cid: 'bafyold', value: record as unknown as BlueskyPostRecord })
+    setup()
+    const el = await mount(post())
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(confirmText()).toContain(sentence)
+  })
+
+  async function twoInAList() {
+    const list = document.createElement('ul')
+    document.body.appendChild(list)
+    const mountIn = async (status: Status) => {
+      const li = document.createElement('li')
+      list.appendChild(li)
+      statusCache.value = new Map([...statusCache.value, [status.id, status]])
+      const el = document.createElement('caribou-status-card') as CaribouStatusCard
+      el.setAttribute('filter-context', 'home')
+      el.status = status
+      li.appendChild(el)
+      await settle(el)
+      for (let i = 0; i < 20 && !activeClient.value; i++) await settle(el)
+      await settle(el)
+      return el
+    }
+    const el = await mountIn(post())
+    const other = `at://${DID}/app.bsky.feed.post/3kother`
+    const next = await mountIn(post({ id: other, uri: other }, { uri: other }))
+    return { el, focusPost: vi.spyOn(next, 'focusPost') }
+  }
+
+  it.each([
+    ['moved on: focus stays where the reader is', false],
+    ['still in this card: focus goes to the next post', true],
+  ])('focus after the delete (N7), the reader %s', async (_, inCard) => {
+    signIn()
+    const { el, focusPost } = await twoInAList()
+    const elsewhere = document.createElement('button')
+    document.body.appendChild(elsewhere)
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    // Where the reader is while the draft is made.
+    if (inCard) await el.focusPost()
+    else elsewhere.focus()
+    await settle(el)
+    expect(pds.blueskyDeletePost).toHaveBeenCalled()
+    expect(focusPost).toHaveBeenCalledTimes(inCard ? 1 : 0)
+    if (!inCard) expect(document.activeElement).toBe(elsewhere)
   })
 })

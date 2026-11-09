@@ -4,6 +4,7 @@ import type { UserKey } from '@beatzball/caribou-auth'
 import { emptyBlueskyDraft } from '../bluesky-compose.js'
 import { clearDraft, emptyDraft, saveDraft } from '../compose.js'
 import { getDraftFiles, pruneDraftFiles, putDraftFiles, removeDraftFiles, _testOnlyClearDraftFiles } from '../draft-files.js'
+import { activeUserKey, addUserSession, signOutActive, users, type UserSession } from '../users.js'
 
 const A = 'did:plc:a@bsky' as UserKey
 const B = 'did:plc:b@bsky' as UserKey
@@ -52,5 +53,27 @@ describe('draft files (IndexedDB)', () => {
     clearDraft(A, 'redraft:k1')
     await pruneDraftFiles()
     expect(await getDraftFiles(A, 'redraft:k1')).toEqual({})
+  })
+
+  it('sign-out removes the account\'s bytes with its drafts (N8)', async () => {
+    const M = 'beatzball@fosstodon.org' as UserKey
+    users.value = new Map()
+    addUserSession({
+      userKey: M, server: 'fosstodon.org', token: 't', generation: 'G1', vapidKey: 'V',
+      account: { id: 'a1', username: 'beatzball', acct: 'beatzball' } as UserSession['account'], createdAt: 1,
+    } as UserSession)
+    activeUserKey.value = M
+    saveDraft(M, 'redraft:k1', emptyDraft({ text: 'x', bluesky: emptyBlueskyDraft({ images: [image('i1')] }) }))
+    await putDraftFiles(M, 'redraft:k1', { i1: new Blob(['one']) })
+    signOutActive()
+    for (let i = 0; i < 20 && Object.keys(await getDraftFiles(M, 'redraft:k1')).length > 0; i++) await new Promise((r) => setTimeout(r, 5))
+    expect(await getDraftFiles(M, 'redraft:k1')).toEqual({})
+  })
+
+  it('a staged redraft keeps the bytes stored under its redraft slot', async () => {
+    saveDraft(A, 'staged:k1', emptyDraft({ text: 'x', bluesky: emptyBlueskyDraft({ images: [image('i1')] }) }))
+    await putDraftFiles(A, 'redraft:k1', { i1: new Blob(['one']), i2: new Blob(['gone']) })
+    await pruneDraftFiles()
+    expect(Object.keys(await getDraftFiles(A, 'redraft:k1'))).toEqual(['i1'])
   })
 })

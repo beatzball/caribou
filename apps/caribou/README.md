@@ -705,8 +705,11 @@ delete and redraft". The rule: nothing can be lost after the delete.
   "Deleting the post…".
   1. The card reads the record, its images and its reply and quote
      targets. A failure: "Could not read this post, so it was not
-     deleted."
-  2. The confirm, "Delete and redraft this post?", says what is lost, and
+     deleted." The record is not there: "This post is already deleted."
+     (info), and the card leaves every list.
+  2. When nothing in the post can be kept (no text, no image, no quote),
+     there is no confirm and no delete: "Nothing in this post can be kept
+     in a draft. Use Delete." (info). Else the confirm, "Delete and redraft this post?", says what is lost, and
      adds a sentence for each that applies: "The video is not kept.",
      "The link card is not kept.", "Its labels are not kept." (a menu
      label on a post with no images), "The post it replies to is gone, so
@@ -715,8 +718,10 @@ delete and redraft". The rule: nothing can be lost after the delete.
   3. The draft is built, the images re-encoded and uploaded, and the draft
      and image bytes stored. A failure: "Could not get the redraft ready,
      so the post was not deleted: <reason>".
-  4. Delete. Failed: as Delete, and the stored draft is removed. Unknown:
-     the draft stays, and the toast says so (state README).
+  4. Delete. Focus goes to the next post only when it is still in this
+     card (the steps before can take seconds). Failed: as Delete, and the
+     staged draft is removed. Unknown: the draft is kept, and the toast
+     says so (state README).
   5. The dialog opens on the stored slot (`caribou:compose` with
      `blueskyRedraft: { userKey, slot }`; the dialog sets `opened` on the
      detail). When it cannot open (another composer is open), a toast
@@ -731,9 +736,17 @@ delete and redraft". The rule: nothing can be lost after the delete.
 - **Targets.** A draft with a reply or quote ref shows the post it names,
   from the cache or read (`fetchStatus`). **While a target is being read,
   Post is off**, and a send is refused ("Checking the post this replies to
-  or quotes. Post again in a moment."). Gone or limited, the dialog's note
+  or quotes. Post again in a moment.", an info toast). Gone or limited, the dialog's note
   names the kind ("The post you replied to was deleted." or "The post you
   quoted was deleted."), and Post stays off, as for any reply or quote.
+- **A post that may still be up.** A redraft whose delete was in doubt is
+  checked when it opens. If the post is still up, a note says "The post
+  this redraft came from is still up. Delete it first, or this text is
+  posted twice."
+- **A tab closed during the delete.** A new post checks for its staged
+  draft (state README). Found, with its post gone: a toast says "A
+  redraft from an earlier visit was found. It opens the next time you
+  write a new post."
 - **Labels.** The label menu has four items: Adult (`porn`), Suggestive
   (`sexual`), Nudity, Graphic, as the official app.
 - Mastodon's delete and redraft do not change.

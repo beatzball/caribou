@@ -558,10 +558,15 @@ draft is stored durably first. The order:
    `application/octet-stream`). The reply parent and the quoted post
    (`fetchStatus`, cached): `gone` (`not_found`), `limited`
    (`replyDisabled` / `embeddingDisabled`), `ok`, or `unknown` (the read
-   failed). The record not there, or any read failing except a target's,
-   throws: nothing is deleted.
-2. **Ask.** The card's confirm names what is not kept and a gone or
-   limited target (app README).
+   failed). Any read failing except a target's throws: nothing is
+   deleted. The record not there throws `BlueskyRedraftGone`: the post is
+   already deleted (the card drops it, app README).
+2. **Ask.** First, when the draft would be empty (no text, no image, no
+   quote: a post that is only a link card, a video or a feed card,
+   `redraftKeepsSomething`), there is no confirm and no delete: "Nothing
+   in this post can be kept in a draft. Use Delete." Else the card's
+   confirm names what is not kept and a gone or limited target (app
+   README).
 3. **Build and store** (`storeBlueskyRedraft`). Every step can fail, and a
    failure throws with nothing deleted and nothing left stored:
    - the draft is built from the record (table below); an odd record
@@ -574,32 +579,64 @@ draft is stored durably first. The order:
      old refs would leave dead refs);
    - the rkey is made (`blueskyNextRkey`), so the draft's first save
      already has it (R6);
-   - the draft is stored in a new `redraft:<key>` slot of the owner
-     account (`storeDraftIf`, refused → throw);
+   - an empty draft throws (the card stops before this, step 2);
+   - the draft, with the post's URI as `bluesky.source`, is stored in a
+     new **`staged:<key>`** slot of the owner account (`storeDraftIf`,
+     refused → throw). See "Rule: a staged redraft is hidden" below;
    - the image bytes (the re-encoded ones) are stored in IndexedDB
-     (`draft-files.ts`), keyed by account, slot and image id. Refused →
-     the draft is removed again, and it throws.
-4. **Delete** (`deleteOwnStatusOutcome`, rules above).
-   - deleted → step 5.
-   - failed → the stored draft and its bytes are removed
+     (`draft-files.ts`), keyed by account, the final slot
+     `redraft:<key>` and image id. Refused → the draft is removed again,
+     and it throws. A post with no images does not use IndexedDB.
+4. **Delete** (`deleteOwnStatusOutcome`, rules above), then
+   `settleBlueskyRedraft` follows the outcome:
+   - deleted → the draft moves to `redraft:<key>`; step 5.
+   - failed → the staged draft and its bytes are removed
      (`discardBlueskyRedraft`): the post is still there.
-   - unknown → the stored draft stays, and the toast says so: "Could not
-     tell whether the post was deleted. Your redraft is saved and opens
-     the next time you write a new post. Check your profile first, so it
-     is not posted twice."
-5. **Open** the composer on the stored slot (app README). When it cannot
-   open (another composer is open, or the account changed), the draft
-   stays stored and opens with the account's next new post
+   - unknown → the draft moves to `redraft:<key>`, marked
+     `sourceMaybeLive`, and the toast says so: "Could not tell whether the
+     post was deleted. Your redraft is saved and opens the next time you
+     write a new post. Check your profile first, so it is not posted
+     twice."
+5. **Open** the composer on the `redraft:<key>` slot (app README). When
+   it cannot open (another composer is open, or the account changed), the
+   draft stays stored and opens with the account's next new post
    (`findRedraftSlot`); a toast says so when the reader is still on that
    account.
 
-A Bluesky redraft always goes in its own `redraft:<key>` slot, never in
+**Rule: a staged redraft is hidden until the delete is decided.** No
+composer opens a `staged:` slot (`findRedraftSlot` skips it), so the
+reader cannot edit it while the delete runs. The outcome moves it or
+removes it. The removal is revision-checked, like every other draft
+write: only the revision the store wrote is removed. So nothing the
+reader writes can be erased by a refused delete.
+
+A moved Bluesky redraft goes in its own `redraft:<key>` slot, never in
 `new`, `reply:` or `quote:`. So it never overwrites another draft, and a
 new post opens it first, whatever its target, even when that target is
 gone.
 
+**One redraft per post.** When a redraft moves to `redraft:<key>`, any
+older `redraft:` slot with the same `bluesky.source` is removed, with its
+bytes. So a second redraft after a delete in doubt replaces the first,
+and the text cannot be posted twice.
+
+**A post that may still be up.** A draft marked `sourceMaybeLive` (a
+delete in doubt) is checked when the dialog opens it
+(`checkRedraftSource`, `getRecord`): still up → the dialog shows a note;
+gone → the mark is cleared.
+
+**A tab closed during the delete.** Its draft stays in `staged:<key>`.
+When a new post opens and the account has staged drafts this tab is not
+deleting for (`hasOrphanStagedRedrafts`), `recoverStagedRedrafts` asks
+`getRecord` for each source: gone → the draft moves to `redraft:<key>`
+(it opens with the next new post, and a toast says so); still up → it
+stays hidden (the post still has the text); no answer → it is tried
+again next time.
+
 **Account switch.** Each step checks the account after its await
-(`ownerGeneration`). A switch before the store: nothing is stored or
+(`ownerGeneration`), and before any write, caches included: a reply or
+quote target read that answers after a switch is not cached. A switch
+before the store: nothing is stored or
 deleted. A switch after the store and before the delete: the draft and
 its bytes are removed, nothing is deleted. A switch during the delete:
 the outcome still decides storage (failed → removed; deleted or unknown →
@@ -611,8 +648,9 @@ usable until the post is sent: the PDS may drop an unused blob, and the
 deleted post was the only copy. The dialog loads them when it opens the
 slot, for the previews and for #189's blob recovery, after a close, a
 reopen or a reload. `pruneDraftFiles()` removes every entry whose account,
-slot and image id is not in a stored draft: after a send, on close, and so
-after a discard or a sign-out. Images the reader picked in compose are
+slot and image id is not in a stored draft (a `redraft:<key>` entry also
+lives while `staged:<key>` names it): after a send, on close, and at
+sign-out. Images the reader picked in compose are
 not stored there: the reader has those files.
 
 **What the draft takes from the record.**

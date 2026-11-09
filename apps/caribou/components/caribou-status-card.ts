@@ -11,7 +11,8 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  BLUESKY_SELF_LABELS, deleteOwnStatusOutcome, discardBlueskyRedraft, readBlueskyRedraft, redraftLabelsOf, storeBlueskyRedraft,
+  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, forgetDeletedStatus,
+  readBlueskyRedraft, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
   type BlueskyRedraftSource, type DraftSlot, type PreparedImage,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
@@ -820,6 +821,14 @@ export class CaribouStatusCard extends LitElement {
     window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status, source } } }))
   }
 
+  // True while focus is in this card (its own tree or its shadow tree).
+  private hasFocus(): boolean {
+    for (let a: Element | null = document.activeElement; a; a = a.shadowRoot?.activeElement ?? null) {
+      if (a === this || this.contains(a) || this.renderRoot.contains(a)) return true
+    }
+    return false
+  }
+
   /** Focuses the post itself, for a keyboard reader whose place just went. */
   async focusPost() {
     await this.updateComplete
@@ -916,12 +925,24 @@ export class CaribouStatusCard extends LitElement {
     let source: BlueskyRedraftSource | null
     try {
       source = await readBlueskyRedraft(owner.client, post)
-    } catch {
-      if (stillOwner(owner)) toast('error', 'Could not read this post, so it was not deleted.')
+    } catch (err) {
+      if (!stillOwner(owner)) return
+      // Deleted already (here after a delete in doubt, or on another device).
+      if (err instanceof BlueskyRedraftGone) {
+        forgetDeletedStatus(post)
+        toast('info', err.message)
+        return
+      }
+      toast('error', 'Could not read this post, so it was not deleted.')
       return
     }
     if (!source || !stillOwner(owner)) return
     this.redraftNote = null
+    // Nothing would be kept: no delete is offered (D3).
+    if (!redraftKeepsSomething(source)) {
+      toast('info', NOTHING_KEPT)
+      return
+    }
     const ok = await confirmDialog({
       title: 'Delete and redraft this post?',
       message: blueskyRedraftQuestion(post, source),
@@ -936,26 +957,28 @@ export class CaribouStatusCard extends LitElement {
       if (stillOwner(owner)) toast('error', `Could not get the redraft ready, so the post was not deleted: ${messageOf(err)}`)
       return
     }
+    // Null after an account switch: the store checks the account last, and
+    // removes what it stored.
     if (!stored) return
-    if (!stillOwner(owner)) {
-      await discardBlueskyRedraft(stored)
-      return
-    }
     this.redraftNote = 'Deleting the post…'
     const next = this.neighbour()
+    // Seconds may have passed since the confirm: focus moves only when the
+    // reader is still here.
+    const moveFocus = this.hasFocus()
     const deleting = deleteOwnStatusOutcome(owner.client, post, { messages: { unknown: REDRAFT_UNKNOWN } })
-    if (next) void next.focusPost()
+    if (next && moveFocus) void next.focusPost()
     const out = await deleting
-    // Still there: the stored draft goes. Unknown: it stays, and the toast says so.
-    if (out.kind === 'failed') await discardBlueskyRedraft(stored)
+    // The staged draft follows the outcome: failed → removed; deleted or
+    // unknown → moved where a new post finds it (the toast says so).
+    const slot = await settleBlueskyRedraft(stored, out.kind)
     if (out.kind !== 'deleted') {
-      if (!out.stale) void this.focusIn('caribou-menu.more')
+      if (!out.stale && moveFocus) void this.focusIn('caribou-menu.more')
       return
     }
     // Deleted after a switch: the draft waits for that account's next new post.
-    if (out.stale || !stillOwner(owner)) return
+    if (out.stale || !stillOwner(owner) || !slot) return
     const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = {
-      blueskyRedraft: { userKey: stored.userKey, slot: stored.slot },
+      blueskyRedraft: { userKey: stored.userKey, slot },
     }
     window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
     if (!detail.opened) toast('info', 'Your redraft is saved. It opens the next time you write a new post.')

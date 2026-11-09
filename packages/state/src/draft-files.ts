@@ -99,6 +99,13 @@ export async function removeDraftFiles(userKey: UserKey, slot: DraftSlot): Promi
   }
 }
 
+// A redraft's bytes are keyed by its final slot, `redraft:<key>`, from the
+// start; while its delete runs the draft sits in `staged:<key>`.
+function draftHas(userKey: UserKey, slot: DraftSlot, id: string): boolean {
+  const has = (s: DraftSlot) => (loadDraft(userKey, s)?.bluesky?.images ?? []).some((i) => i.id === id)
+  return has(slot) || (slot.startsWith('redraft:') && has(`staged:${slot.slice('redraft:'.length)}`))
+}
+
 /**
  * Removes every entry whose account, slot and image id is not in a stored
  * draft: a sent, discarded or signed-out draft, or a removed image.
@@ -112,7 +119,7 @@ export async function pruneDraftFiles(): Promise<void> {
       req.onsuccess = () => resolve(req.result as Row[])
       req.onerror = () => reject(req.error)
     })
-    const dead = rows.filter((r) => !(loadDraft(r.userKey, r.slot)?.bluesky?.images ?? []).some((i) => i.id === r.id))
+    const dead = rows.filter((r) => !draftHas(r.userKey, r.slot, r.id))
     if (dead.length === 0) return
     const tx = db.transaction(STORE, 'readwrite')
     for (const r of dead) tx.objectStore(STORE).delete(r.key)

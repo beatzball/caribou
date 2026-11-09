@@ -6,7 +6,10 @@ import type {
   BlueskyBlobRef, BlueskyFacet, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
-import { clearDraft, emptyDraft, storeDraftIf, type BlueskyDraftImage, type ComposeDraft, type DraftSlot } from './compose.js'
+import {
+  draftRev, emptyDraft, isDraftEmpty, loadDraft, storeDraftIf, storedDrafts,
+  type BlueskyDraftImage, type ComposeDraft, type DraftSlot,
+} from './compose.js'
 import { emptyBlueskyDraft } from './bluesky-compose.js'
 import { putDraftFiles, removeDraftFiles } from './draft-files.js'
 import { ownerGeneration } from './keep-alive.js'
@@ -35,12 +38,35 @@ export interface StoreRedraftOptions {
   prepareImage: (bytes: Blob) => Promise<PreparedImage | null>
 }
 
-/** A redraft stored for its account, before the delete. */
+/**
+ * A redraft stored for its account, before the delete, in a `staged:` slot
+ * no composer opens. `redraftSlot` is where the delete's outcome moves it,
+ * and where its image bytes are stored from the start.
+ */
 export interface StoredBlueskyRedraft {
   userKey: UserKey
   slot: DraftSlot
+  redraftSlot: DraftSlot
+  /** The staged slot's revision: only this one is removed or moved. */
+  rev: string
   draft: ComposeDraft
 }
+
+/** The own record is not there: the post is already deleted. */
+export class BlueskyRedraftGone extends Error {
+  override name = 'BlueskyRedraftGone'
+  constructor() {
+    super('This post is already deleted.')
+  }
+}
+
+/** The redraft would be empty: nothing in the post can be kept in a draft. */
+export const NOTHING_KEPT = 'Nothing in this post can be kept in a draft. Use Delete.'
+
+// The staged slots this tab is deleting for, so a check for slots left by
+// a closed tab skips them.
+const staging = new Set<string>()
+const stagingKey = (userKey: UserKey, slot: DraftSlot) => `${userKey}\u0000${slot}`
 
 interface RecordImage {
   image: unknown
@@ -104,10 +130,14 @@ function replyOf(record: BlueskyPostRecord): { root: BlueskyStrongRef; parent: B
   return root && parent ? { root, parent } : null
 }
 
-// Reads the post replied to or quoted, into the cache for the dialog.
-async function checkTarget(client: CaribouClient, uri: string, flag: 'replyDisabled' | 'embeddingDisabled'): Promise<RedraftTarget> {
+// Reads the post replied to or quoted, into the cache for the dialog. An
+// answer after an account switch writes nothing.
+async function checkTarget(
+  client: CaribouClient, uri: string, flag: 'replyDisabled' | 'embeddingDisabled', generation: number,
+): Promise<RedraftTarget> {
   try {
     const fresh = await client.fetchStatus(uri)
+    if (generation !== ownerGeneration()) return 'unknown'
     cacheStatus(fresh)
     return fresh.bluesky?.[flag] ? 'limited' : 'ok'
   } catch (err) {
@@ -128,8 +158,9 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
   const rkey = uri.split('/').pop() ?? ''
   const own = await need(client, 'blueskyGetOwnPost')(rkey)
   if (generation !== ownerGeneration()) return null
+  if (!own) throw new BlueskyRedraftGone()
   // Same rkey in another repo is another post.
-  if (!own || own.uri !== uri || !isObject(own.value)) throw new Error('The post is not on your server.')
+  if (own.uri !== uri || !isObject(own.value)) throw new Error('The post is not on your server.')
   const record = own.value
   const files = new Map<string, Blob>()
   const { quote, images } = embedParts(record)
@@ -143,8 +174,8 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
   }
   const reply = replyOf(record)
   const [replyState, quoteState] = await Promise.all([
-    reply ? checkTarget(client, reply.parent.uri, 'replyDisabled') : null,
-    quote ? checkTarget(client, quote.uri, 'embeddingDisabled') : null,
+    reply ? checkTarget(client, reply.parent.uri, 'replyDisabled', generation) : null,
+    quote ? checkTarget(client, quote.uri, 'embeddingDisabled', generation) : null,
   ])
   if (generation !== ownerGeneration()) return null
   return { status: post, record, files, targets: { reply: replyState, quote: quoteState }, generation }
@@ -189,11 +220,25 @@ export function redraftLabelsOf(record: BlueskyPostRecord): string[] {
 }
 
 /**
+ * False when the draft made from `source` would be empty: no text, no
+ * image, no quote (a post that is only a link card, a video or a feed
+ * card). Then a redraft would delete the post and keep nothing.
+ */
+export function redraftKeepsSomething(source: BlueskyRedraftSource): boolean {
+  const { record, files } = source
+  const { quote, images } = embedParts(record)
+  const text = redraftTextOf(typeof record.text === 'string' ? record.text : '', record.facets)
+  return text.trim() !== '' || !!quote
+    || images.some((img) => { const ref = blobRef(img.image); return !!ref && files.has(ref.ref.$link) })
+}
+
+/**
  * Step 3: builds the draft, re-encodes and uploads each image, makes the
- * rkey, and stores the draft and the image bytes for the owner account, in
- * a new `redraft:<key>` slot. All before any delete. Throws when any step
- * fails, leaving nothing stored. Resolves null when the account changed
- * (nothing stored then either).
+ * rkey, and stores the draft for the owner account in a new `staged:<key>`
+ * slot, and the image bytes under `redraft:<key>`. All before any delete.
+ * Throws when any step fails, or when the draft would be empty, leaving
+ * nothing stored. Resolves null when the account changed (nothing stored
+ * then either). `settleBlueskyRedraft` then follows the delete's outcome.
  */
 export async function storeBlueskyRedraft(
   client: CaribouClient, source: BlueskyRedraftSource, opts: StoreRedraftOptions,
@@ -252,15 +297,26 @@ export async function storeBlueskyRedraft(
     inReplyToId: reply?.parent.uri ?? null,
     language,
     // A new record with a new rkey (R6), stored with the first save.
-    bluesky: emptyBlueskyDraft({ reply, quote, labels: redraftLabelsOf(record), images, rkey }),
+    bluesky: emptyBlueskyDraft({
+      reply, quote, labels: redraftLabelsOf(record), images, rkey, source: source.status.bluesky?.uri ?? source.status.id,
+    }),
   })
-  const stored: StoredBlueskyRedraft = { userKey: client.userKey, slot: `redraft:${draft.idempotencyKey}`, draft }
-  if (!storeDraftIf(stored.userKey, stored.slot, null, draft)) throw new Error('Could not save the draft.')
-  try {
-    await putDraftFiles(stored.userKey, stored.slot, files)
-  } catch (err) {
-    clearDraft(stored.userKey, stored.slot)
-    throw err
+  if (isDraftEmpty(draft)) throw new Error(NOTHING_KEPT)
+  const key = draft.idempotencyKey
+  const userKey = client.userKey
+  const slot: DraftSlot = `staged:${key}`
+  const saved = storeDraftIf(userKey, slot, null, draft)
+  if (!saved || saved.rev === null) throw new Error('Could not save the draft.')
+  const stored: StoredBlueskyRedraft = { userKey, slot, redraftSlot: `redraft:${key}`, rev: saved.rev, draft }
+  staging.add(stagingKey(userKey, slot))
+  // A post with no images needs no IndexedDB.
+  if (Object.keys(files).length > 0) {
+    try {
+      await putDraftFiles(userKey, stored.redraftSlot, files)
+    } catch (err) {
+      await discardBlueskyRedraft(stored)
+      throw err
+    }
   }
   if (stale()) {
     await discardBlueskyRedraft(stored)
@@ -269,8 +325,110 @@ export async function storeBlueskyRedraft(
   return stored
 }
 
-/** Removes a stored redraft and its image bytes: the post was not deleted. */
+/**
+ * Removes a staged redraft and its image bytes: the post was not deleted.
+ * Only while the slot still holds the staged revision, so nothing written
+ * there since is erased.
+ */
 export async function discardBlueskyRedraft(stored: StoredBlueskyRedraft): Promise<void> {
-  clearDraft(stored.userKey, stored.slot)
-  await removeDraftFiles(stored.userKey, stored.slot)
+  staging.delete(stagingKey(stored.userKey, stored.slot))
+  const cleared = storeDraftIf(stored.userKey, stored.slot, stored.rev, null)
+  if (cleared && !loadDraft(stored.userKey, stored.redraftSlot)) await removeDraftFiles(stored.userKey, stored.redraftSlot)
+}
+
+/**
+ * Follows the delete's outcome. Failed: the staged draft is removed
+ * (`discardBlueskyRedraft`). Deleted or unknown: it moves to its
+ * `redraft:<key>` slot, where a new post finds it; unknown marks it
+ * `sourceMaybeLive`. An older redraft of the same post is replaced, so its
+ * text cannot be posted twice. Answers the slot that holds the draft now
+ * (the staged one when the move could not be written), or null.
+ */
+export async function settleBlueskyRedraft(
+  stored: StoredBlueskyRedraft, outcome: 'deleted' | 'failed' | 'unknown',
+): Promise<DraftSlot | null> {
+  if (outcome === 'failed') {
+    await discardBlueskyRedraft(stored)
+    return null
+  }
+  staging.delete(stagingKey(stored.userKey, stored.slot))
+  return promote(stored.userKey, stored.slot, outcome === 'unknown')
+}
+
+async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): Promise<DraftSlot | null> {
+  const target: DraftSlot = `redraft:${slot.slice('staged:'.length)}`
+  const rev = draftRev(userKey, slot)
+  const draft = loadDraft(userKey, slot)
+  // Moved already (another tab).
+  if (!draft || rev === null) return loadDraft(userKey, target) ? target : null
+  const source = draft.bluesky?.source
+  if (source) {
+    for (const [other, d] of storedDrafts(userKey)) {
+      if (other === target || !other.startsWith('redraft:') || d.bluesky?.source !== source) continue
+      if (storeDraftIf(userKey, other, d.rev ?? '', null)) await removeDraftFiles(userKey, other)
+    }
+  }
+  const moved = { ...draft, bluesky: { ...(draft.bluesky ?? emptyBlueskyDraft()), sourceMaybeLive: maybeLive } }
+  if (!storeDraftIf(userKey, target, null, moved)) return slot
+  storeDraftIf(userKey, slot, rev, null)
+  return target
+}
+
+/**
+ * Staged redrafts this tab is not deleting for: a tab closed, or the page
+ * reloaded, between the store and the delete's answer. For each, asks the
+ * reader's PDS for the post: gone → the draft moves to `redraft:<key>`, as
+ * after a delete; still there → it stays hidden (the post has the text).
+ * Answers the slots it moved. A read that fails, or an account switch,
+ * leaves them for next time.
+ */
+export async function recoverStagedRedrafts(client: CaribouClient): Promise<DraftSlot[]> {
+  const generation = ownerGeneration()
+  const userKey = client.userKey
+  const moved: DraftSlot[] = []
+  for (const [slot, d] of storedDrafts(userKey)) {
+    if (!slot.startsWith('staged:') || staging.has(stagingKey(userKey, slot))) continue
+    const source = d.bluesky?.source
+    if (!source || !client.blueskyGetOwnPost) continue
+    let own: Awaited<ReturnType<NonNullable<CaribouClient['blueskyGetOwnPost']>>>
+    try {
+      own = await client.blueskyGetOwnPost(source.split('/').pop() ?? '')
+    } catch {
+      continue
+    }
+    if (generation !== ownerGeneration()) return moved
+    // Another tab may have moved or removed it meanwhile.
+    if (own || staging.has(stagingKey(userKey, slot))) continue
+    const at = await promote(userKey, slot, false)
+    if (at && at !== slot) moved.push(at)
+  }
+  return moved
+}
+
+/** True when the account has staged redrafts this tab is not deleting for. */
+export function hasOrphanStagedRedrafts(userKey: UserKey): boolean {
+  return storedDrafts(userKey).some(([slot]) => slot.startsWith('staged:') && !staging.has(stagingKey(userKey, slot)))
+}
+
+/**
+ * For a stored redraft marked `sourceMaybeLive`: asks the reader's PDS
+ * whether its post is still up. True: it is. False: it is gone, and the
+ * mark is cleared. Null: no answer, or there is nothing to check.
+ */
+export async function checkRedraftSource(client: CaribouClient, slot: DraftSlot): Promise<boolean | null> {
+  const generation = ownerGeneration()
+  const draft = loadDraft(client.userKey, slot)
+  const source = draft?.bluesky?.source
+  if (!draft?.bluesky?.sourceMaybeLive || !source || !client.blueskyGetOwnPost) return null
+  let own: Awaited<ReturnType<NonNullable<CaribouClient['blueskyGetOwnPost']>>>
+  try {
+    own = await client.blueskyGetOwnPost(source.split('/').pop() ?? '')
+  } catch {
+    return null
+  }
+  if (generation !== ownerGeneration()) return null
+  if (own && own.uri === source) return true
+  const now = loadDraft(client.userKey, slot)
+  if (now?.bluesky) storeDraftIf(client.userKey, slot, now.rev ?? '', { ...now, bluesky: { ...now.bluesky, sourceMaybeLive: false } })
+  return false
 }

@@ -6,10 +6,12 @@ import { activeUserKey } from '../users.js'
 import { ownerGeneration } from '../keep-alive.js'
 import { deleteOwnStatus, deleteOwnStatusOutcome } from '../own-posts.js'
 import {
-  discardBlueskyRedraft, readBlueskyRedraft, redraftTextOf, storeBlueskyRedraft, type PreparedImage,
+  BlueskyRedraftGone, NOTHING_KEPT, checkRedraftSource, discardBlueskyRedraft, hasOrphanStagedRedrafts, readBlueskyRedraft,
+  recoverStagedRedrafts, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
 } from '../bluesky-redraft.js'
-import { findRedraftSlot, loadDraft } from '../compose.js'
-import { getDraftFiles, _testOnlyClearDraftFiles, _testOnlyFailNextPut } from '../draft-files.js'
+import { emptyDraft, findRedraftSlot, loadDraft, saveDraft, storedDrafts } from '../compose.js'
+import { emptyBlueskyDraft } from '../bluesky-compose.js'
+import { getDraftFiles, pruneDraftFiles, _testOnlyClearDraftFiles, _testOnlyFailNextPut } from '../draft-files.js'
 
 const DID = 'did:plc:reader'
 const KEY = `${DID}@bsky` as const
@@ -203,10 +205,26 @@ describe('readBlueskyRedraft', () => {
     expect(c.fetchStatus).not.toHaveBeenCalled()
   })
 
-  it('throws, and deletes nothing, when the record is not there', async () => {
+  it('throws BlueskyRedraftGone, and deletes nothing, when the record is not there', async () => {
     const { client, c } = fakeClient(null)
-    await expect(readBlueskyRedraft(client, post())).rejects.toThrow()
+    await expect(readBlueskyRedraft(client, post())).rejects.toThrow(BlueskyRedraftGone)
+    await expect(readBlueskyRedraft(client, post())).rejects.toThrow('This post is already deleted.')
     expect(c.blueskyDeletePost).not.toHaveBeenCalled()
+  })
+
+  it('a target answer after an account switch writes nothing to the caches (D2)', async () => {
+    const record = { ...RECORD, reply: { root: ROOT, parent: PARENT }, embed: { $type: 'app.bsky.embed.record', record: QUOTED } } as unknown as BlueskyPostRecord
+    const { client, c } = fakeClient(record)
+    const held = [deferred<Status>(), deferred<Status>()]
+    let n = 0
+    c.fetchStatus.mockImplementation(() => held[n++]!.promise)
+    const out = readBlueskyRedraft(client, post())
+    await vi.waitFor(() => expect(c.fetchStatus).toHaveBeenCalledTimes(2))
+    activeUserKey.value = 'did:plc:other@bsky'
+    held[0]!.resolve(post({}, PARENT.uri))
+    held[1]!.resolve(post({}, QUOTED.uri))
+    expect(await out).toBeNull()
+    expect(statusCache.value.size).toBe(0)
   })
 
   it('throws when the record read fails, or an image cannot be read', async () => {
@@ -263,7 +281,8 @@ describe('storeBlueskyRedraft', () => {
     const { c, out } = await stored()
     expect(c.blueskyDeletePost).not.toHaveBeenCalled()
     expect(out!.userKey).toBe(KEY)
-    expect(out!.slot).toMatch(/^redraft:/)
+    expect(out!.slot).toMatch(/^staged:/)
+    expect(out!.redraftSlot).toBe(`redraft:${out!.slot.slice('staged:'.length)}`)
     const d = loadDraft(KEY, out!.slot)!
     expect(d.text).toBe(full.text)
     expect(d.language).toBe('de')
@@ -273,17 +292,21 @@ describe('storeBlueskyRedraft', () => {
     expect(d.bluesky!.labels).toEqual(['sexual', 'something-else'])
     expect(d.bluesky!.rkey).toBe('3knewkey00001')
     expect(d.bluesky!.sent).toBeNull()
+    expect(d.bluesky!.source).toBe(URI)
     // New bytes, so new CIDs: the delete cannot take them with the old record.
     expect(d.bluesky!.images.map((i) => [i.blob.ref.$link, i.alt, i.aspectRatio, i.mime])).toEqual([
       ['new-re bytes of bafkA', 'a cat', { width: 4, height: 3 }, 'image/jpeg'],
       ['new-re bytes of bafkB', '', { width: 8, height: 6 }, 'image/jpeg'],
     ])
-    // The re-encoded bytes are stored with the draft, by image id.
-    const files = await getDraftFiles(KEY, out!.slot)
+    // The re-encoded bytes are stored under the final slot, by image id.
+    const files = await getDraftFiles(KEY, out!.redraftSlot)
     expect(Object.keys(files).sort()).toEqual(d.bluesky!.images.map((i) => i.id).sort())
     expect(await files[d.bluesky!.images[0]!.id]!.text()).toBe('re bytes of bafkA')
-    // A new post opens it first.
-    expect(findRedraftSlot(KEY)).toBe(out!.slot)
+    // Hidden until the delete is decided (D1): a new post does not open it.
+    expect(findRedraftSlot(KEY)).toBeNull()
+    // Prune keeps the bytes of a staged draft.
+    await pruneDraftFiles()
+    expect(Object.keys(await getDraftFiles(KEY, out!.redraftSlot))).toHaveLength(2)
   })
 
   it('a feed in recordWithMedia is not kept as a quote; its images are', async () => {
@@ -362,7 +385,160 @@ describe('storeBlueskyRedraft', () => {
     const { out } = await stored()
     await discardBlueskyRedraft(out!)
     expect(loadDraft(KEY, out!.slot)).toBeNull()
-    expect(await getDraftFiles(KEY, out!.slot)).toEqual({})
+    expect(await getDraftFiles(KEY, out!.redraftSlot)).toEqual({})
+  })
+
+  it('an account switch while the bytes are stored removes the draft again', async () => {
+    const f = fakeClient(IMG_RECORD)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    // The switch lands while putDraftFiles reads the bytes.
+    const switching = async (b: Blob): Promise<PreparedImage> => {
+      const blob = new Blob([await b.text()], { type: 'image/jpeg' })
+      const read = blob.arrayBuffer.bind(blob)
+      blob.arrayBuffer = () => { activeUserKey.value = 'did:plc:other@bsky'; return read() }
+      return { blob, width: 1, height: 1 }
+    }
+    expect(await storeBlueskyRedraft(f.client, source, { prepareImage: switching })).toBeNull()
+    expect(storedDrafts(KEY)).toEqual([])
+  })
+
+  it('a text-only redraft needs no IndexedDB', async () => {
+    const f = fakeClient()
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    _testOnlyFailNextPut()
+    const out = await storeBlueskyRedraft(f.client, source, { prepareImage })
+    expect(loadDraft(KEY, out!.slot)!.text).toBe('hello world')
+  })
+
+  it('a draft that would be empty throws and stores nothing (D3)', async () => {
+    const external = { ...RECORD, text: '', embed: { $type: 'app.bsky.embed.external', external: { uri: 'https://example.com', title: 't', description: '' } } } as unknown as BlueskyPostRecord
+    const f = fakeClient(external)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    expect(redraftKeepsSomething(source)).toBe(false)
+    await expect(storeBlueskyRedraft(f.client, source, { prepareImage })).rejects.toThrow(NOTHING_KEPT)
+    expect(storedDrafts(KEY)).toEqual([])
+  })
+
+  it.each([
+    ['text', RECORD],
+    ['an image', { ...RECORD, text: ' ', embed: IMG_RECORD.embed }],
+    ['a quote', { ...RECORD, text: '', embed: { $type: 'app.bsky.embed.record', record: QUOTED } }],
+  ])('redraftKeepsSomething: %s is kept', async (_, record) => {
+    const f = fakeClient(record as BlueskyPostRecord)
+    expect(redraftKeepsSomething((await readBlueskyRedraft(f.client, post()))!)).toBe(true)
+  })
+})
+
+describe('settleBlueskyRedraft (D1)', () => {
+  async function staged(record: BlueskyPostRecord = IMG_RECORD) {
+    const f = fakeClient(record)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    return { ...f, stored: (await storeBlueskyRedraft(f.client, source, { prepareImage }))! }
+  }
+
+  it('deleted: the draft moves to redraft:<key>, where a new post finds it; the bytes stay', async () => {
+    const { stored } = await staged()
+    expect(await settleBlueskyRedraft(stored, 'deleted')).toBe(stored.redraftSlot)
+    expect(loadDraft(KEY, stored.slot)).toBeNull()
+    expect(findRedraftSlot(KEY)).toBe(stored.redraftSlot)
+    const d = loadDraft(KEY, stored.redraftSlot)!
+    expect(d.text).toBe('hello world')
+    expect(d.bluesky!.sourceMaybeLive).toBe(false)
+    await pruneDraftFiles()
+    expect(Object.keys(await getDraftFiles(KEY, stored.redraftSlot))).toHaveLength(1)
+  })
+
+  it('unknown: it moves too, marked sourceMaybeLive', async () => {
+    const { stored } = await staged()
+    await settleBlueskyRedraft(stored, 'unknown')
+    expect(loadDraft(KEY, stored.redraftSlot)!.bluesky!.sourceMaybeLive).toBe(true)
+  })
+
+  it('failed: the staged draft and its bytes go', async () => {
+    const { stored } = await staged()
+    expect(await settleBlueskyRedraft(stored, 'failed')).toBeNull()
+    expect(storedDrafts(KEY)).toEqual([])
+    expect(await getDraftFiles(KEY, stored.redraftSlot)).toEqual({})
+  })
+
+  it('failed: a slot written since the store is not erased (revision-checked)', async () => {
+    const { stored } = await staged()
+    saveDraft(KEY, stored.slot, { ...loadDraft(KEY, stored.slot)!, text: 'an edit' })
+    await settleBlueskyRedraft(stored, 'failed')
+    expect(loadDraft(KEY, stored.slot)!.text).toBe('an edit')
+    expect(Object.keys(await getDraftFiles(KEY, stored.redraftSlot))).toHaveLength(1)
+  })
+
+  it('a second redraft of the same post replaces the older stored one (N2)', async () => {
+    const first = await staged()
+    await settleBlueskyRedraft(first.stored, 'unknown')
+    const second = await staged()
+    await settleBlueskyRedraft(second.stored, 'deleted')
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([second.stored.redraftSlot])
+    expect(await getDraftFiles(KEY, first.stored.redraftSlot)).toEqual({})
+  })
+})
+
+describe('staged redrafts a closed tab left', () => {
+  function orphan(): string {
+    const d = emptyDraft({ text: 'left behind', bluesky: emptyBlueskyDraft({ source: URI, rkey: '3knew' }) })
+    saveDraft(KEY, `staged:${d.idempotencyKey}`, d)
+    return d.idempotencyKey
+  }
+
+  it('the post is gone: the draft moves to redraft:<key>', async () => {
+    const key = orphan()
+    const { client } = fakeClient(null)
+    expect(hasOrphanStagedRedrafts(KEY)).toBe(true)
+    expect(await recoverStagedRedrafts(client)).toEqual([`redraft:${key}`])
+    expect(findRedraftSlot(KEY)).toBe(`redraft:${key}`)
+    expect(hasOrphanStagedRedrafts(KEY)).toBe(false)
+  })
+
+  it('the post is still up, or the read fails: it stays hidden', async () => {
+    const key = orphan()
+    const { client, c } = fakeClient()
+    expect(await recoverStagedRedrafts(client)).toEqual([])
+    c.blueskyGetOwnPost.mockRejectedValueOnce(new Error('502'))
+    expect(await recoverStagedRedrafts(client)).toEqual([])
+    expect(loadDraft(KEY, `staged:${key}`)!.text).toBe('left behind')
+    expect(findRedraftSlot(KEY)).toBeNull()
+  })
+
+  it('a staged draft whose delete runs in this tab is not touched', async () => {
+    const f = fakeClient()
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    const stored = (await storeBlueskyRedraft(f.client, source, { prepareImage }))!
+    expect(hasOrphanStagedRedrafts(KEY)).toBe(false)
+    f.c.blueskyGetOwnPost.mockResolvedValue(null)
+    expect(await recoverStagedRedrafts(f.client)).toEqual([])
+    expect(loadDraft(KEY, stored.slot)).not.toBeNull()
+  })
+})
+
+describe('checkRedraftSource (N3)', () => {
+  function kept(maybeLive: boolean) {
+    const d = emptyDraft({ text: 'kept', bluesky: emptyBlueskyDraft({ source: URI, sourceMaybeLive: maybeLive }) })
+    saveDraft(KEY, `redraft:${d.idempotencyKey}`, d)
+    return `redraft:${d.idempotencyKey}` as const
+  }
+
+  it('the post is still up: true', async () => {
+    const { client } = fakeClient()
+    expect(await checkRedraftSource(client, kept(true))).toBe(true)
+  })
+
+  it('the post is gone: false, and the mark is cleared', async () => {
+    const slot = kept(true)
+    const { client } = fakeClient(null)
+    expect(await checkRedraftSource(client, slot)).toBe(false)
+    expect(loadDraft(KEY, slot)!.bluesky!.sourceMaybeLive).toBe(false)
+  })
+
+  it('no mark: nothing is asked', async () => {
+    const { client, c } = fakeClient()
+    expect(await checkRedraftSource(client, kept(false))).toBeNull()
+    expect(c.blueskyGetOwnPost).not.toHaveBeenCalled()
   })
 })
 

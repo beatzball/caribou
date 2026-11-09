@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, getDraftFiles, loadDraft,
-  putDraftFiles, saveDraft, _testOnlyClearDraftFiles, type DraftSlot,
+  putDraftFiles, saveDraft, _testOnlyClearDraftFiles, type DraftSlot, findRedraftSlot,
   setBlueskyDriver, statusCache, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
@@ -1361,6 +1361,91 @@ describe('Bluesky redraft', () => {
     expect(await pds.client.blueskyUploadBlob.mock.calls[0]![0].text()).toBe('A')
     expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
     expect($(el, '[data-bsky-image] .state')).toBeNull()
+  })
+
+  const SOURCE = `at://${DID}/app.bsky.feed.post/3kold`
+
+  it('a redraft whose delete was in doubt, and its post is still up: a note says so (N3)', async () => {
+    const pds = signInBluesky()
+    pds.records.set('3kold', { $type: 'app.bsky.feed.post', text: 'old', createdAt: 't' } as BlueskyPostRecord)
+    await storeRedraft({ source: SOURCE, sourceMaybeLive: true })
+    const el = await mount()
+    await openRedraft(el)
+    await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect($(el, '[data-source-live]')!.textContent).toContain('The post this redraft came from is still up.')
+  })
+
+  it('the post is gone: no note, and the mark is cleared (N3)', async () => {
+    const pds = signInBluesky()
+    await storeRedraft({ source: SOURCE, sourceMaybeLive: true })
+    const el = await mount()
+    await openRedraft(el)
+    await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect($(el, '[data-source-live]')).toBeNull()
+    expect(loadDraft(KEY, SLOT)!.bluesky!.sourceMaybeLive).toBe(false)
+  })
+
+  it('a send refused while the target is read is an info toast: "Post again in a moment." (N6)', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    await submit(el)
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'Checking the post this replies to or quotes. Post again in a moment.' })
+  })
+
+  it('a target read that answers after an account switch writes nothing to the cache (D2)', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    activeUserKey.value = 'did:plc:other@bsky'
+    read.resolve(bobPost())
+    await settle(el)
+    expect(statusCache.value.has(PARENT.uri)).toBe(false)
+  })
+
+  it('does not open a redraft of another account, even with a slot of the same name (N5)', async () => {
+    signInBluesky()
+    const other = 'did:plc:other@bsky' as typeof KEY
+    saveDraft(other, SLOT, redraft())
+    const el = await mount()
+    const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = { blueskyRedraft: { userKey: other, slot: SLOT } }
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+    await settle(el)
+    expect(detail.opened).toBe(false)
+    expect($<HTMLTextAreaElement>(el, 'textarea')?.value ?? '').toBe('')
+  })
+
+  it('blob recovery waits for the stored bytes when Post comes first (N5)', async () => {
+    const pds = signInBluesky()
+    await storeRedraft()
+    const el = await mount()
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkA', 'bafkA'))
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { blueskyRedraft: { userKey: KEY, slot: SLOT } } }))
+    await el.updateComplete
+    await submit(el)
+    for (let i = 0; i < 20; i++) await settle(el)
+    expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(1)
+    expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
+  })
+
+  it('a redraft a closed tab left staged, whose post is gone, is found with the next new post', async () => {
+    const pds = signInBluesky()
+    const left = emptyDraft({ text: 'left behind', bluesky: emptyBlueskyDraft({ source: SOURCE, rkey: '3kleft' }) })
+    saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const el = await mount()
+    await open(el)
+    for (let i = 0; i < 5; i++) await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect(findRedraftSlot(KEY)).toBe(`redraft:${left.idempotencyKey}`)
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'A redraft from an earlier visit was found. It opens the next time you write a new post.' })
   })
 
   it('the label menu offers Suggestive (sexual), as the official app does', async () => {

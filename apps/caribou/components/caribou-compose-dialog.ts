@@ -4,6 +4,7 @@ import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, getDraftFiles, loadDraft, postDraft, pruneDraftFiles, saveDraft,
+  checkRedraftSource, hasOrphanStagedRedrafts, recoverStagedRedrafts,
   pollOptions, blueskyDraftInput, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
@@ -51,6 +52,8 @@ const QUOTE_LIMITED = 'The author turned off quotes for this post.'
 const REPLY_GONE = 'The post you replied to was deleted.'
 const QUOTE_GONE = 'The post you quoted was deleted.'
 const CHECKING = 'Checking the post this replies to or quotes…'
+// The toast for a send refused while a target is read (app README).
+const CHECKING_REFUSED = 'Checking the post this replies to or quotes. Post again in a moment.'
 
 /** A reader-facing reason an image was not added. */
 function fitRefusal(name: string, reason: Exclude<FitResult, { ok: true }>['reason']): string {
@@ -334,6 +337,8 @@ export class CaribouComposeDialog extends LitElement {
   @state() private gone: string | null = null
   // Reads of an uncached reply or quote target still running: Post waits.
   @state() private targetsChecking = 0
+  // A redraft whose delete had no clear answer, and its post is still up.
+  @state() private sourceLive = false
   // A link to an earlier version that a retry found posted (spec 7.2).
   @state() private earlierPosted: string | null = null
   // Images (by their local id) the PDS no longer has and that this page has
@@ -452,6 +457,7 @@ export class CaribouComposeDialog extends LitElement {
     this.earlierPosted = null
     this.missingBlobs = new Set()
     this.targetsChecking = 0
+    this.sourceLive = false
     this.filesLoading = Promise.resolve()
     if (this.isBluesky) {
       const session = this.session
@@ -581,7 +587,7 @@ export class CaribouComposeDialog extends LitElement {
       this.targetsChecking += 1
       try {
         const fresh = await client.fetchStatus(ref.uri)
-        if (session !== this.session || client !== this.client) return
+        if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
         cacheStatus(fresh)
         if (kind === 'reply') this.replyTo = fresh
         else this.quoteTo = fresh
@@ -675,7 +681,29 @@ export class CaribouComposeDialog extends LitElement {
     if (target) void this.refreshTarget(client, target, inReplyTo ? 'reply' : 'quote')
     else void this.loadRefTargets(client)
     this.loadStoredFiles()
+    this.checkSource()
+    if (!target && !slot) this.recoverStaged(client)
     return true
+  }
+
+  // A redraft whose delete had no clear answer: is its post still up? (#190)
+  private checkSource(): void {
+    const owner = this.owner()
+    if (!owner || !this.draft.bluesky?.sourceMaybeLive) return
+    void checkRedraftSource(owner.client, owner.slot).then((live) => {
+      if (this.owns(owner)) this.sourceLive = live === true
+    })
+  }
+
+  // Redrafts staged by a tab that closed before its delete answered. A
+  // found one opens with the next new post; the toast says so.
+  private recoverStaged(client: CaribouClient): void {
+    if (!hasOrphanStagedRedrafts(client.userKey)) return
+    void recoverStagedRedrafts(client).then((moved) => {
+      if (moved.length > 0 && activeUserKey.peek() === client.userKey) {
+        toast('info', 'A redraft from an earlier visit was found. It opens the next time you write a new post.')
+      }
+    }, () => {})
   }
 
   // R6 (`packages/state` README): a draft gets its rkey when it is made, so
@@ -724,7 +752,7 @@ export class CaribouComposeDialog extends LitElement {
     const session = this.session
     try {
       const fresh = await client.fetchStatus(target.id)
-      if (session !== this.session || client !== this.client) return
+      if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
       // The page's other copies learn the flags too.
       cacheStatus(fresh)
       if (this.replyTo?.id === fresh.id) this.replyTo = fresh
@@ -857,12 +885,18 @@ export class CaribouComposeDialog extends LitElement {
     }
   }
 
+  // Why a send was refused. A target still being read is not a problem: Post again in a moment.
+  private refuse(reason: string): void {
+    if (reason === CHECKING) toast('info', CHECKING_REFUSED)
+    else toast('error', reason)
+  }
+
   private async submit() {
     const client = this.client
     // A Bluesky reply or quote turned off since the last render: say why
     // (the cache can change without a render), and show the note.
     if (client && this.isBluesky && !this.posting && this.blocked) {
-      toast('error', this.blocked)
+      this.refuse(this.blocked)
       this.requestUpdate()
       return
     }
@@ -903,7 +937,7 @@ export class CaribouComposeDialog extends LitElement {
   private async submitBluesky(client: CaribouClient) {
     // The flags as this page knows them now, not as they were at open.
     if (this.blocked) {
-      toast('error', this.blocked)
+      this.refuse(this.blocked)
       return
     }
     const done = this.replyTo ? 'Reply posted' : 'Post published'
@@ -1299,6 +1333,8 @@ export class CaribouComposeDialog extends LitElement {
           ${this.earlierPosted ? html`<p class="note" data-earlier-posted role="status">Your earlier version was posted.
             <a href=${this.earlierPosted} target="_blank" rel="noopener">Open it</a> (in a new tab). Your edits are still here; Post sends them as a new post.</p>` : nothing}
           ${bluesky && d.bluesky?.sent && !this.earlierPosted && !busy ? html`<p class="note" data-send-unknown>The last send did not finish. Post checks first, so the post is never sent twice.</p>` : nothing}
+          ${this.sourceLive ? html`
+            <p class="note problem" data-source-live role="status">The post this redraft came from is still up. Delete it first, or this text is posted twice.</p>` : nothing}
           ${this.besideOther ? html`
             <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
           ${d.cw && caps.contentWarningText ? html`

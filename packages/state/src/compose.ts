@@ -68,6 +68,13 @@ export interface BlueskyDraft {
   rkey: string | null
   /** Set from just before a send until its outcome is known. */
   sent: BlueskySentRecord | null
+  /** A redraft only: the URI of the post it was made from (#190). */
+  source?: string
+  /**
+   * A redraft only: the delete of `source` had no clear answer, so the post
+   * may still be up. The dialog checks when it opens the draft.
+   */
+  sourceMaybeLive?: boolean
 }
 
 export interface ComposeDraft {
@@ -102,7 +109,10 @@ export interface ComposeDraft {
 // an unsent draft. The deleted post exists nowhere else, so it is stored
 // like any draft, beside the one it must not overwrite.
 // A Bluesky quote keeps its own draft too, `quote:<uri>`.
-export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}` | `quote:${string}`
+// `staged:<key>` holds a Bluesky redraft while its delete runs. No composer
+// opens it; the delete's outcome moves it to `redraft:<key>` or removes it
+// (README, "Bluesky delete and redraft").
+export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}` | `quote:${string}` | `staged:${string}`
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'
@@ -209,6 +219,7 @@ export function storeDraftIf(
 /**
  * The slot of the oldest kept redraft (`redraft:<key>`), or null. A new
  * post opens it before the plain `new` draft, so it cannot be forgotten.
+ * A `staged:` slot is never found here.
  */
 export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
   for (const [slot, d] of Object.entries(readAll(userKey))) {
@@ -217,6 +228,15 @@ export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
     }
   }
   return null
+}
+
+/** Every stored slot of the account, with its draft. */
+export function storedDrafts(userKey: UserKey): Array<[DraftSlot, ComposeDraft]> {
+  const out: Array<[DraftSlot, ComposeDraft]> = []
+  for (const [slot, d] of Object.entries(readAll(userKey))) {
+    if (d && typeof d.text === 'string') out.push([slot as DraftSlot, emptyDraft(d)])
+  }
+  return out
 }
 
 export function clearDraft(userKey: UserKey, slot: DraftSlot): void {
