@@ -244,10 +244,8 @@ nothing (a 401 ends the session). The definitions load or are checked:
 - every 10 minutes while the page is visible (`LABELER_RECHECK_MS`, in
   `apps/caribou/components/_bluesky-session.ts`).
 
-**The window that stays.** Between a takedown and the next check (at most
-10 minutes of visible time), content that only that labeler would have
-labeled can show uncovered. A taken-down labeler's labels are served to no
-client, so the Bluesky app shows the same content.
+Until a check succeeds, the content can show. See "Known gap: a labeler
+dropped after its definitions loaded" at the end of this section.
 
 **Known gap: PDS read-after-write.** Just after the reader posts a reply or
 a quote, the AppView may not have indexed it yet. The PDS then builds the
@@ -274,6 +272,37 @@ It applies to every signed-in read that moderates: `home` (`getTimeline`),
 (`getProfile`), `fetchMutes` and `fetchBlocks`, and `fetchNotifications`.
 An agent without `labelers` or without a session sent none, so rule 2
 covers none.
+
+#### Known gap: a labeler dropped after its definitions loaded
+
+Tracked in #240. The owner accepted it on 2026-11-09.
+
+- **What:** after a subscribed labeler is taken down or deactivated,
+  content that only it would have labeled can show uncovered. This lasts
+  until the next **successful** definitions check. The schedule above is
+  what the app tries, not a limit: if `getServices` keeps failing, the
+  window has no upper limit.
+- **Why it is accepted:** a browser cannot read `atproto-content-labelers`
+  (curl proof in #233), so Caribou cannot see that an answer dropped the
+  labeler. The AppView serves that labeler's labels to no client, so the
+  Bluesky app shows the same content.
+- **Why the stricter rule fails:** "keep the cover when the applied
+  labelers are unknown" covers everything, always, in a browser. That is
+  the #233 bug.
+- **How to close it later:**
+  1. Bluesky exposes the header through CORS. Then rule 1 in
+     `content-labelers.ts` (`answerCoverage`) applies to every answer, and
+     the rule-2 fallback can go.
+  2. A server-side read path that can read the header. The reads in
+     `client.ts` then take the coverage it passes on, in place of
+     `answerCoverage`'s fallback.
+  3. A definitions check before each content read (`oauth.ts`
+     `recheckLabelers`, and the schedule in
+     `apps/caribou/components/_bluesky-session.ts`). This narrows the
+     window but does not prove coverage for an answer.
+- **The test that records it:** `src/__tests__/oauth.test.ts`, "accepted
+  gap: a labeler taken down after its definitions loaded …". If the window
+  is closed, change it to expect the cover at once.
 
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 

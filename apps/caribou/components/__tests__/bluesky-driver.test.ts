@@ -142,16 +142,44 @@ describe('the labeler definitions are checked again', () => {
     expect(recheckLabelers).toHaveBeenCalledTimes(1)
   })
 
-  it('not while a reload runs, and not for an account that is no longer active', async () => {
+  it('not while a reload runs', async () => {
     addUserSession(bsky())
     await blueskyDriver.restore(bsky(), hooks)
     reloadModeration.mockReturnValue(new Promise(() => {}))
     window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: 'x' } }))
     await vi.advanceTimersByTimeAsync(LABELER_RECHECK_MS)
     expect(recheckLabelers).not.toHaveBeenCalled()
+  })
+
+  // No reload runs, so the check reaches the account guard.
+  it('not for an account that is no longer active', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
     activeUserKey.value = null
     await vi.advanceTimersByTimeAsync(LABELER_RECHECK_MS)
     expect(recheckLabelers).not.toHaveBeenCalled()
+  })
+
+  it('a Retry counts as a check: a return to the foreground just after it does not check', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    reloadModeration.mockResolvedValue({ prefs: null, labelDefs: {} })
+    await vi.advanceTimersByTimeAsync(2 * FOREGROUND_RECHECK_MIN_MS)
+    window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: 'x' } }))
+    await vi.advanceTimersByTimeAsync(0)
+    setVisibility('hidden')
+    setVisibility('visible')
+    expect(recheckLabelers).not.toHaveBeenCalled()
+  })
+
+  it('a timed check counts as a check: a return to the foreground just after it does not check again', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    await vi.advanceTimersByTimeAsync(LABELER_RECHECK_MS)
+    expect(recheckLabelers).toHaveBeenCalledTimes(1)
+    setVisibility('hidden')
+    setVisibility('visible')
+    expect(recheckLabelers).toHaveBeenCalledTimes(1)
   })
 
   it('a failed check leaves the reader as it was', async () => {

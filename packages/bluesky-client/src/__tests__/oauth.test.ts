@@ -38,6 +38,13 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
+const L = 'did:web:labeler.example.com'
+const labelerService = (did: string) => ({
+  $type: 'app.bsky.labeler.defs#labelerViewDetailed',
+  uri: `at://${did}/app.bsky.labeler.service/self`, cid: 'bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm',
+  creator: { did, handle: 'labeler.example.com' }, policies: { labelValues: [] }, indexedAt: '2026-01-01T00:00:00.000Z',
+})
+
 /** An OAuth session whose requests go to `routes` by XRPC method name. */
 function fakeSession(did: string, routes: Record<string, () => Response> = {}): OAuthSession & { signOut: ReturnType<typeof vi.fn> } {
   return {
@@ -255,20 +262,19 @@ describe('restoreClient', () => {
   // Codex's case (#235): labeler L's definitions loaded, then L is taken
   // down. The AppView drops L from a later answer, and the browser cannot
   // read the header that says so. The content shows until the next
-  // definitions check; that check finds no view for L and covers again.
-  it('a labeler taken down after its definitions loaded: shown until the next check, covered after it', async () => {
-    const L = 'did:web:labeler.example.com'
-    const service = (did: string) => ({
-      $type: 'app.bsky.labeler.defs#labelerViewDetailed',
-      uri: `at://${did}/app.bsky.labeler.service/self`, cid: 'bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm',
-      creator: { did, handle: 'labeler.example.com' }, policies: { labelValues: [] }, indexedAt: '2026-01-01T00:00:00.000Z',
-    })
+  // successful definitions check; that check finds no view for L and covers
+  // again. This records the window the owner accepted on 2026-11-09
+  // (bluesky-client README, "Known gap: a labeler dropped after its
+  // definitions loaded").
+  it('accepted gap: a labeler taken down after its definitions loaded shows content until the next successful check, then covers', async () => {
     let lUp = true
     const sent: (string | null)[] = []
+    // Like the AppView: a view only for each labeler asked for.
+    let asked: string[] = []
     const session = fakeSession(ALICE, {
       'app.bsky.actor.getPreferences': () => json({ preferences: [{ $type: 'app.bsky.actor.defs#labelersPref', labelers: [{ did: L }] }] }),
       'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
-      'app.bsky.labeler.getServices': () => json({ views: [service(BSKY_LABELER_DID), ...lUp ? [service(L)] : []] }),
+      'app.bsky.labeler.getServices': () => json({ views: [BSKY_LABELER_DID, ...lUp ? [L] : []].filter((d) => asked.includes(d)).map(labelerService) }),
       // No `atproto-content-labelers`: the browser cannot read it.
       'app.bsky.actor.getProfile': () => json({ did: BOB, handle: 'bob.example.com' }),
     })
@@ -276,6 +282,7 @@ describe('restoreClient', () => {
     const inner = handler.getMockImplementation()!
     handler.mockImplementation(async (path: string, init?: RequestInit) => {
       sent.push(new Headers(init?.headers).get('atproto-accept-labelers'))
+      asked = new URLSearchParams(path.split('?')[1]).getAll('dids')
       return inner(path, init)
     })
     const out = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired: () => {}, key: 'TD' })
@@ -288,6 +295,11 @@ describe('restoreClient', () => {
     expect(await settled()).toBe(true)
     expect(sent.at(-1)).toContain(L)
 
+    // A check while L is up keeps L's definitions.
+    const kept = await out.recheckLabelers()
+    expect(Object.keys(kept.labelDefs!)).toEqual(expect.arrayContaining([BSKY_LABELER_DID, L]))
+    expect(await settled()).toBe(true)
+
     // L is taken down. The next answer still names nothing: shown, as before.
     lUp = false
     expect(await settled()).toBe(true)
@@ -297,6 +309,38 @@ describe('restoreClient', () => {
     expect(Object.keys(after.labelDefs!)).toEqual([BSKY_LABELER_DID])
     expect(out.labelDefs).toBe(after.labelDefs)
     expect(await settled()).toBe(false)
+  })
+
+  // A Retry does not wait for a check in flight (`_bluesky-session.ts`).
+  // The slow check began while L was up; the Retry saw L gone.
+  it('a full load that starts after a check began wins: the check does not put back a labeler the load saw as gone', async () => {
+    let lUp = true
+    let release: (() => void) | null = null
+    let holdNext = false
+    const session = fakeSession(ALICE, {
+      'app.bsky.actor.getPreferences': () => json({ preferences: [{ $type: 'app.bsky.actor.defs#labelersPref', labelers: [{ did: L }] }] }),
+      'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
+      'app.bsky.labeler.getServices': (() => {
+        const res = json({ views: [labelerService(BSKY_LABELER_DID), ...lUp ? [labelerService(L)] : []] })
+        if (!holdNext) return res
+        holdNext = false
+        return new Promise<Response>((r) => { release = () => r(res) })
+      }) as unknown as () => Response,
+    })
+    const out = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired: () => {}, key: 'NW' })
+    expect(Object.keys(out.labelDefs!)).toEqual(expect.arrayContaining([L]))
+
+    holdNext = true
+    const check = out.recheckLabelers()
+    await vi.waitFor(() => expect(release).not.toBeNull())
+    lUp = false
+    const reload = await out.reloadModeration()
+    expect(Object.keys(reload.labelDefs!)).toEqual([BSKY_LABELER_DID])
+
+    release!()
+    const late = await check
+    expect(Object.keys(late.labelDefs!)).toEqual([BSKY_LABELER_DID])
+    expect(Object.keys(out.labelDefs!)).toEqual([BSKY_LABELER_DID])
   })
 
   it('recheckLabelers: a failed check keeps the definitions; a 401 ends the session', async () => {
