@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { CaribouClient, FetchNotificationsParams, Notification, Status } from '@beatzball/caribou-mastodon-client'
+import type { CaribouClient, FetchNotificationsParams, Notification, NotificationPage, Status } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 
 const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<Notification[]>>()
@@ -70,8 +70,14 @@ describe('compareNotificationIds', () => {
 })
 
 describe('createNotificationsStore', () => {
+  // The Mastodon client's paging rule (create-client.ts): the last id, and
+  // null on an empty page. A test that sets `nextCursor` itself keeps it.
+  function asPage(list: Notification[]): NotificationPage {
+    if ('nextCursor' in list) return list as NotificationPage
+    return Object.assign(list, { nextCursor: list[list.length - 1]?.id ?? null })
+  }
   function client(): CaribouClient {
-    return { fetchNotifications } as unknown as CaribouClient
+    return { fetchNotifications: (p?: FetchNotificationsParams) => fetchNotifications(p).then(asPage) } as unknown as CaribouClient
   }
 
   it('load() asks for every type by default and caches the posts', async () => {
@@ -97,7 +103,7 @@ describe('createNotificationsStore', () => {
     await store.load()
     fetchNotifications.mockResolvedValueOnce([notif('2'), notif('1')])
     await store.loadMore()
-    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], maxId: '2' })
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], cursor: '2' })
     expect(store.notifications.value.map((n) => n.id)).toEqual(['3', '2', '1'])
   })
 

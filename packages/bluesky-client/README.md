@@ -348,7 +348,7 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   asked); `fetchMutes`, `fetchBlocks` → `getMutes`, `getBlocks`;
   `fetchFilters` → `[]` (Bluesky has no server filters).
 - **Not here yet:** `local`, `public`, hashtag and list timelines, every
-  write, compose, polls, edit, notifications, search, lists and tags throw
+  write, compose, polls, edit, search, lists and tags throw
   `CaribouError('not_found')` naming the issue that adds them. A screen
   hides those by `capabilities`.
 - **Errors (`normalizeXrpcError`):** 401 → `unauthorized` (and
@@ -356,6 +356,66 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `not_found`, 429 → `rate_limited` with `retryAfter` from
   `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
 - **Dedup:** two equal reads in flight share one request.
+
+## Notifications (#191, spec 9)
+
+`src/map/notification.ts` maps one AppView notification; `fetchNotifications`
+in `src/client.ts` reads a page. Both are server-safe.
+
+- **Read:** `listNotifications({ reasons, cursor, limit })`. The filter
+  `types` maps to `reasons`: `mention` → `mention`, `reply`, `quote`;
+  `favourite` → `like`; `reblog` → `repost`; `follow` → `follow`. No
+  `types` (the "All" list) sends no `reasons`: the AppView sends every
+  reason, and the client skips the ones it does not know (below).
+- **Reasons to types:**
+
+  | reason | Caribou `type` | `status` |
+  |---|---|---|
+  | `like` | `favourite` | the liked post (`reasonSubject`) |
+  | `repost` | `reblog` | the reposted post (`reasonSubject`) |
+  | `follow` | `follow` | none |
+  | `mention`, `reply`, `quote` | `mention` | the post itself (`uri`) |
+
+  A reply and a quote show as their post, as a Mastodon mention does.
+- **Skipped, never thrown:** any other reason (`like-via-repost`,
+  `repost-via-repost`, `starterpack-joined`, `verified`, `unverified`,
+  `subscribed-post`, `contact-match`, and any reason added later); a
+  `like` or `repost` with no `reasonSubject`; a notification whose post
+  `getPosts` did not return (deleted, blocked, taken down); one with no
+  author DID or no valid `indexedAt`; one whose mapper throws (`onMapError`
+  hears of it, with the notification's URI).
+- **Posts:** the client reads every post the page names with `getPosts`, 25
+  URIs per request, each URI once. They map with `mapPost`, so each one has
+  its `network`, `viewerOf` and moderation, as in a feed (spec 11, seam 4).
+- **Fields:** `id` = the notification's `uri` (the like, repost, follow or
+  post record). `createdAt` = `indexedAt`. `account` = the author, with its
+  moderation. `groupKey` = the `uri` (the store groups Bluesky
+  notifications itself). `bluesky` = `{ uri, reason, reasonSubject,
+  indexedAt, isRead }`.
+- **Order:** as the AppView sent it, newest first. The store sorts by
+  `indexedAt`.
+- **Paging:** `nextCursor` is the AppView `cursor`, passed back as it came.
+  An empty AppView page ends the list (`null`). A page whose every
+  notification was skipped is empty **with** its cursor: it is not the end.
+- **Seen hint:** each page has `bluesky: { newestAt, unread }`: the newest
+  `indexedAt` on the AppView page, skipped ones included, and whether any
+  notification on it has `isRead: false`. The store uses it for
+  `updateSeen` (`packages/state` README, "Notifications").
+- **Catch-up (`sinceId`):** no `since_id` here either. As for the timeline
+  (seam 7), the client pages from the top, at most 3 pages of 50, until it
+  meets the notification whose `uri` is `sinceId` (matched before any skip).
+  Met: the answer is everything above it and `nextCursor` is `null`. Not met:
+  everything it read, and the cursor after the last page (`null` when the
+  list ended). The store calls that a gap.
+- **Unread badge:** `getUnreadCount()` →
+  `app.bsky.notification.getUnreadCount`, the server's count (a missing or
+  bad count is 0). `updateSeen(seenAt)` →
+  `app.bsky.notification.updateSeen({ seenAt })`. It is a write: it is never
+  deduped and never retried here. Mastodon's client has neither method; it
+  keeps a local marker.
+- **No server groups:** `fetchGroupedNotifications` and
+  `fetchNotificationGroupAccounts` answer `not_found`. The store never asks
+  them for Bluesky.
 
 ## Sign-in and sessions (`src/oauth.ts`, #182, spec 5.5 and 5.6)
 

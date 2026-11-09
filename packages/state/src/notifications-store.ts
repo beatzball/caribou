@@ -1,18 +1,20 @@
 import { computed, effect, signal, type ReadonlySignal } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
 import type {
-  CaribouClient, CaribouError, GroupedNotificationsPage, Notification,
+  CaribouClient, CaribouError, GroupedNotificationsPage, Notification, NotificationPage,
   NotificationType,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheAccount, cacheStatus, readSource, statusCache, type CopySource } from './caches.js'
 import {
-  appendOlderGroups, compareNotificationIds, groupNotifications, groupsFromPage, prependNewerGroups,
+  appendOlderGroups, byIndexedAt, compareNotificationIds, groupBlueskyNotifications, groupNotifications,
+  groupsFromPage, prependNewerGroups,
   type NotificationGroup,
 } from './notification-groups.js'
 import { ownerGeneration } from './keep-alive.js'
 import { startPolling, type PollHost } from './polling.js'
 import { readPrefs, updatePrefs } from './prefs.js'
-import { activeClient, activeUser } from './users.js'
+import { isBlueskySession } from './bluesky-session.js'
+import { activeClient, activeUser, type UserSession } from './users.js'
 
 export type NotificationFilter = 'all' | 'mentions'
 
@@ -36,12 +38,24 @@ export interface NotificationsStore {
   loading:       ReadonlySignal<boolean>
   /** The last failure. Rows already shown stay; the next success clears it. */
   error:         ReadonlySignal<CaribouError | null>
+  /** Whether "Load older" has more: the last page's `nextCursor` is not null. */
   hasMore:       ReadonlySignal<boolean>
+  /**
+   * Bluesky: what the list has read from the top (load and polls), skipped
+   * notifications included: the newest `indexedAt`, and whether any was
+   * unread. `updateSeen` is sent from it. Null for Mastodon.
+   */
+  seen:          ReadonlySignal<BlueskySeenHint | null>
 
   load(): Promise<void>
   loadMore(): Promise<void>
   /** Prepends what is newer than the first notification, or loads an empty list. */
   poll(): Promise<void>
+}
+
+export interface BlueskySeenHint {
+  newestAt: string | null
+  unread: boolean
 }
 
 export interface CreateNotificationsStoreOpts {
@@ -73,11 +87,25 @@ export function resetGroupedSupport(): void {
   withoutGrouped.clear()
 }
 
+function isBlueskyClient(client: CaribouClient | null): boolean {
+  return client?.capabilities?.network === 'bluesky'
+}
+
 function usesGrouped(client: CaribouClient): boolean {
+  if (isBlueskyClient(client)) return false
   return typeof client.fetchGroupedNotifications === 'function' && !withoutGrouped.has(client.userKey)
 }
 
-type PageParams = { minId?: string; maxId?: string; limit?: number }
+type PageParams = { minId?: string; cursor?: string; sinceId?: string; limit?: number }
+
+function laterHint(a: BlueskySeenHint | null, b: BlueskySeenHint | undefined): BlueskySeenHint | null {
+  if (!b) return a
+  if (!a) return { ...b }
+  const newer = b.newestAt !== null && (a.newestAt === null || Date.parse(b.newestAt) > Date.parse(a.newestAt))
+  return { newestAt: newer ? b.newestAt : a.newestAt, unread: a.unread || b.unread }
+}
+
+const EMPTY_PAGE = (): NotificationPage => Object.assign([] as Notification[], { nextCursor: null })
 
 export function createNotificationsStore(opts: CreateNotificationsStoreOpts): NotificationsStore {
   const types = NOTIFICATION_FILTER_TYPES[opts.filter ?? 'all']
@@ -89,6 +117,15 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   const loading = signal(false)
   const error   = signal<CaribouError | null>(null)
   const hasMore = signal(true)
+  // The next older page, as the last page named it. Null: the list ended.
+  let olderCursor: string | null = null
+  // Bluesky: no server groups and no id order (README, "Notifications").
+  const bluesky = signal(false)
+  const seen = signal<BlueskySeenHint | null>(null)
+  function setCursor(next: string | null) {
+    olderCursor = next
+    hasMore.value = next !== null
+  }
   // A load() replaces the list. A reply to a request made before it is
   // dropped, and so is one that comes back under another account (also
   // A -> B -> A). Nothing from a dropped reply reaches the shared caches.
@@ -108,7 +145,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 
   const groups = computed<NotificationGroup[]>(() => {
     const list = serverGroups.value
-    if (!list) return groupNotifications(notifications.value)
+    if (!list) return bluesky.value ? groupBlueskyNotifications(notifications.value) : groupNotifications(notifications.value)
     const cache = statusCache.value
     return list.map((g) => {
       const cached = g.status ? cache.get(g.status.id) : undefined
@@ -142,9 +179,9 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     return page.filter((n) => !known.has(n.id))
   }
 
-  async function fetchPage(params: PageParams) {
+  async function fetchPage(params: PageParams): Promise<NotificationPage> {
     const client = opts.clientSource()
-    if (!client) return []
+    if (!client) return EMPTY_PAGE()
     return client.fetchNotifications({ types, ...params })
   }
 
@@ -154,12 +191,13 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 
   // The first page, from the grouped endpoint when the server has it.
   // Nothing is cached here: the caller checks the reply is still wanted.
-  async function fetchFirst(): Promise<{ grouped: GroupedNotificationsPage | null; page: Notification[] }> {
+  async function fetchFirst(): Promise<{ grouped: GroupedNotificationsPage | null; page: NotificationPage; bluesky: boolean }> {
     const client = opts.clientSource()
-    if (!client) return { grouped: null, page: [] }
+    if (!client) return { grouped: null, page: EMPTY_PAGE(), bluesky: false }
+    if (isBlueskyClient(client)) return { grouped: null, page: await client.fetchNotifications({ types }), bluesky: true }
     if (usesGrouped(client)) {
       try {
-        return { grouped: await fetchGroups(client, {}), page: [] }
+        return { grouped: await fetchGroups(client, {}), page: EMPTY_PAGE(), bluesky: false }
       } catch (err) {
         if (!isMissingEndpoint(err)) throw err
         // A 400 can be a passing proxy fault or a bad query: fall back for
@@ -167,7 +205,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
         if ((err as Partial<CaribouError>).status !== 400) withoutGrouped.add(client.userKey)
       }
     }
-    return { grouped: null, page: await client.fetchNotifications({ types }) }
+    return { grouped: null, page: await client.fetchNotifications({ types }), bluesky: false }
   }
 
   async function load() {
@@ -179,16 +217,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     try {
       const first = await fetchFirst()
       if (!current(mine, owner)) return
-      if (first.grouped) {
-        const groups = ingestGroups(first.grouped, source)
-        serverGroups.value = groups
-        items.value = []
-        hasMore.value = groups.length > 0
-      } else {
-        serverGroups.value = null
-        items.value = ingest(first.page, source)
-        hasMore.value = first.page.length > 0
-      }
+      applyFirst(first, source)
     } catch (err) {
       if (mine === generation) error.value = err as CaribouError
     } finally {
@@ -196,10 +225,19 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     }
   }
 
-  function oldestGroupId(list: NotificationGroup[]): string | undefined {
-    let oldest: string | undefined
-    for (const g of list) if (!oldest || compareNotificationIds(g.oldestId, oldest) < 0) oldest = g.oldestId
-    return oldest
+  // The first page replaces the list. Only the client's cursor ends it.
+  function applyFirst(first: Awaited<ReturnType<typeof fetchFirst>>, source: CopySource) {
+    bluesky.value = first.bluesky
+    seen.value = first.bluesky ? laterHint(null, first.page.bluesky) : null
+    if (first.grouped) {
+      serverGroups.value = ingestGroups(first.grouped, source)
+      items.value = []
+      setCursor(first.grouped.nextCursor)
+    } else {
+      serverGroups.value = null
+      items.value = ingest(first.page, source)
+      setCursor(first.page.nextCursor)
+    }
   }
 
   function newestGroupId(list: NotificationGroup[]): string | undefined {
@@ -211,8 +249,10 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   async function loadMore() {
     if (loading.value || !hasMore.value) return
     const grouped = serverGroups.value
-    const anchor = grouped ? oldestGroupId(grouped) : items.value[items.value.length - 1]?.id
-    if (!anchor) return
+    // The cursor the last page named, as it came. An empty page with a
+    // cursor is not the end (README, "Notifications").
+    const anchor = olderCursor
+    if (anchor === null) return
     const mine = generation
     const owner = ownerGeneration()
     loading.value = true
@@ -221,16 +261,16 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
       if (grouped) {
         const client = opts.clientSource()
         if (!client) return
-        const raw = await fetchGroups(client, { maxId: anchor })
+        const raw = await fetchGroups(client, { cursor: anchor })
         if (!current(mine, owner)) return
         const older = ingestGroups(raw, source)
         serverGroups.value = appendOlderGroups(serverGroups.value ?? [], older)
-        hasMore.value = older.length > 0
+        setCursor(raw.nextCursor)
       } else {
-        const page = await fetchPage({ maxId: anchor })
+        const page = await fetchPage({ cursor: anchor })
         if (!current(mine, owner)) return
         items.value = [...items.value, ...withoutKnown(ingest(page, source))]
-        hasMore.value = page.length > 0
+        setCursor(page.nextCursor)
       }
       error.value = null
     } catch (err) {
@@ -264,11 +304,30 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     error.value = null
   }
 
+  // Bluesky has no min_id: the client reads from the top until it meets the
+  // newest one shown. Met: merge what is above it. Not met (a gap): the list
+  // starts again from what was read, and pages on from there.
+  async function pollBluesky(mine: number, owner: number, first: string, source: CopySource) {
+    const page = await fetchPage({ sinceId: first })
+    if (!current(mine, owner)) return
+    seen.value = laterHint(seen.value, page.bluesky)
+    if (page.nextCursor === null) {
+      const fresh = withoutKnown(ingest(page, source))
+      if (fresh.length > 0) items.value = [...fresh, ...items.value]
+    } else {
+      items.value = ingest(page, source)
+      setCursor(page.nextCursor)
+    }
+    error.value = null
+  }
+
   async function pollOnce() {
     const mine = generation
     const owner = ownerGeneration()
     const grouped = serverGroups.value
-    const first = grouped ? newestGroupId(grouped) : items.value[0]?.id
+    const first = grouped
+      ? newestGroupId(grouped)
+      : bluesky.value ? byIndexedAt(items.value)[0]?.id : items.value[0]?.id
     const source = startRead()
     try {
       if (!first) {
@@ -276,15 +335,16 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
         const firstPage = await fetchFirst()
         if (!current(mine, owner)) return
         if ((serverGroups.value?.length ?? 0) > 0 || items.value.length > 0) return
-        const groups = firstPage.grouped ? ingestGroups(firstPage.grouped, source) : null
-        serverGroups.value = groups
-        items.value = groups ? [] : ingest(firstPage.page, source)
-        hasMore.value = (groups?.length ?? firstPage.page.length) > 0
+        applyFirst(firstPage, source)
         error.value = null
         return
       }
       if (grouped) {
         await pollGroups(mine, owner, first, source)
+        return
+      }
+      if (bluesky.value) {
+        await pollBluesky(mine, owner, first, source)
         return
       }
       // Page forward from the newest one shown. `since_id` would give the
@@ -318,7 +378,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     return polling
   }
 
-  return { notifications, groups, loading, error, hasMore, load, loadMore, poll }
+  return { notifications, groups, loading, error, hasMore, seen, load, loadMore, poll }
 }
 
 // --- seen marker and unread count ------------------------------------------
@@ -354,6 +414,92 @@ export function markNotificationsSeen(id: string, userKey?: UserKey): void {
   unreadNotificationCount.value = 0
 }
 
+// --- Bluesky: updateSeen (README, "Notifications") ------------------------
+
+/** The last `seenAt` this browser sent for a Bluesky account, from its prefs. */
+export function lastSeenNotificationAt(userKey: UserKey): string | null {
+  const at = readPrefs(userKey).lastSeenNotificationAt
+  return typeof at === 'string' && !Number.isNaN(Date.parse(at)) ? at : null
+}
+
+// Each successful updateSeen bumps its account's number. A count whose
+// request started before it can still count what the reader just saw.
+const seenLanded = new Map<UserKey, number>()
+function landedFor(userKey: UserKey): number {
+  return seenLanded.get(userKey) ?? 0
+}
+
+// One updateSeen per account at a time. A newer `seenAt` asked for while one
+// is in flight waits, and is sent after it.
+const seenInFlight = new Map<UserKey, Promise<void>>()
+const seenQueued = new Map<UserKey, { generation: string; seenAt: string }>()
+
+function sessionMatches(user: UserSession | null, userKey: UserKey, generation: string): boolean {
+  return !!user && user.userKey === userKey && user.generation === generation
+}
+
+/** For tests: forget what is in flight. */
+export function resetBlueskySeen(): void {
+  seenLanded.clear()
+  seenInFlight.clear()
+  seenQueued.clear()
+}
+
+export interface MarkBlueskySeenInput {
+  userKey: UserKey
+  /** The sign-in the list was loaded for. */
+  generation: string
+  hint: BlueskySeenHint | null
+}
+
+/**
+ * Sends `updateSeen` for the Bluesky list the reader has seen. Only when the
+ * list read an unread notification, and its newest time is newer than the
+ * last one this browser sent for the account; only to the active client of
+ * that same sign-in. Resolves when done; never throws.
+ */
+export function markBlueskyNotificationsSeen(input: MarkBlueskySeenInput): Promise<void> {
+  const { userKey, generation, hint } = input
+  if (!hint || !hint.unread || !hint.newestAt) return Promise.resolve()
+  if (!sessionMatches(activeUser.peek(), userKey, generation)) return Promise.resolve()
+  const last = lastSeenNotificationAt(userKey)
+  if (last && Date.parse(hint.newestAt) <= Date.parse(last)) return Promise.resolve()
+  const running = seenInFlight.get(userKey)
+  if (running) {
+    const queued = seenQueued.get(userKey)
+    if (!queued || Date.parse(hint.newestAt) > Date.parse(queued.seenAt)) {
+      seenQueued.set(userKey, { generation, seenAt: hint.newestAt })
+    }
+    return running
+  }
+  const run = sendSeen(userKey, generation, hint.newestAt).finally(() => {
+    seenInFlight.delete(userKey)
+    const next = seenQueued.get(userKey)
+    seenQueued.delete(userKey)
+    if (next) void markBlueskyNotificationsSeen({ userKey, generation: next.generation, hint: { newestAt: next.seenAt, unread: true } })
+  })
+  seenInFlight.set(userKey, run)
+  return run
+}
+
+async function sendSeen(userKey: UserKey, generation: string, seenAt: string): Promise<void> {
+  const client = activeClient.peek()
+  // Never for another account, and never for another sign-in of this one.
+  if (!client || client.userKey !== userKey || typeof client.updateSeen !== 'function') return
+  if (!sessionMatches(activeUser.peek(), userKey, generation)) return
+  try {
+    await client.updateSeen(seenAt)
+  } catch {
+    // Nothing changes; the next view or poll tries again.
+    return
+  }
+  // Another tab may have sent a newer one meanwhile.
+  const last = lastSeenNotificationAt(userKey)
+  if (!last || Date.parse(seenAt) > Date.parse(last)) updatePrefs(userKey, { lastSeenNotificationAt: seenAt })
+  seenLanded.set(userKey, landedFor(userKey) + 1)
+  if (sessionMatches(activeUser.peek(), userKey, generation)) unreadNotificationCount.value = 0
+}
+
 export interface StartUnreadNotificationsOpts {
   intervalMs?: number
   host?: PollHost
@@ -371,9 +517,11 @@ export function startUnreadNotifications(opts: StartUnreadNotificationsOpts = {}
 
   // Restart on a new session only. Loading the account replaces the session
   // object, and with it `activeClient`; that is not a reason to ask again.
+  // A Bluesky session has no token: its sign-in is its `generation`.
   const session = computed(() => {
     const user = activeUser.value
-    return user ? `${user.userKey}\n${user.token}` : null
+    if (!user) return null
+    return `${user.userKey}\n${isBlueskySession(user) ? user.generation : user.token}`
   })
 
   // Every new session starts a new activation. A reply from an older one is
@@ -389,9 +537,29 @@ export function startUnreadNotifications(opts: StartUnreadNotificationsOpts = {}
     const user = activeUser.peek()
     if (!current || !user) return
 
+    const fetchBlueskyCount = async (client: CaribouClient) => {
+      // Only the client of this account: a switch drops the old count.
+      if (client.userKey !== user.userKey || typeof client.getUnreadCount !== 'function') return
+      const landed = landedFor(user.userKey)
+      let count: number
+      try {
+        count = await client.getUnreadCount()
+      } catch {
+        return
+      }
+      if (disposed || mine !== activation) return
+      // An updateSeen landed while this was in flight: this count is older.
+      if (landedFor(user.userKey) !== landed) return
+      unreadNotificationCount.value = Math.min(Math.max(0, count), UNREAD_CAP)
+    }
+
     const fetchCount = async () => {
       const client = activeClient.peek()
       if (!client) return
+      if (isBlueskySession(user)) {
+        await fetchBlueskyCount(client)
+        return
+      }
       const since = lastSeenNotificationId(user.userKey)
       let page: Notification[]
       try {

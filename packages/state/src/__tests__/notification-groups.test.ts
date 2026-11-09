@@ -92,6 +92,7 @@ function page(groups: NotificationGroupData[], ids: string[] = ['alice', 'bob', 
     accounts: ids.map(account),
     statuses: [{ id: 's1' } as Status],
     notificationGroups: groups,
+    nextCursor: null,
   }
 }
 

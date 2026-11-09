@@ -3,12 +3,14 @@ import type { UserKey } from '@beatzball/caribou-auth'
 import {
   CaribouError, createDedup,
   type Account, type AccountCredentials, type AccountPage, type BlueskyModerationResult,
-  type CaribouClient, type Capabilities, type Role, type Status, type TimelineKind, type TimelinePage,
+  type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type Status,
+  type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
 import type { MapContext } from './map/context.js'
 import { feedEntryId, mapFeedEntry } from './map/feed-entry.js'
+import { mapNotification, notificationPostUri, reasonsFor, type NotificationView } from './map/notification.js'
 import { mapPost } from './map/post.js'
 
 /** What Bluesky supports (spec 6.5). */
@@ -34,7 +36,7 @@ export const BLUESKY_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
 /** The parts of a signed-in `Agent` the read client calls. */
 export type BlueskyAgent = Pick<Agent,
   'did' | 'getTimeline' | 'getAuthorFeed' | 'getPostThread' | 'getPosts' | 'getProfile' | 'getProfiles'
-> & {
+> & Pick<Agent, 'listNotifications' | 'countUnreadNotifications' | 'updateSeenNotifications'> & {
   app: {
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'getBookmarks'>
@@ -224,6 +226,96 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     })
   }
 
+  // --- notifications (README, "Notifications") ---
+
+  type RawNotificationPage = { notifications: NotificationView[]; cursor?: string }
+
+  // The page's notifications that Caribou shows, with their posts read in
+  // batches. A skipped one is left out; a page's end is read from what the
+  // AppView sent.
+  async function notificationItems(raw: readonly NotificationView[]): Promise<Notification[]> {
+    const wanted: NotificationView[] = []
+    const uris = new Set<string>()
+    for (const n of raw) {
+      try {
+        if (typeof n.author?.did !== 'string') continue
+        const uri = notificationPostUri(n)
+        if (uri === undefined) continue
+        if (uri) uris.add(uri)
+        wanted.push(n)
+      } catch (err) {
+        opts.onMapError?.(err, n?.uri ?? '')
+      }
+    }
+    const views = uris.size === 0 ? [] : (await Promise.all(chunks([...uris], BATCH).map((list) => agent.getPosts({ uris: list }))))
+      .flatMap((p) => p.data.posts)
+    const byUri = new Map(posts(views).map((s) => [s.bluesky?.uri ?? s.id, s]))
+    return wanted.flatMap((n) => {
+      try {
+        const uri = notificationPostUri(n)
+        const mapped = mapNotification(n, account(n.author), uri ? byUri.get(uri) ?? null : null)
+        return mapped ? [mapped] : []
+      } catch (err) {
+        opts.onMapError?.(err, n.uri)
+        return []
+      }
+    })
+  }
+
+  // The seen hint: the newest time on the AppView's pages, skipped ones
+  // included, and whether any was unread.
+  function seenHint(raw: readonly NotificationView[]): { newestAt: string | null; unread: boolean } {
+    let newestAt: string | null = null
+    let unread = false
+    for (const n of raw) {
+      const at = typeof n?.indexedAt === 'string' && !Number.isNaN(Date.parse(n.indexedAt)) ? n.indexedAt : null
+      if (at && (newestAt === null || Date.parse(at) > Date.parse(newestAt))) newestAt = at
+      if (n?.isRead === false) unread = true
+    }
+    return { newestAt, unread }
+  }
+
+  async function notificationPage(raw: readonly NotificationView[], cursor: string | null): Promise<NotificationPage> {
+    return Object.assign(await notificationItems(raw), { nextCursor: cursor, bluesky: seenHint(raw) })
+  }
+
+  async function notifications(params: { types?: readonly string[]; cursor?: string; sinceId?: string; limit?: number }): Promise<NotificationPage> {
+    const reasons = reasonsFor(params.types)
+    const fetchPage = async (cursor: string | undefined, limit: number | undefined): Promise<RawNotificationPage> =>
+      (await agent.listNotifications({
+        ...(reasons.length > 0 ? { reasons } : {}),
+        ...(cursor ? { cursor } : {}),
+        ...(limit ? { limit } : {}),
+      })).data
+    if (params.sinceId) {
+      const sinceId = params.sinceId
+      return run(`notifications:${reasons.join(',')}:since:${sinceId}`, async () => {
+        const out: NotificationView[] = []
+        let cursor: string | undefined
+        for (let i = 0; i < CATCH_UP_MAX_PAGES; i++) {
+          const data = await fetchPage(cursor, CATCH_UP_PAGE_SIZE)
+          // Matched on the raw page, before any skip.
+          const at = data.notifications.findIndex((n) => n?.uri === sinceId)
+          if (at !== -1) return notificationPage([...out, ...data.notifications.slice(0, at)], null)
+          if (data.notifications.length === 0) {
+            cursor = undefined
+            break
+          }
+          out.push(...data.notifications)
+          cursor = data.cursor
+          if (!cursor) break
+        }
+        // Not met: a gap, unless the list ended.
+        return notificationPage(out, out.length > 0 ? cursor ?? null : null)
+      })
+    }
+    return run(`notifications:${reasons.join(',')}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
+      const data = await fetchPage(params.cursor, params.limit)
+      // An empty AppView page ends the list; a page of skipped ones does not.
+      return notificationPage(data.notifications, data.notifications.length > 0 ? data.cursor ?? null : null)
+    })
+  }
+
   function flattenReplies(node: AppBskyFeedDefs.ThreadViewPost, out: Status[]): void {
     for (const reply of node.replies ?? []) {
       if (!isThreadViewPost(reply)) continue
@@ -365,9 +457,26 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     deleteStatus: notYet('delete', '#190'),
     fetchStatusHistory: notYet('edit history', 'no issue: Bluesky has no edit'),
 
-    fetchNotifications: notYet('notifications', '#191'),
-    fetchGroupedNotifications: notYet('notifications', '#191'),
-    fetchNotificationGroupAccounts: notYet('notifications', '#191'),
+    fetchNotifications: (params = {}) => notifications(params),
+    fetchGroupedNotifications: notYet('server notification groups', 'no issue: Caribou groups Bluesky notifications itself'),
+    fetchNotificationGroupAccounts: notYet('server notification groups', 'no issue: Caribou groups Bluesky notifications itself'),
+    async getUnreadCount() {
+      return run('unread-count', async () => {
+        const { data } = await agent.countUnreadNotifications({})
+        const count = (data as { count?: unknown }).count
+        return typeof count === 'number' && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+      })
+    },
+    async updateSeen(seenAt) {
+      // A write: not through the dedup.
+      try {
+        await agent.updateSeenNotifications(seenAt)
+      } catch (err) {
+        const norm = normalizeXrpcError(err)
+        if (norm.code === 'unauthorized') opts.onUnauthorized?.()
+        throw norm
+      }
+    },
 
     search: notYet('search', '#192'),
   }

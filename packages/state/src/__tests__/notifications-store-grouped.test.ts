@@ -4,17 +4,43 @@ import {
   type GroupedNotificationsPage, type NotificationGroupData,
   type Account,
   type Notification,
+  type NotificationPage,
   type Status,
 } from '@beatzball/caribou-mastodon-client'
 import { accountCache, cacheStatus, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
 import { createNotificationsStore, NOTIFICATIONS_PAGE, resetGroupedSupport } from '../notifications-store.js'
+import { compareNotificationIds } from '../notification-groups.js'
 
 const fetchNotifications = vi.fn<(p?: FetchNotificationsParams) => Promise<Notification[]>>()
-const fetchGroupedNotifications = vi.fn<(p?: FetchGroupedNotificationsParams) => Promise<GroupedNotificationsPage>>()
+// A grouped page as a test writes it; `client()` adds the cursor.
+type RawGrouped = Omit<GroupedNotificationsPage, 'nextCursor'> & { nextCursor?: string | null }
+const fetchGroupedNotifications = vi.fn<(p?: FetchGroupedNotificationsParams) => Promise<RawGrouped>>()
+
+// The Mastodon client's paging rule (create-client.ts): a single page's
+// cursor is its last id, a grouped page's the oldest id it covers, and
+// nothing left is null. A test that sets `nextCursor` itself keeps it.
+function asPage(list: Notification[]): NotificationPage {
+  if ('nextCursor' in list) return list as NotificationPage
+  return Object.assign(list, { nextCursor: list[list.length - 1]?.id ?? null })
+}
+
+function oldestOf(groups: NotificationGroupData[]): string | null {
+  let oldest: string | null = null
+  for (const x of groups) {
+    const low = x.pageMinId ?? x.mostRecentNotificationId
+    if (oldest === null || compareNotificationIds(low, oldest) < 0) oldest = low
+  }
+  return oldest
+}
 
 function client(userKey = 'alice@example.social'): CaribouClient {
-  return { userKey, fetchNotifications, fetchGroupedNotifications } as unknown as CaribouClient
+  return {
+    userKey,
+    fetchNotifications: (p?: FetchNotificationsParams) => fetchNotifications(p).then(asPage),
+    fetchGroupedNotifications: (p?: FetchGroupedNotificationsParams) => fetchGroupedNotifications(p).then((x) =>
+      'nextCursor' in x ? x : { ...(x as object), nextCursor: oldestOf((x as GroupedNotificationsPage).notificationGroups) }),
+  } as unknown as CaribouClient
 }
 
 function account(id: string): Account {
@@ -29,7 +55,7 @@ function g(key: string, type: string, min: string, max: string, by: string[], co
   }
 }
 
-function page(groups: NotificationGroupData[]): GroupedNotificationsPage {
+function page(groups: NotificationGroupData[]): RawGrouped {
   return {
     accounts: ['alice', 'bob', 'carol', 'dave'].map(account),
     statuses: [{ id: 's1', content: '<p>s1</p>', account: { id: 'me' } } as unknown as Status],
@@ -81,7 +107,7 @@ describe('createNotificationsStore with grouped notifications', () => {
       g('follow-1', 'follow', '1', '1', ['dave']),
     ]))
     await store.loadMore()
-    expect(fetchGroupedNotifications).toHaveBeenLastCalledWith({ types: [], maxId: '5' })
+    expect(fetchGroupedNotifications).toHaveBeenLastCalledWith({ types: [], cursor: '5' })
     expect(rows(store)).toEqual(['mention:1:carol', 'favourite:3:alice,bob', 'follow:1:dave'])
     fetchGroupedNotifications.mockResolvedValueOnce(page([]))
     await store.loadMore()
@@ -150,7 +176,7 @@ describe('createNotificationsStore with grouped notifications', () => {
   })
 
   it('drops a page that arrives after load() started again', async () => {
-    let resolve!: (p: GroupedNotificationsPage) => void
+    let resolve!: (p: RawGrouped) => void
     fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { resolve = r }))
     const store = createNotificationsStore({ clientSource: () => client() })
     const first = store.load()
@@ -163,7 +189,7 @@ describe('createNotificationsStore with grouped notifications', () => {
 
   const post = (content: string, favourited: boolean) =>
     ({ id: 's1', content, favourited, account: { id: 'me' } }) as unknown as Status
-  const pageWith = (id: string, content: string, favourited: boolean, by: string): GroupedNotificationsPage => ({
+  const pageWith = (id: string, content: string, favourited: boolean, by: string): RawGrouped => ({
     accounts: [{ ...account(by), displayName: `${by} ${content}` }],
     statuses: [post(content, favourited)],
     notificationGroups: [g(`ungrouped-${id}`, 'mention', id, id, [by])],
@@ -172,7 +198,7 @@ describe('createNotificationsStore with grouped notifications', () => {
   it('a superseded load writes nothing to the shared caches', async () => {
     // The client is alice's: her copies carry her flags.
     activeUserKey.value = 'alice@example.social' as never
-    let release!: (p: GroupedNotificationsPage) => void
+    let release!: (p: RawGrouped) => void
     fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
     const store = createNotificationsStore({ clientSource: () => client() })
     const stale = store.load()
@@ -192,7 +218,7 @@ describe('createNotificationsStore with grouped notifications', () => {
     fetchGroupedNotifications.mockResolvedValueOnce(pageWith('9', 'new', false, 'bob'))
     const store = createNotificationsStore({ clientSource: () => client() })
     await store.load()
-    let release!: (p: GroupedNotificationsPage) => void
+    let release!: (p: RawGrouped) => void
     fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
     const older = store.loadMore()
     fetchGroupedNotifications.mockResolvedValueOnce(pageWith('9', 'new', false, 'bob'))
@@ -204,7 +230,7 @@ describe('createNotificationsStore with grouped notifications', () => {
 
   it('a reply held across an account change (A -> B -> A) writes nothing', async () => {
     activeUserKey.value = 'alice@example.social' as never
-    let release!: (p: GroupedNotificationsPage) => void
+    let release!: (p: RawGrouped) => void
     fetchGroupedNotifications.mockReturnValueOnce(new Promise((r) => { release = r }))
     const old = createNotificationsStore({ clientSource: () => client() })
     const pending = old.load()

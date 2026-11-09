@@ -17,8 +17,15 @@ vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
     ...real,
     createCaribouClient: (...args: Parameters<typeof real.createCaribouClient>) => ({
       ...real.createCaribouClient(...args),
-      fetchNotifications: (...a: unknown[]) => fetchSpy(...a),
-      fetchGroupedNotifications: (...a: unknown[]) => groupedSpy(...a),
+      // The Mastodon client's paging rule: the last id, null when empty.
+      fetchNotifications: (...a: unknown[]) => fetchSpy(...a).then((list) =>
+        'nextCursor' in list ? list : Object.assign(list, { nextCursor: list[list.length - 1]?.id ?? null })),
+      // A grouped page's cursor is the oldest id it covers, null with none.
+      fetchGroupedNotifications: (...a: unknown[]) => groupedSpy(...a).then((p) => 'nextCursor' in p ? p : {
+        ...p,
+        nextCursor: p.notificationGroups.map((g) => g.pageMinId ?? g.mostRecentNotificationId)
+          .sort((x, y) => x.length - y.length || (x < y ? -1 : x > y ? 1 : 0))[0] ?? null,
+      }),
       fetchNotificationGroupAccounts: (...a: unknown[]) => accountsSpy(...a),
     }),
   }
@@ -46,7 +53,7 @@ const accountsSpy = vi.fn(async (..._: unknown[]) => [] as Account[])
 const olderServer = async (..._: unknown[]): Promise<GroupedNotificationsPage> => {
   throw new CaribouError('not_found', 'Not found')
 }
-const groupedSpy = vi.fn(olderServer)
+const groupedSpy = vi.fn<(...a: unknown[]) => Promise<Omit<GroupedNotificationsPage, 'nextCursor'> & { nextCursor?: string | null }>>(olderServer)
 
 function signIn(key: Key = userKey) {
   users.value = new Map([...users.value, [key, {
@@ -317,7 +324,7 @@ describe('caribou-notifications', () => {
     el.shadowRoot!.querySelector<HTMLElement>('.more caribou-button')!.click()
     await flush()
     await el.updateComplete
-    expect(fetchSpy).toHaveBeenLastCalledWith({ types: [], maxId: '5' })
+    expect(fetchSpy).toHaveBeenLastCalledWith({ types: [], cursor: '5' })
     expect(items(el)).toHaveLength(2)
   })
 
@@ -361,7 +368,7 @@ describe('caribou-notifications', () => {
     const alice = person('a1', 'Alice')
     const carol = person('c1', 'Carol')
 
-    function groupedPage(): GroupedNotificationsPage {
+    function groupedPage(): Omit<GroupedNotificationsPage, 'nextCursor'> {
       return {
         accounts: [alice, ACCT, carol] as unknown as Account[],
         statuses: [status('s1')] as unknown as Status[],

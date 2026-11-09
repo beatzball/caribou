@@ -91,8 +91,14 @@ function profile(did: string) {
   }
 }
 
+/**
+ * A spec's own answer for a PDS method. Undefined: the default answer.
+ * `body` is the request body as text, or null.
+ */
+export type XrpcAnswer = (method: string, url: URL, body: string | null) => { status?: number; body: unknown } | undefined
+
 /** Installs the fixture servers on `page`. */
-export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}): Promise<FixtureAuth> {
+export async function installFixtureAuth(page: Page, opts: { sub?: string; xrpc?: XrpcAnswer } = {}): Promise<FixtureAuth> {
   const state: FixtureAuth = { sub: opts.sub ?? null, tokenRequests: [], revoked: [], pdsCalls: [], revokedAtServer: false }
   const pars = new Map<string, URLSearchParams>()
   const codes = new Map<string, URLSearchParams>()
@@ -178,6 +184,8 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}
         body: JSON.stringify({ error: 'invalid_token', message: 'token revoked' }),
       })
     }
+    const own = opts.xrpc?.(method, url, req.postData())
+    if (own) return json(route, own.body, own.status ?? 200)
     switch (method) {
       case 'app.bsky.actor.getProfile': return json(route, profile(url.searchParams.get('actor') ?? ALICE))
       case 'app.bsky.actor.getPreferences': return json(route, { preferences: [] })
