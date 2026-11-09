@@ -688,6 +688,48 @@ the 4-image cap and blob recovery); `_image-fit.test.ts`;
 `tests/e2e/bluesky-compose.spec.ts` (the real SDK against a fixture PDS: the
 counter, a TID rkey, facets, and a lost answer across a reload is one post).
 
+### Bluesky card actions (#188)
+
+The card's buttons for a Bluesky post. The writes and their rollback are
+in `packages/state` ("Bluesky acks") and `packages/bluesky-client`
+("Actions").
+
+| button | Bluesky reader, Bluesky post | other readers |
+|---|---|---|
+| Reply | on; opens the composer with `{ inReplyTo }`. **Off** with "The author limited replies" when `bluesky.replyDisabled` is set. | off; "Sign in with a Bluesky account to reply" (Mastodon reader) or "Sign in to reply" |
+| Quote (Bluesky posts only) | on; opens the composer with `{ quote: status }`. **Off** with "The author turned off quotes" when `bluesky.embeddingDisabled` is set. | off, with the same sign-in hint |
+| Boost, Favourite, Bookmark | a repost, a like or a bookmark; one click is one write; a failure rolls back with a toast | off, with the sign-in hint |
+| More → Mute, Block | mute or block the author | not shown |
+
+- **The flags come from the newest copy** of the post (the status cache's
+  `bluesky`), so a reader's copy that turns replies off turns Reply off.
+  The server render and the first client render use the card's own copy.
+- **A limited post never opens a composer.** The button is
+  soft-disabled (the click and the `r` key do nothing) and the handler
+  checks the flag again. The composer checks a third time at submit.
+- **Six controls on a small phone.** Up to 480 px wide, a bar with Quote
+  starts under the avatar, its gaps shrink and its buttons have less
+  side padding (each stays 44 px). A Bluesky count of 1000 or more is
+  short: 2140 is "2.1K", 12345 is "12.3K" (`shortCount`; the
+  description keeps the whole number). With such counts the bar fits on
+  one row from 360 px. At 320 px it can wrap to a second row; the page
+  never scrolls sideways (`bluesky-actions.spec.ts` measures 320, 360
+  and 375 with 312 / 2140 / 12345). These rules match only a Bluesky
+  card, so Mastodon cards keep their layout and whole counts.
+- **Follow from unknown state.** A Bluesky ack, or a read made while
+  blocked, can leave `following` unknown (state README, A1 and R2-1).
+  The profile header and search show no Follow button until a read
+  fills it (`relationshipKnown`). The header still shows Unblock when
+  the block is known.
+- **List blocks and mutes.** Unblock and Unmute refuse a block or mute
+  that comes from a list, with a toast that says so (state README, A3).
+- **A Mastodon card has no Quote button** and its other buttons are as
+  they were.
+- **Block confirm.** For a Bluesky account (card, profile header, Settings
+  → Moderation), the question ends "Blocks on Bluesky are public. Anyone
+  can see that you blocked this account." A Mastodon block's text is
+  unchanged.
+
 ### Bluesky SSR (#185, #186)
 
 Phase 3. The server paints a Bluesky profile and thread with no token

@@ -5,7 +5,7 @@ import { batch, effect } from '@preact/signals-core'
 import { searchPublic, type SearchType, type Account, type Search, type Tag } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, isOwnAccount, loadRelationships, mergeStatus, ownerGeneration, readSource,
-  relationshipCache, relationshipFor, toggleFollow,
+  relationshipCache, relationshipFor, relationshipKnown, toggleFollow,
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import { profilePath } from './_profile-path.js'
@@ -405,7 +405,8 @@ export class CaribouSearch extends LitElement {
     const user = activeUser.peek()
     if (!user || isOwnAccount(user, a)) return nothing
     const rel = relationshipFor(a.id)
-    if (!rel || rel.blocking) return nothing
+    // Unknown fields (state README, A1): no button until the read fills them.
+    if (!relationshipKnown(rel) || rel.blocking) return nothing
     const label = rel.following ? 'Following' : rel.requested ? 'Requested' : 'Follow'
     return html`<caribou-button class="follow" data-state=${label.toLowerCase()}
       variant=${label === 'Follow' ? 'primary' : 'secondary'}

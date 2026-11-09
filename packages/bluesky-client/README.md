@@ -46,6 +46,7 @@ own files; ask in your report for a change in another's.
 | `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
 | `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
 | `src/compose.ts` | `countPost`, `postFits`, `nextRkey`, `detectFacets` over the SDK's `RichText` and `TID` (browser only, through `./browser`) | #189 |
+| `src/actions.ts` | `createActions`: like, repost, bookmark, follow, mute, block and their undos (the client spreads them in) | #188 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
 How they fit:
@@ -469,8 +470,10 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `fetchRelationships` → `getProfiles` (25 per request, in the order
   asked); `fetchMutes`, `fetchBlocks` → `getMutes`, `getBlocks`;
   `fetchFilters` → `[]` (Bluesky has no server filters).
-- **Not here yet:** `local`, `public`, hashtag and list timelines, every
-  write, compose, polls, edit, search, lists and tags throw
+- **Writes:** like, repost, bookmark, follow, mute and block are in
+  "Actions (#188)" below; compose is in "Compose".
+- **Not here yet:** `local`, `public`, hashtag and list timelines, delete,
+  polls, edit, search, lists and tags throw
   `CaribouError('not_found')` naming the issue that adds them. A screen
   hides those by `capabilities`.
 - **Errors (`normalizeXrpcError`):** 401 → `unauthorized` (and
@@ -478,6 +481,72 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `not_found`, 429 → `rate_limited` with `retryAfter` from
   `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
 - **Dedup:** two equal reads in flight share one request.
+
+## Actions (#188, spec 6.3 and 9)
+
+The client's `favourite`, `reblog`, `bookmark`, `follow`, `mute`, `block`
+and their undos live in `src/actions.ts`. The state layer
+(`packages/state`, "Bluesky acks") does the optimistic update, the
+rollback, the in-flight guard and the account check.
+
+- **What a write answers.** An ack, never a post or a relationship
+  (`StatusWriteAck`, `RelationshipWriteAck`). A status ack says whether the
+  action is on and the record it made. A relationship ack says the flags
+  it set and the record refs it made or removed. Nothing is read back after
+  a write: the AppView can lag 60 s behind it, and a failed read must not
+  turn a done write into a rollback.
+- **Records.** Like → `app.bsky.feed.like`, repost →
+  `app.bsky.feed.repost` (subject: the post's strong ref, URI and CID);
+  follow → `app.bsky.graph.follow`, block → `app.bsky.graph.block`
+  (subject: the DID). Each is written to the reader's repo with
+  `createRecord`. The ack carries the new record's URI.
+- **No record.** Bookmark → `app.bsky.bookmark.createBookmark` /
+  `deleteBookmark` (private). Mute → `app.bsky.graph.muteActor` /
+  `unmuteActor` (private; it hides notifications too, so the ack sets
+  `mutingNotifications`).
+- **An undo deletes exactly one record: the one the ref names.** The URI
+  must be in the reader's own repo and the action's collection. Anything
+  else is refused (`CaribouError`, nothing deleted). An undo never guesses
+  a record.
+- **An undo with no ref reads it first.** When the ref has no record (the
+  post came from a read with no viewer state), the client reads the
+  reader's own view: `getPosts` for a like or repost, `getProfile` for a
+  follow or block. It deletes the record that read names. When the read
+  names none, nothing is deleted and the ack says "off": the server has
+  nothing to undo. When the post is gone, the undo fails `not_found`.
+- **A block leaves the follow.** Bluesky keeps the reader's follow
+  record when they block. The ack sets only `blocking` and `blockUri`.
+- **A blocked profile read leaves the follow unknown (R2-1).** While
+  either side blocks, the AppView hides `viewer.following`, but the
+  follow record stays. So `mapRelationship` leaves `following` and
+  `followUri` out then. A read without them never says "not followed".
+  For a list's block the AppView puts the list's URI in
+  `viewer.blocking`; `blockUri` keeps only an `app.bsky.graph.block`
+  URI.
+- **An ack is partial.** It names only the fields the write changed. The
+  state layer never stores it as a whole relationship (state README,
+  "Bluesky acks", A1).
+- **A list's block or mute is refused (A3).** `mapRelationship` keeps the
+  list's URI (`bluesky.blockingByList`, `bluesky.mutingByList`; `null`
+  when none). Unblock and Unmute refuse when the ref names a list, or
+  when the ref does not say and the profile read finds one. Nothing is
+  deleted or sent. The error carries `userMessage`: "This block comes
+  from a list. Remove the account from the list, or unsubscribe from
+  it." (or "This mute …"). A personal block that a list also covers is
+  refused too: a personal undo would leave the account blocked.
+- **One record per click intent, even when an answer is lost.** For a
+  like, repost, follow or block, the client picks the rkey
+  (`compose.nextRkey`, a TID) and keeps it by collection and subject
+  until a write answers. If the answer was lost, the next write of the
+  same intent first reads that record (`getRecord`). Found: it answers
+  that record and writes nothing. Not found: it writes with the same
+  rkey. Any other failure of that read writes nothing (the outcome is
+  still unknown). Without `compose` the PDS picks the rkey, as before.
+- **A post with no URI and CID** is refused (`not_found`) before any
+  request.
+- **No dedup.** Two clicks that reach the client are two requests. The
+  state layer's in-flight guard is what stops a double click.
+- **Errors** are normalized as for reads; a 401 calls `onUnauthorized`.
 
 ## Notifications (#191, spec 9)
 

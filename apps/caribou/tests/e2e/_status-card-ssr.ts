@@ -73,7 +73,7 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
               <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
             </div>
-            <!--lit-part saWHpufMJIM=-->
+            <!--lit-part W9rKRed9Lug=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button
 
@@ -138,6 +138,7 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
     style="display:inline-block;vertical-align:-0.125em"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 21l-7-4l-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg><!--/lit-part--></template></caribou-icon><!--lit-part--><!--/lit-part--></button><span
       class="sr-only" id="description"><!--lit-part-->Sign in to bookmark<!--/lit-part--></span><!--/lit-part--></template></caribou-icon-button>
         <!--lit-part--><!--/lit-part-->
+        <!--lit-part--><!--/lit-part-->
       </div>
     <!--/lit-part-->
           </div>
@@ -194,7 +195,7 @@ export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="time
               <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
             </div>
-            <!--lit-part saWHpufMJIM=-->
+            <!--lit-part W9rKRed9Lug=-->
       <div class="actions" role="group" aria-label="Post actions">
         <!--lit-node 1--><caribou-icon-button
 
@@ -258,6 +259,7 @@ export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="time
     width="1em" height="1em" aria-hidden="true"
     style="display:inline-block;vertical-align:-0.125em"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 21l-7-4l-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg><!--/lit-part--></template></caribou-icon><!--lit-part--><!--/lit-part--></button><span
       class="sr-only" id="description"><!--lit-part-->Sign in to bookmark<!--/lit-part--></span><!--/lit-part--></template></caribou-icon-button>
+        <!--lit-part--><!--/lit-part-->
         <!--lit-part--><!--/lit-part-->
       </div>
     <!--/lit-part-->

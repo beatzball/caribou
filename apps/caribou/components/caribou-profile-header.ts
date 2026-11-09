@@ -7,7 +7,7 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { canActOn, resourceNetwork, type Account, type Relationship } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUser, activeUserKey, isOwnAccount, loadRelationship, relationshipCache, relationshipKey,
-  setBlock, setMute, toggleFollow, type UserSession,
+  relationshipKnown, setBlock, setMute, toggleFollow, type UserSession,
 } from '@beatzball/caribou-state'
 import { mastodonLinkText } from './_shared-styles.js'
 import { confirmBlock } from './caribou-confirm-dialog.js'
@@ -293,7 +293,7 @@ export class CaribouProfileHeader extends LitElement {
       void setBlock(target, false, opts)
       return
     }
-    const ok = await confirmBlock(target.acct)
+    const ok = await confirmBlock(target.acct, resourceNetwork(target))
     // The target's id belongs to the server of the account that asked.
     if (ok && activeUserKey.peek() === userKey && this.target === target) void setBlock(target, true, opts)
   }
@@ -334,7 +334,10 @@ export class CaribouProfileHeader extends LitElement {
   // account cannot be followed: the button then unblocks.
   private renderFollow() {
     const rel = this.relationship
-    if (!this.target || !rel) return nothing
+    // A Bluesky ack, or a read made while blocked, can leave the follow
+    // unknown (state README, A1 and R2-1): no Follow choice until a read
+    // fills it. A known block still shows Unblock.
+    if (!this.target || !rel || (rel.blocking !== true && !relationshipKnown(rel))) return nothing
     const state = rel.blocking ? 'blocked' : rel.following ? 'following' : rel.requested ? 'requested' : 'follow'
     const label = state === 'following'
       ? html`<span class="idle">Following</span><span class="hover">Unfollow</span>`

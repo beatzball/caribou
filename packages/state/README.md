@@ -361,18 +361,83 @@ server data, the card's own copy) stays page data.
 A write still out for the old account finds a new owner generation when
 it answers and writes nothing, so no slot stays marked as written to.
 
-**Relationships** (`relationships.ts`) follow the same rule. The cache
-is keyed by the reader's UserKey, so every read is the reader's copy. A
-read does not replace the cached relationship while a write is out, when
-a write started after the read did, or inside the lag window after a
-write finished when it disagrees with what that write left
-(`following`, `requested`, `muting`, `blocking`).
+**Relationships** (`relationships.ts`) follow the same rule, by field
+group. The cache is keyed by the reader's UserKey, so every read is the
+reader's copy. A write names one group:
+
+| group | fields |
+|---|---|
+| follow | `following`, `requested`, `bluesky.followUri` |
+| block | `blocking`, `bluesky.blockUri`, `bluesky.blockingByList` |
+| mute | `muting`, `mutingNotifications`, `bluesky.mutingByList` |
+
+A read is judged one group at a time. It keeps the cached fields of a
+group when a write to that group is out, when a write to that group
+started after the read did, or inside the lag window after a write to
+that group finished, when the read disagrees with what the write left:
+any flag **or** the record URI. So a read that says `following: true`
+with another `followUri` is refused too (**A2**). Every other field,
+and every other group, always comes from the read. A Mastodon client's
+lag window is 0.
+
+The group rule is for partial answers (Bluesky acks) only. **A whole
+answer drops an old read whole (R2-3).** A Mastodon write answers the
+whole relationship, so its answer is newer than every field of a read
+that started before the write. That read is dropped whole, as before
+#188, and so is a read that lands while a Mastodon write is out. So a
+read from before a block never brings "Follows you" back.
 
 **Network.** Each post and account says its network: it has a `bluesky`
 field or it is Mastodon (`resourceNetwork` in the client package). The
 reader can act on a resource only when the active client's network is
 the resource's (`canActOn`). A Mastodon post also needs the reader's
 server, as before.
+
+## Bluesky acks (#188)
+
+A Bluesky write answers an ack, not the post or the relationship
+(bluesky-client README, "Actions"). The rules above still hold; only the
+commit step differs.
+
+- **Status actions (`mutations.ts`).** The ack's `on` sets the flag and
+  its `record` sets the record ref (`likeUri`, `repostUri`; a bookmark
+  has none). The count stays as the click left it: the ack has no count,
+  and the next reader's copy brings one by the merge rule. The slot is
+  finished with the ack's flag and record. Rollback, the in-flight guard
+  (one click is one write) and the account check (`ownerGeneration`: an
+  ack that lands after an account change writes nothing) are as for
+  Mastodon.
+- **Relationships (`relationships.ts`).** **An ack is partial (A1).**
+  It names only the fields its write changed: the flag and its record
+  URI. They go over the last answer (`queue.confirmed`); every other
+  field stays. With nothing cached, only the named fields are stored, and
+  every other field is unknown: absent, neither true nor false. A screen
+  shows no Follow / Unfollow choice while `following` is unknown
+  (`relationshipKnown`); the profile header and search load the
+  relationship, and that read fills the unknown fields (the group rule
+  above). `toggleFollow` does nothing while `following` is unknown. The
+  next write builds its ref from the last answer, so an unfollow names
+  the follow record the follow made.
+- **A Bluesky block leaves the follow.** The optimistic block patch
+  changes `following` only on Mastodon, whose block ends the follow.
+- **A blocked read knows nothing about the follow (R2-1).** While either
+  side blocks, the AppView hides the follow, but the follow record stays.
+  So such a read leaves `following` and `followUri` unknown
+  (`mapRelationship`), and no Follow choice is shown. The profile header
+  still shows Unblock when `blocking` is known. After an Unblock ack, the
+  relationship is read again, and that read fills the follow. So Unblock
+  never leads to a second follow record.
+- **An undo never claims more than it removed (A3).** A Bluesky block or
+  mute can come from a list (`bluesky.blockingByList`,
+  `bluesky.mutingByList`: the list's URI). A personal undo cannot remove
+  it, so Unblock and Unmute **refuse** it: nothing is sent, the cache
+  stays as it is, and the toast says "This block comes from a list.
+  Remove the account from the list, or unsubscribe from it." (or "This
+  mute comes from a list. …"). The client refuses the same case when
+  its own read finds the list, and its error carries that message
+  (`userMessage`), which the toast shows.
+- **Mastodon** still answers the whole post or relationship, and that path
+  is unchanged.
 
 ## Bluesky drafts (#189, spec 7.2)
 
