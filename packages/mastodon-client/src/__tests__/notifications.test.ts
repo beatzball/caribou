@@ -44,6 +44,38 @@ describe('CaribouClient.fetchNotifications', () => {
     expect(ns[0]!.status?.id).toBe('s2')
   })
 
+  it('pages by the last id: nextCursor is its id, and null on an empty page', async () => {
+    server.use(http.get(url, ({ request }) => {
+      const maxId = new URL(request.url).searchParams.get('max_id')
+      return HttpResponse.json(maxId === '1'
+        ? []
+        : [makeNotification('2', 'mention'), makeNotification('1', 'follow')])
+    }))
+    const c = createCaribouClient(userKey, sessionSource())
+    const first = await c.fetchNotifications()
+    expect(first.nextCursor).toBe('1')
+    const end = await c.fetchNotifications({ cursor: first.nextCursor! })
+    expect(end).toHaveLength(0)
+    expect(end.nextCursor).toBeNull()
+  })
+
+  it('sends cursor as max_id', async () => {
+    let params: URLSearchParams | null = null
+    server.use(http.get(url, ({ request }) => {
+      params = new URL(request.url).searchParams
+      return HttpResponse.json([])
+    }))
+    const c = createCaribouClient(userKey, sessionSource())
+    await c.fetchNotifications({ cursor: '9' })
+    expect((params as unknown as URLSearchParams).get('max_id')).toBe('9')
+    server.use(http.get('https://fosstodon.org/api/v2/notifications', ({ request }) => {
+      params = new URL(request.url).searchParams
+      return HttpResponse.json({ accounts: [], statuses: [], notification_groups: [] })
+    }))
+    await c.fetchGroupedNotifications({ cursor: '8' })
+    expect((params as unknown as URLSearchParams).get('max_id')).toBe('8')
+  })
+
   it('sends types[], since_id, min_id, max_id and limit', async () => {
     let params: URLSearchParams | null = null
     server.use(http.get(url, ({ request }) => {
@@ -112,6 +144,14 @@ describe('CaribouClient.fetchGroupedNotifications', () => {
     }])
     expect(page.accounts[0]!.id).toBe(sampleAccount.id)
     expect(page.statuses[0]!.id).toBe('s1')
+    // The oldest id the page covers names the next one.
+    expect(page.nextCursor).toBe('7')
+  })
+
+  it('gives a grouped page with no groups a null cursor', async () => {
+    server.use(http.get(v2url, () => HttpResponse.json({ accounts: [], statuses: [], notification_groups: [] })))
+    const c = createCaribouClient(userKey, sessionSource())
+    expect((await c.fetchGroupedNotifications()).nextCursor).toBeNull()
   })
 
   it('reports an older server, which has no such endpoint, as not_found', async () => {

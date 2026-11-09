@@ -1,0 +1,109 @@
+{
+  "cursor": "2026-11-07T10:00:00.000Z",
+  "priority": false,
+  "seenAt": "2026-11-07T08:00:00.000Z",
+  "notifications": [
+    {
+      "uri": "at://did:plc:bob/app.bsky.feed.like/3lblike1",
+      "cid": "bafyreigqqz46ydwrzlbomvsboid6h26fx2psa6brhnqpkat4qltga7d5t4",
+      "author": {
+        "did": "did:plc:bob",
+        "handle": "bob.example.com",
+        "displayName": "Bob",
+        "avatar": "https://cdn.example.test/img/avatar/plain/did:plc:bob/bafkbob@jpeg",
+        "viewer": { "muted": false, "blockedBy": false },
+        "labels": [],
+        "createdAt": "2024-01-01T00:00:00.000Z",
+        "indexedAt": "2024-01-01T00:00:00.000Z"
+      },
+      "reason": "like",
+      "reasonSubject": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1",
+      "record": {
+        "$type": "app.bsky.feed.like",
+        "createdAt": "2026-11-07T11:59:00.000Z",
+        "subject": { "cid": "bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm", "uri": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1" }
+      },
+      "isRead": false,
+      "indexedAt": "2026-11-07T12:00:00.000Z",
+      "labels": []
+    },
+    {
+      "uri": "at://did:plc:carol/app.bsky.graph.verification/3lcverify1",
+      "cid": "bafyreighnjeomqrfljvjtmzbw2w6xb7i4jy5rrf6sg3qtrtdk63tastmzy",
+      "author": {
+        "did": "did:plc:carol",
+        "handle": "carol.example.com",
+        "displayName": "Carol",
+        "labels": []
+      },
+      "reason": "verified",
+      "record": { "$type": "app.bsky.graph.verification", "createdAt": "2026-11-07T11:30:00.000Z" },
+      "isRead": false,
+      "indexedAt": "2026-11-07T11:30:00.000Z",
+      "labels": []
+    },
+    {
+      "uri": "at://did:plc:carol/app.bsky.feed.post/3lcreply1",
+      "cid": "bafyreia6uamvty3yrxwmpujnvk7feakv427l52wohrmcae6zreaq4naosa",
+      "author": {
+        "did": "did:plc:carol",
+        "handle": "carol.example.com",
+        "displayName": "Carol",
+        "labels": []
+      },
+      "reason": "reply",
+      "reasonSubject": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1",
+      "record": {
+        "$type": "app.bsky.feed.post",
+        "text": "Nice one",
+        "createdAt": "2026-11-07T11:00:00.000Z",
+        "reply": {
+          "root": { "cid": "bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm", "uri": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1" },
+          "parent": { "cid": "bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm", "uri": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1" }
+        }
+      },
+      "isRead": true,
+      "indexedAt": "2026-11-07T11:00:00.000Z",
+      "labels": []
+    },
+    {
+      "uri": "at://did:plc:dave/app.bsky.graph.follow/3ldfollow1",
+      "cid": "bafyreiamkvln4huqkvn6e6hbz3gt646dcljfrywilbeiv6yjpfm2desplq",
+      "author": {
+        "did": "did:plc:dave",
+        "handle": "dave.example.com",
+        "displayName": "",
+        "labels": []
+      },
+      "reason": "follow",
+      "record": {
+        "$type": "app.bsky.graph.follow",
+        "createdAt": "2026-11-07T10:30:00.000Z",
+        "subject": "did:plc:alice"
+      },
+      "isRead": true,
+      "indexedAt": "2026-11-07T10:30:00.000Z",
+      "labels": []
+    },
+    {
+      "uri": "at://did:plc:bob/app.bsky.feed.repost/3lbrepost1",
+      "cid": "bafyreidho7o2js6ypvuwshz6nzrjtlfp2wq3vnp6cvmfyvfuam77m7pavu",
+      "author": {
+        "did": "did:plc:bob",
+        "handle": "bob.example.com",
+        "displayName": "Bob",
+        "labels": []
+      },
+      "reason": "repost",
+      "reasonSubject": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1",
+      "record": {
+        "$type": "app.bsky.feed.repost",
+        "createdAt": "2026-11-07T10:00:00.000Z",
+        "subject": { "cid": "bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm", "uri": "at://did:plc:alice/app.bsky.feed.post/3lalicepost1" }
+      },
+      "isRead": true,
+      "indexedAt": "2026-11-07T10:00:00.000Z",
+      "labels": []
+    }
+  ]
+}

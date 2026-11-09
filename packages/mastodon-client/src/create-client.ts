@@ -130,8 +130,8 @@ export interface CaribouClient {
   /** Every version of the post, oldest first, the current one last. */
   fetchStatusHistory(statusId: string): Promise<StatusEdit[]>
 
-  // Notifications.
-  fetchNotifications(params?: FetchNotificationsParams): Promise<Notification[]>
+  // Notifications. A page ends the list only when its `nextCursor` is null.
+  fetchNotifications(params?: FetchNotificationsParams): Promise<NotificationPage>
   /**
    * Grouped notifications (`GET /api/v2/notifications`, Mastodon 4.3+).
    * Favourites, boosts and follows are grouped; every other type comes as
@@ -140,6 +140,17 @@ export interface CaribouClient {
   fetchGroupedNotifications(params?: FetchGroupedNotificationsParams): Promise<GroupedNotificationsPage>
   /** Every account in one notification group (`GET /api/v2/notifications/:group_key/accounts`). */
   fetchNotificationGroupAccounts(groupKey: string): Promise<Account[]>
+  /**
+   * The server's count of unread notifications. Bluesky only
+   * (`app.bsky.notification.getUnreadCount`): Mastodon keeps a local marker.
+   */
+  getUnreadCount?(): Promise<number>
+  /**
+   * Tells the server the reader has seen every notification up to `seenAt`
+   * (an ISO time). Bluesky only (`app.bsky.notification.updateSeen`). A
+   * write: never deduped.
+   */
+  updateSeen?(seenAt: string): Promise<void>
 
   /**
    * Accounts, hashtags and posts that match `q` (`GET /api/v2/search`).
@@ -179,6 +190,8 @@ export interface GroupedNotificationsPage {
   accounts: Account[]
   statuses: Status[]
   notificationGroups: NotificationGroupData[]
+  /** The next (older) page, opaque; null on the last one. */
+  nextCursor: string | null
 }
 
 export type SearchType = 'accounts' | 'hashtags' | 'statuses'
@@ -222,9 +235,17 @@ export interface FetchNotificationsParams {
   /** Only these types. Omitted or empty means every type. */
   types?: readonly NotificationType[]
   sinceId?: string
+  /**
+   * Bluesky: the `indexedAt` of the `sinceId` notification. The catch-up
+   * stops at the first notification older than it, also when that one is
+   * gone. Mastodon ignores it.
+   */
+  sinceAt?: string
   /** The page just newer than this id; use it to page forward without a gap. */
   minId?: string
   maxId?: string
+  /** A page's `nextCursor`, passed back as it came. */
+  cursor?: string
   limit?: number
 }
 
@@ -242,6 +263,23 @@ export type TimelinePage = Page<Status>
 
 /** A page of accounts (mutes, blocks). */
 export type AccountPage = Page<Account>
+
+/**
+ * A page of single notifications. A Bluesky page also says what it read,
+ * skipped notifications included: the newest `indexedAt` and whether any
+ * was unread (the seen hint for `updateSeen`).
+ */
+export type NotificationPage = Page<Notification> & {
+  /** `newestUri`: the URI of the notification at `newestAt` (the raw top). */
+  bluesky?: { newestAt: string | null; newestUri?: string | null; unread: boolean }
+}
+
+// Mastodon ids are numbers in a string; a longer one is newer. Comparing
+// them as numbers would lose precision past 2^53.
+function compareIds(a: string, b: string): number {
+  if (a.length !== b.length) return a.length - b.length
+  return a < b ? -1 : a > b ? 1 : 0
+}
 
 // Mastodon pages most timelines by status id: the next page starts below
 // the last post. An empty page is the end.
@@ -652,13 +690,17 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
     // --- notifications ---
     async fetchNotifications(params = {}) {
       const key = `notifications:${JSON.stringify(params)}`
-      return run(key, async (c) => c.v1.notifications.list({
-        ...(params.types && params.types.length > 0 ? { types: params.types } : {}),
-        ...(params.sinceId ? { sinceId: params.sinceId } : {}),
-        ...(params.minId ? { minId: params.minId } : {}),
-        ...(params.maxId ? { maxId: params.maxId } : {}),
-        ...(params.limit ? { limit: params.limit } : {}),
-      }))
+      // The next page starts below the last one; an empty page is the end.
+      return run(key, async (c) => {
+        const list = await c.v1.notifications.list({
+          ...(params.types && params.types.length > 0 ? { types: params.types } : {}),
+          ...(params.sinceId ? { sinceId: params.sinceId } : {}),
+          ...(params.minId ? { minId: params.minId } : {}),
+          ...(params.cursor ?? params.maxId ? { maxId: params.cursor ?? params.maxId } : {}),
+          ...(params.limit ? { limit: params.limit } : {}),
+        })
+        return Object.assign(list, { nextCursor: list[list.length - 1]?.id ?? null })
+      })
     },
     async fetchGroupedNotifications(params = {}) {
       const key = `grouped-notifications:${JSON.stringify(params)}`
@@ -671,13 +713,22 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
           expandAccounts: 'full',
           ...(params.types && params.types.length > 0 ? { types: params.types as unknown as Types } : {}),
           ...(params.minId ? { minId: params.minId } : {}),
-          ...(params.maxId ? { maxId: params.maxId } : {}),
+          ...(params.cursor ?? params.maxId ? { maxId: params.cursor ?? params.maxId } : {}),
           ...(params.limit ? { limit: params.limit } : {}),
         })
+        const groups = (page.notificationGroups ?? []) as unknown as NotificationGroupData[]
+        // The next page starts below the oldest notification this one
+        // covers. No groups is the end.
+        let oldest: string | null = null
+        for (const g of groups) {
+          const low = g.pageMinId ?? g.mostRecentNotificationId
+          if (oldest === null || compareIds(low, oldest) < 0) oldest = low
+        }
         return {
           accounts: page.accounts ?? [],
           statuses: page.statuses ?? [],
-          notificationGroups: (page.notificationGroups ?? []) as unknown as NotificationGroupData[],
+          notificationGroups: groups,
+          nextCursor: oldest,
         }
       })
     },

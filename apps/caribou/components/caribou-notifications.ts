@@ -4,11 +4,13 @@ import { repeat } from 'lit/directives/repeat.js'
 import { computed, effect, untracked } from '@preact/signals-core'
 import type { Account } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUser, compareNotificationIds, createNotificationsStore, markNotificationsSeen, relationshipCache,
+  activeClient, activeUser, compareNotificationIds, createNotificationsStore, isBlueskySession,
+  markBlueskyNotificationsSeen, markNotificationsSeen, relationshipCache,
   startPolling, unreadNotificationCount, withoutSilencedAccounts, NOTIFICATIONS_POLL_MS,
   type NotificationFilter, type NotificationGroup, type NotificationsStore,
 } from '@beatzball/caribou-state'
-import { profilePath } from './_profile-path.js'
+import { accountPath } from './_profile-path.js'
+import { blueskyDecisionSettled, coverNote, uiOf, UNREADABLE } from './_bluesky-moderation.js'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
@@ -30,6 +32,15 @@ const LINES: Partial<Record<string, { icon: IconName; text: string }>> = {
   follow_request: { icon: 'userPlus',    text: 'asked to follow you' },
   poll:           { icon: 'chartColumn', text: 'ran a poll that has ended' },
   update:         { icon: 'squarePen',   text: 'edited a post you interacted with' },
+}
+
+// An author whose decision is not settled yet (the reader veil).
+const CHECKING_AUTHOR = 'checking your moderation settings'
+
+// Bluesky says like and repost, not favourite and boost.
+const BLUESKY_LINES: Partial<Record<string, { icon: IconName; text: string }>> = {
+  favourite: { icon: 'star',    text: 'liked your post' },
+  reblog:    { icon: 'repeat2', text: 'reposted your post' },
 }
 
 /**
@@ -73,6 +84,8 @@ export class CaribouNotifications extends LitElement {
       background: var(--bg-2); border: 2px solid var(--bg-0);
     }
     .avatars img + img { margin-left: -8px; }
+    /* A Bluesky author whose avatar the reader's settings blur (spec 7.4). */
+    img.blurred { filter: blur(6px); }
     .expand {
       margin-left: auto; flex-shrink: 0; padding: var(--space-1) var(--space-2);
       color: var(--fg-1); background: none; border: 1px solid var(--border); border-radius: 999px;
@@ -116,6 +129,13 @@ export class CaribouNotifications extends LitElement {
   @state() private loading = true
   @state() private errorMsg: string | null = null
   @state() private hasMore = false
+  // A Load older click ended the list: the end notice shows and takes focus,
+  // so focus does not fall to the body with the removed button.
+  @state() private endedHere = false
+  // Bumped when the reader veil's inputs change (reader, prefs, label
+  // definitions, the check): author decisions are judged again.
+  @state() private veilTick = 0
+  private disposeVeil: (() => void) | null = null
 
   private store: NotificationsStore | null = null
   private disposeBindings: (() => void) | null = null
@@ -123,10 +143,18 @@ export class CaribouNotifications extends LitElement {
   private disposeSession: (() => void) | null = null
   private revealObserver: MutationObserver | null = null
 
-  // The list belongs to one session. A new one starts the list again.
+  // The list belongs to one session. A new one starts the list again. A
+  // Bluesky session has no token: its sign-in is its `generation`.
   private readonly session = computed(() => {
     const user = activeUser.value
-    return user ? { userKey: user.userKey, id: `${user.userKey}\n${user.token}` } : null
+    if (!user) return null
+    const bluesky = isBlueskySession(user)
+    return {
+      userKey: user.userKey,
+      generation: user.generation,
+      bluesky,
+      id: `${user.userKey}\n${bluesky ? user.generation : user.token}`,
+    }
   })
 
   override connectedCallback() {
@@ -147,6 +175,12 @@ export class CaribouNotifications extends LitElement {
       this.whoRequest.clear()
       untracked(() => this.open(this.filter))
     })
+    // `blueskyDecisionSettled` reads the veil's signals; following it here
+    // renders the authors again when any of them changes.
+    this.disposeVeil = effect(() => {
+      blueskyDecisionSettled(null, activeClient.value)
+      untracked(() => { this.veilTick++ })
+    })
     this.disposeSilenced = effect(() => {
       const prefix = `${this.session.value?.userKey ?? ''} `
       const ids = new Set<string>()
@@ -164,6 +198,8 @@ export class CaribouNotifications extends LitElement {
     this.disposeSession = null
     this.disposeSilenced?.()
     this.disposeSilenced = null
+    this.disposeVeil?.()
+    this.disposeVeil = null
     document.removeEventListener('visibilitychange', this.onVisibility)
     this.close()
     super.disconnectedCallback()
@@ -171,6 +207,7 @@ export class CaribouNotifications extends LitElement {
 
   private open(filter: NotificationFilter) {
     this.close()
+    this.endedHere = false
     const session = this.session.peek()
     // A request made after the session changed gets no client, so it can
     // not mix another account's rows into this list.
@@ -222,6 +259,12 @@ export class CaribouNotifications extends LitElement {
       return
     }
     const session = this.session.peek()
+    // Bluesky: the server keeps what was seen (`updateSeen`), from what the
+    // list read (state README, "Notifications").
+    if (session?.bluesky) {
+      void markBlueskyNotificationsSeen({ userKey: session.userKey, generation: session.generation, hint: store.seen.peek() })
+      return
+    }
     let newest: string | undefined
     for (const g of this.items) if (!newest || compareNotificationIds(g.newestId, newest) > 0) newest = g.newestId
     if (session && newest) markNotificationsSeen(newest, session.userKey)
@@ -263,21 +306,77 @@ export class CaribouNotifications extends LitElement {
 
   private onRetry = () => {
     const store = this.store
+    this.endedHere = false
     if (store) void store.load().then(() => this.markSeen(store))
   }
-  private onMore = () => { void this.store?.loadMore() }
 
-  // `acct` is relative to the user's own server for a local account.
+  // Focus is still the reader's "Load older" (or fell to the body when the
+  // button went): only then may the end notice take it.
+  private focusIsFree(): boolean {
+    const outer = document.activeElement
+    if (outer === null || outer === document.body) return true
+    if (outer !== this) return false
+    const inner = this.shadowRoot?.activeElement ?? null
+    return inner === null || inner.closest('.more') !== null
+  }
+
+  private onMore = async () => {
+    const store = this.store
+    if (!store) return
+    await store.loadMore()
+    if (store !== this.store || store.hasMore.peek() || !this.focusIsFree()) {
+      if (store === this.store && !store.hasMore.peek()) this.endedHere = true
+      return
+    }
+    this.endedHere = true
+    await this.updateComplete
+    if (!this.focusIsFree()) return
+    ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
+  }
+
+  // `acct` is relative to the user's own server for a local account. A
+  // Bluesky account is its handle, with no host.
   private profileHref(a: Account): string {
-    return profilePath(a.acct, activeUser.value?.server ?? '', a.url)
+    return accountPath(a, activeUser.value?.server ?? '')
   }
 
   private name(a: Account): string {
     return a.displayName || a.username || a.acct
   }
 
+  // What the reader's settings say about a Bluesky author in a list
+  // (spec 7.4): `contentList` filters the author out or covers the name,
+  // `avatar` blurs the face. No decision fails closed. A Mastodon account
+  // has none of this.
+  // The decision counts only once it is settled for this reader, as on the
+  // card and the profile header (`blueskyDecisionSettled`: made for this
+  // reader, every subscribed labeler covered). Until then the author is
+  // covered. The list belongs to one sign-in, so its decisions are that
+  // reader's.
+  private authorUi(a: Account): { filter: boolean; cover: string | null; blurAvatar: boolean } {
+    if (!a.bluesky) return { filter: false, cover: null, blurAvatar: false }
+    void this.veilTick
+    const mod = a.bluesky.moderation ?? null
+    const reader = this.session.peek()?.userKey ?? null
+    if (mod && !blueskyDecisionSettled({ viewerOf: reader, moderation: mod }, activeClient.peek())) {
+      return { filter: false, cover: CHECKING_AUTHOR, blurAvatar: true }
+    }
+    const list = mod ? uiOf(mod, 'contentList')! : UNREADABLE
+    const avatar = mod ? uiOf(mod, 'avatar')! : UNREADABLE
+    return { filter: list.filter, cover: list.blur ? coverNote(list) : null, blurAvatar: avatar.blur }
+  }
+
+  // A covered author has no name and no link, only the reason.
   private nameLink(a: Account) {
+    const cover = this.authorUi(a).cover
+    if (cover) return html`<span class="covered">Someone (${cover})</span>`
     return html`<a href=${this.profileHref(a)} @click=${spaClick}>${this.name(a)}</a>`
+  }
+
+  // A covered author's face is blurred too: it would name them.
+  private face(a: Account) {
+    const ui = this.authorUi(a)
+    return html`<img class=${ui.blurAvatar || ui.cover !== null ? 'blurred' : nothing} src=${a.avatarStatic || a.avatar} alt="" loading="lazy">`
   }
 
   // "Alice", "Alice and Bob", "Alice, Bob and 12 others": two names at most.
@@ -377,7 +476,7 @@ export class CaribouNotifications extends LitElement {
     const open = this.expanded.has(g.key)
     return html`<div class="group-body">
       <div class="avatars" aria-hidden="true">
-        ${g.accounts.slice(0, 8).map((a) => html`<img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">`)}
+        ${g.accounts.slice(0, 8).map((a) => this.face(a))}
       </div>
       ${open ? this.renderAccounts(g, this.whoId(g)) : nothing}
     </div>`
@@ -397,7 +496,7 @@ export class CaribouNotifications extends LitElement {
     const failed = this.failedWho.has(g.key)
     return html`<ul class="who" id=${id} aria-label="Who" aria-busy=${loading ? 'true' : 'false'}>
       ${accounts.map((a) => html`<li>
-        <img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">
+        ${this.face(a)}
         ${this.nameLink(a)}
       </li>`)}
       ${more > 0 && !loading ? html`<li class="rest">and ${more} more</li>` : nothing}
@@ -418,7 +517,7 @@ export class CaribouNotifications extends LitElement {
     if (g.type === 'mention' && status) {
       return html`<li class="n-mention">${card}</li>`
     }
-    const known = LINES[g.type]
+    const known = (this.session.value?.bluesky ? BLUESKY_LINES[g.type] : undefined) ?? LINES[g.type]
     const line = known
       ? this.renderLine(known.icon, g, known.text)
       : this.renderLine('bell', g, g.accounts.length > 0 ? 'sent you a notification' : 'New notification')
@@ -437,15 +536,28 @@ export class CaribouNotifications extends LitElement {
     if (this.loading && this.items.length === 0) {
       return html`<div class="notice">Loading notifications…</div>`
     }
-    if (this.items.length === 0) {
-      return html`<div class="notice">${FILTERS.find((f) => f.value === this.filter)!.empty}</div>`
+    // An empty page with a cursor is not the end (a Bluesky page of only
+    // skipped notifications): older ones are still in reach.
+    const empty = FILTERS.find((f) => f.value === this.filter)!.empty
+    // Muted, blocked and (Bluesky) filtered authors leave their rows. The
+    // notices go by what is left.
+    const hidden = new Set(this.silenced)
+    for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
+    const shown = withoutSilencedAccounts(this.items, hidden)
+    if (shown.length === 0 && !this.hasMore) {
+      return html`<div>
+        ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
+        <div class=${this.endedHere ? 'notice end' : 'notice'} tabindex=${this.endedHere ? '-1' : nothing}>${empty}</div>
+      </div>`
     }
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      <ul class="rows">${repeat(withoutSilencedAccounts(this.items, this.silenced), (g) => g.key, (g) => this.renderItem(g))}</ul>
+      ${shown.length === 0
+        ? html`<div class="notice">Nothing to show here yet. Older notifications may follow.</div>`
+        : html`<ul class="rows">${repeat(shown, (g) => g.key, (g) => this.renderItem(g))}</ul>`}
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
-        : nothing}
+        : this.endedHere ? html`<div class="notice end" tabindex="-1">No older notifications.</div>` : nothing}
     </div>`
   }
 
