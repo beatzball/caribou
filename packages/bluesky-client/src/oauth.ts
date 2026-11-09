@@ -366,8 +366,9 @@ export async function restoreClient(
   const client = createBlueskyClient({
     userKey: opts.userKey,
     agent: agent as unknown as BlueskyAgent,
-    // Each read passes its answer's labeler coverage (only notifications
-    // do so far: #191).
+    // Each read passes its answer's labeler coverage: the header when the
+    // browser can read it, else the labelers `configureLabelers` above sent
+    // (README, "Labeler coverage").
     moderation: readerModerationSource(did, () => ({ prefs, labelDefs })),
     // Any 401 ends the session (README: "401"), not only the challenged
     // one the SDK deletes the session for.
