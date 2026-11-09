@@ -27,6 +27,14 @@ export class UpstreamError extends Error {
   }
 }
 
+// A server that will not answer this one (a 401 or a 403): often it blocks
+// the server's address or asks for a token for every read. The request
+// itself is fine, so a reader's own server may still answer it (app README,
+// "A refused remote profile").
+export function isRefusal(err: unknown): boolean {
+  return err instanceof UpstreamError && (err.status === 401 || err.status === 403)
+}
+
 const lru = new LRUCache<string, { value: unknown; expiresAt: number }>({ max: 5_000 })
 const inflight = new Map<string, Promise<unknown>>()
 

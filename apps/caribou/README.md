@@ -109,6 +109,28 @@ link is one: avatar, name and acct are children of one `<a class="author">`.
 Build every profile path with `profilePath` from `components/_profile-path.ts`;
 it adds the instance host to a local acct.
 
+**A refused remote profile.** On `/@name@host` the server asks `host` with
+no token. Some servers refuse this server (often by its address) while they
+answer a reader's own server.
+
+1. **A refusal is not a dead end.** When `host` answers 401 or 403, and only
+   then (`isRefusal` in `server/lib/upstream-cache.ts`), the page data is
+   `{ kind: 'refused', host }`. Nothing from `host` is in it. A 5xx or a
+   network error is an error page as before.
+2. **Server render equals first client render.** Both are the loading shell
+   ("Loading…"), as for a deferred Bluesky page. The data comes after
+   hydration. The page cache never keeps a refused page.
+3. **Signed in (a Mastodon account active).** The page renders
+   `<caribou-profile handle="name@host">` with no `initial` and no
+   `instance`. The profile looks the account up by `name@host` on the
+   reader's server and reads that server's statuses by that server's own id,
+   as on `/@me`. Those ids belong to the reader's server; the links follow
+   the rules above (`profilePath`, the cookie instance).
+4. **Signed out.** The page says that `host` does not allow Caribou to show
+   the profile, and links to the account's own page on `host`.
+5. **Every error message names the handle.** When the data has none, the
+   page reads it from the address.
+
 **Links inside a post body** are the author's server HTML; never rewrite them.
 `<caribou-status-card>` has one delegated click on `.status-content`: a plain
 click on a mention that matches `status.mentions` opens `/@acct@host` in

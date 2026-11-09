@@ -10,6 +10,7 @@ import {
   fetchAccountByHandle, fetchAccountStatuses,
 } from '../server/lib/mastodon-public.js'
 import { getStorage } from '../server/lib/storage.js'
+import { isRefusal } from '../server/lib/upstream-cache.js'
 import { blueskySsrEnabled } from '../server/lib/bluesky-flag.js'
 import type { ProfilePageData, ShellInfo } from '../server/lib/page-data-types.js'
 import '../components/caribou-app-shell.js'
@@ -33,9 +34,12 @@ function parseTab(raw: unknown): Tab {
 // handle is not well formed; nothing was fetched. `deferred`: the public
 // AppView rate limited the server (#187); the page is the loading shell and
 // the browser reads `appview` itself after hydration. No handle either: the
-// server did not learn whether the account is hidden.
+// server did not learn whether the account is hidden. `refused`: a
+// Mastodon server (`host`) refused this server (a 401 or a 403); the page is
+// the loading shell, and the browser asks the reader's own server.
 export type HandlePageData = (
   | ProfilePageData | { kind: 'hidden' } | { kind: 'not-found' } | { kind: 'deferred'; appview: string }
+  | { kind: 'refused'; host: string }
 ) & { shell: ShellInfo; handle: string }
 
 export const pageData = definePageData<HandlePageData>(async (event) => {
@@ -89,6 +93,9 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
       kind: 'ok', account: sanitizeAccount(account), statuses, nextCursor, tab, shell, handle,
     } as HandlePageData
   } catch (err) {
+    // Nothing from the refusing server reaches the page: the browser starts
+    // from the same loading shell either way.
+    if (isRefusal(err)) return { kind: 'refused', host: resolution.instance, shell, handle }
     return { kind: 'error', message: String(err), shell, handle } as HandlePageData
   }
 })
@@ -110,6 +117,10 @@ export class HandlePage extends LitroPage {
   // A deferred page's data, read by the browser (#187). Set after the
   // first render, which is the loading shell the server sent.
   @state() private fallback: HandlePageData | null = null
+  // A refused page, after the first render: a signed-in Mastodon reader
+  // reads the profile through their own server (`home`); anyone else gets
+  // the message (`out`).
+  @state() private refused: 'home' | 'out' | null = null
 
   protected override firstUpdated() {
     const data = this.serverData as HandlePageData | null
@@ -131,6 +142,10 @@ export class HandlePage extends LitroPage {
     }
     if (data?.kind === 'deferred') {
       void this.loadFallback(data)
+      return
+    }
+    if (data?.kind === 'refused') {
+      this.refused = activeClient.value?.capabilities.network === 'mastodon' ? 'home' : 'out'
       return
     }
     if (data?.handle !== 'me') return
@@ -204,11 +219,43 @@ export class HandlePage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    if (data.kind === 'refused' && this.refused === 'home') {
+      // No `initial` and no `instance`: the profile looks the account up by
+      // `name@host` through the reader's client, as on /@me, and pages it by
+      // that server's ids. The links keep the remote route.
+      const tab = parseTab(new URLSearchParams(window.location.search).get('tab'))
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <caribou-profile handle=${data.handle} tab=${tab}></caribou-profile>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'refused' && this.refused === 'out') {
+      const name = data.handle.replace(/^@/, '').split('@')[0] ?? ''
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="status">
+            ${data.host} does not allow Caribou to show this profile.
+            Sign in to see it through your own server, or
+            <a href=${`https://${data.host}/@${encodeURIComponent(name)}`} rel="noopener noreferrer">open @${data.handle} on ${data.host}</a>.
+          </article>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'refused') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="status" aria-busy="true">Loading…</article>
+        </caribou-app-shell>
+      `
+    }
     if (data.kind === 'error') {
+      // The address is the fallback: the message always names the account.
+      const handle = data.handle || (typeof window === 'undefined' ? '' : routeSegment(window.location.pathname))
       return html`
         <caribou-app-shell instance=${inst}>
           <article role="alert">
-            Couldn't load profile @${data.handle}.
+            Couldn't load profile @${handle}.
           </article>
         </caribou-app-shell>
       `
