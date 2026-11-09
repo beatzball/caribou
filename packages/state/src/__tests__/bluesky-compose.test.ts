@@ -622,7 +622,7 @@ describe('round 3 (R6, R7, guards)', () => {
     expect(pds.records.size).toBe(1)
   })
 
-  it('R7: another alt text, label or quote at the rkey is another content', async () => {
+  it('R7: another alt text at the rkey is another content (SDK-shaped record)', async () => {
     const pds = fakePds()
     const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: 'a cat', aspectRatio: null }]
     pds.loseNextAnswer.value = true
@@ -687,6 +687,101 @@ describe('round 3 (R6, R7, guards)', () => {
     expect(mem.bluesky!.sent).toBeNull()
     expect(mem.text).toBe('v2')
   })
+})
+
+const MENTION = [{
+  index: { byteStart: 3, byteEnd: 21 },
+  features: [{ $type: 'app.bsky.richtext.facet#mention', did: 'did:plc:alice' }],
+}] as never[]
+
+describe('round 4', () => {
+  it('a quote with no text is not empty: it keeps its rkey in storage (Codex R4-B1)', () => {
+    expect(isDraftEmpty(draft({ text: '' }, { quote: QUOTED }))).toBe(false)
+    saveDraft(KEY, 'quote:q1', draft({ text: '' }, { quote: QUOTED }))
+    expect(loadDraft(KEY, 'quote:q1')!.bluesky!.rkey).toBe('3krkey0000001')
+  })
+
+  it('a quote with no text: failed create, check absent, reload, the late write lands, retry: one record (Codex R4-B1)', async () => {
+    const pds = fakePds()
+    saveDraft(KEY, 'quote:q1', draft({ text: '' }, { quote: QUOTED }))
+    let late: BlueskyPostRecord | null = null
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record) => {
+      late = record
+      throw new CaribouError('server_error', 'Gateway Timeout', { status: 504 })
+    })
+    await expect(postBlueskyDraft(pds.client, 'quote:q1', loadDraft(KEY, 'quote:q1')!, noWait)).rejects.toBeTruthy()
+    // A reload: only storage is left.
+    const reloaded = loadDraft(KEY, 'quote:q1')
+    expect(reloaded?.bluesky?.rkey).toBe('3krkey0000001')
+    pds.records.set('3krkey0000001', late!)
+    const out = await postBlueskyDraft(pds.client, 'quote:q1', reloaded!, noWait)
+    expect(out.kind).toBe('posted')
+    expect(pds.records.size).toBe(1)
+  })
+
+  it('lookup 1 gives the mention facet, lookup 2 fails; no edit, late write: posted, one record (Fable R4-N1, probe A)', async () => {
+    const pds = fakePds()
+    pds.client.blueskyDetectFacets.mockImplementationOnce(async () => MENTION)
+    let late: BlueskyPostRecord | null = null
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record) => {
+      late = record
+      throw new CaribouError('server_error', 'Gateway Timeout', { status: 504 })
+    })
+    await expect(postBlueskyDraft(pds.client, 'new', draft({ text: 'hi @alice.example.com' }), noWait)).rejects.toBeTruthy()
+    pds.records.set('3krkey0000001', late!)
+    await tick(5)
+    const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('posted')
+    expect(pds.records.size).toBe(1)
+  })
+
+  it('two copies of one draft, the first posts with no facet, the second with it: posted, nothing kept (Fable R4-N1, probe B)', async () => {
+    const pds = fakePds()
+    saveDraft(KEY, 'new', draft({ text: 'hi @alice.example.com' }))
+    const copy2 = loadDraft(KEY, 'new')!
+    await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    pds.client.blueskyDetectFacets.mockImplementationOnce(async () => MENTION)
+    const out2 = await postBlueskyDraft(pds.client, 'new', copy2, noWait)
+    expect(out2.kind).toBe('posted')
+    expect(loadDraft(KEY, 'new')).toBeNull()
+    expect(pds.records.size).toBe(1)
+  })
+
+  it('control: a real edit of a mention post is still kept (probe C)', async () => {
+    const pds = fakePds()
+    saveDraft(KEY, 'new', draft({ text: 'hi @alice.example.com' }))
+    const copy2 = { ...loadDraft(KEY, 'new')!, text: 'hi @alice.example.com, and more' }
+    await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+    saveDraft(KEY, 'new', copy2)
+    const out2 = await postBlueskyDraft(pds.client, 'new', copy2, noWait)
+    expect(out2.kind).toBe('earlier-posted')
+    expect(loadDraft(KEY, 'new')!.text).toBe('hi @alice.example.com, and more')
+  })
+
+  // R7, one field at a time (Fable R4-N2, Codex R4-N1). A pending send whose
+  // record at the rkey differs in only that field is not this send's post.
+  const IMG = { id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1, alt: 'a cat', aspectRatio: null }
+  const BLOB2 = { ...BLOB, ref: { $link: 'bafkreiother' } }
+  const cases: [string, ComposeDraft, (r: BlueskyPostRecord) => BlueskyPostRecord][] = [
+    ['text', draft({ text: 'mine' }), (r) => ({ ...r, text: 'other' })],
+    ['image CID', draft({}, { images: [IMG] }), (r) => ({ ...r, embed: { $type: 'app.bsky.embed.images', images: [{ image: BLOB2, alt: 'a cat' }] } })],
+    ['alt text', draft({}, { images: [IMG] }), (r) => ({ ...r, embed: { $type: 'app.bsky.embed.images', images: [{ image: BLOB, alt: 'a dog' }] } })],
+    ['self-labels', draft({}, { images: [IMG], labels: ['porn'] }), (r) => ({ ...r, labels: { $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'nudity' }] } })],
+    ['quote ref', draft({}, { quote: QUOTED }), (r) => ({ ...r, embed: { $type: 'app.bsky.embed.record', record: { ...QUOTED, cid: 'bafyother' } } })],
+    ['reply refs', draft({}, { reply: { root: ROOT, parent: PARENT } }), (r) => ({ ...r, reply: { root: ROOT, parent: { ...PARENT, uri: 'at://did:plc:bob/app.bsky.feed.post/other' } } })],
+    ['langs', draft({ language: 'en' }), (r) => ({ ...r, langs: ['de'] })],
+  ]
+  for (const [field, d, change] of cases) {
+    it(`R7: another ${field} at the rkey is another content`, async () => {
+      const pds = fakePds()
+      pds.loseNextAnswer.value = true
+      pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+      await expect(postBlueskyDraft(pds.client, 'new', d, noWait)).rejects.toBeTruthy()
+      pds.records.set('3krkey0000001', change(pds.records.get('3krkey0000001')!))
+      const out = await postBlueskyDraft(pds.client, 'new', loadDraft(KEY, 'new')!, noWait)
+      expect(out.kind).toBe('earlier-posted')
+    })
+  }
 })
 
 describe('postBlueskyDraft: after the post', () => {

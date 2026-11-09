@@ -128,8 +128,10 @@ export function emptyDraft(init: Partial<ComposeDraft> = {}): ComposeDraft {
 export function isDraftEmpty(d: ComposeDraft): boolean {
   return d.text.trim() === '' && d.spoilerText.trim() === '' && d.media.length === 0
     && !(d.poll?.options.some((o) => o.trim() !== '') ?? false)
-    // A Bluesky send whose outcome is not known yet is kept, whatever it holds.
-    && (d.bluesky?.images.length ?? 0) === 0 && !d.bluesky?.sent
+    // A Bluesky draft that can be posted is never empty: images or a quote
+    // alone can be posted, and a send whose outcome is not known yet is kept
+    // whatever it holds (README, "Bluesky drafts").
+    && (d.bluesky?.images.length ?? 0) === 0 && !d.bluesky?.quote && !d.bluesky?.sent
 }
 
 /** The options a poll sends: the filled ones, trimmed. */

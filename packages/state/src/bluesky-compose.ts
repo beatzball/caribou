@@ -136,9 +136,10 @@ function strongRef(r: unknown): string {
 }
 
 /**
- * A record's content, field by field (R7): text, facets, reply and quote
- * refs, image CIDs and alt text, self-labels, langs. Never `createdAt`, and
- * never a deep compare: `getRecord` gives the SDK's `BlobRef` objects.
+ * A record's content, field by field (R7): text, reply and quote refs, image
+ * CIDs and alt text, self-labels, langs. Not facets: a mention's facet
+ * depends on whether its lookup worked, and facets come from the text. Never
+ * `createdAt`, and never a deep compare: `getRecord` gives SDK `BlobRef`s.
  */
 function contentOf(r: BlueskyPostRecord): string {
   const embed = r.embed as {
@@ -150,10 +151,6 @@ function contentOf(r: BlueskyPostRecord): string {
     : embed?.$type === 'app.bsky.embed.recordWithMedia' ? embed.record?.record : null
   return JSON.stringify({
     text: r.text,
-    facets: (r.facets ?? []).map((f) => ({
-      s: f.index.byteStart, e: f.index.byteEnd,
-      f: f.features.map((x) => [x.$type, x['uri'] ?? x['did'] ?? x['tag'] ?? null]),
-    })),
     reply: r.reply ? [strongRef(r.reply.root), strongRef(r.reply.parent)] : null,
     quote: quote ? strongRef(quote) : null,
     images: images.map((i) => [cidOf(i.image), String(i.alt ?? '')]),

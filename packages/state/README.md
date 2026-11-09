@@ -412,8 +412,11 @@ redraft's language; `createdAt`.
 | sign-out | removed with the account's other drafts. |
 | a 401 that removes a Mastodon session | kept (#215 tracks letting a reader delete it). |
 
-`isDraftEmpty` is false for a draft with images or with `sent`, so a quote
-with no text, or a send in doubt, is never dropped as empty.
+**A draft that can be posted is never empty.** `isDraftEmpty` is false for
+a Bluesky draft with text, images, a quote, or `sent`. Those are every field
+that alone lets Post send (a reply needs text or images; labels go only with
+images). So a quote with no text keeps its stored rkey through an unfreeze,
+a close and a reload (R6), and a send in doubt is never dropped.
 
 **One post per click** (`postBlueskyDraft`). Five rules. Every path in the
 send follows them; a new path must too.
@@ -478,8 +481,11 @@ with no rkey (a `TypeError`): the send never makes one.
 
 **R7. "This is our post" means the same content, not the same `createdAt`.**
 A found record is this send's post when its content matches the frozen
-record's, field by field: text, facets, reply refs, quote ref, image CIDs and
-alt text, self-labels, langs. The whole record is never deep-compared:
+record's, field by field: text, reply refs, quote ref, image CIDs and alt
+text, self-labels, langs. **Not facets:** a mention's facet is there only
+when its handle lookup worked, so two freezes of the same draft can differ
+in facets with no edit; facets come from the text, and the text is compared.
+The whole record is never deep-compared:
 `getRecord` gives the SDK's `BlobRef` objects for images, so a CID is read
 from `ref.$link` or from the CID object's string. An rkey belongs to one
 draft (R6), so the same content at it is this draft's post. This is what

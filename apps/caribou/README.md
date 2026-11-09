@@ -670,7 +670,9 @@ last send did not finish. Post checks first, so the post is never sent
 twice." (only while no send runs: during a send it would not be true). The
 draft gets its rkey when the dialog opens it (state R6), so a dialog closed
 and opened again during a send posts the same record, not a second one;
-Post waits for the rkey. When another version is the one posted (a late first write after an
+Post waits for the rkey. When a send from an earlier opening of the dialog
+ends posted, and the open draft has the same rkey and the same content, the
+dialog closes: that text is posted. When another version is the one posted (a late first write after an
 edit), the dialog stays open with the edits and says "Your earlier version
 was posted." with a link to it (`/@<did>/<rkey>`) that opens in a new tab,
 so the open dialog does not cover a page change. After a blob refusal the

@@ -4,7 +4,7 @@ import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
-  pollOptions, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
+  pollOptions, blueskyDraftInput, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
 } from '@beatzball/caribou-state'
@@ -804,6 +804,8 @@ export class CaribouComposeDialog extends LitElement {
     }
     const done = this.replyTo ? 'Reply posted' : 'Post published'
     const owner = this.owner()!
+    const sentRkey = this.draft.bluesky?.rkey ?? null
+    const sentInput = blueskyDraftInput(this.draft)
     this.posting = true
     this.earlierPosted = null
     try {
@@ -814,6 +816,14 @@ export class CaribouComposeDialog extends LitElement {
       })
       if (!this.owns(owner)) {
         toast('info', out.kind === 'posted' ? done : 'Your earlier version was posted.')
+        // The dialog was opened again on the same draft (same rkey, no edit):
+        // that text is posted now, so it closes (review R4-N4).
+        const open = this.draft.bluesky
+        if (out.kind === 'posted' && this.open && this.client === owner.client && open?.rkey === sentRkey
+          && blueskyDraftInput(this.draft) === sentInput) {
+          this.draft = emptyDraft()
+          this.close()
+        }
         return
       }
       if (out.kind === 'earlier-posted') {
