@@ -91,8 +91,15 @@ function profile(did: string) {
   }
 }
 
+/**
+ * A spec's own answer for a PDS method. Undefined: the default answer.
+ * `body` is the request body as text, or null.
+ */
+export type XrpcAnswer = (method: string, url: URL, body: string | null) =>
+  { status?: number; body: unknown; headers?: Record<string, string> } | undefined
+
 /** Installs the fixture servers on `page`. */
-export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}): Promise<FixtureAuth> {
+export async function installFixtureAuth(page: Page, opts: { sub?: string; xrpc?: XrpcAnswer } = {}): Promise<FixtureAuth> {
   const state: FixtureAuth = { sub: opts.sub ?? null, tokenRequests: [], revoked: [], pdsCalls: [], revokedAtServer: false }
   const pars = new Map<string, URLSearchParams>()
   const codes = new Map<string, URLSearchParams>()
@@ -176,6 +183,20 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string } = {}
         status: 401,
         headers: { ...CORS, 'content-type': 'application/json', 'www-authenticate': 'DPoP error="invalid_token"' },
         body: JSON.stringify({ error: 'invalid_token', message: 'token revoked' }),
+      })
+    }
+    const own = opts.xrpc?.(method, url, req.postData())
+    if (own) {
+      // A spec's own headers are exposed to the page, as a PDS must for
+      // `atproto-content-labelers`.
+      const extra = own.headers ?? {}
+      return route.fulfill({
+        status: own.status ?? 200,
+        headers: {
+          ...CORS, 'content-type': 'application/json', ...extra,
+          ...(Object.keys(extra).length > 0 ? { 'access-control-expose-headers': Object.keys(extra).join(', ') } : {}),
+        },
+        body: JSON.stringify(own.body),
       })
     }
     switch (method) {

@@ -587,12 +587,23 @@ export interface RelationshipSeveranceEvent {
   createdAt: string
 }
 
+/** What a Bluesky notification adds (bluesky-client README, "Notifications"). */
+export interface NotificationBluesky {
+  uri: string
+  /** The AppView's reason: `like`, `repost`, `follow`, `mention`, `reply`, `quote`. */
+  reason: string
+  reasonSubject: string | null
+  indexedAt: string
+  isRead: boolean
+}
+
 interface BaseNotification<T extends string> {
   id: string
   type: T
   createdAt: string
   account: Account
   groupKey: string
+  bluesky?: NotificationBluesky
 }
 
 type PlainNotification<T extends string> = BaseNotification<T> & {

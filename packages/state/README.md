@@ -489,6 +489,97 @@ storage refusing every click sends nothing, then one post after a reload
 blob refusal, and a facet lookup that lands late (R4); an answer after an
 account switch tells no screen.
 
+## Notifications (`notifications-store.ts`, `notification-groups.ts`)
+
+**Paging, both networks.** A list ends only when the client says so, with
+`nextCursor === null`, as for timelines. An empty page with a cursor keeps
+"Load older". `loadMore()` sends the last page's `nextCursor` back as
+`cursor`, as it came. The Mastodon client gives a single-notification page
+the last id as its cursor and an empty page `null`; a grouped page the
+oldest id it covers, and no groups `null`. So Mastodon ends where it did.
+
+**Mastodon** is as before: the server's groups (4.3+), else single ones
+grouped here by `groupNotifications` (same type on the same post, or a
+follow, on the same UTC day), ordered by id. The seen marker is the local
+`lastSeenNotificationId`.
+
+**Bluesky** (`client.capabilities.network === 'bluesky'`) has no server
+groups, no `min_id` and no id order. Its list:
+
+- **Order:** by `indexedAt`, newest first. Equal times keep the order the
+  AppView sent. Never by id: an AT URI sorts by DID.
+- **Grouping** (`groupBlueskyNotifications`): likes, reposts and follows
+  group. The key is the type, the post's URI (none for a follow) and the UTC
+  day of `indexedAt`: `favourite:<post uri>:2026-11-08`,
+  `follow::2026-11-08`. So a group is "these people liked this post on that
+  day", and two pages never disagree on where a notification goes: the day
+  is fixed, not a window that moves with the newest one. Every other type
+  is a row of one. The whole list is grouped again on every change.
+- **Place:** a row sits where its newest notification is. When a poll
+  brings a new like for a group, the row keeps its key (an open "Show all"
+  stays open) and moves to the top, as a Mastodon group does. Who did it:
+  newest first, each account once. `count` is how many notifications the
+  list holds for it; `complete` is true (the list has every one it loaded).
+- **Poll:** `fetchNotifications({ sinceId: <newest uri>, sinceAt: <its
+  indexedAt> })`. The client reads from the top until it meets that one, or
+  the first one older than its time when it was deleted (README of the
+  Bluesky client). Met: the new ones are merged above, and rows "Load older"
+  brought in stay. Not met (a gap, more than 150 new): the list is replaced
+  by what was read, and its cursor goes on from there. Nothing is lost:
+  older ones are under "Load older".
+- **Unknown reasons** never reach the store: the client skips them.
+
+**A replaced list is a new generation (both networks).** `load()`, a gap
+poll, and a poll that loads the first page into an empty list replace the
+list or its cursor. Each starts a new generation, so an answer to a request
+made before it (a "Load older" in flight) writes nothing: no old rows, no
+old cursor. The request it drops no longer holds the list as loading.
+
+**A poll on an empty list** loads the first page only until a first page
+has come in. After that, an empty first page keeps the list as it is only
+when its **raw top** is the one the list last read: the newest `indexedAt`
+and its URI on the AppView page, skipped reasons included (`seen.newestAt`
+and `seen.newestUri`). Then nothing new came in, and "Load older" does not
+come back for a list that has already read to its end. When the raw top
+changed, new notifications arrived, maybe all of kinds Caribou skips, with
+shown ones behind them: the page replaces the list (a new generation) and
+its cursor is used, so "Load older" reaches them. Mastodon pages have no raw
+top; an empty Mastodon page has no cursor anyway.
+
+**Unread badge.** `unreadNotificationCount` is the one count the nav rail
+reads. `startUnreadNotifications()` follows the active session (for
+Bluesky its `generation`; there is no token). On every session change,
+also A → B → A, the count is 0 at once and an answer for the old session
+is dropped.
+
+- Mastodon: notifications newer than the local marker, one page at most.
+- Bluesky: `client.getUnreadCount()`, the server's count, capped at
+  `UNREAD_CAP` so the rail says "40+". A count whose request started before
+  the last `updateSeen` landed is dropped: it can still count what the
+  reader just saw.
+
+**`updateSeen` (Bluesky)** is sent by `markBlueskyNotificationsSeen`, which
+`<caribou-notifications>` calls at the moment a Mastodon list moves its
+marker: the "All" list (not "Mentions") has loaded or polled, it has
+rendered, the tab is visible, the router has shown the page, and the
+session is still the one the list was loaded for. Then:
+
+- `seenAt` is the store's `seen.newestAt`: the newest `indexedAt` the list
+  has read from the top (load and polls, not "Load older"), skipped
+  reasons included. A skipped reason has nothing to show, so it is seen
+  with the rest; else the badge would count it forever.
+- It is sent only when the list read an unread one (`isRead: false`) and
+  `seenAt` is newer than the last `seenAt` this browser sent for the
+  account (`lastSeenNotificationAt` in its prefs). So it is sent once per
+  new notification, also across reloads, and never moves back.
+- It goes to the active client only when that client is for the same
+  `userKey`, and the active session has the same `generation`, when it is
+  sent. One request per account at a time; a newer `seenAt` asked for
+  meanwhile is sent after it.
+- On success, `lastSeenNotificationAt` moves, and the badge goes to 0 if
+  that session is still active. On failure nothing changes, and the next
+  view or poll tries again.
+
 ## Gotchas
 
 - **Don't mutate cache Maps directly.** Direct `.set` skips the signal-write

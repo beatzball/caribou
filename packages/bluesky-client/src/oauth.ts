@@ -11,7 +11,7 @@ import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { createBlueskyClient, type BlueskyAgent } from './client.js'
 import { detectFacets, nextRkey } from './compose.js'
 import { normalizeXrpcError } from './errors.js'
-import { labelDefsFromServices, moderate, type LabelDefs } from './moderation.js'
+import { labelDefsFromServices, readerModerationSource, type LabelDefs } from './moderation.js'
 
 export const BLUESKY_SCOPE = 'atproto transition:generic'
 
@@ -366,10 +366,9 @@ export async function restoreClient(
   const client = createBlueskyClient({
     userKey: opts.userKey,
     agent: agent as unknown as BlueskyAgent,
-    moderation: {
-      post: (view) => moderate({ kind: 'post', view }, did, prefs, labelDefs),
-      profile: (view) => moderate({ kind: 'profile', view }, did, prefs, labelDefs),
-    },
+    // Each read passes its answer's labeler coverage (only notifications
+    // do so far: #191).
+    moderation: readerModerationSource(did, () => ({ prefs, labelDefs })),
     // Any 401 ends the session (README: "401"), not only the challenged
     // one the SDK deletes the session for.
     onUnauthorized: opts.onExpired,

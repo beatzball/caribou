@@ -17,6 +17,8 @@ export interface NotificationGroup {
   /** The newest and the oldest notification id the row covers. */
   newestId: string
   oldestId: string
+  /** Bluesky: the newest notification's `indexedAt`. The list's order. */
+  newestAt?: string
 }
 
 /** The types that group. The rest are one row each. */
@@ -186,6 +188,66 @@ export function withoutSilencedAccounts(
       const count = Math.max(accounts.length, g.count - (g.accounts.length - accounts.length))
       if (accounts.length > 0 || (!g.complete && count > 0)) out.push({ ...g, accounts, count })
     }
+  }
+  return out
+}
+
+// --- Bluesky (README, "Notifications") --------------------------------------
+
+function timeOf(n: { createdAt?: string }): number {
+  const t = Date.parse(n.createdAt ?? '')
+  return Number.isNaN(t) ? -Infinity : t
+}
+
+/**
+ * Sorts Bluesky notifications by `indexedAt` (their `createdAt`), newest
+ * first. Equal times keep the order given. Never by id: an AT URI sorts by
+ * DID.
+ */
+export function byIndexedAt<T extends { createdAt?: string }>(list: readonly T[]): T[] {
+  return list.map((n, i) => ({ n, i, t: timeOf(n) }))
+    .sort((a, b) => b.t - a.t || a.i - b.i)
+    .map((x) => x.n)
+}
+
+// Likes, reposts and follows group by type, post and the UTC day of
+// `indexedAt`; the day is fixed, so pages never disagree on a key.
+function blueskyGroupKey(n: LooseNotification): string {
+  if (!GROUPABLE_NOTIFICATION_TYPES.has(n.type)) return `ungrouped-${n.id}`
+  const t = timeOf(n)
+  const day = Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : ''
+  return `${n.type}:${n.status?.id ?? ''}:${day}`
+}
+
+/**
+ * Groups Bluesky notifications (no server groups there). Rows are ordered
+ * by their newest notification's `indexedAt`, newest first; a row moves up
+ * when a newer notification joins it, and keeps its key. Who did it: newest
+ * first, each once. The whole list is grouped again on every change.
+ */
+export function groupBlueskyNotifications(list: readonly Notification[]): NotificationGroup[] {
+  const out: NotificationGroup[] = []
+  const byKey = new Map<string, NotificationGroup>()
+  const seen = new Set<string>()
+  for (const raw of byIndexedAt(list)) {
+    const n = raw as unknown as LooseNotification
+    if (seen.has(n.id)) continue
+    seen.add(n.id)
+    const key = blueskyGroupKey(n)
+    let group = byKey.get(key)
+    if (!group) {
+      group = {
+        key, type: n.type, count: 0, accounts: [], complete: true,
+        status: n.status ?? null, newestId: n.id, oldestId: n.id,
+        ...(n.createdAt ? { newestAt: n.createdAt } : {}),
+      }
+      byKey.set(key, group)
+      out.push(group)
+    }
+    group.count++
+    addAccount(group.accounts, n.account)
+    // Sorted newest first: each later one is older.
+    group.oldestId = n.id
   }
   return out
 }
