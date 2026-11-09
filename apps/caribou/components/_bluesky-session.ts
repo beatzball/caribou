@@ -28,7 +28,20 @@ type Restored = Awaited<ReturnType<BlueskyBrowser['restoreClient']>>
 // The active account's restored session, for a cover's Retry
 // (`BLUESKY_RETRY_EVENT`): its definitions load again, and the client's
 // calls wait for that, so the card's refetch is judged with the new ones.
-let active: { userKey: string; restored: Restored; reloading: Promise<void> | null } | null = null
+// `checkedAt`: when its definitions were last loaded or checked.
+let active: {
+  userKey: string; restored: Restored; reloading: Promise<void> | null
+  rechecking: Promise<void> | null; checkedAt: number
+} | null = null
+
+/**
+ * How often the active reader's label definitions are checked again while
+ * the page is visible (bluesky-client README, "Labeler coverage"). A
+ * labeler taken down since loses its definitions, so the veil covers again.
+ */
+export const LABELER_RECHECK_MS = 10 * 60_000
+/** A return to the foreground checks again, unless a check ran this recently. */
+export const FOREGROUND_RECHECK_MIN_MS = 60_000
 
 function publishReader(userKey: string, r: { prefs: Restored['prefs']; labelDefs: Restored['labelDefs'] }): void {
   setBlueskyReader({ userKey: userKey as `${string}@${string}`, prefs: r.prefs, labelDefs: r.labelDefs })
@@ -38,12 +51,47 @@ function publishReader(userKey: string, r: { prefs: Restored['prefs']; labelDefs
 export function reloadActiveModeration(): Promise<void> | null {
   const a = active
   if (!a || activeUserKey.peek() !== a.userKey) return null
+  a.checkedAt = Date.now()
   a.reloading ??= a.restored.reloadModeration().then(
     (r) => { if (active === a && activeUserKey.peek() === a.userKey) publishReader(a.userKey, r) },
     // Still unknown: the covers stay, with Retry.
     () => {},
   ).finally(() => { a.reloading = null })
   return a.reloading
+}
+
+/**
+ * Checks the active reader's label definitions again (`recheckLabelers`).
+ * One at a time, and not while a full reload runs. A failed check changes
+ * nothing.
+ */
+export function recheckActiveLabelers(): Promise<void> | null {
+  const a = active
+  if (!a || activeUserKey.peek() !== a.userKey) return null
+  if (a.reloading) return a.reloading
+  a.checkedAt = Date.now()
+  a.rechecking ??= a.restored.recheckLabelers().then(
+    (r) => { if (active === a && activeUserKey.peek() === a.userKey) publishReader(a.userKey, r) },
+    () => {},
+  ).finally(() => { a.rechecking = null })
+  return a.rechecking
+}
+
+let stopRecheck: (() => void) | null = null
+
+// Every LABELER_RECHECK_MS while visible, and on a return to the foreground.
+function startLabelerRecheck(): void {
+  stopRecheck?.()
+  const visible = () => document.visibilityState === 'visible'
+  const timer = setInterval(() => { if (visible()) void recheckActiveLabelers() }, LABELER_RECHECK_MS)
+  const onVisibility = () => {
+    if (visible() && active && Date.now() - active.checkedAt >= FOREGROUND_RECHECK_MIN_MS) void recheckActiveLabelers()
+  }
+  document.addEventListener('visibilitychange', onVisibility)
+  stopRecheck = () => {
+    clearInterval(timer)
+    document.removeEventListener('visibilitychange', onVisibility)
+  }
 }
 
 // Every async call waits for a reload in progress for its account.
@@ -89,7 +137,7 @@ export const blueskyDriver: BlueskyDriver = {
         onExpired: hooks.onExpired,
       })
       if (activeUserKey.peek() === session.userKey) {
-        active = { userKey: session.userKey, restored, reloading: null }
+        active = { userKey: session.userKey, restored, reloading: null, rechecking: null, checkedAt: Date.now() }
         publishReader(session.userKey, restored)
       }
       return afterReload(restored.client, session.userKey)
@@ -123,6 +171,8 @@ export function installBlueskyDriver(): void {
   })
   // A cover's Retry (#184): load the definitions again.
   window.addEventListener(BLUESKY_RETRY_EVENT, () => { void reloadActiveModeration() })
+  // A labeler taken down since its definitions loaded (#233).
+  startLabelerRecheck()
 }
 
 /** Why a sign-in did not start or did not finish, in words for the reader. */

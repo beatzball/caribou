@@ -294,6 +294,13 @@ export interface RestoredClient {
    * above follow too.
    */
   reloadModeration(): Promise<{ prefs: ModerationPrefs | null; labelDefs: LabelDefs | null }>
+  /**
+   * Checks the definitions again, for the labelers the prefs name now
+   * (README, "Labeler coverage"). A labeler `getServices` no longer answers
+   * for loses its definitions at once, so the veil covers again. A failed
+   * check changes nothing; a 401 ends the session.
+   */
+  recheckLabelers(): Promise<{ prefs: ModerationPrefs | null; labelDefs: LabelDefs | null }>
 }
 
 export interface RestoreOptions {
@@ -354,20 +361,33 @@ export async function restoreClient(
     if (normalizeXrpcError(err).code === 'unauthorized') opts.onExpired()
     return null
   }
+  const labelerDidsOf = (p: ModerationPrefs | null) => [...new Set([BSKY_LABELER_DID, ...(p?.labelers ?? []).map((l) => l.did)])]
+  const loadDefs = (dids: string[]) => agent.app.bsky.labeler.getServices({ dids, detailed: true })
+    .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), failed)
+  // A full load started after a check began wins over that check.
+  let loads = 0
   async function loadModeration() {
+    loads++
     prefs = await agent.getPreferences().then((p) => p.moderationPrefs, failed)
-    const labelerDids = [...new Set([BSKY_LABELER_DID, ...(prefs?.labelers ?? []).map((l) => l.did)])]
+    const labelerDids = labelerDidsOf(prefs)
     agent.configureLabelers(labelerDids)
-    labelDefs = await agent.app.bsky.labeler.getServices({ dids: labelerDids, detailed: true })
-      .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), failed)
+    labelDefs = await loadDefs(labelerDids)
+  }
+  // Only a successful answer replaces the definitions: a labeler it has no
+  // view for (taken down, gone) then has none, and the veil covers again.
+  async function recheckLabelers() {
+    const at = loads
+    const fresh = await loadDefs(labelerDidsOf(prefs))
+    if (fresh && at === loads) labelDefs = fresh
   }
   await loadModeration()
 
   const client = createBlueskyClient({
     userKey: opts.userKey,
     agent: agent as unknown as BlueskyAgent,
-    // Each read passes its answer's labeler coverage (only notifications
-    // do so far: #191).
+    // Each read passes its answer's labeler coverage: the header when the
+    // browser can read it, else the labelers `configureLabelers` above sent
+    // (README, "Labeler coverage").
     moderation: readerModerationSource(did, () => ({ prefs, labelDefs })),
     // Any 401 ends the session (README: "401"), not only the challenged
     // one the SDK deletes the session for.
@@ -380,6 +400,11 @@ export async function restoreClient(
     async reloadModeration() {
       await loadModeration()
       out.prefs = prefs
+      out.labelDefs = labelDefs
+      return { prefs, labelDefs }
+    },
+    async recheckLabelers() {
+      await recheckLabelers()
       out.labelDefs = labelDefs
       return { prefs, labelDefs }
     },
