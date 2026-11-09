@@ -6,10 +6,9 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import {
   _testOnlyResetMutations, activeClient, activeUserKey, addUserSession, cacheStatus, statusCache, users,
 } from '@beatzball/caribou-state'
-import '../caribou-status-card.js'
 import { startShortcuts } from '../_shortcuts.js'
 import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
-import type { CaribouStatusCard } from '../caribou-status-card.js'
+import { shortCount, type CaribouStatusCard } from '../caribou-status-card.js'
 
 // #188: Bluesky card actions. Reply and Quote are off, with a reason, when
 // the post's own flags say so; Quote opens the composer; a Mastodon card has
@@ -198,6 +197,30 @@ describe('other readers', () => {
     signIn('mastodon')
     const el = await mount(mastodonPost(), 'example.social')
     expect(quote(el)).toBeNull()
+  })
+})
+
+// R2-2: a Bluesky bar has one more control, so its big counts are short.
+describe('counts', () => {
+  const counts = (el: CaribouStatusCard) => ['reply', 'boost', 'favourite']
+    .map((c) => el.shadowRoot!.querySelector(`.actions caribou-icon-button.${c}`)!.getAttribute('count'))
+
+  it('shortCount: whole up to 999, then K and M with one decimal', () => {
+    expect([0, 999, 1000, 2140, 12345, 1_250_000].map(shortCount)).toEqual(['0', '999', '1K', '2.1K', '12.3K', '1.3M'])
+  })
+
+  it('a Bluesky post shows big counts short; the description keeps the whole number', async () => {
+    signIn('bluesky')
+    const post = { ...blueskyPost(), repliesCount: 312, reblogsCount: 2140, favouritesCount: 12345 }
+    const el = await mount(post)
+    expect(counts(el)).toEqual(['312', '2.1K', '12.3K'])
+    expect(el.shadowRoot!.querySelector('.actions caribou-icon-button.favourite')!.getAttribute('description')).toMatch(/^12345 favourites/)
+  })
+
+  it('a Mastodon post shows its counts whole, as before', async () => {
+    signIn('mastodon')
+    const el = await mount(mastodonPost({ repliesCount: 312, reblogsCount: 2140, favouritesCount: 12345 }), 'example.social')
+    expect(counts(el)).toEqual(['312', '2140', '12345'])
   })
 })
 

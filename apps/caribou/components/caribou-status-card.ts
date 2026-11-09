@@ -99,6 +99,14 @@ function sameFields(a: ActionFields, b: ActionFields): boolean {
     && a.bookmarked === b.bookmarked && a.repliesCount === b.repliesCount
 }
 
+// 999 → "999", 2140 → "2.1K", 12345 → "12.3K". One fixed locale, so the
+// server and the browser write the same text. The description keeps the
+// whole number for a screen reader.
+const SHORT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })
+export function shortCount(n: number): string {
+  return n < 1000 ? String(n) : SHORT.format(n)
+}
+
 function plural(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
@@ -300,14 +308,21 @@ export class CaribouStatusCard extends LitElement {
     .actions caribou-menu.more { margin-inline-start: auto; }
     /* A Bluesky bar has six controls (it has Quote). On a small phone six
        44 px targets do not fit beside the avatar: the bar starts under the
-       avatar and the space between controls shrinks. A Mastodon bar has
-       no Quote and is as it was. */
+       avatar, the space between controls shrinks, and big counts are short
+       (2.1K). At 360 px and up a busy post fits on one row; at 320 px its
+       bar can take a second row. A Mastodon bar has no Quote and is as it
+       was. */
     @media (max-width: 480px) {
       .actions:has(> caribou-icon-button.quote) {
         gap: 0; justify-content: space-between;
         margin-inline-start: calc(-1 * (48px + var(--space-3)));
+        /* The last resort, if the counts are still too wide: a second row,
+           never a page that scrolls sideways. */
+        flex-wrap: wrap;
       }
       .actions:has(> caribou-icon-button.quote) caribou-menu.more { margin-inline-start: 0; }
+      /* Less side padding: a count still has room, the target stays 44 px. */
+      .actions:has(> caribou-icon-button.quote) caribou-icon-button::part(button) { padding-inline: var(--space-1); }
     }
     .actions caribou-menu.more::part(trigger) { color: var(--fg-muted); }
     @media (pointer: fine) {
@@ -941,7 +956,9 @@ export class CaribouStatusCard extends LitElement {
     const boostHint = !boostable
       ? 'This post cannot be boosted'
       : off ? `${signIn} boost` : ''
-    const count = (n: number) => n > 0 ? String(n) : ''
+    // A Bluesky bar has one more control, so its big counts are short
+    // (2.1K). A Mastodon count is as it was.
+    const count = (n: number) => n <= 0 ? '' : post.bluesky ? shortCount(n) : String(n)
     // The label names the action; the description carries the count and
     // the hint a mouse user reads in the title.
     const describe = (...parts: string[]) => parts.filter(Boolean).join('. ')

@@ -380,6 +380,13 @@ with another `followUri` is refused too (**A2**). Every other field,
 and every other group, always comes from the read. A Mastodon client's
 lag window is 0.
 
+The group rule is for partial answers (Bluesky acks) only. **A whole
+answer drops an old read whole (R2-3).** A Mastodon write answers the
+whole relationship, so its answer is newer than every field of a read
+that started before the write. That read is dropped whole, as before
+#188, and so is a read that lands while a Mastodon write is out. So a
+read from before a block never brings "Follows you" back.
+
 **Network.** Each post and account says its network: it has a `bluesky`
 field or it is Mastodon (`resourceNetwork` in the client package). The
 reader can act on a resource only when the active client's network is
@@ -413,6 +420,13 @@ commit step differs.
   the follow record the follow made.
 - **A Bluesky block leaves the follow.** The optimistic block patch
   changes `following` only on Mastodon, whose block ends the follow.
+- **A blocked read knows nothing about the follow (R2-1).** While either
+  side blocks, the AppView hides the follow, but the follow record stays.
+  So such a read leaves `following` and `followUri` unknown
+  (`mapRelationship`), and no Follow choice is shown. The profile header
+  still shows Unblock when `blocking` is known. After an Unblock ack, the
+  relationship is read again, and that read fills the follow. So Unblock
+  never leads to a second follow record.
 - **An undo never claims more than it removed (A3).** A Bluesky block or
   mute can come from a list (`bluesky.blockingByList`,
   `bluesky.mutingByList`: the list's URI). A personal undo cannot remove

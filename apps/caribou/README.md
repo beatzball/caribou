@@ -708,12 +708,19 @@ in `packages/state` ("Bluesky acks") and `packages/bluesky-client`
   soft-disabled (the click and the `r` key do nothing) and the handler
   checks the flag again. The composer checks a third time at submit.
 - **Six controls on a small phone.** Up to 480 px wide, a bar with Quote
-  starts under the avatar and its gaps shrink, so six 44 px targets fit
-  at 320 px (`bluesky-actions.spec.ts` measures 320 and 375). The rule
-  matches only a bar with Quote, so Mastodon cards keep their layout.
-- **Follow from unknown state.** A Bluesky ack can leave `following`
-  unknown (state README, A1). The profile header and search show no
-  Follow button until their read fills it (`relationshipKnown`).
+  starts under the avatar, its gaps shrink and its buttons have less
+  side padding (each stays 44 px). A Bluesky count of 1000 or more is
+  short: 2140 is "2.1K", 12345 is "12.3K" (`shortCount`; the
+  description keeps the whole number). With such counts the bar fits on
+  one row from 360 px. At 320 px it can wrap to a second row; the page
+  never scrolls sideways (`bluesky-actions.spec.ts` measures 320, 360
+  and 375 with 312 / 2140 / 12345). These rules match only a Bluesky
+  card, so Mastodon cards keep their layout and whole counts.
+- **Follow from unknown state.** A Bluesky ack, or a read made while
+  blocked, can leave `following` unknown (state README, A1 and R2-1).
+  The profile header and search show no Follow button until a read
+  fills it (`relationshipKnown`). The header still shows Unblock when
+  the block is known.
 - **List blocks and mutes.** Unblock and Unmute refuse a block or mute
   that comes from a list, with a toast that says so (state README, A3).
 - **A Mastodon card has no Quote button** and its other buttons are as

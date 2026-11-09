@@ -334,9 +334,10 @@ export class CaribouProfileHeader extends LitElement {
   // account cannot be followed: the button then unblocks.
   private renderFollow() {
     const rel = this.relationship
-    // A Bluesky ack can leave the follow unknown (state README, A1): no
-    // button until the read fills it.
-    if (!this.target || !relationshipKnown(rel)) return nothing
+    // A Bluesky ack, or a read made while blocked, can leave the follow
+    // unknown (state README, A1 and R2-1): no Follow choice until a read
+    // fills it. A known block still shows Unblock.
+    if (!this.target || !rel || (rel.blocking !== true && !relationshipKnown(rel))) return nothing
     const state = rel.blocking ? 'blocked' : rel.following ? 'following' : rel.requested ? 'requested' : 'follow'
     const label = state === 'following'
       ? html`<span class="idle">Following</span><span class="hover">Unfollow</span>`

@@ -13,13 +13,16 @@ const COVERED = { 'atproto-content-labelers': `${BSKY_LABELER};redact` }
 const OPEN = `at://${BOB}/app.bsky.feed.post/3lopenpost1`
 const LIMITED = `at://${BOB}/app.bsky.feed.post/3llimited01`
 
+// Real counts, so the action bar test measures a busy post (R2-2).
+const COUNTS = { replyCount: 312, repostCount: 2140, likeCount: 12345, quoteCount: 0 }
+
 function postView(uri: string, text: string, viewer: Record<string, unknown> = {}) {
   return {
     $type: 'app.bsky.feed.defs#postView',
     uri, cid: CID,
     author: { did: BOB, handle: 'bob.example.com', displayName: 'Bob', labels: [] },
     record: { $type: 'app.bsky.feed.post', createdAt: '2026-11-05T09:30:00.000Z', text },
-    replyCount: 0, repostCount: 0, likeCount: 2, quoteCount: 0,
+    ...COUNTS,
     indexedAt: '2026-11-05T09:30:00.500Z', viewer, labels: [],
   }
 }
@@ -112,7 +115,8 @@ test.describe('Bluesky card actions', () => {
     await like.click()
     const unlike = open.getByRole('button', { name: 'Unfavourite' })
     await expect(unlike).toHaveAttribute('aria-pressed', 'true')
-    await expect(unlike).toContainText('3')
+    // 12345 + 1. The bar shows it short (12.3K); the description has it whole.
+    await expect(open.locator('caribou-icon-button.favourite')).toHaveAttribute('description', /^12346 favourites/)
     await expect.poll(() => pds.creates.length).toBe(1)
     expect(pds.creates[0]).toMatchObject({
       collection: 'app.bsky.feed.like',
@@ -154,8 +158,9 @@ test.describe('Bluesky card actions', () => {
 })
 
 // Six controls (Reply, Repost, Like, Bookmark, Quote, More) on a small
-// phone with a touch pointer, where each control is at least 44 px.
-for (const width of [320, 375]) {
+// phone with a touch pointer, where each control is at least 44 px, with
+// the fixture's big counts (shown short: 312, 2.1K, 12.3K).
+for (const width of [320, 360, 375]) {
   test.describe(`Bluesky action bar at ${width} px`, () => {
     test.skip(({ browserName }) => browserName === 'webkit' && process.platform === 'darwin',
       'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
@@ -171,19 +176,24 @@ for (const width of [320, 375]) {
         const root = el.shadowRoot!
         const bar = root.querySelector('.actions') as HTMLElement
         const article = root.querySelector('article') as HTMLElement
-        const last = bar.lastElementChild as HTMLElement
+        const a = article.getBoundingClientRect()
+        const controls = [...bar.children].map((c) => c.getBoundingClientRect())
         return {
-          controls: bar.children.length,
+          controls: controls.length,
+          counts: [...bar.querySelectorAll('caribou-icon-button')].map((b) => b.getAttribute('count') ?? ''),
           overflow: bar.scrollWidth - bar.clientWidth,
-          lastRight: last.getBoundingClientRect().right,
-          articleRight: article.getBoundingClientRect().right,
+          outside: controls.filter((c) => c.left < a.left || c.right > a.right).length,
+          rows: new Set(controls.map((c) => Math.round(c.top))).size,
           page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         }
       })
       expect(box.controls).toBe(6)
+      expect(box.counts.slice(0, 3)).toEqual(['312', '2.1K', '12.3K'])
       expect(box.overflow).toBeLessThanOrEqual(0)
-      expect(box.lastRight).toBeLessThanOrEqual(box.articleRight)
+      expect(box.outside).toBe(0)
       expect(box.page).toBeLessThanOrEqual(0)
+      // One row from 360 px; at 320 px the bar may wrap once, never scroll.
+      expect(box.rows).toBeLessThanOrEqual(width >= 360 ? 1 : 2)
     })
   })
 }

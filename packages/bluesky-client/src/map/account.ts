@@ -63,13 +63,21 @@ export function mapAccount(view: ProfileView): Account {
 
 /**
  * The profile's `viewer` → a Caribou `Relationship`, with the record URIs an
- * undo needs. A block or mute by list counts as one; a block by list has no
- * `blockUri`, since the reader undoes it on the list.
+ * undo needs. A block or mute by list counts as one. For a list's block the
+ * AppView puts the list's URI in `viewer.blocking`, so `blockUri` keeps only
+ * a block record's URI: the reader undoes a list's block on the list.
+ *
+ * While either side blocks, the AppView hides the follow, but the follow
+ * record stays. So `following` and `followUri` are left out (unknown) then
+ * (state README, R2-1): a block says nothing about the follow.
  */
 export function mapRelationship(view: ProfileView): Relationship {
   const v = view.viewer ?? {}
   const muting = v.muted === true
-  return {
+  // at://<did>/<collection>/<rkey>
+  const blockRecord = v.blocking?.split('/')[3] === 'app.bsky.graph.block' ? v.blocking : null
+  const followHidden = v.blocking != null || v.blockingByList != null || v.blockedBy === true
+  const rel: Relationship = {
     id: view.did,
     following: v.following != null,
     showingReblogs: v.mutedOnlyReposts !== true,
@@ -86,9 +94,14 @@ export function mapRelationship(view: ProfileView): Relationship {
     requestedBy: false,
     bluesky: {
       followUri: v.following ?? null,
-      blockUri: v.blocking ?? null,
+      blockUri: blockRecord,
       blockingByList: v.blockingByList?.uri ?? null,
       mutingByList: v.mutedByList?.uri ?? null,
     },
   }
+  if (followHidden && v.following == null) {
+    delete (rel as Partial<Relationship>).following
+    delete (rel.bluesky as Partial<NonNullable<Relationship['bluesky']>>).followUri
+  }
+  return rel
 }

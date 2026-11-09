@@ -153,6 +153,19 @@ describe('<caribou-search>', () => {
     expect(button.getAttribute('data-state')).toBe('following')
   })
 
+  // State README, A1: an unknown follow shows no Follow choice.
+  it('a cached relationship with no follow field ({ id, muting: true }) shows no follow button', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'search').mockResolvedValue(result({ accounts: [account('2', 'bob@other.social')] }))
+    vi.spyOn(client, 'fetchRelationships').mockReturnValue(new Promise(() => {}))
+    relationshipCache.value = new Map([[`${client.userKey} 2`, { id: '2', muting: true } as Relationship]])
+    const el = await mount({ q: 'bob' })
+    await flush()
+    await el.updateComplete
+    expect(el.shadowRoot!.querySelector('.acct')?.textContent).toContain('bob@other.social')
+    expect(el.shadowRoot!.querySelector('caribou-button.follow')).toBeNull()
+  })
+
   it('never lets a slower earlier answer replace a newer one', async () => {
     const client = signIn()
     vi.spyOn(client, 'fetchRelationships').mockResolvedValue([])

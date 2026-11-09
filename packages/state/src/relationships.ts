@@ -70,7 +70,9 @@ const REFS: Record<Group, readonly (keyof RelationshipBluesky)[]> = {
   mute: ['mutingByList'],
 }
 
-interface Pending { patch: RelationshipFlags; groups: readonly Group[] }
+// `whole`: the write's answer is (or, while it is out, will be) the whole
+// relationship, as Mastodon answers. Only a Bluesky ack is partial.
+interface Pending { patch: RelationshipFlags; groups: readonly Group[]; whole: boolean }
 
 interface Queue {
   // The relationship as the server last said, or as cached when the first
@@ -96,6 +98,9 @@ const following = new Set<string>()
 // Bumped when a write starts. A read records it before its fetch.
 const revisions = new Map<string, number>()
 const groupStates = new Map<string, Map<Group, GroupState>>()
+// The revision of the last write that answers the whole relationship
+// (Mastodon), set when it starts: a failed one counts too, as before acks.
+const wholeWrites = new Map<string, number>()
 
 function groupState(key: string, g: Group): GroupState | undefined {
   return groupStates.get(key)?.get(g)
@@ -158,9 +163,18 @@ function merged(key: string, revision: number, read: Relationship, base: Relatio
   return out
 }
 
+// A whole answer (Mastodon) is newer than every field of a read that
+// started before its write, so that read is dropped whole, as before acks
+// existed. The group rule is for partial acks only (README, R2-3).
+function wholeWriteSince(key: string, revision: number): boolean {
+  if (queues.get(key)?.pending.some((p) => p.whole)) return true
+  return (wholeWrites.get(key) ?? 0) > revision
+}
+
 // What a read changes: the cached relationship, and the last answer of a
 // queue still running, so its writes land on the read's other fields.
 function applyRead(key: string, revision: number, read: Relationship, into: Map<string, Relationship>): void {
+  if (wholeWriteSince(key, revision)) return
   const q = queues.get(key)
   if (q) {
     q.confirmed = merged(key, revision, read, q.confirmed)
@@ -177,6 +191,7 @@ export function _testOnlyResetRelationships(): void {
   following.clear()
   revisions.clear()
   groupStates.clear()
+  wholeWrites.clear()
 }
 
 function shown(q: Queue, id: string): Relationship | undefined {
@@ -206,18 +221,20 @@ function enqueue(
   // Nothing ahead: the request goes out now, in this task, as a single
   // write always did.
   const idle = queue.pending.length === 0
-  const entry: Pending = { patch, groups }
+  const entry: Pending = { patch, groups, whole: client.capabilities?.network !== 'bluesky' }
   queue.pending.push(entry)
   const revision = (revisions.get(key) ?? 0) + 1
   revisions.set(key, revision)
   for (const g of groups) setGroupState(key, g, { ...groupState(key, g), started: revision })
+  if (entry.whole) wholeWrites.set(key, revision)
   put(key, shown(queue, accountId))
   const generation = ownerGeneration()
   const start = async () => {
     let ok = true
     try {
       const answer = await call(client, accountRef(accountId, queue.confirmed))
-      queue.confirmed = isWriteAck(answer) ? withAck(queue.confirmed, accountId, answer) : answer
+      entry.whole = !isWriteAck(answer)
+      queue.confirmed = entry.whole ? (answer as Relationship) : withAck(queue.confirmed, accountId, answer as RelationshipWriteAck)
       const claim = { time: Date.now(), lagMs: client.capabilities?.readLagMs ?? 0, rel: queue.confirmed }
       for (const g of groups) setGroupState(key, g, { ...groupState(key, g)!, claim })
     } catch (err) {
@@ -415,5 +432,10 @@ export function setBlock(account: AccountHandle, on: boolean, opts: Relationship
         bluesky ? ['block'] : ['block', 'follow'],
         (c, ref) => c.block(ref), `Couldn't block @${account.acct}.`)
     : writeFlags(client, account, 'blocking', false, { blocking: false }, ['block'],
-        (c, ref) => c.unblock(ref), `Couldn't unblock @${account.acct}.`)
+        (c, ref) => c.unblock(ref), `Couldn't unblock @${account.acct}.`).then((ok) => {
+        // A Bluesky read made while blocked does not show the follow (R2-1),
+        // so it is unknown: read it again now the block is gone.
+        if (ok && bluesky && client) void loadRelationship(account.id, { clientSource: () => client })
+        return ok
+      })
 }

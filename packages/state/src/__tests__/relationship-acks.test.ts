@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, Relationship, RelationshipWriteAck } from '@beatzball/caribou-mastodon-client'
+import type { AccountRef, CaribouClient, Relationship, RelationshipWriteAck } from '@beatzball/caribou-mastodon-client'
 import { ownerGeneration } from '../keep-alive.js'
 import {
   _testOnlyResetRelationships, loadRelationship, relationshipCache, relationshipKey, relationshipKnown,
@@ -172,5 +172,109 @@ describe('N5: a Bluesky block leaves the follow', () => {
     answer(ack({ blocking: true }, { blockUri: B1 }))
     await p
     expect(cached()).toMatchObject({ blocking: true, following: true, bluesky: { followUri: F1, blockUri: B1 } })
+  })
+})
+
+describe('the group rule: a write to this group is out', () => {
+  it('a read that lands while a mute is out keeps the mute group as cached', async () => {
+    let answer!: (a: RelationshipWriteAck) => void
+    const p = setMute(BOB, true, bsky({ mute: () => new Promise((r) => { answer = r }) }))
+    // The read started after the write did, so only the "out" rule holds it.
+    await read(server({ following: true, muting: false }, { followUri: F1 }))
+    // The read's other groups land; the mute group stays as the cache had
+    // it (unknown) under the pending patch.
+    expect(cached()).toMatchObject({ following: true, muting: true, bluesky: { followUri: F1 } })
+    answer(ack({ muting: true, mutingNotifications: true }))
+    await p
+    expect(cached()).toMatchObject({ following: true, muting: true })
+  })
+
+  it('when that write fails, the rollback base is the cache, not the read taken while it was out', async () => {
+    let fail!: (e: Error) => void
+    const p = setMute(BOB, true, bsky({ mute: () => new Promise((_, r) => { fail = r }) }))
+    await read(server({ following: true, muting: false }, { followUri: F1 }))
+    fail(new Error('boom'))
+    await p
+    expect(cached()?.following).toBe(true)
+    expect(cached() && 'muting' in cached()!).toBe(false)
+  })
+})
+
+describe('R2-1: an unblock does not lead to a second follow record', () => {
+  // As `mapRelationship` builds a read made while blocked: no follow fields.
+  const blockedRead = () => {
+    const { following: _, ...r } = server({ blocking: true }, { blockUri: B1 })
+    const { followUri: __, ...b } = r.bluesky!
+    return { ...r, bluesky: b } as Relationship
+  }
+
+  it('follow, block, a blocked read, unblock: the follow is read again, and the click unfollows', async () => {
+    relationshipCache.value = new Map([[key, server({ following: true }, { followUri: F1 })]])
+    await setBlock(BOB, true, bsky({ block: async () => ack({ blocking: true }, { blockUri: B1 }) }))
+    await read(blockedRead())
+    expect(relationshipKnown(cached())).toBe(false)
+    const fetchRelationships = vi.fn(async () => [server({ following: true }, { followUri: F1 })])
+    await setBlock(BOB, false, bsky({ unblock: async () => ack({ blocking: false }, { blockUri: null }), fetchRelationships }))
+    await vi.waitFor(() => expect(fetchRelationships).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(relationshipKnown(cached())).toBe(true))
+    expect(cached()).toMatchObject({ following: true, blocking: false, bluesky: { followUri: F1, blockUri: null } })
+    const follow = vi.fn(async () => ack({ following: true }, { followUri: F2 }))
+    const unfollow = vi.fn(async (_ref: AccountRef) => ack({ following: false }, { followUri: null }))
+    await toggleFollow(BOB, bsky({ follow, unfollow }))
+    expect(follow).not.toHaveBeenCalled()
+    expect(unfollow).toHaveBeenCalledOnce()
+    expect(unfollow.mock.calls[0]![0].bluesky?.followUri).toBe(F1)
+  })
+
+  it('until that read lands, the follow stays unknown and a click sends nothing', async () => {
+    relationshipCache.value = new Map([[key, server({ following: true }, { followUri: F1 })]])
+    await read(blockedRead())
+    await setBlock(BOB, false, bsky({
+      unblock: async () => ack({ blocking: false }, { blockUri: null }),
+      fetchRelationships: () => new Promise(() => {}),
+    }))
+    expect(relationshipKnown(cached())).toBe(false)
+    const follow = vi.fn(async () => ack({ following: true }, { followUri: F2 }))
+    await toggleFollow(BOB, bsky({ follow }))
+    expect(follow).not.toHaveBeenCalled()
+  })
+})
+
+describe('R2-3: a whole (Mastodon) answer drops an old read whole', () => {
+  const MKEY = relationshipKey(ME, BOB.id)
+  const masto = (impl: Partial<CaribouClient>) =>
+    ({ clientSource: () => ({ userKey: ME, capabilities: { network: 'mastodon', readLagMs: 0 }, ...impl }) as CaribouClient })
+  const mserver = (over: Partial<Relationship> = {}) => ({
+    id: BOB.id, following: false, followedBy: false, muting: false, mutingNotifications: false,
+    blocking: false, blockedBy: false, requested: false, showingReblogs: false, notifying: false, ...over }) as Relationship
+
+  it('after a block, a read that started before it brings no "Follows you" back', async () => {
+    relationshipCache.value = new Map([[MKEY, mserver({ following: true, followedBy: true, showingReblogs: true })]])
+    let land!: (r: Relationship[]) => void
+    const reading = loadRelationship(BOB.id, masto({ fetchRelationships: () => new Promise((r) => { land = r }) }))
+    await setBlock(BOB, true, masto({ block: async () => mserver({ blocking: true }) }))
+    land([mserver({ following: true, followedBy: true, showingReblogs: true })])
+    await reading
+    expect(relationshipCache.value.get(MKEY)).toEqual(mserver({ blocking: true }))
+  })
+
+  it('a read that lands while a Mastodon write is out changes nothing', async () => {
+    relationshipCache.value = new Map([[MKEY, mserver({ followedBy: true })]])
+    let answer!: (r: Relationship) => void
+    const p = setMute(BOB, true, masto({ mute: () => new Promise((r) => { answer = r }) }))
+    await loadRelationship(BOB.id, masto({ fetchRelationships: async () => [mserver({ followedBy: false, showingReblogs: true })] }))
+    expect(relationshipCache.value.get(MKEY)).toMatchObject({ followedBy: true, showingReblogs: false, muting: true })
+    answer(mserver({ followedBy: true, muting: true, mutingNotifications: true }))
+    await p
+  })
+
+  it('a failed Mastodon write still drops a read that started before it', async () => {
+    relationshipCache.value = new Map([[MKEY, mserver({ followedBy: true })]])
+    let land!: (r: Relationship[]) => void
+    const reading = loadRelationship(BOB.id, masto({ fetchRelationships: () => new Promise((r) => { land = r }) }))
+    await setMute(BOB, true, masto({ mute: async () => { throw new Error('boom') } }))
+    land([mserver({ followedBy: false })])
+    await reading
+    expect(relationshipCache.value.get(MKEY)).toEqual(mserver({ followedBy: true }))
   })
 })

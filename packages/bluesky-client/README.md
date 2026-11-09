@@ -395,6 +395,13 @@ rollback, the in-flight guard and the account check.
   nothing to undo. When the post is gone, the undo fails `not_found`.
 - **A block leaves the follow.** Bluesky keeps the reader's follow
   record when they block. The ack sets only `blocking` and `blockUri`.
+- **A blocked profile read leaves the follow unknown (R2-1).** While
+  either side blocks, the AppView hides `viewer.following`, but the
+  follow record stays. So `mapRelationship` leaves `following` and
+  `followUri` out then. A read without them never says "not followed".
+  For a list's block the AppView puts the list's URI in
+  `viewer.blocking`; `blockUri` keeps only an `app.bsky.graph.block`
+  URI.
 - **An ack is partial.** It names only the fields the write changed. The
   state layer never stores it as a whole relationship (state README,
   "Bluesky acks", A1).
