@@ -2,12 +2,13 @@ import type { Agent, AppBskyFeedDefs } from '@atproto/api'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
   CaribouError, createDedup,
-  type Account, type AccountCredentials, type AccountPage, type BlueskyModerationResult,
+  type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet,
+  type BlueskyModerationResult, type BlueskyOwnPost, type BlueskyPostRecord,
   type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type Status,
   type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { labelersCoveredBy } from './content-labelers.js'
-import { normalizeXrpcError } from './errors.js'
+import { BlueskyBlobNotFound, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
 import type { MapContext } from './map/context.js'
 import { feedEntryId, mapFeedEntry } from './map/feed-entry.js'
@@ -38,6 +39,11 @@ export const BLUESKY_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
 export type BlueskyAgent = Pick<Agent,
   'did' | 'getTimeline' | 'getAuthorFeed' | 'getPostThread' | 'getPosts' | 'getProfile' | 'getProfiles'
 > & Pick<Agent, 'listNotifications' | 'countUnreadNotifications' | 'updateSeenNotifications'> & {
+  com: {
+    atproto: {
+      repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'getRecord' | 'uploadBlob'>
+    }
+  }
   app: {
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'getBookmarks'>
@@ -76,6 +82,45 @@ export interface BlueskyClientOptions {
    * post's URI. The page still answers without it. For logging; optional.
    */
   onMapError?: (err: unknown, uri: string) => void
+  /**
+   * The SDK's compose helpers (`./compose`, browser only), so this module
+   * needs no runtime import of the SDK. Without them compose answers
+   * `not_found`.
+   */
+  compose?: {
+    nextRkey(): string
+    detectFacets(text: string): Promise<BlueskyFacet[]>
+  }
+}
+
+const POST_COLLECTION = 'app.bsky.feed.post'
+
+/** The JSON form of the SDK's `BlobRef` (its `ref` is a CID object). */
+export function blobRefJson(blob: unknown): BlueskyBlobRef {
+  const b = blob as { ref?: unknown; mimeType?: unknown; size?: unknown }
+  const ref = b.ref as { $link?: unknown; toString(): string } | undefined
+  const link = typeof ref?.$link === 'string' ? ref.$link : ref ? ref.toString() : ''
+  if (!link || typeof b.mimeType !== 'string' || typeof b.size !== 'number') {
+    throw new CaribouError('unknown', 'The server did not answer a blob')
+  }
+  return { $type: 'blob', ref: { $link: link }, mimeType: b.mimeType, size: b.size }
+}
+
+/**
+ * `getRecord` answers a missing record with 400 `RecordNotFound`. Only that
+ * means "not there": a 404, a deactivated or taken-down account, or any
+ * other answer is not proof, and a retry must not send on it.
+ */
+function isRecordMissing(err: unknown): boolean {
+  return (err as { error?: unknown } | null)?.error === 'RecordNotFound'
+}
+
+/** The PDS answers a post that names an unknown blob with 400 `BlobNotFound`. */
+function blobMissing(err: unknown): BlueskyBlobNotFound | null {
+  const e = err as { status?: unknown; error?: unknown; message?: unknown }
+  const message = typeof e?.message === 'string' ? e.message : ''
+  if (e?.error !== 'BlobNotFound' && !/could not find blob/i.test(message)) return null
+  return new BlueskyBlobNotFound(message, /baf[a-z0-9]+/.exec(message)?.[0] ?? null)
 }
 
 /** Entries per page when the client pages on its own (catch-up). */
@@ -112,6 +157,10 @@ function isPostView(v: object): v is AppBskyFeedDefs.PostView {
     && (v as { $type?: unknown }).$type === 'app.bsky.feed.defs#postView'
 }
 
+function notBluesky(method: string, instead: string): () => Promise<never> {
+  return () => Promise.reject(new CaribouError('not_found', `Bluesky: ${method} is Mastodon's; use ${instead}`))
+}
+
 function notYet(what: string, issue: string): () => Promise<never> {
   return () => Promise.reject(new CaribouError('not_found', `Bluesky: ${what} comes in ${issue}`))
 }
@@ -133,6 +182,22 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (norm.code === 'unauthorized') opts.onUnauthorized?.()
       throw norm
     }
+  }
+
+  // A write, or a read that must not be shared with an earlier one.
+  async function write<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn()
+    } catch (err) {
+      const norm = err instanceof BlueskyBlobNotFound ? err : normalizeXrpcError(err)
+      if (norm.code === 'unauthorized') opts.onUnauthorized?.()
+      throw norm
+    }
+  }
+
+  function did(): string {
+    if (!agent.did) throw new CaribouError('unauthorized', 'no active session')
+    return agent.did
   }
 
   function account(view: ProfileView, coverage?: BlueskyCoverage): Account {
@@ -481,12 +546,59 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     removeListAccounts: notYet('lists', '#195'),
     fetchAccountLists: notYet('lists', '#195'),
 
-    createStatus: notYet('compose', '#189'),
-    uploadMedia: notYet('compose', '#189'),
-    fetchMedia: notYet('compose', '#189'),
-    waitForMedia: notYet('compose', '#189'),
-    updateMedia: notYet('compose', '#189'),
-    fetchInstance: notYet('compose limits', '#189'),
+    // Compose. Bluesky has its own methods below; the Mastodon-shaped ones
+    // are not used for Bluesky (README, "Compose").
+    createStatus: notBluesky('createStatus', 'blueskyCreatePost'),
+    uploadMedia: notBluesky('uploadMedia', 'blueskyUploadBlob'),
+    fetchMedia: notBluesky('fetchMedia', 'blueskyUploadBlob'),
+    waitForMedia: notBluesky('waitForMedia', 'blueskyUploadBlob'),
+    updateMedia: notBluesky('updateMedia', 'the draft (alt text is in the embed)'),
+    fetchInstance: notBluesky('fetchInstance', 'capabilities'),
+
+    async blueskyNextRkey() {
+      if (!opts.compose) throw new CaribouError('not_found', 'Bluesky compose is not loaded')
+      return opts.compose.nextRkey()
+    },
+
+    async blueskyDetectFacets(text) {
+      if (!opts.compose) throw new CaribouError('not_found', 'Bluesky compose is not loaded')
+      // A failed lookup leaves a mention as text; it never fails the post.
+      return opts.compose.detectFacets(text)
+    },
+
+    // Writes bypass dedup: two sends are two requests.
+    async blueskyUploadBlob(file) {
+      return write(async () => {
+        const { data } = await agent.com.atproto.repo.uploadBlob(file, { encoding: file.type || 'application/octet-stream' })
+        return blobRefJson(data.blob)
+      })
+    },
+
+    async blueskyCreatePost(record: BlueskyPostRecord, rkey: string) {
+      return write(async () => {
+        try {
+          const { data } = await agent.com.atproto.repo.createRecord({
+            repo: did(), collection: POST_COLLECTION, rkey, record: record as unknown as Record<string, unknown>,
+          })
+          return { uri: data.uri, cid: data.cid }
+        } catch (err) {
+          throw blobMissing(err) ?? err
+        }
+      })
+    },
+
+    async blueskyGetOwnPost(rkey: string): Promise<BlueskyOwnPost | null> {
+      return write(async () => {
+        try {
+          const { data } = await agent.com.atproto.repo.getRecord({ repo: did(), collection: POST_COLLECTION, rkey })
+          if (typeof data.cid !== 'string') return null
+          return { uri: data.uri, cid: data.cid, value: data.value as unknown as BlueskyPostRecord }
+        } catch (err) {
+          if (isRecordMissing(err)) return null
+          throw err
+        }
+      })
+    },
 
     votePoll: notYet('polls', 'no issue: Bluesky has no polls'),
     fetchPoll: notYet('polls', 'no issue: Bluesky has no polls'),

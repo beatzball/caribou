@@ -1,5 +1,7 @@
 import type { UserKey } from '@beatzball/caribou-auth'
-import type { CaribouClient, MediaAttachmentType, Status, StatusVisibility } from '@beatzball/caribou-mastodon-client'
+import type {
+  BlueskyBlobRef, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, MediaAttachmentType, Status, StatusVisibility,
+} from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 
 export interface DraftMedia {
@@ -25,6 +27,49 @@ export interface DraftPoll {
   hideTotals: boolean
 }
 
+/** An image a Bluesky draft holds: the PDS has the blob, so a reload does not upload it again. */
+export interface BlueskyDraftImage {
+  /**
+   * A local id for the controls. Not the CID: the same file picked twice
+   * has the same CID and is still two images.
+   */
+  id: string
+  blob: BlueskyBlobRef
+  mime: string
+  size: number
+  /** Alt text. It goes in the post's embed; Bluesky keeps none on the blob. */
+  alt: string
+  aspectRatio: { width: number; height: number } | null
+  /** The name of the file the reader picked, for the controls' names. */
+  name?: string
+}
+
+/**
+ * The exact record a send wrote, or tried to, frozen before the request
+ * (spec 7.2). `input` is `blueskyDraftInput` of the draft it was made
+ * from, so a retry can tell whether the reader edited since.
+ */
+export interface BlueskySentRecord {
+  input: string
+  record: BlueskyPostRecord
+}
+
+/**
+ * What a Bluesky draft holds beside `text` (spec 7.2; rules in the README,
+ * "Bluesky drafts"). Plain JSON, kept in the account's drafts.
+ */
+export interface BlueskyDraft {
+  reply: { root: BlueskyStrongRef; parent: BlueskyStrongRef } | null
+  quote: BlueskyStrongRef | null
+  /** Self-labels from the label menu. Sent only with images. */
+  labels: string[]
+  images: BlueskyDraftImage[]
+  /** The record key, picked before the first send and kept until the post is known. */
+  rkey: string | null
+  /** Set from just before a send until its outcome is known. */
+  sent: BlueskySentRecord | null
+}
+
 export interface ComposeDraft {
   text: string
   spoilerText: string
@@ -41,6 +86,14 @@ export interface ComposeDraft {
   language?: string | null
   /** A poll. Mastodon refuses a post with both a poll and media. */
   poll?: DraftPoll | null
+  /** A Bluesky draft's own parts. A Mastodon draft has none. */
+  bluesky?: BlueskyDraft
+  /**
+   * The stored revision: every save in this slot makes a new, unique one
+   * (so a cleared and refilled slot never repeats one). A send writes only
+   * while the revision is the one it owns (README, R4).
+   */
+  rev?: string
 }
 
 // A new post and each reply keep their own draft, so opening a reply does
@@ -48,7 +101,8 @@ export interface ComposeDraft {
 // `redraft:<key>` holds a delete-and-redraft opened while its own slot held
 // an unsent draft. The deleted post exists nowhere else, so it is stored
 // like any draft, beside the one it must not overwrite.
-export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}`
+// A Bluesky quote keeps its own draft too, `quote:<uri>`.
+export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}` | `quote:${string}`
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'
@@ -74,6 +128,10 @@ export function emptyDraft(init: Partial<ComposeDraft> = {}): ComposeDraft {
 export function isDraftEmpty(d: ComposeDraft): boolean {
   return d.text.trim() === '' && d.spoilerText.trim() === '' && d.media.length === 0
     && !(d.poll?.options.some((o) => o.trim() !== '') ?? false)
+    // A Bluesky draft that can be posted is never empty: images or a quote
+    // alone can be posted, and a send whose outcome is not known yet is kept
+    // whatever it holds (README, "Bluesky drafts").
+    && (d.bluesky?.images.length ?? 0) === 0 && !d.bluesky?.quote && !d.bluesky?.sent
 }
 
 /** The options a poll sends: the filled ones, trimmed. */
@@ -97,12 +155,15 @@ function readAll(userKey: UserKey): Partial<Record<DraftSlot, ComposeDraft>> {
   }
 }
 
-function writeAll(userKey: UserKey, all: Partial<Record<DraftSlot, ComposeDraft>>): void {
+// False when storage refused the write (full or blocked).
+function writeAll(userKey: UserKey, all: Partial<Record<DraftSlot, ComposeDraft>>): boolean {
   try {
     if (Object.keys(all).length === 0) localStorage.removeItem(storageKey(userKey))
     else localStorage.setItem(storageKey(userKey), JSON.stringify(all))
+    return true
   } catch {
     // Storage full or blocked: the draft lives on in the open dialog.
+    return false
   }
 }
 
@@ -115,10 +176,34 @@ export function loadDraft(userKey: UserKey, slot: DraftSlot): ComposeDraft | nul
 // An empty draft is removed rather than stored, so a dialog opened and
 // closed again leaves nothing behind.
 export function saveDraft(userKey: UserKey, slot: DraftSlot, draft: ComposeDraft): void {
+  storeDraftIf(userKey, slot, undefined, draft)
+}
+
+/** The revision stored in `slot` now, or null when the slot is empty. */
+export function draftRev(userKey: UserKey, slot: DraftSlot): string | null {
+  const d = readAll(userKey)[slot]
+  return d && typeof d.text === 'string' ? d.rev ?? '' : null
+}
+
+/**
+ * Stores `draft` (null, or an empty draft, clears the slot) only when the
+ * slot's revision is still `expected` (null: an empty slot; undefined: any).
+ * Answers the slot's new revision (null once cleared), or false when the
+ * revision had moved or storage refused the write.
+ */
+export function storeDraftIf(
+  userKey: UserKey, slot: DraftSlot, expected: string | null | undefined, draft: ComposeDraft | null,
+): { rev: string | null } | false {
   const all = readAll(userKey)
-  if (isDraftEmpty(draft)) delete all[slot]
-  else all[slot] = draft
-  writeAll(userKey, all)
+  const held = all[slot]
+  const current = held && typeof held.text === 'string' ? held.rev ?? '' : null
+  if (expected !== undefined && current !== expected) return false
+  const keep = !!draft && !isDraftEmpty(draft)
+  const rev = newKey()
+  if (keep) all[slot] = { ...draft, rev }
+  else delete all[slot]
+  if (!writeAll(userKey, all)) return false
+  return { rev: keep ? rev : null }
 }
 
 /**

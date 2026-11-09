@@ -585,6 +585,109 @@ active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
 
+### Bluesky compose (#189)
+
+`<caribou-compose-dialog>` with a Bluesky account active. Every rule here
+applies only when the dialog's client is Bluesky; Mastodon compose is as
+before. The draft and the retry rules are in `packages/state` README
+("Bluesky drafts"), the client's calls in `packages/bluesky-client` README
+("Compose").
+
+**Controls.** No visibility, no poll, no content-warning text (by
+`capabilities`). "Add images" takes images only (`accept="image/*"`), at
+most 4. The counter shows graphemes left out of 300. Post is off when the
+text is over 300 graphemes **or** over 3000 bytes, counted with the SDK's
+`RichText` (`countPost`), as the PDS counts. The SDK loads through
+`loadBluesky()` when the dialog opens; until it has, Post is off. A post
+may have no text when it has an image or a quote. When the bytes are over
+(few graphemes can be many bytes), visible text says "Over the 3000-byte
+limit", the counter's name adds it ("270 characters left, over the
+3000-byte limit"), and the live region says it once. Post is also off with
+more than 4 images, whatever a stored draft holds.
+
+**Images** (`components/_image-fit.ts`). Each picked file goes through
+`fitImage(file, 2 MB)`. **Every image is drawn on a canvas and encoded
+again as JPEG**, whatever its size: a blob on a PDS is public
+(`com.atproto.sync.getBlob`) and the PDS keeps it as sent, so this is what
+removes EXIF data, GPS position included, and it turns HEIC, TIFF or other
+types into one Bluesky shows. An animated GIF keeps its first frame.
+
+- not an image: refused, "… is not an image."
+- cannot be read by the browser: refused, "… could not be read as an
+  image." (it cannot be cleaned either).
+- long side 2000 px at most (a larger one is scaled down), quality 0.9,
+  0.8, 0.7, then the long side × 0.8 each round, until it is at most 2 MB.
+  Below a 400 px long side it is refused: "… is too large, even made
+  smaller. Pick an image under 2 MB." A transparent image gets a white
+  ground (JPEG has no transparency).
+
+At most 4 images, counted across picks: the picker's room is 4 minus the
+draft's images minus the uploads in flight. Each image has a local `id`
+for its controls (remove, alt text), not its CID: the same file picked
+twice is two images with one CID. The upload is the fitted image, never
+the original. The alt text field is the draft's: it goes in the post's
+embed, with no server call. The page keeps each fitted file in memory by
+the image's id. When the PDS answers `BlueskyBlobNotFound` (it dropped an
+upload no post used yet), the send unfreezes the record (state rule 1),
+and the dialog uploads that file again (the same bytes, so the same CID)
+and asks the reader to post again; an image with no file (after a reload)
+shows "Not on the server any more. Remove it and add it again." and Post
+stays off until it is removed.
+
+**Labels instead of a content warning** (spec 7.4). With at least one
+image, a `<caribou-menu>` "Label this media" (anchored, the shared menu's
+focus rules) lists Adult, Nudity and Graphic. Each is a toggle button with
+`aria-pressed`; the menu's name lists the labels on. Labels go in the
+record only with images. Known: the shared menu closes after each choice, so
+two labels take two openings (review note N7, left as it is for day one).
+
+**Reply and quote.** `caribou:compose` with `inReplyTo` (a Bluesky post) or
+`quote`. The draft takes the strong refs from the post (`reply.root` from
+its `replyRef.root`, else the post). No mentions are typed into a Bluesky
+reply: a mention is addressed by DID, never by handle text (#177's note).
+The dialog opens only when the post's network is the active account's: a
+Mastodon account never opens for a Bluesky post, and only a Bluesky account
+quotes. On open the dialog reads the post again (`fetchStatus`):
+
+| the post | the dialog |
+|---|---|
+| `replyDisabled` (reply) or `embeddingDisabled` (quote) on the dialog's own copy **or** on the status cache's copy, checked on open, after the fresh read, and at send. Neither copy is known to be newer, so either one blocks. The fresh read also goes into the cache (`cacheStatus`). | "The author limited replies. You cannot reply to this post." / "The author turned off quotes for this post." Post is off, and a send is refused with that toast. #188 owns the card's buttons; this is the second check. |
+| gone (`not_found`) | "The post you replied to was deleted." (or quoted). The draft keeps its text; Post is off. |
+
+**Sending.** `postBlueskyDraft`, under the five rules in the `packages/state`
+README ("One post per click", R1 to R5). The open draft takes every draft
+the send makes (`onDraft`), the frozen one before the network. Storage
+refusing the freeze is a toast, "Could not save the draft, so the post was
+not sent.", nothing is sent, and the open draft is unfrozen, so every later
+Post is refused the same way until storage works. Every await in the dialog
+(fit, upload, re-upload, the target read, the send) captures its owner
+(client, account, slot, dialog session) and checks it after; a late answer
+for a closed, reopened or switched dialog writes nothing. A failed create is
+checked at once (R1): found, the dialog closes as posted; absent, the draft
+is open again with the reader's text; the check failed, the toast says
+"Post again to retry; it is never sent twice." and the dialog shows "The
+last send did not finish. Post checks first, so the post is never sent
+twice." (only while no send runs: during a send it would not be true). The
+draft gets its rkey when the dialog opens it (state R6), so a dialog closed
+and opened again during a send posts the same record, not a second one;
+Post waits for the rkey. When a send from an earlier opening of the dialog
+ends posted, and the open draft has the same rkey and the same content, the
+dialog closes: that text is posted. When another version is the one posted (a late first write after an
+edit), the dialog stays open with the edits and says "Your earlier version
+was posted." with a link to it (`/@<did>/<rkey>`) that opens in a new tab,
+so the open dialog does not cover a page change. After a blob refusal the
+toast says only what happened: an image uploaded again, an image to add
+again, or "The server refused an image this post named." The reply/quote
+block is read live at every render and at every Post.
+Link cards are phase 6: a link is posted as a facet with no card.
+
+Tests: `caribou-compose-dialog-bluesky.test.ts` (limits with emoji,
+combining marks, CJK and a link; one post after a lost answer, a reload and
+an edit; reply and quote refs; the flags; images, alt text, labels, resize,
+the 4-image cap and blob recovery); `_image-fit.test.ts`;
+`tests/e2e/bluesky-compose.spec.ts` (the real SDK against a fixture PDS: the
+counter, a TID rkey, facets, and a lost answer across a reload is one post).
+
 ### Bluesky SSR (#185, #186)
 
 Phase 3. The server paints a Bluesky profile and thread with no token

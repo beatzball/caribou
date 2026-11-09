@@ -374,6 +374,148 @@ reader can act on a resource only when the active client's network is
 the resource's (`canActOn`). A Mastodon post also needs the reader's
 server, as before.
 
+## Bluesky drafts (#189, spec 7.2)
+
+`bluesky-compose.ts`, over the drafts in `compose.ts`.
+
+**What a Bluesky draft holds.** `ComposeDraft.text` (and `language` from a
+redraft), plus `bluesky`:
+
+| field | what |
+|---|---|
+| `reply` | `{ root, parent }` strong refs (`uri` + `cid`). `parent` is the post replied to; `root` is its `replyRef.root`, or the post itself when it is a top post. |
+| `quote` | the quoted post's strong ref, or `null` |
+| `images` | per image: the blob ref `uploadBlob` answered, its type and size, its alt text, its `aspectRatio` (or `null` when the browser could not read it), the file name |
+| `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `nudity` Nudity, `graphic-media` Graphic) |
+| `rkey` | the record key, made (`blueskyNextRkey`) when the draft is made, and stored with its first save (R6) |
+| `sent` | the exact record a send wrote or tried to, frozen with its facets and `createdAt`, and the input it was made from (`blueskyDraftInput`) |
+
+Facets are not kept on their own: they are made from the text at send
+time (`blueskyDetectFacets`, which resolves mentions to DIDs) and frozen in
+`sent.record`. Slots: `new`, `reply:<parent uri>`, `quote:<quoted uri>`.
+
+**The record** (`blueskyRecord`): `text`; `facets` when there are any;
+`reply`; `embed` is `app.bsky.embed.images` (each image with its `alt` and
+`aspectRatio`), `app.bsky.embed.record` for a quote, or
+`app.bsky.embed.recordWithMedia` for both; `labels` as
+`com.atproto.label.defs#selfLabels`, only the menu's values, in menu order,
+and **only with images** (the menu labels media, spec 7.4); `langs` from a
+redraft's language; `createdAt`.
+
+**What survives.** All of it is plain JSON in `caribou.drafts.<userKey>`.
+
+| event | the draft |
+|---|---|
+| reload | kept whole: text, refs, blob refs, alt text, labels, `rkey`, `sent`. The file behind an image is not (memory only); its blob ref is. |
+| account switch | kept under its own account; the dialog closes (it posts only as the account it opened for). |
+| session expiry | kept (rule: an expiry keeps drafts). A send that failed with the expiry keeps `sent`, so the retry after signing in again checks first. |
+| sign-out | removed with the account's other drafts. |
+| a 401 that removes a Mastodon session | kept (#215 tracks letting a reader delete it). |
+
+**A draft that can be posted is never empty.** `isDraftEmpty` is false for
+a Bluesky draft with text, images, a quote, or `sent`. Those are every field
+that alone lets Post send (a reply needs text or images; labels go only with
+images). So a quote with no text keeps its stored rkey through an unfreeze,
+a close and a reload (R6), and a send in doubt is never dropped.
+
+**One post per click** (`postBlueskyDraft`). Five rules. Every path in the
+send follows them; a new path must too.
+
+**R1. Only `getRecord` decides what happened.** After any failed create (no
+answer, a timeout, a 5xx, or an answered refusal such as `BlobNotFound` or
+"a value already exists at that key"), the send's result is never read from
+the error. It is read from `blueskyGetOwnPost(rkey)`:
+
+| the check | result |
+|---|---|
+| found, and it has this send's content (R7) | posted |
+| found, but another record | `earlier-posted`: the reader's current draft is kept with a new rkey |
+| absent (`RecordNotFound` only) | the rkey is unused: unfreeze (`sent: null`, same rkey), keep the reader's **current** draft, and throw the create's error |
+| the check failed | unknown: the send stays pending, nothing more is sent, the create's error is thrown; the next Post checks again |
+
+Only `RecordNotFound` means absent. A 404, `AccountDeactivated`,
+`AccountTakedown`, a 5xx or a network error is "the check failed".
+
+**R2. A retry sends what the reader sees now.** A pending draft (`rkey` and
+`sent`) is checked first, by the table above. Found → posted or
+`earlier-posted`, nothing is sent. Absent → the **current** draft is frozen
+on the same rkey and sent. A late first write is still safe: the second
+create fails ("exists"), the check finds the first record, the compare (R7)
+says it is another content, and the result is `earlier-posted` with the edit
+kept. With no edit, the compare says it is this content, and the result is
+`posted`.
+No edit is ever replaced by older text, and no draft is stuck: a record the
+PDS refuses (a missing blob) unfreezes, so removing the image lets it go.
+
+**R3. Durable before the network.** The frozen draft is written to storage
+before `createRecord`, and read back to confirm. If it cannot be stored,
+nothing is sent, the caller gets the draft back **unfrozen** (`onDraft`),
+and `DraftNotSaved` is thrown ("Could not save the draft, so the post was
+not sent."). So every later Post takes the same refused path until storage
+works. Without the stored rkey a reload could post twice.
+
+**R4. A send writes storage only for the draft version it owns.** Every save
+of a draft gives it a new revision (`rev`, unique, set by `saveDraft` and `storeDraftIf`). A send
+reads the slot's revision when it starts, and each write it makes (freeze,
+unfreeze, clear on success, the kept draft after `earlier-posted`) happens
+only if the stored revision is still the one it owns; a write it makes
+moves its own revision on. After every await inside the send (the check,
+facet detection) it checks the revision again before the freeze,
+and stops (`DraftChanged`, nothing sent) if another save came in. After the
+create it only skips its writes. So a dialog closed and reopened during
+the send, then edited, keeps its edit: that edit is a pending draft, and its
+next Post finds the record and keeps the edit (R2).
+
+**R5. Every message is true.** "Could not save the draft, so the post was
+not sent." only when the freeze was refused. "An image was uploaded again"
+only when one was.
+
+**R6. A draft gets its rkey when the draft is made**, like a Mastodon
+draft's `idempotencyKey`. The dialog makes it (`blueskyNextRkey`) when it
+opens a draft that has none, and it goes to storage with the draft's first
+save. Every copy of the draft (a reopened dialog, a reload) then has the
+same rkey, so one draft makes at most one record, even when two copies are
+posted at once. The rkey is kept through an unfreeze. It changes only after
+`earlier-posted`, for the kept edits. `postBlueskyDraft` refuses a draft
+with no rkey (a `TypeError`): the send never makes one.
+
+**R7. "This is our post" means the same content, not the same `createdAt`.**
+A found record is this send's post when its content matches the frozen
+record's, field by field: text, reply refs, quote ref, image CIDs and alt
+text, self-labels, langs. **Not facets:** a mention's facet is there only
+when its handle lookup worked, so two freezes of the same draft can differ
+in facets with no edit; facets come from the text, and the text is compared.
+The whole record is never deep-compared:
+`getRecord` gives the SDK's `BlobRef` objects for images, so a CID is read
+from `ref.$link` or from the CID object's string. An rkey belongs to one
+draft (R6), so the same content at it is this draft's post. This is what
+makes "no answer, the check says absent, the write lands late, Post again"
+end as `posted`, not as a second post.
+
+The dialog side (rule 4 of round 1, kept): the dialog captures its owner
+(client, account, slot, dialog session) before each await (fit, upload,
+re-upload, `recoverBlob`, the target read, the send) and checks it after,
+before it touches its state or storage. `onDraft` is applied only while the
+owner holds.
+
+After `posted`, the post is read back (`fetchStatus`, 3 tries a second
+apart, as the AppView lags). It is cached and `caribou:posted` is sent only
+while the client's account is still the active one. A post the AppView does
+not have yet answers `posted` with `status: null`.
+
+Tests (`bluesky-compose.test.ts`): a timeout after the write, then a retry,
+is one post; a lost answer, a reload, a retry; a lost answer, an edit, a
+retry keeps the edit; not found sends the current draft once with the same
+rkey (R2); a late first write with an edit keeps the edit (R2); a found
+record that is not the frozen one is never read as posted; a failed check
+sends nothing (R1); a 400 that is not `RecordNotFound` sends nothing; a
+refused first create unfreezes (R1); a pending send whose retry is refused
+for a missing blob unfreezes, and removing the image posts (R1, R2);
+storage refusing every click sends nothing, then one post after a reload
+(R3); a reopened and edited draft survives an old send's success, its late
+blob refusal, and a facet lookup that lands late (R4); an answer after an
+account switch tells no screen.
+
 ## Notifications (`notifications-store.ts`, `notification-groups.ts`)
 
 **Paging, both networks.** A list ends only when the client says so, with

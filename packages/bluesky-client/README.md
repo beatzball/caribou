@@ -45,6 +45,7 @@ own files; ask in your report for a change in another's.
 | `src/browser.ts` | the SDK classes, the client and the OAuth glue, for the lazy chunk | #177, #182 |
 | `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
 | `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
+| `src/compose.ts` | `countPost`, `postFits`, `nextRkey`, `detectFacets` over the SDK's `RichText` and `TID` (browser only, through `./browser`) | #189 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
 How they fit:
@@ -542,6 +543,61 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   reach SDK internals (`sessionGetter`, `serverFactory`); a missing one
   throws, so an SDK upgrade that moves them fails the tests. Nothing else
   is aborted: other accounts' requests go on.
+
+## Compose (#189, spec 7.2)
+
+The client's write side for a new post. The draft and the retry rules are
+in `packages/state` README, "Bluesky drafts"; the dialog's in the app
+README, "Bluesky compose".
+
+**Counting (`src/compose.ts`).** `countPost(text)` is the SDK's `RichText`:
+`graphemes` is `graphemeLength`, `bytes` is `length` (UTF-8). The PDS checks
+`app.bsky.feed.post` with the same `graphemeLen`, so the counter, the Post
+button and the server agree. `postFits` is true at 300 graphemes **and**
+3000 bytes or fewer. A link counts as its whole text: Bluesky does not
+shorten it, and phase 4 sends no link card. Tests: plain text, a family
+emoji (1 grapheme, 25 bytes), a flag, a letter with 50 combining marks (1
+grapheme, 101 bytes), 30 of those (under 300 graphemes, over 3000 bytes),
+CJK (3 bytes each), a link.
+
+**Record keys.** `nextRkey()` is the SDK's `TID.nextStr()` (`@atproto/common-web`).
+
+**Facets.** `detectFacets(agent, text)` is `RichText.detectFacets`: links,
+mentions and tags, with byte offsets. The SDK gives a mention whose handle
+does not resolve an empty DID, and the PDS would refuse the whole post for
+it, so that mention is dropped and its text stays plain. A failed lookup
+never fails a post.
+
+**The client methods.** Optional on `CaribouClient`; only this client has them.
+
+| method | call | answer |
+|---|---|---|
+| `blueskyNextRkey()` | `nextRkey` | a TID |
+| `blueskyDetectFacets(text)` | `detectFacets` with the session's agent | facets as plain JSON |
+| `blueskyUploadBlob(file)` | `com.atproto.repo.uploadBlob`, `encoding` = the file's type | the blob ref as JSON: `{ $type: 'blob', ref: { $link }, mimeType, size }` |
+| `blueskyCreatePost(record, rkey)` | `com.atproto.repo.createRecord` on the reader's repo, collection `app.bsky.feed.post`, that `rkey` | `{ uri, cid }` |
+| `blueskyGetOwnPost(rkey)` | `com.atproto.repo.getRecord` on the reader's repo, on the PDS (the agent's own host, not the AppView, which can lag) | `{ uri, cid, value }`, or `null` for `RecordNotFound` |
+
+- Writes and `getOwnPost` skip the read dedup: two sends are two requests.
+- Errors go through `normalizeXrpcError`; a 401 calls `onUnauthorized`.
+- **`getOwnPost` answers `null` only for the XRPC error `RecordNotFound`.**
+  Anything else throws: a network error, a timeout, a 5xx, a 404, a 400
+  such as `AccountDeactivated` or `AccountTakedown`, or a 400 whose message
+  says "not found". An unknown answer is never read as "not there", or a
+  retry could send on it.
+- **A used `rkey`** gives a plain 500 from the PDS (spec 7.2: the repo layer
+  throws "There is already a value at key"). The client does not try to
+  read it; it is `server_error`, and the retry rule finds the record.
+- **A missing blob** (`BlobNotFound`, or "Could not find blob") is
+  `BlueskyBlobNotFound`, a `CaribouError('not_found')` with the blob's
+  `cid` when the message names it. The root exports it, so the app can tell
+  it apart without the SDK.
+- The Mastodon-shaped `createStatus`, `uploadMedia`, `fetchMedia`,
+  `waitForMedia`, `updateMedia` and `fetchInstance` answer `not_found`
+  naming the Bluesky method to use. Alt text has no server call: it goes in
+  the post's embed.
+- `restoreClient` passes the helpers in as `compose`, so `client.ts` keeps no
+  runtime import of the SDK.
 
 ## Embeds (`mapEmbed`, spec 7.3)
 
