@@ -1,7 +1,7 @@
 import { BSKY_LABELER_DID, type AppBskyFeedDefs, type ModerationPrefs } from '@atproto/api'
 import { describe, expect, it, vi } from 'vitest'
 import { createBlueskyClient, type BlueskyAgent } from '../client.js'
-import { labelersCoveredBy, parseContentLabelers } from '../content-labelers.js'
+import { answerCoverage, parseContentLabelers } from '../content-labelers.js'
 import { blueskyCheckSettled, readerModerationSource, type LabelDefs } from '../moderation.js'
 import { fixture, READER } from './_helpers.js'
 
@@ -49,8 +49,8 @@ describe('parseContentLabelers', () => {
     expect(parseContentLabelers('')).toEqual([])
     expect(parseContentLabelers('not a did, ;')).toEqual([])
     expect(parseContentLabelers(undefined)).toEqual([])
-    expect(labelersCoveredBy({ 'Atproto-Content-Labelers': BSKY_LABELER_DID })).toEqual([BSKY_LABELER_DID])
-    expect(labelersCoveredBy(undefined)).toEqual([])
+    expect(answerCoverage({ 'Atproto-Content-Labelers': BSKY_LABELER_DID }, [], [])).toEqual([BSKY_LABELER_DID])
+    expect(answerCoverage(undefined, [], [])).toEqual([])
   })
 })
 

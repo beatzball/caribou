@@ -8,7 +8,7 @@ import {
   type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
-import { labelersCoveredBy } from './content-labelers.js'
+import { answerCoverage, commonLabelers } from './content-labelers.js'
 import { BlueskyBlobNotFound, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
 import type { MapContext } from './map/context.js'
@@ -39,7 +39,10 @@ export const BLUESKY_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
 /** The parts of a signed-in `Agent` the read client calls. */
 export type BlueskyAgent = Pick<Agent,
   'did' | 'getTimeline' | 'getAuthorFeed' | 'getPostThread' | 'getPosts' | 'getProfile' | 'getProfiles'
-> & Pick<Agent, 'listNotifications' | 'countUnreadNotifications' | 'updateSeenNotifications'> & {
+> & Pick<Agent, 'listNotifications' | 'countUnreadNotifications' | 'updateSeenNotifications'>
+  // What the SDK sends in `atproto-accept-labelers` (README, "Labeler
+  // coverage"). Missing: none sent, so no coverage.
+  & Partial<Pick<Agent, 'labelers' | 'appLabelers'>> & {
   com: {
     atproto: {
       repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'getRecord' | 'uploadBlob'>
@@ -55,7 +58,7 @@ export type BlueskyAgent = Pick<Agent,
 
 /**
  * What an AppView answer established for moderation: the labelers whose
- * labels it carries (`atproto-content-labelers`). Missing is `[]`.
+ * labels it carries (README, "Labeler coverage"). Missing is `[]`.
  */
 export interface BlueskyCoverage {
   labelersCovered?: string[]
@@ -63,8 +66,8 @@ export interface BlueskyCoverage {
 
 /**
  * Moderation as plain data, built by the caller from the reader's prefs
- * (#180). `coverage` is the answer's, when the read passes it on; a read
- * that does not passes none, and its decisions never settle the veil.
+ * (#180). `coverage` is the answer's: every signed-in read passes it
+ * (README, "Labeler coverage"). None never settles the veil.
  */
 export interface BlueskyModerationSource {
   post(view: AppBskyFeedDefs.PostView, coverage?: BlueskyCoverage): BlueskyModerationResult
@@ -173,7 +176,32 @@ function notYet(what: string, issue: string): () => Promise<never> {
 export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   const { userKey, agent, moderation } = opts
   const dedup = createDedup()
-  const ctx: MapContext = { viewerOf: userKey, moderatePost: (view) => moderation.post(view) }
+
+  // The labelers the agent sends in `atproto-accept-labelers` now. Rule 2
+  // holds only for a signed-in agent, whose reads go through its PDS to the
+  // AppView. An agent with no session (the public host, which ignores the
+  // request header) counts as sending none.
+  function sending(): unknown[] {
+    if (!agent.did) return []
+    return [...agent.appLabelers ?? [], ...agent.labelers ?? []]
+  }
+
+  // One AppView answer, with its labeler coverage (README, "Labeler
+  // coverage"). What was sent is read when the call starts and when it lands.
+  async function answer<D>(call: () => Promise<{ data: D; headers?: Record<string, string | undefined> }>): Promise<{ data: D; coverage: BlueskyCoverage }> {
+    const start = sending()
+    const res = await call()
+    return { data: res.data, coverage: { labelersCovered: answerCoverage(res.headers, start, sending()) } }
+  }
+
+  // Several answers: only the labelers every one of them covered.
+  function common(list: readonly BlueskyCoverage[]): BlueskyCoverage {
+    return { labelersCovered: commonLabelers(list.map((c) => c.labelersCovered ?? [])) }
+  }
+
+  function ctxFor(coverage: BlueskyCoverage): MapContext {
+    return { viewerOf: userKey, moderatePost: (view) => moderation.post(view, coverage) }
+  }
 
   async function run<T>(key: string, fn: () => Promise<T>): Promise<T> {
     try {
@@ -201,9 +229,9 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return agent.did
   }
 
-  function account(view: ProfileView, coverage?: BlueskyCoverage): Account {
+  function account(view: ProfileView, coverage: BlueskyCoverage): Account {
     const a = mapAccount(view)
-    return { ...a, bluesky: { ...a.bluesky!, moderation: coverage ? moderation.profile(view, coverage) : moderation.profile(view) } }
+    return { ...a, bluesky: { ...a.bluesky!, moderation: moderation.profile(view, coverage) } }
   }
 
   // One bad post never fails a page: a mapper that throws on one post's data
@@ -219,12 +247,13 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     })
   }
 
-  function entries(feed: AppBskyFeedDefs.FeedViewPost[]): Status[] {
-    return each(feed, (e) => e.post.uri, (e) => mapFeedEntry(e, ctx))
+  function entries(feed: AppBskyFeedDefs.FeedViewPost[], coverage: BlueskyCoverage): Status[] {
+    const c = ctxFor(coverage)
+    return each(feed, (e) => e.post.uri, (e) => mapFeedEntry(e, c))
   }
 
-  function posts(views: readonly AppBskyFeedDefs.PostView[], coverage?: BlueskyCoverage): Status[] {
-    const c: MapContext = coverage ? { viewerOf: userKey, moderatePost: (view) => moderation.post(view, coverage) } : ctx
+  function posts(views: readonly AppBskyFeedDefs.PostView[], coverage: BlueskyCoverage): Status[] {
+    const c = ctxFor(coverage)
     return each(views, (v) => v.uri, (v) => mapPost(v, c))
   }
 
@@ -235,15 +264,17 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
   // Seam 7: no since_id, so page from the top until the known top entry.
   async function catchUp(
-    fetchPage: (cursor: string | undefined) => Promise<{ feed: AppBskyFeedDefs.FeedViewPost[]; cursor?: string }>,
+    fetchPage: (cursor: string | undefined) => Promise<{ data: { feed: AppBskyFeedDefs.FeedViewPost[]; cursor?: string }; coverage: BlueskyCoverage }>,
     sinceId: string,
   ): Promise<TimelinePage> {
     const out: AppBskyFeedDefs.FeedViewPost[] = []
+    const covered: BlueskyCoverage[] = []
     let cursor: string | undefined
     for (let i = 0; i < CATCH_UP_MAX_PAGES; i++) {
-      const data = await fetchPage(cursor)
+      const { data, coverage } = await fetchPage(cursor)
+      covered.push(coverage)
       const at = data.feed.findIndex((e) => feedEntryId(e) === sinceId)
-      if (at !== -1) return page(entries([...out, ...data.feed.slice(0, at + 1)]), undefined)
+      if (at !== -1) return page(entries([...out, ...data.feed.slice(0, at + 1)], common(covered)), undefined)
       // An empty page ends the feed: its cursor names nothing.
       if (data.feed.length === 0) {
         cursor = undefined
@@ -254,19 +285,19 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (!cursor) break
     }
     // Not met: a gap. Its cursor is where the page after it starts.
-    return Object.assign(entries(out), { nextCursor: out.length > 0 ? cursor ?? null : null })
+    return Object.assign(entries(out, common(covered)), { nextCursor: out.length > 0 ? cursor ?? null : null })
   }
 
   async function timeline(params: { sinceId?: string; cursor?: string; limit?: number }): Promise<TimelinePage> {
-    const fetchPage = async (cursor: string | undefined, limit: number | undefined) =>
-      (await agent.getTimeline({ ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) })).data
+    const fetchPage = (cursor: string | undefined, limit: number | undefined) =>
+      answer(() => agent.getTimeline({ ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }))
     if (params.sinceId) {
       const sinceId = params.sinceId
       return run(`home:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId))
     }
     return run(`home:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
-      const data = await fetchPage(params.cursor, params.limit)
-      return feedPage(data.feed, entries(data.feed), data.cursor)
+      const { data, coverage } = await fetchPage(params.cursor, params.limit)
+      return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
     })
   }
 
@@ -278,15 +309,18 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       // on, a few pages at most, until a page has a post or the bookmarks
       // end; at the budget, answer an empty page with the last cursor. That
       // is not the end: the store ends a list only on a null cursor.
+      // The posts keep what every page read covered.
       let cursor = params.cursor
+      const covered: BlueskyCoverage[] = []
       for (let i = 0; i < BOOKMARK_SKIP_PAGES; i++) {
-        const { data } = await agent.app.bsky.bookmark.getBookmarks({
+        const { data, coverage } = await answer(() => agent.app.bsky.bookmark.getBookmarks({
           ...(cursor ? { cursor } : {}),
           ...(params.limit ? { limit: params.limit } : {}),
-        })
+        }))
+        covered.push(coverage)
         const views = data.bookmarks.map((b): object => b.item).filter(isPostView)
         if (data.bookmarks.length === 0) return page([], undefined)
-        if (views.length > 0) return feedPage(data.bookmarks, posts(views), data.cursor)
+        if (views.length > 0) return feedPage(data.bookmarks, posts(views, common(covered)), data.cursor)
         if (!data.cursor) return page([], undefined)
         cursor = data.cursor
       }
@@ -298,11 +332,11 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return run(`${kind}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
       const q = { ...(params.cursor ? { cursor: params.cursor } : {}), ...(params.limit ? { limit: params.limit } : {}) }
       if (kind === 'mutes') {
-        const { data } = await agent.app.bsky.graph.getMutes(q)
-        return page(data.mutes.map((v) => account(v)), data.cursor)
+        const { data, coverage } = await answer(() => agent.app.bsky.graph.getMutes(q))
+        return page(data.mutes.map((v) => account(v, coverage)), data.cursor)
       }
-      const { data } = await agent.app.bsky.graph.getBlocks(q)
-      return page(data.blocks.map((v) => account(v)), data.cursor)
+      const { data, coverage } = await answer(() => agent.app.bsky.graph.getBlocks(q))
+      return page(data.blocks.map((v) => account(v, coverage)), data.cursor)
     })
   }
 
@@ -328,9 +362,11 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
         opts.onMapError?.(err, n?.uri ?? '')
       }
     }
-    // Each getPosts answer's own coverage goes with its posts.
-    const answers = uris.size === 0 ? [] : await Promise.all(chunks([...uris], BATCH).map((list) => agent.getPosts({ uris: list })))
-    const mapped = answers.flatMap((p) => posts(p.data.posts, { labelersCovered: labelersCoveredBy(p.headers) }))
+    // The posts keep what every getPosts answer covered; the authors keep
+    // the listNotifications answers' (`coverage`).
+    const answers = uris.size === 0 ? [] : await Promise.all(chunks([...uris], BATCH).map((list) => answer(() => agent.getPosts({ uris: list }))))
+    const postCoverage = common(answers.map((a) => a.coverage))
+    const mapped = posts(answers.flatMap((a) => a.data.posts), postCoverage)
     const byUri = new Map(mapped.map((s) => [s.bluesky?.uri ?? s.id, s]))
     return wanted.flatMap((n) => {
       try {
@@ -365,24 +401,17 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return Object.assign(await notificationItems(raw, coverage), { nextCursor: cursor, bluesky: seenHint(raw) })
   }
 
-  // Several answers (a catch-up): only the labelers every one of them covered.
-  function commonCoverage(list: BlueskyCoverage[]): BlueskyCoverage {
-    if (list.length === 0) return { labelersCovered: [] }
-    const [first, ...rest] = list.map((c) => c.labelersCovered ?? [])
-    return { labelersCovered: first!.filter((did) => rest.every((r) => r.includes(did))) }
-  }
-
   async function notifications(params: {
     types?: readonly string[]; cursor?: string; sinceId?: string; sinceAt?: string; limit?: number
   }): Promise<NotificationPage> {
     const reasons = reasonsFor(params.types)
     const fetchPage = async (cursor: string | undefined, limit: number | undefined): Promise<RawNotificationPage> => {
-      const res = await agent.listNotifications({
+      const { data, coverage } = await answer(() => agent.listNotifications({
         ...(reasons.length > 0 ? { reasons } : {}),
         ...(cursor ? { cursor } : {}),
         ...(limit ? { limit } : {}),
-      })
-      return { ...res.data, coverage: { labelersCovered: labelersCoveredBy(res.headers) } }
+      }))
+      return { ...data, coverage }
     }
     if (params.sinceId) {
       const sinceId = params.sinceId
@@ -401,7 +430,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
           covered.push(data.coverage)
           // Matched on the raw page, before any skip.
           const at = data.notifications.findIndex(met)
-          if (at !== -1) return notificationPage([...out, ...data.notifications.slice(0, at)], null, commonCoverage(covered))
+          if (at !== -1) return notificationPage([...out, ...data.notifications.slice(0, at)], null, common(covered))
           if (data.notifications.length === 0) {
             cursor = undefined
             break
@@ -411,7 +440,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
           if (!cursor) break
         }
         // Not met: a gap, unless the list ended.
-        return notificationPage(out, out.length > 0 ? cursor ?? null : null, commonCoverage(covered))
+        return notificationPage(out, out.length > 0 ? cursor ?? null : null, common(covered))
       })
     }
     return run(`notifications:${reasons.join(',')}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
@@ -421,11 +450,11 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     })
   }
 
-  function flattenReplies(node: AppBskyFeedDefs.ThreadViewPost, out: Status[]): void {
+  function flattenReplies(node: AppBskyFeedDefs.ThreadViewPost, out: Status[], coverage: BlueskyCoverage): void {
     for (const reply of node.replies ?? []) {
       if (!isThreadViewPost(reply)) continue
-      out.push(...posts([reply.post]))
-      flattenReplies(reply, out)
+      out.push(...posts([reply.post], coverage))
+      flattenReplies(reply, out, coverage)
     }
   }
 
@@ -447,8 +476,8 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
     async fetchStatus(statusId) {
       return run(`status:${statusId}`, async () => {
-        const { data } = await agent.getPosts({ uris: [statusId] })
-        const post = posts(data.posts.slice(0, 1))[0]
+        const { data, coverage } = await answer(() => agent.getPosts({ uris: [statusId] }))
+        const post = posts(data.posts.slice(0, 1), coverage)[0]
         if (!post) throw new CaribouError('not_found', 'post not found', { status: 404 })
         return post
       })
@@ -457,35 +486,39 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     async fetchStatuses(statusIds) {
       if (statusIds.length === 0) return []
       return run(`statuses:${statusIds.join(',')}`, async () => {
-        const pages = await Promise.all(chunks(statusIds, BATCH).map((uris) => agent.getPosts({ uris })))
-        return posts(pages.flatMap((p) => p.data.posts))
+        const pages = await Promise.all(chunks(statusIds, BATCH).map((uris) => answer(() => agent.getPosts({ uris }))))
+        return posts(pages.flatMap((p) => p.data.posts), common(pages.map((p) => p.coverage)))
       })
     },
 
     async fetchThread(statusId) {
       return run(`thread:${statusId}`, async () => {
-        const { data } = await agent.getPostThread({ uri: statusId })
-        if (!isThreadViewPost(data.thread) || posts([data.thread.post]).length === 0) {
+        const { data, coverage } = await answer(() => agent.getPostThread({ uri: statusId }))
+        if (!isThreadViewPost(data.thread) || posts([data.thread.post], coverage).length === 0) {
           throw new CaribouError('not_found', 'post not found', { status: 404 })
         }
         const ancestors: Status[] = []
-        for (let p = data.thread.parent; isThreadViewPost(p); p = p.parent) ancestors.unshift(...posts([p.post]))
+        for (let p = data.thread.parent; isThreadViewPost(p); p = p.parent) ancestors.unshift(...posts([p.post], coverage))
         const descendants: Status[] = []
-        flattenReplies(data.thread, descendants)
+        flattenReplies(data.thread, descendants, coverage)
         return { ancestors, descendants }
       })
     },
 
     async lookupAccount(handle) {
       const actor = handle.replace(/^@/, '')
-      return run(`lookup:${actor}`, async () => account((await agent.getProfile({ actor })).data))
+      return run(`lookup:${actor}`, async () => {
+        const { data, coverage } = await answer(() => agent.getProfile({ actor }))
+        return account(data, coverage)
+      })
     },
 
     async verifyCredentials(): Promise<AccountCredentials> {
       return run('verify', async () => {
         if (!agent.did) throw new CaribouError('unauthorized', 'no active session')
-        const view = (await agent.getProfile({ actor: agent.did })).data
-        const a = account(view)
+        const actor = agent.did
+        const { data: view, coverage } = await answer(() => agent.getProfile({ actor }))
+        const a = account(view, coverage)
         return {
           ...a,
           source: {
@@ -499,11 +532,11 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
     async fetchAccountStatuses(accountId, { tab, cursor, limit }) {
       return run(`author:${accountId}:${tab}:${cursor ?? ''}:${limit ?? ''}`, async () => {
-        const { data } = await agent.getAuthorFeed({
+        const { data, coverage } = await answer(() => agent.getAuthorFeed({
           actor: accountId, filter: author[tab], includePins: false,
           ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}),
-        })
-        return feedPage(data.feed, entries(data.feed), data.cursor)
+        }))
+        return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
       })
     },
 

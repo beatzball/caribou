@@ -278,8 +278,8 @@ function decide(
 /**
  * The signed-in client's moderation source (`restoreClient`): the reader's
  * DID, and their prefs and definitions as they are now (null: not loaded,
- * fail closed). The coverage a read passes on is the answer's own
- * (`atproto-content-labelers`); a read that passes none settles nothing.
+ * fail closed). The coverage a read passes on is the answer's own (README,
+ * "Labeler coverage"); a read that passes none settles nothing.
  */
 export function readerModerationSource(
   did: string,

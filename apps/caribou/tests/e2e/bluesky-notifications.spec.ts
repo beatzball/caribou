@@ -19,8 +19,10 @@ const CID = 'bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm'
 
 // Bluesky's own labeler, which every reader subscribes to.
 const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
-// The AppView says which labelers' labels an answer carries. With it the
-// reader veil can settle; without it every author stays covered.
+// The AppView says which labelers' labels an answer carries. The fixture
+// PDS sends it but does not expose it, as the real servers do, so the page
+// settles from what the request sent (bluesky-client README, "Labeler
+// coverage"). bluesky-coverage.spec.ts covers the exposed case.
 const COVERED = { 'atproto-content-labelers': `${BSKY_LABELER};redact` }
 
 function postView(uri: string) {
