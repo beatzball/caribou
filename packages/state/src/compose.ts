@@ -68,6 +68,24 @@ export interface BlueskyDraft {
   rkey: string | null
   /** Set from just before a send until its outcome is known. */
   sent: BlueskySentRecord | null
+  /** A redraft only: the URI of the post it was made from (#190). */
+  source?: string
+  /**
+   * A redraft only: the delete of `source` had no clear answer, so the post
+   * may still be up. The dialog checks when it opens the draft.
+   */
+  sourceMaybeLive?: boolean
+  /**
+   * A staged redraft only: when it was staged (ms). After a day with its
+   * post still up, it is shown as a normal redraft (README, rule E).
+   */
+  stagedAt?: number
+  /**
+   * Set the first time a staged redraft can be seen: revealed, opened or
+   * moved to `redraft:`. An exposed draft is a normal draft for good: only
+   * its send or the reader removes it (README, rule E).
+   */
+  exposed?: boolean
 }
 
 export interface ComposeDraft {
@@ -102,7 +120,10 @@ export interface ComposeDraft {
 // an unsent draft. The deleted post exists nowhere else, so it is stored
 // like any draft, beside the one it must not overwrite.
 // A Bluesky quote keeps its own draft too, `quote:<uri>`.
-export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}` | `quote:${string}`
+// `staged:<key>` holds a Bluesky redraft while its delete runs. No composer
+// opens it; the delete's outcome moves it to `redraft:<key>` or removes it
+// (README, "Bluesky delete and redraft").
+export type DraftSlot = 'new' | `reply:${string}` | `redraft:${string}` | `quote:${string}` | `staged:${string}`
 
 export function draftSlot(inReplyToId: string | null | undefined): DraftSlot {
   return inReplyToId ? `reply:${inReplyToId}` : 'new'
@@ -170,7 +191,7 @@ function writeAll(userKey: UserKey, all: Partial<Record<DraftSlot, ComposeDraft>
 export function loadDraft(userKey: UserKey, slot: DraftSlot): ComposeDraft | null {
   const d = readAll(userKey)[slot]
   if (!d || typeof d.text !== 'string') return null
-  return emptyDraft(d)
+  return withRevealed(userKey, slot, emptyDraft(d))
 }
 
 // An empty draft is removed rather than stored, so a dialog opened and
@@ -209,14 +230,86 @@ export function storeDraftIf(
 /**
  * The slot of the oldest kept redraft (`redraft:<key>`), or null. A new
  * post opens it before the plain `new` draft, so it cannot be forgotten.
+ * A `staged:` slot is never found here.
  */
 export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
   for (const [slot, d] of Object.entries(readAll(userKey))) {
-    if (slot.startsWith('redraft:') && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
+    const kept = slot.startsWith('redraft:')
+      || (slot.startsWith('staged:') && (!!d?.bluesky?.exposed || revealed.has(`${userKey}\u0000${slot}`)))
+    if (kept && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
       return slot as DraftSlot
     }
   }
   return null
+}
+
+// `staged:` slots whose delete is decided but that could not be renamed
+// (storage refused), with the fields storage could not take (`exposed`,
+// the outcome's `sourceMaybeLive`). This page reads the slot with them.
+const revealed = new Map<string, Partial<BlueskyDraft>>()
+
+function withRevealed(userKey: UserKey, slot: DraftSlot, d: ComposeDraft): ComposeDraft {
+  const over = revealed.get(`${userKey}\u0000${slot}`)
+  return over && d.bluesky ? { ...d, bluesky: { ...d.bluesky, ...over } } : d
+}
+
+/**
+ * Reveals a `staged:` slot whose rename failed: it is exposed (rule E),
+ * and `findRedraftSlot` finds it. `patch` (the outcome's mark) is kept in
+ * this page, and stored too when storage takes it, with `exposed`.
+ */
+export function revealDraftSlot(userKey: UserKey, slot: DraftSlot, patch: Partial<BlueskyDraft> = {}): void {
+  const key = `${userKey}\u0000${slot}`
+  revealed.set(key, { ...revealed.get(key), ...patch, exposed: true })
+  const held = loadDraft(userKey, slot)
+  if (held) storeDraftIf(userKey, slot, held.rev ?? '', held)
+}
+
+/** Changes the page-only fields of a revealed slot (no-op for any other). */
+export function patchRevealed(userKey: UserKey, slot: DraftSlot, patch: Partial<BlueskyDraft>): void {
+  const key = `${userKey}\u0000${slot}`
+  const over = revealed.get(key)
+  if (over) revealed.set(key, { ...over, ...patch })
+}
+
+/** Tests only: forget the page-only reveals, as a reload does. */
+export function _testOnlyForgetRevealed(): void {
+  revealed.clear()
+}
+
+/**
+ * Renames `from` to `to` in one write of the account's draft map, only
+ * while `from` still has revision `expected` and `to` is empty. `patch`
+ * changes the moved draft. No second copy is stored, so a full storage
+ * that took the draft takes the rename too. Answers the new revision, or
+ * false.
+ */
+export function renameDraftIf(
+  userKey: UserKey, from: DraftSlot, expected: string, to: DraftSlot,
+  patch: (d: ComposeDraft) => ComposeDraft = (d) => d,
+): { rev: string } | false {
+  const all = readAll(userKey)
+  const held = all[from]
+  if (!held || typeof held.text !== 'string' || (held.rev ?? '') !== expected || all[to]) return false
+  const rev = newKey()
+  // Rebuilt in order, so the map keeps its shape and its size.
+  const next: Partial<Record<DraftSlot, ComposeDraft>> = {}
+  for (const [slot, d] of Object.entries(all) as Array<[DraftSlot, ComposeDraft]>) {
+    if (slot === from) next[to] = { ...patch(withRevealed(userKey, from, held as ComposeDraft)), rev }
+    else next[slot] = d
+  }
+  if (!writeAll(userKey, next)) return false
+  revealed.delete(`${userKey}\u0000${from}`)
+  return { rev }
+}
+
+/** Every stored slot of the account, with its draft. */
+export function storedDrafts(userKey: UserKey): Array<[DraftSlot, ComposeDraft]> {
+  const out: Array<[DraftSlot, ComposeDraft]> = []
+  for (const [slot, d] of Object.entries(readAll(userKey))) {
+    if (d && typeof d.text === 'string') out.push([slot as DraftSlot, withRevealed(userKey, slot as DraftSlot, emptyDraft(d))])
+  }
+  return out
 }
 
 export function clearDraft(userKey: UserKey, slot: DraftSlot): void {

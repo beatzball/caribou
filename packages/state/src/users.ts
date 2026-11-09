@@ -6,6 +6,7 @@ import {
   type Account,
 } from '@beatzball/caribou-mastodon-client'
 import { prefsKey } from './prefs.js'
+import { pruneDraftFiles } from './draft-files.js'
 import { blueskyDriver, deferredBlueskyClient, isBlueskySession } from './bluesky-session.js'
 
 // The rules for `generation` and `expired`, and for what a failure may do to
@@ -172,6 +173,8 @@ function dropSession(key: UserKey): void {
   users.value = next
   localStorage.removeItem(prefsKey(key))
   localStorage.removeItem(`caribou.drafts.${key}`)
+  // The account's redraft image bytes go with its drafts.
+  void pruneDraftFiles()
 }
 
 /**

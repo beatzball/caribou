@@ -1,6 +1,9 @@
+import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, loadDraft, saveDraft,
+  activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, getDraftFiles, loadDraft,
+  putDraftFiles, saveDraft, _testOnlyClearDraftFiles, type DraftSlot, findRedraftSlot,
+  ownerGeneration, settleBlueskyRedraft, storeBlueskyRedraft, storedDrafts, _testOnlyForgetRevealed,
   setBlueskyDriver, statusCache, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
@@ -17,6 +20,20 @@ vi.mock('../_bluesky.js', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   loadBluesky: async () => compose,
 }))
+
+// The IndexedDB read of a slot's bytes, held when a test says so.
+const fileRead = vi.hoisted(() => ({ hold: null as Promise<void> | null, calls: 0 }))
+vi.mock('@beatzball/caribou-state', async (orig) => {
+  const m = await orig<{ getDraftFiles: (...a: unknown[]) => Promise<unknown> }>()
+  return {
+    ...m,
+    getDraftFiles: async (...a: unknown[]) => {
+      fileRead.calls += 1
+      if (fileRead.hold) await fileRead.hold
+      return m.getDraftFiles(...a)
+    },
+  }
+})
 
 const fit = vi.hoisted(() => ({ result: null as null | ((f: Blob) => FitResult), gate: null as Promise<void> | null }))
 vi.mock('../_image-fit.js', () => ({
@@ -1162,21 +1179,532 @@ describe('round 4 (PR #232)', () => {
     expect(loadDraft(KEY, 'new')).toBeNull()
   })
 
+  // The create is held, not the facets: an edit during the lookup stops the
+  // send before the freeze (R4), so it would never reach the close (#232 review R5-N1).
   it('an earlier opening\'s send posts, but the reopened draft was edited: the dialog stays with the edit', async () => {
     const pds = signInBluesky()
     const el = await mount()
     await open(el)
     await type(el, 'v1')
-    const lookup1 = deferred<never[]>()
-    pds.client.blueskyDetectFacets.mockImplementationOnce(() => lookup1.promise)
+    const create = deferred<void>()
+    const realCreate = pds.client.blueskyCreatePost.getMockImplementation()!
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
+      await create.promise
+      return realCreate(record, rkey)
+    })
     await submit(el)
+    expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(1)
     $(el, '[data-action="cancel"]')!.click()
     await settle(el)
     await open(el)
     await type(el, 'v1 and more')
-    lookup1.resolve([])
+    create.resolve()
     await settle(el)
+    expect([...pds.records.values()].map((r) => r.text)).toEqual(['v1'])
     expect($<HTMLDialogElement>(el, 'dialog')?.open).toBe(true)
     expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('v1 and more')
+  })
+})
+
+// #190: a Bluesky redraft, stored before its delete (app README, "Bluesky delete and redraft").
+describe('Bluesky redraft', () => {
+  const PARENT = { uri: bobPost().id, cid: 'bafyp1' }
+  const QUOTED = { uri: 'at://did:plc:carol/app.bsky.feed.post/q1', cid: 'bafyq1' }
+  const SLOT: DraftSlot = 'redraft:k1'
+  const image = (id: string, link: string) => ({
+    id, blob: { $type: 'blob' as const, ref: { $link: link }, mimeType: 'image/jpeg', size: 3 },
+    mime: 'image/jpeg', size: 3, alt: `alt ${id}`, aspectRatio: { width: 4, height: 3 },
+  })
+  const redraft = (over: Partial<NonNullable<ReturnType<typeof emptyDraft>['bluesky']>> = {}) => emptyDraft({
+    text: 'from the deleted post', language: 'de', inReplyToId: over.reply ? over.reply.parent.uri : null,
+    bluesky: emptyBlueskyDraft({ labels: ['nudity'], images: [image('i1', 'bafkA')], rkey: '3kredraft0001', ...over }),
+  })
+
+  // As storeBlueskyRedraft leaves it: the draft and the image bytes.
+  async function storeRedraft(over: Parameters<typeof redraft>[0] = {}) {
+    saveDraft(KEY, SLOT, redraft(over))
+    await putDraftFiles(KEY, SLOT, { i1: new Blob(['A'], { type: 'image/jpeg' }) })
+  }
+
+  async function openRedraft(el: CaribouComposeDialog) {
+    const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = { blueskyRedraft: { userKey: KEY, slot: SLOT } }
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+    await settle(el)
+    return detail.opened
+  }
+
+  // IndexedDB answers on its own schedule.
+  async function untilPreview(el: CaribouComposeDialog) {
+    for (let i = 0; i < 50 && !$(el, '[data-bsky-image="i1"] img'); i++) await settle(el)
+  }
+
+  beforeEach(async () => { await _testOnlyClearDraftFiles() })
+
+  it('opens the stored slot: the draft, its images shown from the stored bytes, and its own rkey', async () => {
+    const pds = signInBluesky()
+    await storeRedraft()
+    const el = await mount()
+    expect(await openRedraft(el)).toBe(true)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    await untilPreview(el)
+    expect($(el, '[data-bsky-image="i1"] img')).not.toBeNull()
+    expect(pds.client.blueskyNextRkey).not.toHaveBeenCalled()
+    // No other draft: no "other unsent draft" note.
+    expect($(el, '[data-redraft-note]')).toBeNull()
+    await submit(el)
+    expect(pds.client.blueskyCreatePost.mock.calls.map((c) => c[1])).toEqual(['3kredraft0001'])
+    const sent = [...pds.records.values()][0]!
+    expect(sent.langs).toEqual(['de'])
+    expect(sent.labels).toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'nudity' }] })
+    expect(sent.embed).toMatchObject({ $type: 'app.bsky.embed.images', images: [{ alt: 'alt i1', aspectRatio: { width: 4, height: 3 } }] })
+  })
+
+  it('after the post is sent and the dialog closes, the stored bytes go', async () => {
+    signInBluesky()
+    await storeRedraft()
+    const el = await mount()
+    await openRedraft(el)
+    await untilPreview(el)
+    await submit(el)
+    for (let i = 0; i < 20; i++) await settle(el)
+    expect(await getDraftFiles(KEY, SLOT)).toEqual({})
+  })
+
+  it('does not open while another composer is open, or for another account: the draft stays stored', async () => {
+    signInBluesky()
+    await storeRedraft()
+    const el = await mount()
+    // A reply composer is open (a new post would open the kept redraft itself).
+    await open(el, { inReplyTo: bobPost() })
+    expect(await openRedraft(el)).toBe(false)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('')
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    activeUserKey.value = null
+    expect(await openRedraft(el)).toBe(false)
+    expect(loadDraft(KEY, SLOT)!.text).toBe('from the deleted post')
+  })
+
+  it('says "other unsent draft" only when its own kind\'s slot holds one', async () => {
+    signInBluesky()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'half written', bluesky: emptyBlueskyDraft({ rkey: '3krkeyHALF' }) }))
+    await storeRedraft()
+    const el = await mount()
+    await openRedraft(el)
+    expect($(el, '[data-redraft-note]')).not.toBeNull()
+  })
+
+  it('a redraft whose reply target is not cached: Post is off while it is read, and no create is sent', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+    expect(postButton(el).disabled).toBe(true)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('Checking the post this replies to or quotes…')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    read.resolve(bobPost({ replyDisabled: true }))
+    await settle(el)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The author limited replies. You cannot reply to this post.')
+    expect(postButton(el).disabled).toBe(true)
+  })
+
+  it('a reply target read that answers deleted keeps Post off', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    await submit(el)
+    read.resolve(Promise.reject(new CaribouError('not_found', 'gone', { status: 404 })) as unknown as Status)
+    await settle(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The post you replied to was deleted.')
+    expect(postButton(el).disabled).toBe(true)
+  })
+
+  it('a reply that also quotes: a gone quote says "quoted", not "replied to" (review N6)', async () => {
+    const pds = signInBluesky()
+    statusCache.value = new Map([[PARENT.uri, bobPost()], [QUOTED.uri, bobPost({}, QUOTED.uri)]])
+    pds.client.fetchStatus.mockImplementation(async (id: string) => {
+      if (id === QUOTED.uri) throw new CaribouError('not_found', 'gone', { status: 404 })
+      return bobPost({}, id)
+    })
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT }, quote: QUOTED })
+    const el = await mount()
+    await openRedraft(el)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The post you quoted was deleted.')
+  })
+
+  it('a quote redraft keeps its ref', async () => {
+    const pds = signInBluesky()
+    await storeRedraft({ quote: QUOTED, images: [] })
+    const el = await mount()
+    await openRedraft(el)
+    await submit(el)
+    expect([...pds.records.values()][0]!.embed).toEqual({ $type: 'app.bsky.embed.record', record: QUOTED })
+  })
+
+  it('a kept redraft opens with the next new post, and reads the post it replies to', async () => {
+    const pds = signInBluesky()
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+  })
+
+  it('a dropped blob is uploaded again from the stored bytes, after a close and a reopen', async () => {
+    const pds = signInBluesky()
+    await storeRedraft()
+    let el = await mount()
+    await openRedraft(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    // A reload: a new dialog with nothing in memory.
+    el.remove()
+    el = await mount()
+    await open(el)
+    await untilPreview(el)
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkA', 'bafkA'))
+    await submit(el)
+    expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(1)
+    expect(await pds.client.blueskyUploadBlob.mock.calls[0]![0].text()).toBe('A')
+    expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
+    expect($(el, '[data-bsky-image] .state')).toBeNull()
+  })
+
+  const SOURCE = `at://${DID}/app.bsky.feed.post/3kold`
+
+  it('a redraft whose delete was in doubt, and its post is still up: a note says so (N3)', async () => {
+    const pds = signInBluesky()
+    pds.records.set('3kold', { $type: 'app.bsky.feed.post', text: 'old', createdAt: 't' } as BlueskyPostRecord)
+    await storeRedraft({ source: SOURCE, sourceMaybeLive: true })
+    const el = await mount()
+    await openRedraft(el)
+    await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect($(el, '[data-source-live]')!.textContent).toContain('The post this redraft came from is still up.')
+  })
+
+  it('the post is gone: no note, and the mark is cleared (N3)', async () => {
+    const pds = signInBluesky()
+    await storeRedraft({ source: SOURCE, sourceMaybeLive: true })
+    const el = await mount()
+    await openRedraft(el)
+    await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect($(el, '[data-source-live]')).toBeNull()
+    expect(loadDraft(KEY, SLOT)!.bluesky!.sourceMaybeLive).toBe(false)
+  })
+
+  it('a send refused while the target is read is an info toast: "Post again in a moment." (N6)', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    await submit(el)
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'Checking the post this replies to or quotes. Post again in a moment.' })
+  })
+
+  it('a target read that answers after an account switch writes nothing to the cache (D2)', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    activeUserKey.value = 'did:plc:other@bsky'
+    read.resolve(bobPost())
+    await settle(el)
+    expect(statusCache.value.has(PARENT.uri)).toBe(false)
+  })
+
+  it('does not open a redraft of another account, even with a slot of the same name (N5)', async () => {
+    signInBluesky()
+    const other = 'did:plc:other@bsky' as typeof KEY
+    saveDraft(other, SLOT, redraft())
+    const el = await mount()
+    const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = { blueskyRedraft: { userKey: other, slot: SLOT } }
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+    await settle(el)
+    expect(detail.opened).toBe(false)
+    expect($<HTMLTextAreaElement>(el, 'textarea')?.value ?? '').toBe('')
+  })
+
+  it('blob recovery waits for the stored bytes when Post comes first (N5, the read held for real)', async () => {
+    const pds = signInBluesky()
+    await storeRedraft()
+    const el = await mount()
+    const read = deferred<void>()
+    fileRead.hold = read.promise
+    try {
+      pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkA', 'bafkA'))
+      expect(await openRedraft(el)).toBe(true)
+      expect(fileRead.calls).toBeGreaterThan(0)
+      await submit(el)
+      for (let i = 0; i < 5; i++) await settle(el)
+      // Still waiting for the bytes: nothing uploaded, nothing asked of the reader.
+      expect(pds.client.blueskyUploadBlob).not.toHaveBeenCalled()
+      expect(toasts.map((t) => t.message).join(' ')).not.toContain('again')
+      read.resolve()
+      for (let i = 0; i < 20; i++) await settle(el)
+    } finally {
+      fileRead.hold = null
+    }
+    expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(1)
+    expect(await pds.client.blueskyUploadBlob.mock.calls[0]![0].text()).toBe('A')
+    expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
+  })
+
+  it('the stored redraft wins over an orphan of the same post, even while it is open (D4, Fable P13)', async () => {
+    const pds = signInBluesky()
+    await storeRedraft({ source: SOURCE })
+    saveDraft(KEY, SLOT, { ...loadDraft(KEY, SLOT)!, text: 'from the deleted post, plus an edit' })
+    const left = emptyDraft({ text: 'from the deleted post', bluesky: emptyBlueskyDraft({ source: SOURCE, rkey: '3kleft', stagedAt: Date.now() }) })
+    saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const el = await mount()
+    await open(el)
+    for (let i = 0; i < 5; i++) await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post, plus an edit')
+    expect(loadDraft(KEY, SLOT)!.text).toBe('from the deleted post, plus an edit')
+    expect(loadDraft(KEY, `staged:${left.idempotencyKey}`)).toBeNull()
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([SLOT])
+    expect(toasts.map((t) => t.message).join(' ')).not.toContain('earlier visit')
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post, plus an edit')
+  })
+
+  it('a full storage after the store: delete, close, reopen: the text is found and the image goes up again (Codex R3-2)', async () => {
+    const pds = signInBluesky()
+    const record = {
+      $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't',
+      embed: { $type: 'app.bsky.embed.images', images: [{ image: { $type: 'blob', ref: { $link: 'bafkOLD' }, mimeType: 'image/jpeg', size: 1 }, alt: 'a cat' }] },
+    } as unknown as BlueskyPostRecord
+    const source = {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map([['bafkOLD', new Blob(['OLD'], { type: 'image/jpeg' })]]),
+      targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, source, {
+      prepareImage: async (b) => ({ blob: new Blob([`re ${await b.text()}`], { type: 'image/jpeg' }), width: 4, height: 3 }),
+    }))!
+    // Room for the stored drafts and 64 characters more, not for a second copy.
+    const room = (localStorage.getItem(`caribou.drafts.${KEY}`) ?? '').length + 64
+    const real = localStorage.setItem.bind(localStorage)
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+      if (k.startsWith('caribou.drafts.') && v.length > room) throw new DOMException('full', 'QuotaExceededError')
+      real(k, v)
+    })
+    let el: CaribouComposeDialog
+    try {
+      // The delete went through.
+      await settleBlueskyRedraft(stored, 'deleted')
+      el = await mount()
+      await open(el)
+      $(el, '[data-action="cancel"]')!.click()
+      await settle(el)
+      el.remove()
+      el = await mount()
+      await open(el)
+      expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+      // The preview comes from the stored bytes, by their real key.
+      for (let i = 0; i < 50 && !$(el, '[data-bsky-image] img'); i++) await settle(el)
+      expect($(el, '[data-bsky-image] img')).not.toBeNull()
+    } finally {
+      // Post stores its sent mark first (R3), so it needs room: some is freed.
+      spy.mockRestore()
+    }
+    pds.client.blueskyUploadBlob.mockClear()
+    const cid = stored.draft.bluesky!.images[0]!.blob.ref.$link
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound(`Could not find blob: ${cid}`, cid))
+    await submit(el)
+    for (let i = 0; i < 20; i++) await settle(el)
+    expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(1)
+    expect(await pds.client.blueskyUploadBlob.mock.calls[0]![0].text()).toBe('re OLD')
+    expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
+  })
+
+  it('storage refuses even the rename: the staged slot opens with the next new post, its bytes by their real key', async () => {
+    const pds = signInBluesky()
+    const record = {
+      $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't',
+      embed: { $type: 'app.bsky.embed.images', images: [{ image: { $type: 'blob', ref: { $link: 'bafkOLD' }, mimeType: 'image/jpeg', size: 1 }, alt: '' }] },
+    } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map([['bafkOLD', new Blob(['OLD'], { type: 'image/jpeg' })]]),
+      targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async (b) => ({ blob: new Blob([`re ${await b.text()}`], { type: 'image/jpeg' }), width: 4, height: 3 }) }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    let el: CaribouComposeDialog
+    try {
+      expect(await settleBlueskyRedraft(stored, 'deleted')).toBe(stored.slot)
+      el = await mount()
+      await open(el)
+      expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+      for (let i = 0; i < 50 && !$(el, '[data-bsky-image] img'); i++) await settle(el)
+      expect($(el, '[data-bsky-image] img')).not.toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+    const cid = stored.draft.bluesky!.images[0]!.blob.ref.$link
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound(`Could not find blob: ${cid}`, cid))
+    await submit(el)
+    for (let i = 0; i < 20; i++) await settle(el)
+    expect(await pds.client.blueskyUploadBlob.mock.calls.at(-1)![0].text()).toBe('re OLD')
+  })
+
+  // A browser fires the dialog's close event a task after close(); happy-dom
+  // fires it at once. This holds it, as a browser would.
+  function holdClose(el: CaribouComposeDialog): () => void {
+    const dlg = $<HTMLDialogElement>(el, 'dialog')!
+    const close = dlg.close.bind(dlg)
+    let queued: (() => void) | null = null
+    dlg.close = () => { queued = close }
+    return () => queued?.()
+  }
+
+  it.each(['an uncached target', 'a refresh of the shown target'])(
+    'a switch, then %s answers before the close event: nothing is cached (Codex R4-2)', async (kind) => {
+      const pds = signInBluesky()
+      const read = deferred<Status>()
+      pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+      const el = await mount()
+      if (kind === 'an uncached target') {
+        await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+        await openRedraft(el)
+      } else {
+        await open(el, { inReplyTo: bobPost() })
+      }
+      expect(pds.client.fetchStatus).toHaveBeenCalled()
+      statusCache.value = new Map()
+      const fireClose = holdClose(el)
+      activeUserKey.value = 'did:plc:other@bsky'
+      read.resolve(bobPost())
+      await settle(el)
+      expect(statusCache.value.has(PARENT.uri)).toBe(false)
+      fireClose()
+    })
+
+  it('an unknown delete whose rename storage refused: the fallback opens with the "still up" note (Codex R4-3)', async () => {
+    const pds = signInBluesky()
+    pds.records.set('3kold', { $type: 'app.bsky.feed.post', text: 'old', createdAt: 't' } as BlueskyPostRecord)
+    const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async () => null }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    let el: CaribouComposeDialog
+    try {
+      expect(await settleBlueskyRedraft(stored, 'unknown')).toBe(stored.slot)
+      el = await mount()
+      await open(el)
+      for (let i = 0; i < 5; i++) await settle(el)
+    } finally {
+      spy.mockRestore()
+    }
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect($(el, '[data-source-live]')).not.toBeNull()
+  })
+
+  it('a revealed fallback opened after storage is back: no recovery under it, the edit stays, and it is found after a reload (rule E, Fable P17)', async () => {
+    const pds = signInBluesky()
+    const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async () => null }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    try {
+      await settleBlueskyRedraft(stored, 'deleted')
+    } finally {
+      spy.mockRestore()
+    }
+    let el = await mount()
+    await open(el)
+    for (let i = 0; i < 5; i++) await settle(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect(toasts.map((t) => t.message).join(' ')).not.toContain('earlier visit')
+    await type(el, 'from the deleted post, plus an edit')
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    expect(storedDrafts(KEY).map(([slot, d]) => [slot, d.text])).toEqual([[stored.slot, 'from the deleted post, plus an edit']])
+    // A reload: the page-only reveal is gone; the stored exposed flag finds it.
+    _testOnlyForgetRevealed()
+    el.remove()
+    el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post, plus an edit')
+  })
+
+  it('a revealed fallback that is only opened is exposed for good: found after a reload with no edit (rule E)', async () => {
+    const pds = signInBluesky()
+    const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
+    const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
+      status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
+      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+    }, { prepareImage: async () => null }))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    try {
+      await settleBlueskyRedraft(stored, 'deleted')
+    } finally {
+      spy.mockRestore()
+    }
+    let el = await mount()
+    await open(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    _testOnlyForgetRevealed()
+    el.remove()
+    el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+  })
+
+  it('a cleared mark stays cleared in the open draft: its next save does not bring it back (R3-N5)', async () => {
+    signInBluesky()
+    await storeRedraft({ source: SOURCE, sourceMaybeLive: true })
+    const el = await mount()
+    await openRedraft(el)
+    for (let i = 0; i < 5; i++) await settle(el)
+    expect(loadDraft(KEY, SLOT)!.bluesky!.sourceMaybeLive).toBe(false)
+    const ta = $<HTMLTextAreaElement>(el, 'textarea')!
+    ta.value = 'an edit'
+    ta.dispatchEvent(new Event('input'))
+    await settle(el)
+    expect(loadDraft(KEY, SLOT)!.text).toBe('an edit')
+    expect(loadDraft(KEY, SLOT)!.bluesky!.sourceMaybeLive).toBe(false)
+  })
+
+  it('a redraft a closed tab left staged, whose post is gone, is found with the next new post', async () => {
+    const pds = signInBluesky()
+    const left = emptyDraft({ text: 'left behind', bluesky: emptyBlueskyDraft({ source: SOURCE, rkey: '3kleft' }) })
+    saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const el = await mount()
+    await open(el)
+    for (let i = 0; i < 5; i++) await settle(el)
+    expect(pds.client.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
+    expect(findRedraftSlot(KEY)).toBe(`redraft:${left.idempotencyKey}`)
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'A redraft from an earlier visit was found. It opens the next time you write a new post.' })
+  })
+
+  it('the label menu offers Suggestive (sexual), as the official app does', async () => {
+    signInBluesky()
+    await storeRedraft({ labels: [] })
+    const el = await mount()
+    await openRedraft(el)
+    const names = [...el.shadowRoot!.querySelectorAll('caribou-menu.labels button, [data-label]')].map((b) => b.textContent?.trim())
+    expect(names.join(' ')).toContain('Suggestive')
   })
 })

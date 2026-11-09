@@ -15,6 +15,7 @@ import { activeUserKey } from './users.js'
  */
 export const BLUESKY_SELF_LABELS: readonly { value: string; label: string }[] = Object.freeze([
   { value: 'porn', label: 'Adult' },
+  { value: 'sexual', label: 'Suggestive' },
   { value: 'nudity', label: 'Nudity' },
   { value: 'graphic-media', label: 'Graphic' },
 ])
@@ -23,10 +24,15 @@ export function emptyBlueskyDraft(init: Partial<BlueskyDraft> = {}): BlueskyDraf
   return { reply: null, quote: null, labels: [], images: [], rkey: null, sent: null, ...init }
 }
 
-/** The labels the record carries: menu values only, in menu order, and only with images. */
+/**
+ * The labels the record carries: the menu's values in menu order, only
+ * with images (they label media), then any other value a redraft carried,
+ * as it is (#190).
+ */
 function sentLabels(b: BlueskyDraft): string[] {
-  if (b.images.length === 0) return []
-  return BLUESKY_SELF_LABELS.map((l) => l.value).filter((v) => b.labels.includes(v))
+  const menu = BLUESKY_SELF_LABELS.map((l) => l.value)
+  const other = b.labels.filter((v, i) => !menu.includes(v) && b.labels.indexOf(v) === i)
+  return [...(b.images.length > 0 ? menu.filter((v) => b.labels.includes(v)) : []), ...other]
 }
 
 /**

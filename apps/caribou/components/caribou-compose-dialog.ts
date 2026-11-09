@@ -3,7 +3,8 @@ import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
-  draftSlot, emptyDraft, loadDraft, postDraft, saveDraft,
+  draftSlot, emptyDraft, getDraftFiles, loadDraft, postDraft, pruneDraftFiles, saveDraft,
+  checkRedraftSource, draftFilesSlot, hasOrphanStagedRedrafts, recoverStagedRedrafts,
   pollOptions, blueskyDraftInput, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
@@ -34,6 +35,12 @@ export interface ComposeDetail {
   redraft?: ComposeDraft
   /** A Bluesky post to quote. Only a Bluesky account can quote. */
   quote?: Status
+  /**
+   * A Bluesky redraft stored before its delete (#190): the dialog opens that
+   * slot for that account, and sets `opened` when it did.
+   */
+  blueskyRedraft?: { userKey: string; slot: DraftSlot }
+  opened?: boolean
 }
 
 /** The counts the counter and the Post button read for a Bluesky post. */
@@ -44,6 +51,9 @@ const REPLY_LIMITED = 'The author limited replies. You cannot reply to this post
 const QUOTE_LIMITED = 'The author turned off quotes for this post.'
 const REPLY_GONE = 'The post you replied to was deleted.'
 const QUOTE_GONE = 'The post you quoted was deleted.'
+const CHECKING = 'Checking the post this replies to or quotes…'
+// The toast for a send refused while a target is read (app README).
+const CHECKING_REFUSED = 'Checking the post this replies to or quotes. Post again in a moment.'
 
 /** A reader-facing reason an image was not added. */
 function fitRefusal(name: string, reason: Exclude<FitResult, { ok: true }>['reason']): string {
@@ -325,14 +335,20 @@ export class CaribouComposeDialog extends LitElement {
   @state() private bsky: BlueskyBrowser | null = null
   // The reply or quote target is gone (`not_found` on the fresh read).
   @state() private gone: string | null = null
+  // Reads of an uncached reply or quote target still running: Post waits.
+  @state() private targetsChecking = 0
+  // A redraft whose delete had no clear answer, and its post is still up.
+  @state() private sourceLive = false
   // A link to an earlier version that a retry found posted (spec 7.2).
   @state() private earlierPosted: string | null = null
   // Images (by their local id) the PDS no longer has and that this page has
   // no file for.
   @state() private missingBlobs = new Set<string>()
   // The file behind each uploaded image, by its local id, so a dropped blob
-  // can go up again, and its preview. Memory only: a reload keeps the blob refs.
+  // can go up again, and its preview. Memory, plus a stored redraft's bytes
+  // loaded from IndexedDB (`filesLoading`) when its slot opens.
   private blobFiles = new Map<string, Blob>()
+  private filesLoading: Promise<void> = Promise.resolve()
   private blobPreviews = new Map<string, string>()
 
   @query('dialog') private dialogEl?: HTMLDialogElement
@@ -413,6 +429,7 @@ export class CaribouComposeDialog extends LitElement {
     if (!this.isActive()) return
     const detail = (e as CustomEvent<ComposeDetail | undefined>).detail
     if (detail?.edit) this.showEdit(detail.edit.status, detail.edit.source)
+    else if (detail?.blueskyRedraft) detail.opened = this.showStoredRedraft(detail.blueskyRedraft)
     else if (detail?.redraft) this.showRedraft(detail.redraft, detail.inReplyTo ?? null)
     else if (detail?.quote) this.showQuote(detail.quote)
     else this.show(detail?.inReplyTo ?? null)
@@ -439,6 +456,9 @@ export class CaribouComposeDialog extends LitElement {
     this.gone = null
     this.earlierPosted = null
     this.missingBlobs = new Set()
+    this.targetsChecking = 0
+    this.sourceLive = false
+    this.filesLoading = Promise.resolve()
     if (this.isBluesky) {
       const session = this.session
       this.bsky = null
@@ -517,11 +537,79 @@ export class CaribouComposeDialog extends LitElement {
     this.finishOpen()
   }
 
+  /**
+   * A Bluesky redraft (#190), stored before its delete: opens that slot like
+   * a new post. False when it cannot open (another composer is open, or
+   * another account is active); the draft stays stored and opens with that
+   * account's next new post.
+   */
+  private showStoredRedraft({ userKey, slot }: { userKey: string; slot: DraftSlot }): boolean {
+    if (activeClient.value?.capabilities.network !== 'bluesky' || activeUserKey.peek() !== userKey) return false
+    if (!loadDraft(userKey as Parameters<typeof loadDraft>[0], slot)) return false
+    return this.showBluesky({ slot })
+  }
+
+  // The open redraft is kept beside another unsent draft in its own kind's
+  // slot (the note says so). Read from storage at render.
+  private get besideOther(): boolean {
+    if (!this.keptRedraft || !this.client) return false
+    const b = this.draft.bluesky
+    const natural: DraftSlot = b
+      ? b.reply ? draftSlot(b.reply.parent.uri) : b.quote ? `quote:${b.quote.uri}` : 'new'
+      : draftSlot(this.draft.inReplyToId)
+    const held = loadDraft(this.client.userKey, natural)
+    return !!held && !isDraftEmpty(held)
+  }
+
+  // A draft with reply or quote refs shows the post it names, and is
+  // checked like any reply or quote: the dialog's post is read again; a
+  // draft with none yet (a redraft, or a kept redraft opened as a new post)
+  // takes it from the cache, or reads it.
+  private async loadRefTargets(client: CaribouClient): Promise<void> {
+    const b = this.draft.bluesky
+    const session = this.session
+    const refs = [['reply', b?.reply?.parent], ['quote', b?.quote]] as const
+    for (const [kind, ref] of refs) {
+      if (!ref) continue
+      const have = kind === 'reply' ? this.replyTo : this.quoteTo
+      if (have) {
+        void this.refreshTarget(client, have, kind)
+        continue
+      }
+      const cached = statusCache.peek().get(ref.uri)
+      if (cached) {
+        if (kind === 'reply') this.replyTo = cached
+        else this.quoteTo = cached
+        void this.refreshTarget(client, cached, kind)
+        continue
+      }
+      // Post waits until the target is known (review Codex 3).
+      this.targetsChecking += 1
+      try {
+        const fresh = await client.fetchStatus(ref.uri)
+        // The account too: a switch closes the dialog, but `this.client`
+        // clears only with the close event, a task later.
+        if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
+        cacheStatus(fresh)
+        if (kind === 'reply') this.replyTo = fresh
+        else this.quoteTo = fresh
+      } catch (err) {
+        if (session !== this.session || client !== this.client) return
+        if (err instanceof CaribouError && err.code === 'not_found') this.gone = kind === 'reply' ? REPLY_GONE : QUOTE_GONE
+      } finally {
+        if (session === this.session) this.targetsChecking -= 1
+      }
+    }
+  }
+
   /** Opens the dialog for a new post, or a reply to `inReplyTo`. */
   show(inReplyTo: Status | null): void {
     // A reply goes to a post on the active account's network only (spec 11).
     if (inReplyTo && !!inReplyTo.bluesky !== (activeClient.value?.capabilities.network === 'bluesky')) return
-    if (activeClient.value?.capabilities.network === 'bluesky') return this.showBluesky({ inReplyTo })
+    if (activeClient.value?.capabilities.network === 'bluesky') {
+      this.showBluesky({ inReplyTo })
+      return
+    }
     if (!this.begin()) return
     const user = activeUser.value!
     const client = this.client!
@@ -549,16 +637,35 @@ export class CaribouComposeDialog extends LitElement {
     this.showBluesky({ quote })
   }
 
+  // A stored redraft's image bytes (IndexedDB), for its previews and for
+  // blob recovery after a close, a reopen or a reload.
+  private loadStoredFiles(): void {
+    const owner = this.owner()
+    const ids = new Set((this.draft.bluesky?.images ?? []).map((i) => i.id))
+    if (!owner || ids.size === 0) return
+    this.filesLoading = getDraftFiles(owner.client.userKey, draftFilesSlot(owner.slot)).then((files) => {
+      if (!this.owns(owner)) return
+      let added = false
+      for (const [id, file] of Object.entries(files)) {
+        if (!ids.has(id) || this.blobFiles.has(id)) continue
+        this.keepFile(id, file)
+        added = true
+      }
+      if (added) this.requestUpdate()
+    })
+  }
+
   // A Bluesky post: a new one, a reply or a quote. Its draft holds the
   // strong refs (README, "Bluesky compose").
-  private showBluesky({ inReplyTo, quote }: { inReplyTo?: Status | null; quote?: Status }): void {
-    if (!this.begin()) return
+  // `slot`: a stored slot to open (a Bluesky redraft). True when it opened.
+  private showBluesky({ inReplyTo, quote, slot }: { inReplyTo?: Status | null; quote?: Status; slot?: DraftSlot }): boolean {
+    if (!this.begin()) return false
     const client = this.client!
     const target = inReplyTo ?? quote ?? null
     const ref = target ? refOf(target) : null
-    if (target && !ref) return
+    if (target && !ref) return false
     const redraft = target ? null : findRedraftSlot(client.userKey)
-    this.draftKey = redraft ?? (inReplyTo ? draftSlot(inReplyTo.id) : quote ? `quote:${quote.id}` : 'new')
+    this.draftKey = slot ?? redraft ?? (inReplyTo ? draftSlot(inReplyTo.id) : quote ? `quote:${quote.id}` : 'new')
     this.replyTo = inReplyTo ?? null
     this.quoteTo = quote ?? null
     const stored = loadDraft(client.userKey, this.draftKey)
@@ -571,9 +678,44 @@ export class CaribouComposeDialog extends LitElement {
     // Each image needs a local id for its controls (one stored without it gets one).
     const images = bluesky.images.map((i) => i.id ? i : { ...i, id: crypto.randomUUID() })
     this.draft = { ...(stored ?? emptyDraft({ inReplyToId: inReplyTo?.id ?? null })), bluesky: { ...bluesky, images } }
+    // A staged redraft opened (a refused rename): exposed for good (rule E).
+    // Stored now, even when this page already shows it exposed.
+    if (this.draftKey.startsWith('staged:') && this.draft.bluesky) {
+      this.draft = { ...this.draft, bluesky: { ...this.draft.bluesky!, exposed: true } }
+      saveDraft(client.userKey, this.draftKey, this.draft)
+    }
     this.finishOpen()
     this.ensureRkey()
-    if (target) void this.refreshTarget(client, target)
+    if (target) void this.refreshTarget(client, target, inReplyTo ? 'reply' : 'quote')
+    else void this.loadRefTargets(client)
+    this.loadStoredFiles()
+    this.checkSource()
+    if (!target && !slot) this.recoverStaged(client)
+    return true
+  }
+
+  // A redraft whose delete had no clear answer: is its post still up? (#190)
+  private checkSource(): void {
+    const owner = this.owner()
+    if (!owner || !this.draft.bluesky?.sourceMaybeLive) return
+    void checkRedraftSource(owner.client, owner.slot).then((live) => {
+      if (!this.owns(owner)) return
+      this.sourceLive = live === true
+      // Gone: the open draft drops the mark too, or its next save writes it back.
+      const b = this.draft.bluesky
+      if (live === false && b?.sourceMaybeLive) this.draft = { ...this.draft, bluesky: { ...b, sourceMaybeLive: false } }
+    })
+  }
+
+  // Redrafts staged by a tab that closed before its delete answered. A
+  // found one opens with the next new post; the toast says so.
+  private recoverStaged(client: CaribouClient): void {
+    if (!hasOrphanStagedRedrafts(client.userKey)) return
+    void recoverStagedRedrafts(client).then((moved) => {
+      if (moved.length > 0 && activeUserKey.peek() === client.userKey) {
+        toast('info', 'A redraft from an earlier visit was found. It opens the next time you write a new post.')
+      }
+    }, () => {})
   }
 
   // R6 (`packages/state` README): a draft gets its rkey when it is made, so
@@ -604,7 +746,7 @@ export class CaribouComposeDialog extends LitElement {
   private get blocked(): string | null {
     const replyOff = !!this.replyTo && (!!this.replyTo.bluesky?.replyDisabled || !!cachedCopy(this.replyTo)?.bluesky?.replyDisabled)
     const quoteOff = !!this.quoteTo && (!!this.quoteTo.bluesky?.embeddingDisabled || !!cachedCopy(this.quoteTo)?.bluesky?.embeddingDisabled)
-    return replyOff ? REPLY_LIMITED : quoteOff ? QUOTE_LIMITED : this.gone
+    return replyOff ? REPLY_LIMITED : quoteOff ? QUOTE_LIMITED : this.gone ?? (this.targetsChecking > 0 ? CHECKING : null)
   }
 
   private owner(): Owner | null {
@@ -618,11 +760,11 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   // Reads the post again: its flags may have changed, or it may be gone.
-  private async refreshTarget(client: CaribouClient, target: Status): Promise<void> {
+  private async refreshTarget(client: CaribouClient, target: Status, kind: 'reply' | 'quote'): Promise<void> {
     const session = this.session
     try {
       const fresh = await client.fetchStatus(target.id)
-      if (session !== this.session || client !== this.client) return
+      if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
       // The page's other copies learn the flags too.
       cacheStatus(fresh)
       if (this.replyTo?.id === fresh.id) this.replyTo = fresh
@@ -631,7 +773,7 @@ export class CaribouComposeDialog extends LitElement {
       if (session !== this.session || client !== this.client) return
       if (err instanceof CaribouError && err.code === 'not_found') {
         // The draft keeps its text; it just cannot be sent there.
-        this.gone = this.replyTo ? REPLY_GONE : QUOTE_GONE
+        this.gone = kind === 'reply' ? REPLY_GONE : QUOTE_GONE
       }
     }
   }
@@ -652,6 +794,8 @@ export class CaribouComposeDialog extends LitElement {
     this.blobPreviews = new Map()
     this.blobFiles = new Map()
     this.quoteTo = null
+    // Bytes of a sent or discarded redraft go (state README, "Image bytes").
+    void pruneDraftFiles()
     const target = this.returnFocus
     this.returnFocus = null
     if (target?.isConnected) target.focus()
@@ -753,12 +897,18 @@ export class CaribouComposeDialog extends LitElement {
     }
   }
 
+  // Why a send was refused. A target still being read is not a problem: Post again in a moment.
+  private refuse(reason: string): void {
+    if (reason === CHECKING) toast('info', CHECKING_REFUSED)
+    else toast('error', reason)
+  }
+
   private async submit() {
     const client = this.client
     // A Bluesky reply or quote turned off since the last render: say why
     // (the cache can change without a render), and show the note.
     if (client && this.isBluesky && !this.posting && this.blocked) {
-      toast('error', this.blocked)
+      this.refuse(this.blocked)
       this.requestUpdate()
       return
     }
@@ -799,7 +949,7 @@ export class CaribouComposeDialog extends LitElement {
   private async submitBluesky(client: CaribouClient) {
     // The flags as this page knows them now, not as they were at open.
     if (this.blocked) {
-      toast('error', this.blocked)
+      this.refuse(this.blocked)
       return
     }
     const done = this.replyTo ? 'Reply posted' : 'Post published'
@@ -850,6 +1000,9 @@ export class CaribouComposeDialog extends LitElement {
   // from the file this page still has, or ask for the file again. Each
   // await rechecks the owner (rule 4).
   private async recoverBlob(owner: Owner, err: BlueskyBlobNotFound) {
+    // A stored redraft's bytes may still be loading.
+    await this.filesLoading
+    if (!this.owns(owner)) return
     const gone = (this.draft.bluesky?.images ?? []).filter((i) => err.cid === null || i.blob.ref.$link === err.cid)
     const missing = new Set(this.missingBlobs)
     const replaced = new Map<string, BlueskyDraftImage>()
@@ -1192,7 +1345,9 @@ export class CaribouComposeDialog extends LitElement {
           ${this.earlierPosted ? html`<p class="note" data-earlier-posted role="status">Your earlier version was posted.
             <a href=${this.earlierPosted} target="_blank" rel="noopener">Open it</a> (in a new tab). Your edits are still here; Post sends them as a new post.</p>` : nothing}
           ${bluesky && d.bluesky?.sent && !this.earlierPosted && !busy ? html`<p class="note" data-send-unknown>The last send did not finish. Post checks first, so the post is never sent twice.</p>` : nothing}
-          ${this.keptRedraft ? html`
+          ${this.sourceLive ? html`
+            <p class="note problem" data-source-live role="status">The post this redraft came from is still up. Delete it first, or this text is posted twice.</p>` : nothing}
+          ${this.besideOther ? html`
             <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
           ${d.cw && caps.contentWarningText ? html`
             <label class="visually-hidden" for="compose-cw">Content warning</label>

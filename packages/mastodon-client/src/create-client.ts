@@ -126,6 +126,10 @@ export interface CaribouClient {
   blueskyCreatePost?(record: BlueskyPostRecord, rkey: string): Promise<BlueskyStrongRef>
   /** `getRecord` on the reader's own PDS for that key, or null when there is none. */
   blueskyGetOwnPost?(rkey: string): Promise<BlueskyOwnPost | null>
+  /** `deleteRecord` of the reader's own post (#190). Refuses any other URI. */
+  blueskyDeletePost?(uri: string): Promise<void>
+  /** The bytes of a blob in the reader's own repo (`com.atproto.sync.getBlob`), for a redraft. */
+  blueskyGetBlob?(cid: string): Promise<Blob>
 
   // Polls. A vote answers with the poll as the server now has it.
   /** Votes on a poll with the indexes of the chosen options. */

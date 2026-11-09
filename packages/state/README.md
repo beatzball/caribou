@@ -451,7 +451,7 @@ redraft), plus `bluesky`:
 | `reply` | `{ root, parent }` strong refs (`uri` + `cid`). `parent` is the post replied to; `root` is its `replyRef.root`, or the post itself when it is a top post. |
 | `quote` | the quoted post's strong ref, or `null` |
 | `images` | per image: the blob ref `uploadBlob` answered, its type and size, its alt text, its `aspectRatio` (or `null` when the browser could not read it), the file name |
-| `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `nudity` Nudity, `graphic-media` Graphic) |
+| `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `sexual` Suggestive, `nudity` Nudity, `graphic-media` Graphic), and any other self-label a redraft carries |
 | `rkey` | the record key, made (`blueskyNextRkey`) when the draft is made, and stored with its first save (R6) |
 | `sent` | the exact record a send wrote or tried to, frozen with its facets and `createdAt`, and the input it was made from (`blueskyDraftInput`) |
 
@@ -463,8 +463,9 @@ time (`blueskyDetectFacets`, which resolves mentions to DIDs) and frozen in
 `reply`; `embed` is `app.bsky.embed.images` (each image with its `alt` and
 `aspectRatio`), `app.bsky.embed.record` for a quote, or
 `app.bsky.embed.recordWithMedia` for both; `labels` as
-`com.atproto.label.defs#selfLabels`, only the menu's values, in menu order,
-and **only with images** (the menu labels media, spec 7.4); `langs` from a
+`com.atproto.label.defs#selfLabels`: the menu's values in menu order,
+**only with images** (the menu labels media, spec 7.4), then any other
+value a redraft carried, as it is (#190); `langs` from a
 redraft's language; `createdAt`.
 
 **What survives.** All of it is plain JSON in `caribou.drafts.<userKey>`.
@@ -580,6 +581,205 @@ storage refusing every click sends nothing, then one post after a reload
 (R3); a reopened and edited draft survives an old send's success, its late
 blob refusal, and a facet lookup that lands late (R4); an answer after an
 account switch tells no screen.
+
+## Bluesky delete and redraft (#190)
+
+`own-posts.ts` (delete), `bluesky-redraft.ts` (redraft), `draft-files.ts`
+(image bytes).
+
+**Delete** (`deleteOwnStatus`, the same function as Mastodon's). For a
+Bluesky client it calls `blueskyDeletePost(uri)`; for Mastodon it calls
+`deleteStatus(id)` as before. The post and every repost of it leave the
+cache at once and its id is marked deleted, so every list drops it. Only
+the author's own post: the card offers Delete only on it, and the client
+refuses another repo's URI.
+
+A Bluesky delete has three outcomes, and **only `getRecord` decides** when
+the answer is not a clear refusal (as R1 does for a create). The client
+does this (`packages/bluesky-client` README, "Delete"):
+
+| the delete | the outcome | the page |
+|---|---|---|
+| answered OK | deleted | the post stays gone |
+| no answer, a timeout or a 5xx, and `getRecord` says `RecordNotFound` | deleted | the post stays gone |
+| an answered 4xx refusal, or `getRecord` finds the record | failed | the post comes back; "Could not delete this post. Try again." |
+| `getRecord` fails too | unknown | the post comes back; "Could not tell whether the post was deleted. Reload to check." |
+
+`deleteOwnStatusOutcome` answers the outcome, and whether the account
+changed meanwhile (`stale`: then it writes nothing to the page and says
+nothing). `deleteOwnStatus` is the old shape on top of it: the post as the
+reader saw it when deleted (Bluesky's delete answers nothing), else null.
+Mastodon never has "unknown": its failures are "failed", as before.
+
+**Redraft. Rule: nothing can be lost after the delete.** Bluesky has no
+edit, so a redraft deletes the post and opens a new draft with what it
+had. Everything that can fail happens **before** the delete, and the
+draft is stored durably first. The order:
+
+0. **A stored redraft wins** (rule D4 below). First of all, before any
+   read: when a redraft of the same post is stored already
+   (`findRedraftOf`; a delete in doubt kept it), it opens. Nothing is
+   read, uploaded or deleted.
+1. **Read** (`readBlueskyRedraft`). The record from the reader's PDS
+   (`blueskyGetOwnPost`), not the AppView copy: it has the text as typed,
+   the exact refs and blob CIDs. Each image's bytes (`blueskyGetBlob`),
+   typed with the record's `mimeType` (a PDS may answer
+   `application/octet-stream`). The reply parent and the quoted post
+   (`fetchStatus`, cached): `gone` (`not_found`), `limited`
+   (`replyDisabled` / `embeddingDisabled`), `ok`, or `unknown` (the read
+   failed). Any read failing except a target's throws: nothing is
+   deleted. The record not there throws `BlueskyRedraftGone`: the post is
+   already deleted (the card drops it, app README).
+2. **Ask.** When the draft would be empty (no text, no image, no
+   quote: a post that is only a link card, a video or a feed card,
+   `redraftKeepsSomething`), there is no confirm and no delete: "Nothing
+   in this post can be kept in a draft. Use Delete." Else the card's
+   confirm names what is not kept and a gone or limited target (app
+   README).
+3. **Build and store** (`storeBlueskyRedraft`). Every step can fail, and a
+   failure throws with nothing deleted and nothing left stored:
+   - the draft is built from the record (table below); an odd record
+     (missing or wrong-typed fields) is read defensively, and a throw here
+     is before the delete;
+   - each image is **re-encoded** (the caller's `prepareImage`, the
+     canvas, as compose does) and uploaded. A new encoding gives a new
+     CID, so the delete does not take the new blob with the old record
+     (the PDS deletes a blob as soon as no record names it; keeping the
+     old refs would leave dead refs);
+   - the rkey is made (`blueskyNextRkey`), so the draft's first save
+     already has it (R6);
+   - an empty draft throws (the card stops before this, step 2);
+   - the draft, with the post's URI as `bluesky.source`, is stored in a
+     new **`staged:<key>`** slot of the owner account (`storeDraftIf`,
+     refused → throw). See "Rule: a staged redraft is hidden" below;
+   - the image bytes (the re-encoded ones) are stored in IndexedDB
+     (`draft-files.ts`), keyed by account, the final slot
+     `redraft:<key>` and image id. Refused → the draft is removed again,
+     and it throws. A post with no images does not use IndexedDB.
+4. **Delete** (`deleteOwnStatusOutcome`, rules above), then
+   `settleBlueskyRedraft` follows the outcome:
+   - deleted → the draft is renamed to `redraft:<key>`; other unexposed
+     staged copies of the same post that no flow of this tab runs (a
+     closed tab's) are removed (rule E, case 3); step 5.
+   - failed → the staged draft and its bytes are removed
+     (`discardBlueskyRedraft`): the post is still there.
+   - unknown → the draft is renamed to `redraft:<key>`, marked
+     `sourceMaybeLive`, and the toast says so: "Could not tell whether the
+     post was deleted. Your redraft is saved and opens the next time you
+     write a new post. Check your profile first, so it is not posted
+     twice."
+5. **Open** the composer on the `redraft:<key>` slot (app README). When
+   it cannot open (another composer is open, or the account changed), the
+   draft stays stored and opens with the account's next new post
+   (`findRedraftSlot`); a toast says so when the reader is still on that
+   account.
+
+**Rule E: when Caribou removes a draft.** Only in these cases:
+
+1. The send that posted it.
+2. The reader discards it.
+3. An **unexposed** staged copy, removed by its **own** redraft flow:
+   its delete was refused, or a stored redraft of the same post won (D4),
+   or a redraft of the same post was deleted (the closed tab's copy).
+
+**Exposed** (`bluesky.exposed`, stored with the draft) is set the first
+time a staged copy can be seen: revealed as a fallback, opened, or
+renamed to `redraft:`. A `redraft:` slot is always exposed. An exposed
+draft is a normal draft for good, and only cases 1 and 2 remove it. No
+other cleanup exists: plain Delete removes no draft, and age removes no
+draft. A removal is revision-checked, and never touches a staged slot
+that a flow of this tab is running for.
+
+**Rule: a staged redraft is hidden until the delete is decided.** No
+composer opens an unexposed `staged:` slot (`findRedraftSlot` skips it), so the
+reader cannot edit it while the delete runs. The outcome moves it or
+removes it. The removal is revision-checked, like every other draft
+write: only the revision the store wrote is removed. So nothing the
+reader writes can be erased by a refused delete.
+
+A moved Bluesky redraft goes in its own `redraft:<key>` slot, never in
+`new`, `reply:` or `quote:`. So it never overwrites another draft, and a
+new post opens it first, whatever its target, even when that target is
+gone.
+
+**The rename needs no more storage.** The move from `staged:<key>` to
+`redraft:<key>` is one revision-checked write of the account's draft map
+that renames the slot in place (`renameDraftIf`), never a second copy.
+The staged draft already holds `sourceMaybeLive: false`, so the rename
+only changes values. The image bytes are stored under `redraft:<key>`
+from the start (`draftFilesSlot` maps a `staged:` slot to it), so they do
+not move. If storage refuses even the rename, the `staged:` slot stays
+and is revealed (`revealDraftSlot`): exposed, with the outcome's
+`sourceMaybeLive`. This page keeps both in memory, and stores them as
+soon as storage takes a write (the reveal tries at once; opening the
+slot stores them). A new post finds it (`findRedraftSlot` takes an
+exposed `staged:` slot), after a reload too once the flag is stored; its
+bytes load by their real key.
+
+**Rule D4: the stored redraft wins.** A stored redraft of the same post
+(the same `bluesky.source`: a `redraft:` slot, or an exposed `staged:`
+one) may hold the reader's edits, so it is never replaced. The card looks for it before the confirm: found → it opens,
+"You already have a redraft of this post…", and nothing is read,
+uploaded or deleted. Found later (the delete's outcome, or a closed
+tab's staged draft): the new staged copy and its bytes go, and the
+stored slot stays, its `sourceMaybeLive` set from the outcome. So the
+text cannot be posted twice, and no edit is lost.
+
+**A post that may still be up.** A draft marked `sourceMaybeLive` (a
+delete in doubt) is checked when the dialog opens it
+(`checkRedraftSource`, `getRecord`): still up → the dialog shows a note;
+gone → the mark is cleared.
+
+**A tab closed during the delete.** Its draft stays in `staged:<key>`,
+unexposed. When a new post opens and the account has unexposed staged
+drafts this tab is not deleting for (`hasOrphanStagedRedrafts`),
+`recoverStagedRedrafts` asks `getRecord` for each source:
+- gone → the draft moves to `redraft:<key>` (unless a stored redraft of
+  the post wins); it opens with the next new post, and a toast says so;
+- still up, staged less than a day ago (`stagedAt`, set by the store,
+  `STAGED_MAX_AGE_MS`) → it stays hidden: another tab may still be
+  deleting for it. It is asked about again next time;
+- still up and a day old → it moves to `redraft:<key>`, exposed, marked
+  `sourceMaybeLive`, so the dialog shows "The post this redraft came from
+  is still up…". The reader decides. It is not asked about again;
+- no answer → it is tried again next time.
+
+**Account switch.** Each step checks the account after its await
+(`ownerGeneration`), and before any write, caches included: a reply or
+quote target read that answers after a switch is not cached. A switch
+before the store: nothing is stored or
+deleted. A switch after the store and before the delete: the draft and
+its bytes are removed, nothing is deleted. A switch during the delete:
+the outcome still decides storage (failed → removed; deleted or unknown →
+kept for that account), but nothing touches the new account's page.
+
+**Image bytes** (`draft-files.ts`). A stored redraft keeps each image's
+bytes in IndexedDB (`caribou-draft-files`), because its blob is not proven
+usable until the post is sent: the PDS may drop an unused blob, and the
+deleted post was the only copy. The dialog loads them when it opens the
+slot, for the previews and for #189's blob recovery, after a close, a
+reopen or a reload. `pruneDraftFiles()` removes every entry whose account,
+slot and image id is not in a stored draft (a `redraft:<key>` entry also
+lives while `staged:<key>` names it): after a send, on close, and at
+sign-out. Images the reader picked in compose are
+not stored there: the reader has those files.
+
+**What the draft takes from the record.**
+
+| record | draft |
+|---|---|
+| `text` | `text`. Facets are made again from the text at send. So a link whose shown text is not its URL (other apps shorten links) gets its full URL back in the text, and the text can then be over 300 graphemes (Post is off until the reader cuts it). A mention is resolved again from the handle in the text, so a renamed account's mention stays plain text. |
+| `facets` | not kept (see `text`) |
+| `reply` | `bluesky.reply` (same strong refs), `inReplyToId` = the parent URI |
+| `embed` record, or `recordWithMedia.record`, whose URI is a post (`app.bsky.feed.post`) | `bluesky.quote` (same strong ref) |
+| an embedded feed, list, starter pack or labeler | not kept (a card) |
+| `embed` images, or `recordWithMedia.media` images | `bluesky.images`: the new blob ref, `alt`, `aspectRatio` (the record's, else the new encoding's), type and size |
+| `labels` self-labels | `bluesky.labels`, every value. The menu's values (`porn`, `sexual`, `nudity`, `graphic-media`) go only with images; any other value goes as it is. |
+| `langs` | `language` = the first one; the others are not kept (compose sends one) |
+| a video, an external link card | not kept. The link's URL stays only if it is in the text. |
+| `tags` | not kept |
+| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again |
+| `createdAt` | not kept: a new post gets a new time |
 
 ## Notifications (`notifications-store.ts`, `notification-groups.ts`)
 

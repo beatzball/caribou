@@ -11,6 +11,9 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
+  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, findRedraftOf, forgetDeletedStatus,
+  readBlueskyRedraft, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
+  type BlueskyRedraftSource, type DraftSlot, type PreparedImage,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
@@ -178,6 +181,36 @@ function withEdit(post: Status, edit: Status | null): Status {
   return out as unknown as Status
 }
 
+const REDRAFT_UNKNOWN = 'Could not tell whether the post was deleted. Your redraft is saved and opens the next time you write a new post. '
+  + 'Check your profile first, so it is not posted twice.'
+
+function messageOf(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).replace(/\.$/, '')
+}
+
+// The canvas re-encode compose uses, loaded only when a redraft needs it.
+async function reencode(bytes: Blob): Promise<PreparedImage | null> {
+  const { fitImage } = await import('./_image-fit.js')
+  const fit = await fitImage(bytes, 2_000_000)
+  return fit.ok ? { blob: fit.blob, width: fit.width, height: fit.height } : null
+}
+
+// The redraft question: what is lost, and what the read found.
+function blueskyRedraftQuestion(post: Status, source: BlueskyRedraftSource): string {
+  const out = ['The post is deleted and opens again as a new draft. Its likes, reposts and replies are lost.']
+  if ((post.mediaAttachments ?? []).some((m) => m.type === 'video' || m.type === 'gifv')) out.push('The video is not kept.')
+  const embed = (source.record.embed as { $type?: unknown } | undefined)?.$type
+  if (post.card || post.bluesky?.recordCard || embed === 'app.bsky.embed.external') out.push('The link card is not kept.')
+  const menu = BLUESKY_SELF_LABELS.map((l) => l.value)
+  if (source.files.size === 0 && redraftLabelsOf(source.record).some((v) => menu.includes(v))) out.push('Its labels are not kept.')
+  const { reply, quote } = source.targets
+  if (reply === 'gone') out.push('The post it replies to is gone, so the redraft cannot be posted as a reply.')
+  if (reply === 'limited') out.push('The author of the post it replies to limited replies, so the redraft cannot be posted as a reply.')
+  if (quote === 'gone') out.push('The post it quotes is gone, so the redraft cannot be posted with the quote.')
+  if (quote === 'limited') out.push('The author of the post it quotes turned off quotes, so the redraft cannot be posted with the quote.')
+  return out.join(' ')
+}
+
 function toast(kind: 'error' | 'info', message: string): void {
   window.dispatchEvent(new CustomEvent('caribou:toast', { detail: { kind, message } }))
 }
@@ -273,6 +306,7 @@ export class CaribouStatusCard extends LitElement {
       --caribou-icon-fill: none;
     }
     .warning { margin-top: var(--space-2); }
+    .redraft-status { margin: 0; align-self: center; font-size: 0.875rem; }
     /* Mastodon's "RE: <link>" fallback for older apps; the quote shows it. */
     .status-body:has(caribou-status-quote) .quote-inline { display: none; }
     .spoiler {
@@ -386,6 +420,9 @@ export class CaribouStatusCard extends LitElement {
   // The post is the active account's own, by account id (never by handle):
   // its menu offers Edit and Delete instead of Mute and Block.
   @state() private mine = false
+  // What a running Bluesky redraft is doing, for the status line (#190).
+  @state() private redraftNote: string | null = null
+  private redrafting = false
   // The active account's network can edit posts (`capabilities.edit`):
   // Edit and the edit history are shown only then. False on the server.
   @state() private canEdit = false
@@ -816,6 +853,14 @@ export class CaribouStatusCard extends LitElement {
     window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { edit: { status, source } } }))
   }
 
+  // True while focus is in this card (its own tree or its shadow tree).
+  private hasFocus(): boolean {
+    for (let a: Element | null = document.activeElement; a; a = a.shadowRoot?.activeElement ?? null) {
+      if (a === this || this.contains(a) || this.renderRoot.contains(a)) return true
+    }
+    return false
+  }
+
   /** Focuses the post itself, for a keyboard reader whose place just went. */
   async focusPost() {
     await this.updateComplete
@@ -874,6 +919,7 @@ export class CaribouStatusCard extends LitElement {
     const post = this.shownPost()
     const owner = currentOwner()
     if (!this.mine || !post || !owner) return
+    if (post.bluesky) return this.redraftBluesky(owner, post)
     const ok = await confirmDialog({
       title: 'Delete and redraft this post?',
       message: 'The post is deleted and opens again as a new draft. Its boosts, favourites and replies are lost.'
@@ -889,6 +935,102 @@ export class CaribouStatusCard extends LitElement {
     window.dispatchEvent(new CustomEvent('caribou:compose', {
       detail: { redraft: draft, ...(inReplyTo ? { inReplyTo } : {}) },
     }))
+  }
+
+  // Bluesky has no edit (#190; app README, "Bluesky delete and redraft").
+  // The rule: nothing can be lost after the delete. Read, ask, then build,
+  // upload and store the draft; only then delete, then open it. One flow at
+  // a time: a second click while one runs does nothing.
+  private async redraftBluesky(owner: Owner, post: Status): Promise<void> {
+    if (this.redrafting) return
+    this.redrafting = true
+    try {
+      await this.runBlueskyRedraft(owner, post)
+    } finally {
+      this.redrafting = false
+      this.redraftNote = null
+    }
+  }
+
+  private async runBlueskyRedraft(owner: Owner, post: Status): Promise<void> {
+    // A redraft of this post is stored already (a delete in doubt): it wins,
+    // as it may hold the reader's edits. It opens; nothing is read or deleted.
+    const kept = findRedraftOf(owner.client.userKey, post.bluesky?.uri ?? post.id)
+    if (kept) {
+      const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = {
+        blueskyRedraft: { userKey: owner.client.userKey, slot: kept },
+      }
+      window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+      toast('info', detail.opened
+        ? 'You already have a redraft of this post, so it opens. The post was not deleted. If it is still up, use Delete.'
+        : 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted. If it is still up, use Delete.')
+      return
+    }
+    this.redraftNote = 'Reading the post…'
+    let source: BlueskyRedraftSource | null
+    try {
+      source = await readBlueskyRedraft(owner.client, post)
+    } catch (err) {
+      if (!stillOwner(owner)) return
+      // Deleted already (here after a delete in doubt, or on another device).
+      if (err instanceof BlueskyRedraftGone) {
+        // The card leaves, as after Delete: focus goes on when it was here.
+        const next = this.neighbour()
+        const moveFocus = this.hasFocus()
+        forgetDeletedStatus(post)
+        if (next && moveFocus) void next.focusPost()
+        toast('info', err.message)
+        return
+      }
+      toast('error', 'Could not read this post, so it was not deleted.')
+      return
+    }
+    if (!source || !stillOwner(owner)) return
+    this.redraftNote = null
+    // Nothing would be kept: no delete is offered (D3).
+    if (!redraftKeepsSomething(source)) {
+      toast('info', NOTHING_KEPT)
+      return
+    }
+    const ok = await confirmDialog({
+      title: 'Delete and redraft this post?',
+      message: blueskyRedraftQuestion(post, source),
+      confirmLabel: 'Delete & redraft',
+    })
+    if (!ok || !stillOwner(owner)) return
+    this.redraftNote = 'Getting the draft ready…'
+    let stored: Awaited<ReturnType<typeof storeBlueskyRedraft>>
+    try {
+      stored = await storeBlueskyRedraft(owner.client, source, { prepareImage: reencode })
+    } catch (err) {
+      if (stillOwner(owner)) toast('error', `Could not get the redraft ready, so the post was not deleted: ${messageOf(err)}`)
+      return
+    }
+    // Null after an account switch: the store checks the account last, and
+    // removes what it stored.
+    if (!stored) return
+    this.redraftNote = 'Deleting the post…'
+    const next = this.neighbour()
+    // Seconds may have passed since the confirm: focus moves only when the
+    // reader is still here.
+    const moveFocus = this.hasFocus()
+    const deleting = deleteOwnStatusOutcome(owner.client, post, { messages: { unknown: REDRAFT_UNKNOWN } })
+    if (next && moveFocus) void next.focusPost()
+    const out = await deleting
+    // The staged draft follows the outcome: failed → removed; deleted or
+    // unknown → moved where a new post finds it (the toast says so).
+    const slot = await settleBlueskyRedraft(stored, out.kind)
+    if (out.kind !== 'deleted') {
+      if (!out.stale && moveFocus) void this.focusIn('caribou-menu.more')
+      return
+    }
+    // Deleted after a switch: the draft waits for that account's next new post.
+    if (out.stale || !stillOwner(owner) || !slot) return
+    const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = {
+      blueskyRedraft: { userKey: stored.userKey, slot },
+    }
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+    if (!detail.opened) toast('info', 'Your redraft is saved. It opens the next time you write a new post.')
   }
 
   private onHistory = () => {
@@ -996,6 +1138,7 @@ export class CaribouStatusCard extends LitElement {
           ?soft-disabled=${off || !!limits.quote}
           @click=${this.onQuote}></caribou-icon-button>` : nothing}
         ${this.mine ? this.renderOwnMenu() : this.canAct && !this.ownPost ? this.renderMenu(post) : nothing}
+        ${this.mine ? html`<p class="redraft-status" role="status">${this.redraftNote ?? ''}</p>` : nothing}
       </div>
     `
   }
