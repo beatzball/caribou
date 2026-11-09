@@ -34,6 +34,11 @@ export interface ComposeDetail {
   redraft?: ComposeDraft
   /** A Bluesky post to quote. Only a Bluesky account can quote. */
   quote?: Status
+  /**
+   * A Bluesky redraft's image bytes, by the draft's image id: the previews,
+   * and the files the dialog uploads again if the PDS has dropped a blob.
+   */
+  files?: Record<string, Blob>
 }
 
 /** The counts the counter and the Post button read for a Bluesky post. */
@@ -413,6 +418,7 @@ export class CaribouComposeDialog extends LitElement {
     if (!this.isActive()) return
     const detail = (e as CustomEvent<ComposeDetail | undefined>).detail
     if (detail?.edit) this.showEdit(detail.edit.status, detail.edit.source)
+    else if (detail?.redraft?.bluesky) this.showBlueskyRedraft(detail.redraft, detail)
     else if (detail?.redraft) this.showRedraft(detail.redraft, detail.inReplyTo ?? null)
     else if (detail?.quote) this.showQuote(detail.quote)
     else this.show(detail?.inReplyTo ?? null)
@@ -517,6 +523,63 @@ export class CaribouComposeDialog extends LitElement {
     this.finishOpen()
   }
 
+  /**
+   * A Bluesky redraft (#190): a new post filled from the deleted one, with
+   * its refs, images and labels, and a new rkey (R6). Stored at once in
+   * the slot of its kind, or beside an unsent draft there, as for Mastodon.
+   */
+  private showBlueskyRedraft(draft: ComposeDraft, { inReplyTo, quote, files }: ComposeDetail): void {
+    const b = draft.bluesky
+    if (!b || activeClient.value?.capabilities.network !== 'bluesky' || !this.begin()) return
+    const client = this.client!
+    const slot: DraftSlot = b.reply ? draftSlot(b.reply.parent.uri) : b.quote ? `quote:${b.quote.uri}` : 'new'
+    const held = loadDraft(client.userKey, slot)
+    this.draftKey = held && !isDraftEmpty(held) ? `redraft:${draft.idempotencyKey}` : slot
+    this.replyTo = b.reply && inReplyTo?.id === b.reply.parent.uri ? inReplyTo : null
+    this.quoteTo = b.quote && quote?.id === b.quote.uri ? quote : null
+    this.draft = draft
+    for (const [id, file] of Object.entries(files ?? {})) this.keepFile(id, file)
+    saveDraft(client.userKey, this.draftKey, draft)
+    this.finishOpen()
+    this.ensureRkey()
+    void this.loadRefTargets(client)
+  }
+
+  // A draft with reply or quote refs shows the post it names, and is
+  // checked like any reply or quote: the dialog's post is read again; a
+  // draft with none yet (a redraft, or a kept redraft opened as a new post)
+  // takes it from the cache, or reads it.
+  private async loadRefTargets(client: CaribouClient): Promise<void> {
+    const b = this.draft.bluesky
+    const session = this.session
+    const refs = [['reply', b?.reply?.parent], ['quote', b?.quote]] as const
+    for (const [kind, ref] of refs) {
+      if (!ref) continue
+      const have = kind === 'reply' ? this.replyTo : this.quoteTo
+      if (have) {
+        void this.refreshTarget(client, have)
+        continue
+      }
+      const cached = statusCache.peek().get(ref.uri)
+      if (cached) {
+        if (kind === 'reply') this.replyTo = cached
+        else this.quoteTo = cached
+        void this.refreshTarget(client, cached)
+        continue
+      }
+      try {
+        const fresh = await client.fetchStatus(ref.uri)
+        if (session !== this.session || client !== this.client) return
+        cacheStatus(fresh)
+        if (kind === 'reply') this.replyTo = fresh
+        else this.quoteTo = fresh
+      } catch (err) {
+        if (session !== this.session || client !== this.client) return
+        if (err instanceof CaribouError && err.code === 'not_found') this.gone = kind === 'reply' ? REPLY_GONE : QUOTE_GONE
+      }
+    }
+  }
+
   /** Opens the dialog for a new post, or a reply to `inReplyTo`. */
   show(inReplyTo: Status | null): void {
     // A reply goes to a post on the active account's network only (spec 11).
@@ -574,6 +637,7 @@ export class CaribouComposeDialog extends LitElement {
     this.finishOpen()
     this.ensureRkey()
     if (target) void this.refreshTarget(client, target)
+    else void this.loadRefTargets(client)
   }
 
   // R6 (`packages/state` README): a draft gets its rkey when it is made, so

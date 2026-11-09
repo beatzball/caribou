@@ -688,6 +688,29 @@ the 4-image cap and blob recovery); `_image-fit.test.ts`;
 `tests/e2e/bluesky-compose.spec.ts` (the real SDK against a fixture PDS: the
 counter, a TID rkey, facets, and a lost answer across a reload is one post).
 
+### Bluesky delete and redraft (#190)
+
+The card's Delete and "Delete & redraft" on the reader's own Bluesky post.
+Rules in `packages/state` README, "Bluesky delete and redraft".
+
+- **Delete** asks first, as for Mastodon. The post leaves every list at
+  once; a refusal brings it back with a toast. Focus goes as for Mastodon.
+- **Delete & redraft** asks first. The confirm adds "The video is not
+  kept." or "The link card is not kept." when the post has one. Then the
+  card reads the record and its images. If that fails, a toast says "Could
+  not read this post, so it was not deleted." and nothing changes. Then it
+  deletes. If the delete fails, the composer does not open. Then the
+  dialog opens with the new draft (`caribou:compose` with `redraft`, and
+  the image bytes in `files`).
+- The dialog opens a Bluesky redraft like a Bluesky new post, reply or
+  quote (`showBluesky`), with the draft's refs, images and labels, and a
+  new rkey. The images show from the bytes. The post replied to or quoted
+  is taken from the page's cache, or read (`fetchStatus`); deleted, it
+  shows the "deleted" note and Post is off, as for any reply.
+- A kept Bluesky redraft that opens as the next new post reads its reply
+  or quote target the same way.
+- Mastodon's delete and redraft do not change.
+
 ### Bluesky SSR (#185, #186)
 
 Phase 3. The server paints a Bluesky profile and thread with no token

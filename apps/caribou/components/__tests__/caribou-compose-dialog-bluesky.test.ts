@@ -1162,21 +1162,135 @@ describe('round 4 (PR #232)', () => {
     expect(loadDraft(KEY, 'new')).toBeNull()
   })
 
+  // The create is held, not the facets: an edit during the lookup stops the
+  // send before the freeze (R4), so it would never reach the close (#232 review R5-N1).
   it('an earlier opening\'s send posts, but the reopened draft was edited: the dialog stays with the edit', async () => {
     const pds = signInBluesky()
     const el = await mount()
     await open(el)
     await type(el, 'v1')
-    const lookup1 = deferred<never[]>()
-    pds.client.blueskyDetectFacets.mockImplementationOnce(() => lookup1.promise)
+    const create = deferred<void>()
+    const realCreate = pds.client.blueskyCreatePost.getMockImplementation()!
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record, rkey) => {
+      await create.promise
+      return realCreate(record, rkey)
+    })
     await submit(el)
+    expect(pds.client.blueskyCreatePost).toHaveBeenCalledTimes(1)
     $(el, '[data-action="cancel"]')!.click()
     await settle(el)
     await open(el)
     await type(el, 'v1 and more')
-    lookup1.resolve([])
+    create.resolve()
     await settle(el)
+    expect([...pds.records.values()].map((r) => r.text)).toEqual(['v1'])
     expect($<HTMLDialogElement>(el, 'dialog')?.open).toBe(true)
     expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('v1 and more')
+  })
+})
+
+// #190: a Bluesky redraft (app README, "Bluesky delete and redraft").
+describe('Bluesky redraft', () => {
+  const PARENT = { uri: bobPost().id, cid: 'bafyp1' }
+  const QUOTED = { uri: 'at://did:plc:carol/app.bsky.feed.post/q1', cid: 'bafyq1' }
+  const image = (id: string, link: string) => ({
+    id, blob: { $type: 'blob' as const, ref: { $link: link }, mimeType: 'image/jpeg', size: 3 },
+    mime: 'image/jpeg', size: 3, alt: `alt ${id}`, aspectRatio: { width: 4, height: 3 },
+  })
+  const redraft = (over: Partial<NonNullable<ReturnType<typeof emptyDraft>['bluesky']>> = {}) => emptyDraft({
+    text: 'from the deleted post', language: 'de', inReplyToId: over.reply ? over.reply.parent.uri : null,
+    bluesky: emptyBlueskyDraft({ labels: ['nudity'], images: [image('i1', 'bafkA')], ...over }),
+  })
+  const files = () => ({ i1: new Blob(['A'], { type: 'image/jpeg' }) })
+
+  it('opens the Bluesky composer with the draft, its images shown from the bytes, and a new rkey', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el, { redraft: redraft(), files: files() })
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect($(el, '[data-bsky-image="i1"] img')).not.toBeNull()
+    expect(pds.client.blueskyNextRkey).toHaveBeenCalledTimes(1)
+    const stored = loadDraft(KEY, 'new')!
+    expect(stored.text).toBe('from the deleted post')
+    expect(stored.bluesky!.rkey).toBe('3krkey0000001')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost.mock.calls.map((c) => c[1])).toEqual(['3krkey0000001'])
+    const sent = [...pds.records.values()][0]!
+    expect(sent.text).toBe('from the deleted post')
+    expect(sent.langs).toEqual(['de'])
+    expect(sent.labels).toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'nudity' }] })
+    expect(sent.embed).toMatchObject({ $type: 'app.bsky.embed.images', images: [{ alt: 'alt i1', aspectRatio: { width: 4, height: 3 } }] })
+  })
+
+  it('a reply redraft goes in the reply slot, keeps its refs, and shows the post it replies to', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el, { redraft: redraft({ reply: { root: PARENT, parent: PARENT } }), inReplyTo: bobPost() })
+    expect(loadDraft(KEY, `reply:${PARENT.uri}`)!.text).toBe('from the deleted post')
+    expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+    await submit(el)
+    expect([...pds.records.values()][0]!.reply).toEqual({ root: PARENT, parent: PARENT })
+  })
+
+  it('a reply redraft whose parent is not on the page reads it; a deleted parent blocks Post', async () => {
+    const pds = signInBluesky()
+    pds.client.fetchStatus.mockRejectedValue(new CaribouError('not_found', 'gone', { status: 404 }))
+    const el = await mount()
+    await open(el, { redraft: redraft({ reply: { root: PARENT, parent: PARENT } }) })
+    expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The post you replied to was deleted.')
+    expect(postButton(el).disabled).toBe(true)
+  })
+
+  it('a quote redraft goes in the quote slot and keeps its ref', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el, { redraft: redraft({ quote: QUOTED, images: [] }) })
+    expect(loadDraft(KEY, `quote:${QUOTED.uri}`)).not.toBeNull()
+    await submit(el)
+    expect([...pds.records.values()][0]!.embed).toEqual({ $type: 'app.bsky.embed.record', record: QUOTED })
+  })
+
+  it('never overwrites an unsent draft: the redraft is kept beside it, and opens first next time', async () => {
+    signInBluesky()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'half written', bluesky: emptyBlueskyDraft({ rkey: '3krkeyHALF' }) }))
+    const el = await mount()
+    const d = redraft()
+    await open(el, { redraft: d, files: files() })
+    expect(loadDraft(KEY, 'new')!.text).toBe('half written')
+    expect(loadDraft(KEY, `redraft:${d.idempotencyKey}`)!.text).toBe('from the deleted post')
+    expect($(el, '[data-redraft-note]')).not.toBeNull()
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+  })
+
+  it('a kept reply redraft opened as the next new post reads the post it replies to', async () => {
+    const pds = signInBluesky()
+    const d = redraft({ reply: { root: PARENT, parent: PARENT } })
+    saveDraft(KEY, `redraft:${d.idempotencyKey}`, d)
+    const el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+  })
+
+  it('a blob the PDS dropped is uploaded again from the redraft\'s bytes', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el, { redraft: redraft(), files: files() })
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkA', 'bafkA'))
+    await submit(el)
+    expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(1)
+    expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
+  })
+
+  it('opens nothing for a Mastodon account', async () => {
+    signInMastodonOffline('alice@example.social')
+    const el = await mount()
+    await open(el, { redraft: redraft(), files: files() })
+    expect($<HTMLDialogElement>(el, 'dialog')?.open).not.toBe(true)
+    expect(loadDraft('alice@example.social', 'new')).toBeNull()
   })
 })

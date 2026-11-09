@@ -11,6 +11,7 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
+  finishBlueskyRedraft, readBlueskyRedraft,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
 } from '@beatzball/caribou-state'
@@ -842,6 +843,7 @@ export class CaribouStatusCard extends LitElement {
     const post = this.shownPost()
     const owner = currentOwner()
     if (!this.mine || !post || !owner) return
+    if (post.bluesky) return this.redraftBluesky(owner, post)
     const ok = await confirmDialog({
       title: 'Delete and redraft this post?',
       message: 'The post is deleted and opens again as a new draft. Its boosts, favourites and replies are lost.'
@@ -856,6 +858,40 @@ export class CaribouStatusCard extends LitElement {
     const inReplyTo = draft.inReplyToId ? statusCache.peek().get(draft.inReplyToId) : undefined
     window.dispatchEvent(new CustomEvent('caribou:compose', {
       detail: { redraft: draft, ...(inReplyTo ? { inReplyTo } : {}) },
+    }))
+  }
+
+  // Bluesky has no edit (#190; app README, "Bluesky delete and redraft").
+  // The record and its images are read first: if that fails, nothing is
+  // deleted. If the delete fails, nothing opens. The new draft gets a new rkey.
+  private async redraftBluesky(owner: Owner, post: Status): Promise<void> {
+    const video = (post.mediaAttachments ?? []).some((m) => m.type === 'video' || m.type === 'gifv')
+    const ok = await confirmDialog({
+      title: 'Delete and redraft this post?',
+      message: 'The post is deleted and opens again as a new draft. Its likes, reposts and replies are lost.'
+        + (video ? ' The video is not kept.' : '')
+        + (post.card || post.bluesky?.recordCard ? ' The link card is not kept.' : ''),
+      confirmLabel: 'Delete & redraft',
+    })
+    if (!ok || !stillOwner(owner)) return
+    let source: Awaited<ReturnType<typeof readBlueskyRedraft>>
+    try {
+      source = await readBlueskyRedraft(owner.client, post)
+    } catch {
+      if (stillOwner(owner)) toast('error', 'Could not read this post, so it was not deleted.')
+      return
+    }
+    if (!source || !stillOwner(owner)) return
+    const gone = await this.deleteAndMoveFocus(owner, post)
+    if (!gone || !stillOwner(owner)) return
+    const out = await finishBlueskyRedraft(owner.client, source)
+    if (!out || !stillOwner(owner)) return
+    const b = out.draft.bluesky
+    const cache = statusCache.peek()
+    const inReplyTo = b?.reply ? cache.get(b.reply.parent.uri) : undefined
+    const quote = b?.quote ? cache.get(b.quote.uri) : undefined
+    window.dispatchEvent(new CustomEvent('caribou:compose', {
+      detail: { redraft: out.draft, files: out.files, ...(inReplyTo ? { inReplyTo } : {}), ...(quote ? { quote } : {}) },
     }))
   }
 

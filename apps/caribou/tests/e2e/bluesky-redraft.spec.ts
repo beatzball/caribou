@@ -1,0 +1,188 @@
+import { expect, test, type Page } from '@playwright/test'
+import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+
+// Bluesky delete and redraft through the real SDK (#190; app README,
+// "Bluesky delete and redraft"). The record and its image are read from the
+// fixture PDS first, then the post is deleted with `deleteRecord`, the image
+// uploaded again, and the new draft posts with a new rkey.
+
+const PDS = 'https://pds.example.test'
+const OLD_RKEY = '3lalicepost1'
+const OLD_URI = `at://${ALICE}/app.bsky.feed.post/${OLD_RKEY}`
+const POST_CID = 'bafyreib7upx3s2pfhghouqwntlb4vsokgkwi7kmeqfsyddvum2xle33riq'
+// The raw CID of IMAGE_BYTES, as a PDS computes it.
+const BLOB_CID = 'bafkreibsiyovxulxgajkz3ylufldm5jjjg6xylhfb6ixefm5t5lm6dozv4'
+const IMAGE_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
+// Bluesky's own labeler. The AppView says which labelers' labels an answer
+// carries; with it, and the labeler's definitions, the reader's check settles.
+const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
+const COVERED = { 'atproto-content-labelers': `${BSKY_LABELER};redact` }
+const TID = /^[234567abcdefghij][234567abcdefghijklmnopqrstuvwxyz]{12}$/
+
+const RECORD = {
+  $type: 'app.bsky.feed.post',
+  text: 'a deer photo',
+  embed: {
+    $type: 'app.bsky.embed.images',
+    images: [{
+      image: { $type: 'blob', ref: { $link: BLOB_CID }, mimeType: 'image/jpeg', size: IMAGE_BYTES.length },
+      alt: 'a deer in snow', aspectRatio: { width: 4, height: 3 },
+    }],
+  },
+  langs: ['en'],
+  createdAt: '2026-11-05T10:00:00.000Z',
+}
+
+const POST_VIEW = {
+  $type: 'app.bsky.feed.defs#postView',
+  uri: OLD_URI, cid: POST_CID,
+  author: { did: ALICE, handle: 'alice.example.com', displayName: 'Alice', labels: [] },
+  record: RECORD,
+  embed: {
+    $type: 'app.bsky.embed.images#view',
+    images: [{ thumb: `${PDS}/img/thumb.jpg`, fullsize: `${PDS}/img/full.jpg`, alt: 'a deer in snow', aspectRatio: { width: 4, height: 3 } }],
+  },
+  replyCount: 0, repostCount: 0, likeCount: 0, quoteCount: 0,
+  indexedAt: '2026-11-05T10:00:01.000Z', viewer: {}, labels: [],
+}
+
+interface Pds {
+  calls: string[]
+  creates: { rkey: string; record: Record<string, unknown> }[]
+  deleted: string[]
+  failDelete: boolean
+}
+
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }
+
+// The timeline and the labeler, through the auth fixture's own PDS hook.
+function appview(pds: Pds): XrpcAnswer {
+  return (method) => {
+    if (method === 'app.bsky.feed.getTimeline') {
+      return { body: { feed: pds.deleted.length > 0 ? [] : [{ post: POST_VIEW }] }, headers: COVERED }
+    }
+    if (method === 'app.bsky.labeler.getServices') {
+      return { body: { views: [{
+        $type: 'app.bsky.labeler.defs#labelerViewDetailed',
+        uri: `at://${BSKY_LABELER}/app.bsky.labeler.service/self`, cid: POST_CID,
+        creator: { did: BSKY_LABELER, handle: 'moderation.bsky.app', labels: [] },
+        policies: { labelValues: [] }, indexedAt: '2026-01-01T00:00:00.000Z', labels: [],
+      }] } }
+    }
+    return undefined
+  }
+}
+
+function newPds(): Pds {
+  return { calls: [], creates: [], deleted: [], failDelete: false }
+}
+
+async function fixturePds(page: Page, pds: Pds): Promise<void> {
+  const json = (body: unknown, status = 200) => ({ status, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  await page.route(`${PDS}/xrpc/**`, async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    const method = url.pathname.replace('/xrpc/', '')
+    if (req.method() === 'OPTIONS') return route.fallback()
+    switch (method) {
+      case 'com.atproto.repo.getRecord':
+        pds.calls.push(`getRecord ${url.searchParams.get('rkey')}`)
+        return route.fulfill(url.searchParams.get('rkey') === OLD_RKEY && pds.deleted.length === 0
+          ? json({ uri: OLD_URI, cid: POST_CID, value: RECORD })
+          : json({ error: 'RecordNotFound', message: 'Could not locate record' }, 400))
+      case 'com.atproto.sync.getBlob':
+        pds.calls.push(`getBlob ${url.searchParams.get('cid')}`)
+        return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'image/jpeg' }, body: IMAGE_BYTES })
+      case 'com.atproto.repo.deleteRecord': {
+        const body = req.postDataJSON() as { repo: string; collection: string; rkey: string }
+        pds.calls.push(`deleteRecord ${body.repo} ${body.collection} ${body.rkey}`)
+        if (pds.failDelete) return route.fulfill(json({ error: 'InternalServerError', message: 'Internal Server Error' }, 500))
+        pds.deleted.push(body.rkey)
+        return route.fulfill(json({}))
+      }
+      case 'com.atproto.repo.uploadBlob':
+        pds.calls.push('uploadBlob')
+        return route.fulfill(json({ blob: { $type: 'blob', ref: { $link: BLOB_CID }, mimeType: 'image/jpeg', size: IMAGE_BYTES.length } }))
+      case 'com.atproto.repo.createRecord': {
+        const body = req.postDataJSON() as { repo: string; collection: string; rkey: string; record: Record<string, unknown> }
+        pds.calls.push('createRecord')
+        pds.creates.push({ rkey: body.rkey, record: body.record })
+        return route.fulfill(json({ uri: `at://${body.repo}/${body.collection}/${body.rkey}`, cid: POST_CID }))
+      }
+      case 'app.bsky.feed.getPosts': return route.fulfill(json({ posts: [] }))
+      case 'app.bsky.feed.getPostThread':
+        return route.fulfill(json({ error: 'NotFound', message: 'Post not found' }, 400))
+      default: return route.fallback()
+    }
+  })
+  await page.route(`${PDS}/img/**`, (route) => route.fulfill({ status: 200, headers: { 'content-type': 'image/jpeg' }, body: IMAGE_BYTES }))
+}
+
+async function signIn(page: Page, origin: string) {
+  await page.addInitScript(() => localStorage.setItem('caribou.flag.bluesky', '1'))
+  await page.goto(`${origin}/`)
+  await page.getByRole('tab', { name: 'Bluesky' }).click()
+  await page.getByLabel('Bluesky handle').fill('alice.example.com')
+  await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL(`${origin}/home`)
+}
+
+async function chooseRedraft(page: Page) {
+  const menu = page.getByRole('button', { name: 'More actions for your post' })
+  await expect(menu).toBeVisible({ timeout: 15_000 })
+  await menu.click()
+  await page.getByRole('menuitem', { name: 'Delete & redraft' }).or(page.getByRole('button', { name: 'Delete & redraft' })).first().click()
+  await page.getByRole('dialog', { name: 'Delete and redraft this post?' }).getByRole('button', { name: 'Delete & redraft' }).click()
+}
+
+test.describe('Bluesky delete and redraft', () => {
+  // As in bluesky-signin.spec.ts: Playwright WebKit on macOS hangs storing
+  // the SDK's DPoP key in IndexedDB. CI runs WebKit on Linux.
+  test.skip(({ browserName }) => browserName === 'webkit' && process.platform === 'darwin',
+    'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
+  // A signed-in timeline card stays covered ("checking your moderation
+  // settings") until #233 passes labeler coverage for the timeline, so the
+  // menu cannot be reached. Both tests passed with the timeline covered.
+  test.fixme(true, 'needs #233: signed-in timeline moderation never settles')
+
+  test('reads the record and image, deletes, and posts the redraft as a new record', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    const pds = newPds()
+    await installFixtureAuth(page, { xrpc: appview(pds) })
+    await fixturePds(page, pds)
+    await signIn(page, origin)
+    await chooseRedraft(page)
+
+    const dialog = page.getByRole('dialog', { name: 'New post' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('textbox', { name: 'Post text' })).toHaveValue('a deer photo')
+    await expect(dialog.getByRole('textbox', { name: /Alt text for/ })).toHaveValue('a deer in snow')
+    expect(pds.calls.slice(0, 4)).toEqual([
+      `getRecord ${OLD_RKEY}`, `getBlob ${BLOB_CID}`, `deleteRecord ${ALICE} app.bsky.feed.post ${OLD_RKEY}`, 'uploadBlob',
+    ])
+
+    await dialog.getByRole('button', { name: 'Post' }).click()
+    await expect(dialog).toBeHidden()
+    expect(pds.creates).toHaveLength(1)
+    expect(pds.creates[0]!.rkey).toMatch(TID)
+    expect(pds.creates[0]!.rkey).not.toBe(OLD_RKEY)
+    expect(pds.creates[0]!.record).toMatchObject({
+      $type: 'app.bsky.feed.post', text: 'a deer photo', langs: ['en'],
+      embed: { $type: 'app.bsky.embed.images', images: [{ alt: 'a deer in snow', image: { ref: { $link: BLOB_CID } } }] },
+    })
+  })
+
+  test('a refused delete opens no composer and keeps the post', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    const pds = newPds()
+    await installFixtureAuth(page, { xrpc: appview(pds) })
+    await fixturePds(page, pds)
+    pds.failDelete = true
+    await signIn(page, origin)
+    await chooseRedraft(page)
+    await expect(page.getByText('Could not delete this post. Try again.')).toBeVisible()
+    await expect(page.getByRole('dialog', { name: 'New post' })).toBeHidden()
+    await expect(page.getByRole('button', { name: 'More actions for your post' })).toBeVisible()
+    expect(pds.calls).not.toContain('uploadBlob')
+  })
+})

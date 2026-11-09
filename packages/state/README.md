@@ -516,6 +516,63 @@ storage refusing every click sends nothing, then one post after a reload
 blob refusal, and a facet lookup that lands late (R4); an answer after an
 account switch tells no screen.
 
+
+## Bluesky delete and redraft (#190)
+
+`own-posts.ts` (delete) and `bluesky-redraft.ts` (redraft).
+
+**Delete** (`deleteOwnStatus`, the same function as Mastodon's). For a
+Bluesky client it calls `blueskyDeletePost(uri)`; for Mastodon it calls
+`deleteStatus(id)` as before. The rest is shared and unchanged: the post
+and every repost of it leave the cache at once and its id is marked
+deleted, so every list drops it; a refusal puts them back and toasts
+"Could not delete this post. Try again."; an answer that lands after an
+account switch writes nothing. On success it resolves to the post as the
+reader saw it (Bluesky's delete answers nothing). Only the author's own
+post: the card offers Delete only on it, and the client refuses another
+repo's URI.
+
+**Redraft.** Bluesky has no edit, so a redraft deletes the post and opens a
+new draft with what it had. Three steps, in this order:
+
+1. **Read** (`readBlueskyRedraft`), before anything is deleted. The record
+   from the reader's PDS (`blueskyGetOwnPost`), not the AppView copy: it
+   has the text as typed, the facets, the exact refs and blob CIDs. Then
+   the bytes of each image (`blueskyGetBlob`). If any of it fails, or the
+   record is not there, nothing is deleted and nothing opens; it throws.
+2. **Delete** (`deleteOwnStatus`). If it fails, nothing opens.
+3. **Draft** (`finishBlueskyRedraft`). Each image is uploaded again from
+   its bytes. **Why not keep the blob refs:** the PDS deletes a blob as
+   soon as no record names it, so the old refs die with the post. The same
+   bytes give the same CID. Upload before the delete would not help: the
+   delete removes that blob too. An upload that fails keeps the old ref,
+   and the bytes go to the dialog with the draft, so the dialog's blob
+   recovery (#189) uploads them at Post. This step never throws: the post
+   is gone, and its text must open.
+
+**What the draft takes from the record.**
+
+| record | draft |
+|---|---|
+| `text` | `text`. A link facet whose shown text is not its URL (other apps shorten links) gets its full URL back in the text, because facets are made again from the text at send. |
+| `facets` | not kept: made again from the text at send, like any draft |
+| `reply` | `bluesky.reply` (same strong refs), `inReplyToId` = the parent URI |
+| `embed` record, or `recordWithMedia.record` | `bluesky.quote` (same strong ref) |
+| `embed` images, or `recordWithMedia.media` images | `bluesky.images`: the uploaded blob ref, `alt`, `aspectRatio`, type and size |
+| `labels` self-labels | `bluesky.labels`, the menu's values only (`BLUESKY_SELF_LABELS`) |
+| `langs` | `language` = the first one (compose sends one) |
+| a video, an external link card | not kept. The confirm says so first. The link stays in the text. |
+| `createdAt` | not kept: a new post gets a new time |
+
+`rkey` and `sent` are `null`. The dialog gives the draft a **new** rkey
+when it opens it (R6): the redraft is a new record, never the old key.
+The slot is the same as for a new post of that kind (`reply:<parent uri>`,
+`quote:<uri>`, `new`), or `redraft:<key>` when that slot holds an unsent
+draft, as for Mastodon.
+
+**Account switch.** Each step checks the account after its await
+(`ownerGeneration`). A switch before the delete stops it: nothing is
+deleted. A switch after the delete opens nothing.
 ## Notifications (`notifications-store.ts`, `notification-groups.ts`)
 
 **Paging, both networks.** A list ends only when the client says so, with

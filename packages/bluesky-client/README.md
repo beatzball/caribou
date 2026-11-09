@@ -599,6 +599,29 @@ never fails a post.
 - `restoreClient` passes the helpers in as `compose`, so `client.ts` keeps no
   runtime import of the SDK.
 
+## Delete (#190)
+
+Bluesky has no edit. Delete removes the post record; a redraft reads the
+record first and writes a new one (rules in `packages/state` README,
+"Bluesky delete and redraft").
+
+| method | call | answer |
+|---|---|---|
+| `blueskyDeletePost(uri)` | `com.atproto.repo.deleteRecord` on the reader's repo, collection `app.bsky.feed.post`, the URI's rkey | nothing |
+| `blueskyGetBlob(cid)` | `com.atproto.sync.getBlob` with the reader's DID, on the PDS | the blob's bytes as a `Blob`, typed from the answer |
+
+- **Only the reader's own post.** The URI must be
+  `at://<the session's DID>/app.bsky.feed.post/<rkey>`. Any other URI is
+  refused with `CaribouError('not_found')` before any request: a delete
+  never goes to someone else's repo, a like or a repost record.
+- A delete of a record that is already gone succeeds (the PDS answers it
+  as done). So a second click, or a retry after a lost answer, is safe.
+- Writes skip the read dedup. Errors go through `normalizeXrpcError`; a
+  401 calls `onUnauthorized`.
+- `deleteStatus` (Mastodon's) answers `not_found` naming
+  `blueskyDeletePost`, like `createStatus`. `fetchStatusSource` does the
+  same, naming `blueskyGetOwnPost`: the record is the source.
+
 ## Embeds (`mapEmbed`, spec 7.3)
 
 **`mapPost` hands over the post URI:** it calls `mapEmbed(view.embed, ctx,

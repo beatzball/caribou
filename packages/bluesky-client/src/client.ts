@@ -41,7 +41,8 @@ export type BlueskyAgent = Pick<Agent,
 > & Pick<Agent, 'listNotifications' | 'countUnreadNotifications' | 'updateSeenNotifications'> & {
   com: {
     atproto: {
-      repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'getRecord' | 'uploadBlob'>
+      repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'getRecord' | 'uploadBlob' | 'deleteRecord'>
+      sync: Pick<Agent['com']['atproto']['sync'], 'getBlob'>
     }
   }
   app: {
@@ -155,6 +156,18 @@ function isThreadViewPost(v: unknown): v is AppBskyFeedDefs.ThreadViewPost {
 function isPostView(v: object): v is AppBskyFeedDefs.PostView {
   return typeof v === 'object' && v !== null
     && (v as { $type?: unknown }).$type === 'app.bsky.feed.defs#postView'
+}
+
+/**
+ * The rkey of a post in the reader's own repo, or a refusal: a delete never
+ * goes to another repo or another collection (README, "Delete").
+ */
+function ownPostRkey(uri: string, reader: string): string {
+  const m = /^at:\/\/([^/]+)\/([^/]+)\/([^/]+)$/.exec(uri)
+  if (!m || m[1] !== reader || m[2] !== POST_COLLECTION) {
+    throw new CaribouError('not_found', 'Bluesky: only your own post can be deleted')
+  }
+  return m[3]!
 }
 
 function notBluesky(method: string, instead: string): () => Promise<never> {
@@ -600,12 +613,28 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       })
     },
 
+    // Delete (#190): only the reader's own post record.
+    async blueskyDeletePost(uri: string) {
+      const rkey = ownPostRkey(uri, did())
+      return write(async () => {
+        await agent.com.atproto.repo.deleteRecord({ repo: did(), collection: POST_COLLECTION, rkey })
+      })
+    },
+
+    async blueskyGetBlob(cid: string) {
+      return write(async () => {
+        const { data, headers } = await agent.com.atproto.sync.getBlob({ did: did(), cid })
+        const type = headers['content-type'] ?? ''
+        return new Blob([data as BlobPart], { type: type.split(';')[0]!.trim() })
+      })
+    },
+
     votePoll: notYet('polls', 'no issue: Bluesky has no polls'),
     fetchPoll: notYet('polls', 'no issue: Bluesky has no polls'),
 
-    fetchStatusSource: notYet('delete and redraft', '#190'),
+    fetchStatusSource: notBluesky('fetchStatusSource', 'blueskyGetOwnPost'),
     editStatus: notYet('edit', 'no issue: Bluesky has no edit'),
-    deleteStatus: notYet('delete', '#190'),
+    deleteStatus: notBluesky('deleteStatus', 'blueskyDeletePost'),
     fetchStatusHistory: notYet('edit history', 'no issue: Bluesky has no edit'),
 
     fetchNotifications: (params = {}) => notifications(params),

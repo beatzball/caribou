@@ -52,7 +52,8 @@ function replaceInBoosts(post: Status): void {
  * server sent it (its `text` is the source, for a redraft), or null.
  */
 export async function deleteOwnStatus(client: CaribouClient, status: Status): Promise<Status | null> {
-  const id = (status.reblog ?? status).id
+  const post = status.reblog ?? status
+  const id = post.id
   const generation = ownerGeneration()
   const removed = new Map<string, Status>()
   batch(() => {
@@ -68,7 +69,10 @@ export async function deleteOwnStatus(client: CaribouClient, status: Status): Pr
     deletedStatusIds.value = new Set([...deletedStatusIds.peek(), id])
   })
   try {
-    const gone = await client.deleteStatus(id)
+    // Bluesky's delete answers nothing; the post as the reader saw it is the answer.
+    const gone = post.bluesky && client.blueskyDeletePost
+      ? await client.blueskyDeletePost(post.bluesky.uri).then(() => post)
+      : await client.deleteStatus(id)
     if (generation !== ownerGeneration()) return null
     return gone
   } catch {
