@@ -4,7 +4,7 @@ import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, getDraftFiles, loadDraft, postDraft, pruneDraftFiles, saveDraft,
-  checkRedraftSource, hasOrphanStagedRedrafts, recoverStagedRedrafts,
+  checkRedraftSource, draftFilesSlot, hasOrphanStagedRedrafts, recoverStagedRedrafts,
   pollOptions, blueskyDraftInput, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
@@ -587,7 +587,7 @@ export class CaribouComposeDialog extends LitElement {
       this.targetsChecking += 1
       try {
         const fresh = await client.fetchStatus(ref.uri)
-        if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
+        if (session !== this.session || client !== this.client) return
         cacheStatus(fresh)
         if (kind === 'reply') this.replyTo = fresh
         else this.quoteTo = fresh
@@ -641,7 +641,7 @@ export class CaribouComposeDialog extends LitElement {
     const owner = this.owner()
     const ids = new Set((this.draft.bluesky?.images ?? []).map((i) => i.id))
     if (!owner || ids.size === 0) return
-    this.filesLoading = getDraftFiles(owner.client.userKey, owner.slot).then((files) => {
+    this.filesLoading = getDraftFiles(owner.client.userKey, draftFilesSlot(owner.slot)).then((files) => {
       if (!this.owns(owner)) return
       let added = false
       for (const [id, file] of Object.entries(files)) {
@@ -691,7 +691,11 @@ export class CaribouComposeDialog extends LitElement {
     const owner = this.owner()
     if (!owner || !this.draft.bluesky?.sourceMaybeLive) return
     void checkRedraftSource(owner.client, owner.slot).then((live) => {
-      if (this.owns(owner)) this.sourceLive = live === true
+      if (!this.owns(owner)) return
+      this.sourceLive = live === true
+      // Gone: the open draft drops the mark too, or its next save writes it back.
+      const b = this.draft.bluesky
+      if (live === false && b?.sourceMaybeLive) this.draft = { ...this.draft, bluesky: { ...b, sourceMaybeLive: false } }
     })
   }
 
@@ -752,7 +756,7 @@ export class CaribouComposeDialog extends LitElement {
     const session = this.session
     try {
       const fresh = await client.fetchStatus(target.id)
-      if (session !== this.session || client !== this.client || activeUserKey.peek() !== client.userKey) return
+      if (session !== this.session || client !== this.client) return
       // The page's other copies learn the flags too.
       cacheStatus(fresh)
       if (this.replyTo?.id === fresh.id) this.replyTo = fresh

@@ -99,6 +99,14 @@ export async function removeDraftFiles(userKey: UserKey, slot: DraftSlot): Promi
   }
 }
 
+/**
+ * The slot a draft's bytes are stored under: a `staged:<key>` redraft's
+ * bytes are under `redraft:<key>` from the start, so its rename moves none.
+ */
+export function draftFilesSlot(slot: DraftSlot): DraftSlot {
+  return slot.startsWith('staged:') ? `redraft:${slot.slice('staged:'.length)}` : slot
+}
+
 // A redraft's bytes are keyed by its final slot, `redraft:<key>`, from the
 // start; while its delete runs the draft sits in `staged:<key>`.
 function draftHas(userKey: UserKey, slot: DraftSlot, id: string): boolean {

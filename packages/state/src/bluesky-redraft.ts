@@ -7,7 +7,7 @@ import type {
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 import {
-  draftRev, emptyDraft, isDraftEmpty, loadDraft, storeDraftIf, storedDrafts,
+  draftRev, emptyDraft, isDraftEmpty, loadDraft, renameDraftIf, revealDraftSlot, storeDraftIf, storedDrafts,
   type BlueskyDraftImage, type ComposeDraft, type DraftSlot,
 } from './compose.js'
 import { emptyBlueskyDraft } from './bluesky-compose.js'
@@ -67,6 +67,39 @@ export const NOTHING_KEPT = 'Nothing in this post can be kept in a draft. Use De
 // a closed tab skips them.
 const staging = new Set<string>()
 const stagingKey = (userKey: UserKey, slot: DraftSlot) => `${userKey}\u0000${slot}`
+
+/** A staged draft whose post is still up is removed after this long. */
+export const STAGED_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The stored `redraft:` slot made from the post `source`, or null. The
+ * stored redraft wins: a new redraft of the same post opens it instead
+ * (it may hold the reader's edits).
+ */
+export function findRedraftOf(userKey: UserKey, source: string): DraftSlot | null {
+  for (const [slot, d] of storedDrafts(userKey)) {
+    if (slot.startsWith('redraft:') && d.bluesky?.source === source && !isDraftEmpty(d)) return slot
+  }
+  return null
+}
+
+/**
+ * Removes the staged drafts of `source` that this tab is not deleting for
+ * (a tab closed before their delete went out). Plain Delete calls this:
+ * the reader wanted the post gone, not a redraft of it.
+ */
+export async function dropStagedRedraftsOf(userKey: UserKey, source: string): Promise<void> {
+  for (const [slot, d] of storedDrafts(userKey)) {
+    if (!slot.startsWith('staged:') || staging.has(stagingKey(userKey, slot)) || d.bluesky?.source !== source) continue
+    await dropStaged(userKey, slot, d.rev ?? '')
+  }
+}
+
+// Removes a staged draft (revision-checked) and the bytes under its final slot.
+async function dropStaged(userKey: UserKey, slot: DraftSlot, rev: string): Promise<void> {
+  const target: DraftSlot = `redraft:${slot.slice('staged:'.length)}`
+  if (storeDraftIf(userKey, slot, rev, null) && !loadDraft(userKey, target)) await removeDraftFiles(userKey, target)
+}
 
 interface RecordImage {
   image: unknown
@@ -299,6 +332,9 @@ export async function storeBlueskyRedraft(
     // A new record with a new rkey (R6), stored with the first save.
     bluesky: emptyBlueskyDraft({
       reply, quote, labels: redraftLabelsOf(record), images, rkey, source: source.status.bluesky?.uri ?? source.status.id,
+      // Set now, so the rename after the delete only changes its value
+      // (and needs no more storage).
+      sourceMaybeLive: false, stagedAt: Date.now(),
     }),
   })
   if (isDraftEmpty(draft)) throw new Error(NOTHING_KEPT)
@@ -338,11 +374,13 @@ export async function discardBlueskyRedraft(stored: StoredBlueskyRedraft): Promi
 
 /**
  * Follows the delete's outcome. Failed: the staged draft is removed
- * (`discardBlueskyRedraft`). Deleted or unknown: it moves to its
- * `redraft:<key>` slot, where a new post finds it; unknown marks it
- * `sourceMaybeLive`. An older redraft of the same post is replaced, so its
- * text cannot be posted twice. Answers the slot that holds the draft now
- * (the staged one when the move could not be written), or null.
+ * (`discardBlueskyRedraft`). Deleted or unknown: it is renamed to its
+ * `redraft:<key>` slot in place, where a new post finds it; unknown marks
+ * it `sourceMaybeLive`. When a redraft of the same post is stored already,
+ * that one wins: the staged copy and its bytes go, and the stored one takes
+ * the mark. Answers the slot that holds the draft now (the staged one,
+ * found by a new post in this page, when the rename could not be written),
+ * or null.
  */
 export async function settleBlueskyRedraft(
   stored: StoredBlueskyRedraft, outcome: 'deleted' | 'failed' | 'unknown',
@@ -362,25 +400,36 @@ async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): P
   // Moved already (another tab).
   if (!draft || rev === null) return loadDraft(userKey, target) ? target : null
   const source = draft.bluesky?.source
-  if (source) {
-    for (const [other, d] of storedDrafts(userKey)) {
-      if (other === target || !other.startsWith('redraft:') || d.bluesky?.source !== source) continue
-      if (storeDraftIf(userKey, other, d.rev ?? '', null)) await removeDraftFiles(userKey, other)
+  const kept = source ? findRedraftOf(userKey, source) : null
+  if (kept && kept !== target) {
+    // The stored redraft wins: it may hold the reader's edits.
+    await dropStaged(userKey, slot, rev)
+    const held = loadDraft(userKey, kept)
+    if (held?.bluesky && held.bluesky.sourceMaybeLive !== maybeLive) {
+      storeDraftIf(userKey, kept, held.rev ?? '', { ...held, bluesky: { ...held.bluesky, sourceMaybeLive: maybeLive } })
     }
+    return kept
   }
-  const moved = { ...draft, bluesky: { ...(draft.bluesky ?? emptyBlueskyDraft()), sourceMaybeLive: maybeLive } }
-  if (!storeDraftIf(userKey, target, null, moved)) return slot
-  storeDraftIf(userKey, slot, rev, null)
-  return target
+  const renamed = renameDraftIf(userKey, slot, rev, target, (d) => {
+    const { stagedAt: _, ...b } = d.bluesky ?? emptyBlueskyDraft()
+    return { ...d, bluesky: { ...b, sourceMaybeLive: maybeLive } }
+  })
+  if (renamed) return target
+  // Storage refused even the rename: the staged slot stays, found by a new
+  // post in this page; its bytes are under `redraft:<key>` (`draftFilesSlot`).
+  revealDraftSlot(userKey, slot)
+  return slot
 }
 
 /**
  * Staged redrafts this tab is not deleting for: a tab closed, or the page
  * reloaded, between the store and the delete's answer. For each, asks the
  * reader's PDS for the post: gone → the draft moves to `redraft:<key>`, as
- * after a delete; still there → it stays hidden (the post has the text).
- * Answers the slots it moved. A read that fails, or an account switch,
- * leaves them for next time.
+ * after a delete (unless a redraft of that post is stored: it wins);
+ * still there → it stays hidden (the post has the text), and is removed
+ * once older than `STAGED_MAX_AGE_MS`. Answers the slots that hold a
+ * found draft now. A read that fails, or an account switch, leaves them
+ * for next time.
  */
 export async function recoverStagedRedrafts(client: CaribouClient): Promise<DraftSlot[]> {
   const generation = ownerGeneration()
@@ -398,9 +447,16 @@ export async function recoverStagedRedrafts(client: CaribouClient): Promise<Draf
     }
     if (generation !== ownerGeneration()) return moved
     // Another tab may have moved or removed it meanwhile.
-    if (own || staging.has(stagingKey(userKey, slot))) continue
+    if (staging.has(stagingKey(userKey, slot))) continue
+    if (own) {
+      const at = d.bluesky?.stagedAt
+      if (typeof at !== 'number' || Date.now() - at > STAGED_MAX_AGE_MS) await dropStaged(userKey, slot, d.rev ?? '')
+      continue
+    }
+    const kept = source ? findRedraftOf(userKey, source) : null
     const at = await promote(userKey, slot, false)
-    if (at && at !== slot) moved.push(at)
+    // A stored redraft that won is not news.
+    if (at && !kept) moved.push(at)
   }
   return moved
 }

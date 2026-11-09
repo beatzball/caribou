@@ -561,7 +561,10 @@ draft is stored durably first. The order:
    failed). Any read failing except a target's throws: nothing is
    deleted. The record not there throws `BlueskyRedraftGone`: the post is
    already deleted (the card drops it, app README).
-2. **Ask.** First, when the draft would be empty (no text, no image, no
+2. **Ask.** First, when a `redraft:` slot of the same post is stored
+   already (`findRedraftOf`; a delete in doubt kept it), that one wins:
+   it opens, and nothing is uploaded or deleted (rule D4 below). Then,
+   when the draft would be empty (no text, no image, no
    quote: a post that is only a link card, a video or a feed card,
    `redraftKeepsSomething`), there is no confirm and no delete: "Nothing
    in this post can be kept in a draft. Use Delete." Else the card's
@@ -589,10 +592,10 @@ draft is stored durably first. The order:
      and it throws. A post with no images does not use IndexedDB.
 4. **Delete** (`deleteOwnStatusOutcome`, rules above), then
    `settleBlueskyRedraft` follows the outcome:
-   - deleted → the draft moves to `redraft:<key>`; step 5.
+   - deleted → the draft is renamed to `redraft:<key>`; step 5.
    - failed → the staged draft and its bytes are removed
      (`discardBlueskyRedraft`): the post is still there.
-   - unknown → the draft moves to `redraft:<key>`, marked
+   - unknown → the draft is renamed to `redraft:<key>`, marked
      `sourceMaybeLive`, and the toast says so: "Could not tell whether the
      post was deleted. Your redraft is saved and opens the next time you
      write a new post. Check your profile first, so it is not posted
@@ -615,10 +618,24 @@ A moved Bluesky redraft goes in its own `redraft:<key>` slot, never in
 new post opens it first, whatever its target, even when that target is
 gone.
 
-**One redraft per post.** When a redraft moves to `redraft:<key>`, any
-older `redraft:` slot with the same `bluesky.source` is removed, with its
-bytes. So a second redraft after a delete in doubt replaces the first,
-and the text cannot be posted twice.
+**The rename needs no more storage.** The move from `staged:<key>` to
+`redraft:<key>` is one revision-checked write of the account's draft map
+that renames the slot in place (`renameDraftIf`), never a second copy.
+The staged draft already holds `sourceMaybeLive: false`, so the rename
+only changes values. The image bytes are stored under `redraft:<key>`
+from the start (`draftFilesSlot` maps a `staged:` slot to it), so they do
+not move. If storage refuses even the rename, the `staged:` slot stays,
+and a new post in this page finds it (`revealDraftSlot`); its bytes load
+by their real key.
+
+**Rule D4: the stored redraft wins.** A `redraft:` slot of the same post
+(the same `bluesky.source`) may hold the reader's edits, so it is never
+replaced. The card looks for it before the confirm: found → it opens,
+"You already have a redraft of this post…", and nothing is read,
+uploaded or deleted. Found later (the delete's outcome, or a closed
+tab's staged draft): the new staged copy and its bytes go, and the
+stored slot stays, its `sourceMaybeLive` set from the outcome. So the
+text cannot be posted twice, and no edit is lost.
 
 **A post that may still be up.** A draft marked `sourceMaybeLive` (a
 delete in doubt) is checked when the dialog opens it
@@ -630,8 +647,10 @@ When a new post opens and the account has staged drafts this tab is not
 deleting for (`hasOrphanStagedRedrafts`), `recoverStagedRedrafts` asks
 `getRecord` for each source: gone → the draft moves to `redraft:<key>`
 (it opens with the next new post, and a toast says so); still up → it
-stays hidden (the post still has the text); no answer → it is tried
-again next time.
+stays hidden (the post still has the text), and is removed once it is
+older than a day (`stagedAt`, `STAGED_MAX_AGE_MS`); no answer → it is
+tried again next time. Plain Delete of its post removes it too
+(`dropStagedRedraftsOf`): the reader wanted the post gone.
 
 **Account switch.** Each step checks the account after its await
 (`ownerGeneration`), and before any write, caches included: a reply or

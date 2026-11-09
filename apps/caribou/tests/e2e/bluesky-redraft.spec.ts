@@ -146,11 +146,6 @@ test.describe('Bluesky delete and redraft', () => {
   // the SDK's DPoP key in IndexedDB. CI runs WebKit on Linux.
   test.skip(({ browserName }) => browserName === 'webkit' && process.platform === 'darwin',
     'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
-  // A signed-in timeline card stays covered ("checking your moderation
-  // settings") until #233 passes labeler coverage for the timeline, so the
-  // menu cannot be reached. All tests passed with the timeline covered.
-  // Turn on: #239.
-  test.fixme(true, 'needs #233: signed-in timeline moderation never settles')
 
   test('reads the record and image, deletes, and posts the redraft as a new record', async ({ page, baseURL }) => {
     const origin = loopbackOrigin(baseURL)

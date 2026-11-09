@@ -11,7 +11,7 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, forgetDeletedStatus,
+  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, dropStagedRedraftsOf, findRedraftOf, forgetDeletedStatus,
   readBlueskyRedraft, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
   type BlueskyRedraftSource, type DraftSlot, type PreparedImage,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
@@ -878,7 +878,10 @@ export class CaribouStatusCard extends LitElement {
       confirmLabel: 'Delete',
     })
     if (!ok || !stillOwner(owner)) return
-    if (await this.deleteAndMoveFocus(owner, post)) toast('info', 'Post deleted')
+    if (!await this.deleteAndMoveFocus(owner, post)) return
+    toast('info', 'Post deleted')
+    // A redraft a closed tab staged for this post is not wanted now.
+    if (post.bluesky) void dropStagedRedraftsOf(owner.client.userKey, post.bluesky.uri)
   }
 
   // Deletes the post, then opens a new one with what it had. Boosts,
@@ -921,6 +924,19 @@ export class CaribouStatusCard extends LitElement {
   }
 
   private async runBlueskyRedraft(owner: Owner, post: Status): Promise<void> {
+    // A redraft of this post is stored already (a delete in doubt): it wins,
+    // as it may hold the reader's edits. It opens; nothing is read or deleted.
+    const kept = findRedraftOf(owner.client.userKey, post.bluesky?.uri ?? post.id)
+    if (kept) {
+      const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = {
+        blueskyRedraft: { userKey: owner.client.userKey, slot: kept },
+      }
+      window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+      toast('info', detail.opened
+        ? 'You already have a redraft of this post, so it opens. The post was not deleted again.'
+        : 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted again.')
+      return
+    }
     this.redraftNote = 'Reading the post…'
     let source: BlueskyRedraftSource | null
     try {
@@ -929,7 +945,11 @@ export class CaribouStatusCard extends LitElement {
       if (!stillOwner(owner)) return
       // Deleted already (here after a delete in doubt, or on another device).
       if (err instanceof BlueskyRedraftGone) {
+        // The card leaves, as after Delete: focus goes on when it was here.
+        const next = this.neighbour()
+        const moveFocus = this.hasFocus()
         forgetDeletedStatus(post)
+        if (next && moveFocus) void next.focusPost()
         toast('info', err.message)
         return
       }

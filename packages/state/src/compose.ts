@@ -75,6 +75,8 @@ export interface BlueskyDraft {
    * may still be up. The dialog checks when it opens the draft.
    */
   sourceMaybeLive?: boolean
+  /** A staged redraft only: when it was staged (ms), so an old one can go. */
+  stagedAt?: number
 }
 
 export interface ComposeDraft {
@@ -223,11 +225,47 @@ export function storeDraftIf(
  */
 export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
   for (const [slot, d] of Object.entries(readAll(userKey))) {
-    if (slot.startsWith('redraft:') && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
+    const kept = slot.startsWith('redraft:') || revealed.has(`${userKey}\u0000${slot}`)
+    if (kept && d && typeof d.text === 'string' && !isDraftEmpty(emptyDraft(d))) {
       return slot as DraftSlot
     }
   }
   return null
+}
+
+// `staged:` slots whose delete is decided but that could not be renamed
+// (storage refused): found by `findRedraftSlot` in this page all the same.
+const revealed = new Set<string>()
+
+/** Lets `findRedraftSlot` find a `staged:` slot whose rename failed. */
+export function revealDraftSlot(userKey: UserKey, slot: DraftSlot): void {
+  revealed.add(`${userKey}\u0000${slot}`)
+}
+
+/**
+ * Renames `from` to `to` in one write of the account's draft map, only
+ * while `from` still has revision `expected` and `to` is empty. `patch`
+ * changes the moved draft. No second copy is stored, so a full storage
+ * that took the draft takes the rename too. Answers the new revision, or
+ * false.
+ */
+export function renameDraftIf(
+  userKey: UserKey, from: DraftSlot, expected: string, to: DraftSlot,
+  patch: (d: ComposeDraft) => ComposeDraft = (d) => d,
+): { rev: string } | false {
+  const all = readAll(userKey)
+  const held = all[from]
+  if (!held || typeof held.text !== 'string' || (held.rev ?? '') !== expected || all[to]) return false
+  const rev = newKey()
+  // Rebuilt in order, so the map keeps its shape and its size.
+  const next: Partial<Record<DraftSlot, ComposeDraft>> = {}
+  for (const [slot, d] of Object.entries(all) as Array<[DraftSlot, ComposeDraft]>) {
+    if (slot === from) next[to] = { ...patch(held), rev }
+    else next[slot] = d
+  }
+  if (!writeAll(userKey, next)) return false
+  revealed.delete(`${userKey}\u0000${from}`)
+  return { rev }
 }
 
 /** Every stored slot of the account, with its draft. */

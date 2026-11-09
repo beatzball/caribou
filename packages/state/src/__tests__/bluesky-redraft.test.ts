@@ -6,10 +6,11 @@ import { activeUserKey } from '../users.js'
 import { ownerGeneration } from '../keep-alive.js'
 import { deleteOwnStatus, deleteOwnStatusOutcome } from '../own-posts.js'
 import {
-  BlueskyRedraftGone, NOTHING_KEPT, checkRedraftSource, discardBlueskyRedraft, hasOrphanStagedRedrafts, readBlueskyRedraft,
+  BlueskyRedraftGone, NOTHING_KEPT, STAGED_MAX_AGE_MS, checkRedraftSource, discardBlueskyRedraft, dropStagedRedraftsOf,
+  findRedraftOf, hasOrphanStagedRedrafts, readBlueskyRedraft,
   recoverStagedRedrafts, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
 } from '../bluesky-redraft.js'
-import { emptyDraft, findRedraftSlot, loadDraft, saveDraft, storedDrafts } from '../compose.js'
+import { emptyDraft, findRedraftSlot, loadDraft, saveDraft, storedDrafts, type DraftSlot } from '../compose.js'
 import { emptyBlueskyDraft } from '../bluesky-compose.js'
 import { getDraftFiles, pruneDraftFiles, _testOnlyClearDraftFiles, _testOnlyFailNextPut } from '../draft-files.js'
 
@@ -70,6 +71,11 @@ function deferred<T>() {
   let reject!: (e: unknown) => void
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
   return { promise, resolve, reject }
+}
+
+async function putDraftFilesFor(slot: DraftSlot) {
+  const { putDraftFiles } = await import('../draft-files.js')
+  await putDraftFiles(KEY, slot, { i1: new Blob(['bytes']) })
 }
 
 const toasts: string[] = []
@@ -469,22 +475,98 @@ describe('settleBlueskyRedraft (D1)', () => {
     expect(Object.keys(await getDraftFiles(KEY, stored.redraftSlot))).toHaveLength(1)
   })
 
-  it('a second redraft of the same post replaces the older stored one (N2)', async () => {
+  it('a redraft of the same post stored already wins: its edits stay, the new copy and its bytes go (D4)', async () => {
     const first = await staged()
     await settleBlueskyRedraft(first.stored, 'unknown')
+    // The reader edits the kept redraft and closes it.
+    saveDraft(KEY, first.stored.redraftSlot, { ...loadDraft(KEY, first.stored.redraftSlot)!, text: 'hello, plus an edit' })
     const second = await staged()
-    await settleBlueskyRedraft(second.stored, 'deleted')
-    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([second.stored.redraftSlot])
-    expect(await getDraftFiles(KEY, first.stored.redraftSlot)).toEqual({})
+    expect(await settleBlueskyRedraft(second.stored, 'deleted')).toBe(first.stored.redraftSlot)
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([first.stored.redraftSlot])
+    const kept = loadDraft(KEY, first.stored.redraftSlot)!
+    expect(kept.text).toBe('hello, plus an edit')
+    // The outcome sets its mark: this delete went through.
+    expect(kept.bluesky!.sourceMaybeLive).toBe(false)
+    expect(Object.keys(await getDraftFiles(KEY, first.stored.redraftSlot))).toHaveLength(1)
+    expect(await getDraftFiles(KEY, second.stored.redraftSlot)).toEqual({})
+    expect(findRedraftOf(KEY, URI)).toBe(first.stored.redraftSlot)
+  })
+
+  it('the rename needs no second copy: a storage full after the store still takes it (Codex R3-2)', async () => {
+    const { stored } = await staged()
+    // Room for what is stored now and 64 characters more, not for a copy.
+    const room = (localStorage.getItem(`caribou.drafts.${KEY}`) ?? '').length + 64
+    const real = localStorage.setItem.bind(localStorage)
+    let refused = 0
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((k: string, v: string) => {
+      if (k.startsWith('caribou.drafts.') && v.length > room) { refused += 1; throw new DOMException('full', 'QuotaExceededError') }
+      real(k, v)
+    })
+    try {
+      expect(await settleBlueskyRedraft(stored, 'unknown')).toBe(stored.redraftSlot)
+      // The quota is real: a second full copy does not fit.
+      expect(() => localStorage.setItem(`caribou.drafts.${KEY}`, (localStorage.getItem(`caribou.drafts.${KEY}`) ?? '').repeat(2))).toThrow()
+      expect(refused).toBe(1)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([stored.redraftSlot])
+    expect(loadDraft(KEY, stored.redraftSlot)!.bluesky!.sourceMaybeLive).toBe(true)
+  })
+
+  it('storage refuses even the rename: the staged slot is found by a new post in this page', async () => {
+    const { stored } = await staged()
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    try {
+      expect(await settleBlueskyRedraft(stored, 'deleted')).toBe(stored.slot)
+    } finally {
+      spy.mockRestore()
+    }
+    expect(findRedraftSlot(KEY)).toBe(stored.slot)
   })
 })
 
 describe('staged redrafts a closed tab left', () => {
-  function orphan(): string {
-    const d = emptyDraft({ text: 'left behind', bluesky: emptyBlueskyDraft({ source: URI, rkey: '3knew' }) })
+  function orphan(stagedAt = Date.now()): string {
+    const d = emptyDraft({ text: 'left behind', bluesky: emptyBlueskyDraft({ source: URI, rkey: '3knew', stagedAt }) })
     saveDraft(KEY, `staged:${d.idempotencyKey}`, d)
     return d.idempotencyKey
   }
+
+  it('a redraft of the same post stored meanwhile wins: the orphan goes, the edits stay, nothing is "found" (D4, Fable P10)', async () => {
+    const key = orphan()
+    const kept = emptyDraft({ text: 'hello world, plus an edit', bluesky: emptyBlueskyDraft({ source: URI, rkey: '3kkept' }) })
+    const keptSlot: DraftSlot = `redraft:${kept.idempotencyKey}`
+    saveDraft(KEY, keptSlot, kept)
+    await putDraftFilesFor(keptSlot)
+    await putDraftFilesFor(`redraft:${key}`)
+    const { client } = fakeClient(null)
+    expect(await recoverStagedRedrafts(client)).toEqual([])
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([keptSlot])
+    expect(loadDraft(KEY, keptSlot)!.text).toBe('hello world, plus an edit')
+    expect(findRedraftSlot(KEY)).toBe(keptSlot)
+    expect(Object.keys(await getDraftFiles(KEY, keptSlot))).toHaveLength(1)
+    expect(await getDraftFiles(KEY, `redraft:${key}`)).toEqual({})
+  })
+
+  it('a staged draft whose post is still up goes once it is older than a day (R3-N2)', async () => {
+    const key = orphan(Date.now() - STAGED_MAX_AGE_MS - 1)
+    await putDraftFilesFor(`redraft:${key}`)
+    const { client } = fakeClient()
+    expect(await recoverStagedRedrafts(client)).toEqual([])
+    expect(storedDrafts(KEY)).toEqual([])
+    expect(await getDraftFiles(KEY, `redraft:${key}`)).toEqual({})
+  })
+
+  it('plain Delete of its post removes a staged draft a closed tab left (R3-N2)', async () => {
+    const key = orphan()
+    await putDraftFilesFor(`redraft:${key}`)
+    await dropStagedRedraftsOf(KEY, 'at://did:plc:reader/app.bsky.feed.post/other')
+    expect(loadDraft(KEY, `staged:${key}`)).not.toBeNull()
+    await dropStagedRedraftsOf(KEY, URI)
+    expect(storedDrafts(KEY)).toEqual([])
+    expect(await getDraftFiles(KEY, `redraft:${key}`)).toEqual({})
+  })
 
   it('the post is gone: the draft moves to redraft:<key>', async () => {
     const key = orphan()
@@ -495,7 +577,7 @@ describe('staged redrafts a closed tab left', () => {
     expect(hasOrphanStagedRedrafts(KEY)).toBe(false)
   })
 
-  it('the post is still up, or the read fails: it stays hidden', async () => {
+  it('the post is still up (staged less than a day ago), or the read fails: it stays hidden', async () => {
     const key = orphan()
     const { client, c } = fakeClient()
     expect(await recoverStagedRedrafts(client)).toEqual([])

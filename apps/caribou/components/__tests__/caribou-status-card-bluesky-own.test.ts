@@ -409,7 +409,7 @@ describe('<caribou-status-card> own Bluesky post', () => {
     expect(toasts).toEqual([{ kind: 'info', message: 'This post is already deleted.' }])
   })
 
-  it('a second redraft after a delete in doubt replaces the first stored draft (N2)', async () => {
+  it('a second redraft after a delete in doubt opens the stored one, with its edits; nothing is read, uploaded or deleted (D4, Fable P15)', async () => {
     signIn()
     const el = await mount(post())
     pds.blueskyDeletePost.mockRejectedValueOnce(Object.assign(new Error('?'), { name: 'BlueskyDeleteUnknown' }))
@@ -417,15 +417,51 @@ describe('<caribou-status-card> own Bluesky post', () => {
     await settle(el)
     confirmYes()
     await settle(el)
-    const first = findRedraftSlot(KEY)
+    const first = findRedraftSlot(KEY)!
+    // The reader writes more in it and closes it.
+    saveDraft(KEY, first, { ...loadDraft(KEY, first)!, text: 'hello, plus what the reader wrote' })
+    calls.length = 0
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(calls).toEqual([])
+    expect(confirmEl()?.shadowRoot?.querySelector('dialog[open]') ?? null).toBeNull()
+    expect(storedDrafts(KEY).map(([slot]) => slot)).toEqual([first])
+    expect(loadDraft(KEY, first)!.text).toBe('hello, plus what the reader wrote')
+    expect((events.at(-1)!.detail as { blueskyRedraft: { slot: DraftSlot } }).blueskyRedraft.slot).toBe(first)
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'You already have a redraft of this post. It opens the next time you write a new post. The post was not deleted again.' })
+  })
+
+  it('a switch during the upload: no delete (R3-N4)', async () => {
+    signIn()
+    const el = await mount(post())
+    let release!: () => void
+    pds.blueskyUploadBlob.mockImplementationOnce(async (b: Blob) => {
+      await new Promise<void>((r) => { release = r })
+      return { $type: 'blob' as const, ref: { $link: 'bafkNEW' }, mimeType: b.type, size: b.size }
+    })
     item(el, 'redraft')!.click()
     await settle(el)
     confirmYes()
     await settle(el)
-    expect(pds.blueskyDeletePost).toHaveBeenCalledTimes(2)
-    const slots = storedDrafts(KEY).map(([slot]) => slot)
-    expect(slots).toHaveLength(1)
-    expect(slots[0]).not.toBe(first)
+    expect(pds.blueskyUploadBlob).toHaveBeenCalled()
+    activeUserKey.value = null
+    release()
+    await settle(el)
+    expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
+    expect(storedDrafts(KEY)).toEqual([])
+  })
+
+  it('plain Delete removes a staged redraft of the post that a closed tab left (R3-N2)', async () => {
+    signIn()
+    const left = emptyDraft({ text: 'left behind', bluesky: { reply: null, quote: null, labels: [], images: [], rkey: 'x', sent: null, source: URI, stagedAt: Date.now() } })
+    saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const el = await mount(post())
+    item(el, 'delete')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    expect(pds.blueskyDeletePost).toHaveBeenCalledWith(URI)
+    expect(storedDrafts(KEY)).toEqual([])
   })
 
   it.each([
@@ -470,6 +506,23 @@ describe('<caribou-status-card> own Bluesky post', () => {
     const next = await mountIn(post({ id: other, uri: other }, { uri: other }))
     return { el, focusPost: vi.spyOn(next, 'focusPost') }
   }
+
+  it.each([
+    ['in the card: focus goes to the next post', true],
+    ['elsewhere: focus stays', false],
+  ])('a post found already deleted, focus %s (R3-N1)', async (_, inCard) => {
+    signIn()
+    pds.blueskyGetOwnPost.mockResolvedValue(null)
+    const { el, focusPost } = await twoInAList()
+    const elsewhere = document.createElement('button')
+    document.body.appendChild(elsewhere)
+    if (inCard) await el.focusPost()
+    else elsewhere.focus()
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(statusCache.value.has(URI)).toBe(false)
+    expect(focusPost).toHaveBeenCalledTimes(inCard ? 1 : 0)
+  })
 
   it.each([
     ['moved on: focus stays where the reader is', false],
