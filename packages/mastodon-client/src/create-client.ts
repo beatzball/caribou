@@ -235,6 +235,12 @@ export interface FetchNotificationsParams {
   /** Only these types. Omitted or empty means every type. */
   types?: readonly NotificationType[]
   sinceId?: string
+  /**
+   * Bluesky: the `indexedAt` of the `sinceId` notification. The catch-up
+   * stops at the first notification older than it, also when that one is
+   * gone. Mastodon ignores it.
+   */
+  sinceAt?: string
   /** The page just newer than this id; use it to page forward without a gap. */
   minId?: string
   maxId?: string

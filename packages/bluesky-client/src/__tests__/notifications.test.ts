@@ -1,6 +1,7 @@
 import { lexicons, type AppBskyFeedDefs, type AppBskyNotificationListNotifications } from '@atproto/api'
 import { describe, expect, it, vi } from 'vitest'
 import { CATCH_UP_MAX_PAGES, CATCH_UP_PAGE_SIZE, createBlueskyClient, type BlueskyAgent } from '../client.js'
+import { reasonsFor } from '../map/notification.js'
 import { fixture, moderationFor, READER } from './_helpers.js'
 
 vi.mock('../facets.js', () => ({ renderFacets: vi.fn((text: string) => `<p>${text}</p>`) }))
@@ -87,7 +88,9 @@ describe('fetchNotifications: the reasons', () => {
     expect(like!.account.bluesky!.moderation!.contexts.profileList.reasons[0]!.source).toBe('did:plc:bob')
   })
 
-  it.each(['like-via-repost', 'repost-via-repost', 'starterpack-joined', 'verified', 'unverified', 'subscribed-post', 'contact-match', 'a-reason-from-later'])(
+  it.each(['like-via-repost', 'repost-via-repost', 'starterpack-joined', 'verified', 'unverified', 'subscribed-post', 'contact-match', 'a-reason-from-later',
+    // Names of Object members: never read from the prototype.
+    'constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf'])(
     'skips %s and never throws', async (reason) => {
       const { agent, client } = setup()
       agent.listNotifications.mockResolvedValue({ data: { cursor: 'c', notifications: [raw(1, reason)] } })
@@ -96,6 +99,11 @@ describe('fetchNotifications: the reasons', () => {
       // Skipped is not the end.
       expect(res.nextCursor).toBe('c')
     })
+
+  it('reasonsFor never reads a type from the prototype', () => {
+    expect(reasonsFor(['constructor', 'toString', '__proto__'])).toEqual([])
+    expect(reasonsFor(['mention'])).toEqual(['mention', 'reply', 'quote'])
+  })
 
   it('skips a like with no subject, one whose post is gone, and one with no valid time', async () => {
     const { agent, client } = setup({ missing: ['at://did:plc:alice/app.bsky.feed.post/gone'] })
@@ -202,6 +210,42 @@ describe('fetchNotifications: catch-up (sinceId)', () => {
     const res = await client.fetchNotifications({ sinceId: 'at://did:plc:bob/app.bsky.feed.like/unknown' })
     expect(res).toHaveLength(CATCH_UP_MAX_PAGES * CATCH_UP_PAGE_SIZE)
     expect(res.nextCursor).toBe(String(CATCH_UP_MAX_PAGES))
+  })
+
+  // The anchor was deleted (an unlike, an unfollow): its URI is gone, so
+  // the catch-up stops at the first one older than its time.
+  const GONE = 'at://did:plc:bob/app.bsky.feed.like/deleted'
+
+  it('a deleted anchor on a small account: one page read, nothing repeated, the end', async () => {
+    const { agent, client } = setup()
+    agent.listNotifications = paged(1)
+    // The anchor sat between n2 and n3.
+    const sinceAt = new Date(Date.parse(raw(2).indexedAt) - 30_000).toISOString()
+    for (let poll = 0; poll < 3; poll++) {
+      const res = await client.fetchNotifications({ sinceId: GONE, sinceAt })
+      expect(res.map((x) => x.id)).toEqual([raw(0).uri, raw(1).uri, raw(2).uri])
+      expect(res.nextCursor).toBeNull()
+    }
+    expect(agent.listNotifications).toHaveBeenCalledTimes(3)
+  })
+
+  it('a deleted anchor on a large account: no gap, nothing new', async () => {
+    const { agent, client } = setup()
+    agent.listNotifications = paged(8)
+    // The anchor was n0's neighbour at n0's time: n0 (known to the store) is read, nothing else.
+    const res = await client.fetchNotifications({ sinceId: GONE, sinceAt: raw(0).indexedAt })
+    expect(res.map((x) => x.id)).toEqual([raw(0).uri])
+    expect(res.nextCursor).toBeNull()
+    expect(agent.listNotifications).toHaveBeenCalledTimes(1)
+  })
+
+  it('one at the same time as the anchor is read (the store drops the known ones)', async () => {
+    const { agent, client } = setup()
+    const same = raw(1, 'follow', { indexedAt: raw(0).indexedAt, uri: 'at://did:plc:bob/app.bsky.graph.follow/same' })
+    agent.listNotifications.mockResolvedValue({ data: { notifications: [same, raw(0, 'follow'), raw(2, 'follow')] } })
+    const res = await client.fetchNotifications({ sinceId: GONE, sinceAt: raw(0).indexedAt })
+    expect(res.map((x) => x.id)).toEqual([same.uri, raw(0).uri])
+    expect(res.nextCursor).toBeNull()
   })
 
   it('not met but the list ended: a null cursor', async () => {

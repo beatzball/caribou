@@ -279,7 +279,9 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return Object.assign(await notificationItems(raw), { nextCursor: cursor, bluesky: seenHint(raw) })
   }
 
-  async function notifications(params: { types?: readonly string[]; cursor?: string; sinceId?: string; limit?: number }): Promise<NotificationPage> {
+  async function notifications(params: {
+    types?: readonly string[]; cursor?: string; sinceId?: string; sinceAt?: string; limit?: number
+  }): Promise<NotificationPage> {
     const reasons = reasonsFor(params.types)
     const fetchPage = async (cursor: string | undefined, limit: number | undefined): Promise<RawNotificationPage> =>
       (await agent.listNotifications({
@@ -289,13 +291,19 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       })).data
     if (params.sinceId) {
       const sinceId = params.sinceId
-      return run(`notifications:${reasons.join(',')}:since:${sinceId}`, async () => {
+      const sinceAt = params.sinceAt !== undefined ? Date.parse(params.sinceAt) : NaN
+      // Met: the anchor itself, or the first one older than its time (the
+      // anchor can be deleted). One at the same time is read; the store
+      // drops the ones it holds.
+      const met = (n: NotificationView) => n?.uri === sinceId
+        || (!Number.isNaN(sinceAt) && Date.parse(n?.indexedAt ?? '') < sinceAt)
+      return run(`notifications:${reasons.join(',')}:since:${sinceId}:${params.sinceAt ?? ''}`, async () => {
         const out: NotificationView[] = []
         let cursor: string | undefined
         for (let i = 0; i < CATCH_UP_MAX_PAGES; i++) {
           const data = await fetchPage(cursor, CATCH_UP_PAGE_SIZE)
           // Matched on the raw page, before any skip.
-          const at = data.notifications.findIndex((n) => n?.uri === sinceId)
+          const at = data.notifications.findIndex(met)
           if (at !== -1) return notificationPage([...out, ...data.notifications.slice(0, at)], null)
           if (data.notifications.length === 0) {
             cursor = undefined

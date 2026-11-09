@@ -405,12 +405,24 @@ groups, no `min_id` and no id order. Its list:
   stays open) and moves to the top, as a Mastodon group does. Who did it:
   newest first, each account once. `count` is how many notifications the
   list holds for it; `complete` is true (the list has every one it loaded).
-- **Poll:** `fetchNotifications({ sinceId: <newest uri> })`. The client
-  reads from the top until it meets that one (README of the Bluesky
-  client). Met: the new ones are merged above. Not met (a gap, more than
-  150 new): the list is replaced by what was read, and its cursor goes on
-  from there. Nothing is lost: older ones are under "Load older".
+- **Poll:** `fetchNotifications({ sinceId: <newest uri>, sinceAt: <its
+  indexedAt> })`. The client reads from the top until it meets that one, or
+  the first one older than its time when it was deleted (README of the
+  Bluesky client). Met: the new ones are merged above, and rows "Load older"
+  brought in stay. Not met (a gap, more than 150 new): the list is replaced
+  by what was read, and its cursor goes on from there. Nothing is lost:
+  older ones are under "Load older".
 - **Unknown reasons** never reach the store: the client skips them.
+
+**A replaced list is a new generation (both networks).** `load()`, a gap
+poll, and a poll that loads the first page into an empty list replace the
+list or its cursor. Each starts a new generation, so an answer to a request
+made before it (a "Load older" in flight) writes nothing: no old rows, no
+old cursor. The request it drops no longer holds the list as loading.
+
+**A poll on an empty list** loads the first page only until a first page
+has come in. After that, an empty first page changes nothing: it must not
+bring back "Load older" for a list that has already read to its end.
 
 **Unread badge.** `unreadNotificationCount` is the one count the nav rail
 reads. `startUnreadNotifications()` follows the active session (for

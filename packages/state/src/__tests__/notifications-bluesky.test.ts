@@ -32,13 +32,26 @@ const POST = 'at://did:plc:alice/app.bsky.feed.post/p1'
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
+// A post as the Bluesky mapper makes it: its provenance is `bluesky`.
+const MODERATION = { contexts: {}, labelersCovered: ['did:plc:labeler'] }
+function bskyPost(uri: string): Status {
+  return {
+    id: uri, uri, content: '', account: { id: 'did:plc:alice', acct: 'alice.example.com', bluesky: { did: 'did:plc:alice' } },
+    favourited: false, reblogged: false, bookmarked: false,
+    bluesky: {
+      uri, cid: 'c', likeUri: null, repostUri: null, replyRef: null, replyDisabled: false, embeddingDisabled: false,
+      labels: [], moderation: MODERATION, viewerOf: alice,
+    },
+  } as unknown as Status
+}
+
 // The authors' DIDs sort the other way from the times, so an id sort would
 // show the wrong order.
 function n(i: number, type: string, at: string, by = `did:plc:${'zyxwvutsrq'[i % 10]}`, post: string | null = POST): Notification {
   return {
     id: `at://${by}/app.bsky.feed.${type}/n${i}`, type, createdAt: at, groupKey: `at://${by}/n${i}`,
     account: { id: by, acct: `${by.slice(8)}.example.com` },
-    ...(post && type !== 'follow' ? { status: { id: post, content: '', account: { id: 'did:plc:alice' } } as unknown as Status } : {}),
+    ...(post && type !== 'follow' ? { status: bskyPost(post) } : {}),
     bluesky: { uri: `at://${by}/n${i}`, reason: type, reasonSubject: post, indexedAt: at, isRead: false },
   } as unknown as Notification
 }
@@ -174,10 +187,13 @@ describe('the store: Bluesky', () => {
       n(2, 'mention', '2026-11-07T12:00:00.000Z', 'did:plc:carol', 'at://did:plc:carol/app.bsky.feed.post/r1'),
       n(3, 'favourite', '2026-11-07T08:00:00.000Z', 'did:plc:dave'),
     ], 'next', { newestAt: '2026-11-07T12:00:00.000Z', unread: true }))
+    // The reader the list is for is the active one, as on the page.
+    activeUserKey.value = alice
     const store = createNotificationsStore({ clientSource: () => client })
     await store.load()
     expect(store.groups.value.map((g) => `${g.type}:${g.count}`)).toEqual(['mention:1', 'favourite:2'])
-    expect(statusCache.value.has(POST)).toBe(true)
+    // The cached post keeps its network, its viewer and its moderation.
+    expect(statusCache.value.get(POST)?.bluesky).toMatchObject({ uri: POST, viewerOf: alice, moderation: MODERATION })
     expect(store.seen.value).toEqual({ newestAt: '2026-11-07T12:00:00.000Z', unread: true })
   })
 
@@ -194,7 +210,9 @@ describe('the store: Bluesky', () => {
     const likeKey = store.groups.value[0]!.key
     await store.poll()
     // By indexedAt, not by the AppView's or the id's order.
-    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], sinceId: n(2, 'favourite', '', 'did:plc:zzz').id })
+    expect(fetchNotifications).toHaveBeenLastCalledWith({
+      types: [], sinceId: n(2, 'favourite', '', 'did:plc:zzz').id, sinceAt: '2026-11-07T12:00:00.000Z',
+    })
     expect(store.groups.value.map((g) => [g.key, g.count])).toEqual([[likeKey, 2], [expect.stringMatching(/^ungrouped-/), 1]])
     expect(store.seen.value).toEqual({ newestAt: '2026-11-07T13:00:00.000Z', unread: true })
     // The poll does not touch Load older.
@@ -214,6 +232,53 @@ describe('the store: Bluesky', () => {
     expect(store.hasMore.value).toBe(true)
     await store.loadMore()
     expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], cursor: 'after-gap' })
+  })
+
+  it('a Load older answer that lands after a gap poll writes nothing; the cursor is the new one', async () => {
+    let release!: (p: NotificationPage) => void
+    const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams): Promise<NotificationPage> => {
+      if (p?.sinceId) return page([n(9, 'mention', '2026-11-08T10:00:00.000Z')], 'after-new-top')
+      if (p?.cursor === 'old-tail') return new Promise((r) => { release = r })
+      return page([n(1, 'mention', '2026-11-07T08:00:00.000Z')], 'old-tail')
+    })
+    const { client } = bskyClient(fetchNotifications)
+    const store = createNotificationsStore({ clientSource: () => client })
+    await store.load()
+    const older = store.loadMore()
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    await store.poll()
+    release(page([n(0, 'mention', '2026-11-01T08:00:00.000Z')], 'after-ancient-tail'))
+    await older
+    expect(store.groups.value.map((g) => g.newestId)).toEqual([n(9, 'mention', '').id])
+    expect(store.loading.value).toBe(false)
+    await store.loadMore()
+    expect(fetchNotifications).toHaveBeenLastCalledWith({ types: [], cursor: 'after-new-top' })
+  })
+
+  it('a poll on an empty list does not bring Load older back after the list ended', async () => {
+    const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams) =>
+      p?.cursor === 'c1' ? page([], null) : page([], 'c1'))
+    const { client } = bskyClient(fetchNotifications)
+    const store = createNotificationsStore({ clientSource: () => client })
+    await store.load()
+    await store.loadMore()
+    expect(store.hasMore.value).toBe(false)
+    await store.poll()
+    expect(store.hasMore.value).toBe(false)
+  })
+
+  it('a poll whose catch-up met nothing new keeps the rows Load older brought in', async () => {
+    const fetchNotifications = vi.fn(async (p?: FetchNotificationsParams) => {
+      if (p?.sinceId) return page([], null)
+      if (p?.cursor) return page([n(2, 'mention', '2026-11-01T08:00:00.000Z')], null)
+      return page([n(1, 'mention', '2026-11-07T08:00:00.000Z')], 'c')
+    })
+    const { client } = bskyClient(fetchNotifications)
+    const store = createNotificationsStore({ clientSource: () => client })
+    await store.load()
+    await store.loadMore()
+    await store.poll()
+    expect(store.groups.value).toHaveLength(2)
   })
 
   it('Load older does not move the seen hint', async () => {

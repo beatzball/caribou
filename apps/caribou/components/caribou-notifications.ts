@@ -10,6 +10,7 @@ import {
   type NotificationFilter, type NotificationGroup, type NotificationsStore,
 } from '@beatzball/caribou-state'
 import { accountPath } from './_profile-path.js'
+import { coverNote, uiOf, UNREADABLE } from './_bluesky-moderation.js'
 import { spaClick } from './_spa-link.js'
 import type { IconName } from './caribou-icon.js'
 import './caribou-button.js'
@@ -80,6 +81,8 @@ export class CaribouNotifications extends LitElement {
       background: var(--bg-2); border: 2px solid var(--bg-0);
     }
     .avatars img + img { margin-left: -8px; }
+    /* A Bluesky author whose avatar the reader's settings blur (spec 7.4). */
+    img.blurred { filter: blur(6px); }
     .expand {
       margin-left: auto; flex-shrink: 0; padding: var(--space-1) var(--space-2);
       color: var(--fg-1); background: none; border: 1px solid var(--border); border-radius: 999px;
@@ -123,6 +126,9 @@ export class CaribouNotifications extends LitElement {
   @state() private loading = true
   @state() private errorMsg: string | null = null
   @state() private hasMore = false
+  // A Load older click ended the list: the end notice shows and takes focus,
+  // so focus does not fall to the body with the removed button.
+  @state() private endedHere = false
 
   private store: NotificationsStore | null = null
   private disposeBindings: (() => void) | null = null
@@ -186,6 +192,7 @@ export class CaribouNotifications extends LitElement {
 
   private open(filter: NotificationFilter) {
     this.close()
+    this.endedHere = false
     const session = this.session.peek()
     // A request made after the session changed gets no client, so it can
     // not mix another account's rows into this list.
@@ -286,7 +293,15 @@ export class CaribouNotifications extends LitElement {
     const store = this.store
     if (store) void store.load().then(() => this.markSeen(store))
   }
-  private onMore = () => { void this.store?.loadMore() }
+  private onMore = async () => {
+    const store = this.store
+    if (!store) return
+    await store.loadMore()
+    if (store !== this.store || store.hasMore.peek()) return
+    this.endedHere = true
+    await this.updateComplete
+    ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
+  }
 
   // `acct` is relative to the user's own server for a local account. A
   // Bluesky account is its handle, with no host.
@@ -298,8 +313,29 @@ export class CaribouNotifications extends LitElement {
     return a.displayName || a.username || a.acct
   }
 
+  // What the reader's settings say about a Bluesky author in a list
+  // (spec 7.4): `contentList` filters the author out or covers the name,
+  // `avatar` blurs the face. No decision fails closed. A Mastodon account
+  // has none of this.
+  private authorUi(a: Account): { filter: boolean; cover: string | null; blurAvatar: boolean } {
+    if (!a.bluesky) return { filter: false, cover: null, blurAvatar: false }
+    const mod = a.bluesky.moderation ?? null
+    const list = mod ? uiOf(mod, 'contentList')! : UNREADABLE
+    const avatar = mod ? uiOf(mod, 'avatar')! : UNREADABLE
+    return { filter: list.filter, cover: list.blur ? coverNote(list) : null, blurAvatar: avatar.blur }
+  }
+
+  // A covered author has no name and no link, only the reason.
   private nameLink(a: Account) {
+    const cover = this.authorUi(a).cover
+    if (cover) return html`<span class="covered">Someone (${cover})</span>`
     return html`<a href=${this.profileHref(a)} @click=${spaClick}>${this.name(a)}</a>`
+  }
+
+  // A covered author's face is blurred too: it would name them.
+  private face(a: Account) {
+    const ui = this.authorUi(a)
+    return html`<img class=${ui.blurAvatar || ui.cover !== null ? 'blurred' : nothing} src=${a.avatarStatic || a.avatar} alt="" loading="lazy">`
   }
 
   // "Alice", "Alice and Bob", "Alice, Bob and 12 others": two names at most.
@@ -399,7 +435,7 @@ export class CaribouNotifications extends LitElement {
     const open = this.expanded.has(g.key)
     return html`<div class="group-body">
       <div class="avatars" aria-hidden="true">
-        ${g.accounts.slice(0, 8).map((a) => html`<img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">`)}
+        ${g.accounts.slice(0, 8).map((a) => this.face(a))}
       </div>
       ${open ? this.renderAccounts(g, this.whoId(g)) : nothing}
     </div>`
@@ -419,7 +455,7 @@ export class CaribouNotifications extends LitElement {
     const failed = this.failedWho.has(g.key)
     return html`<ul class="who" id=${id} aria-label="Who" aria-busy=${loading ? 'true' : 'false'}>
       ${accounts.map((a) => html`<li>
-        <img src=${a.avatarStatic || a.avatar} alt="" loading="lazy">
+        ${this.face(a)}
         ${this.nameLink(a)}
       </li>`)}
       ${more > 0 && !loading ? html`<li class="rest">and ${more} more</li>` : nothing}
@@ -461,15 +497,21 @@ export class CaribouNotifications extends LitElement {
     }
     // An empty page with a cursor is not the end (a Bluesky page of only
     // skipped notifications): older ones are still in reach.
+    const empty = FILTERS.find((f) => f.value === this.filter)!.empty
     if (this.items.length === 0 && !this.hasMore) {
-      return html`<div class="notice">${FILTERS.find((f) => f.value === this.filter)!.empty}</div>`
+      return html`<div class=${this.endedHere ? 'notice end' : 'notice'} tabindex=${this.endedHere ? '-1' : nothing}>${empty}</div>`
     }
+    // Muted, blocked and (Bluesky) filtered authors leave their rows.
+    const hidden = new Set(this.silenced)
+    for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      <ul class="rows">${repeat(withoutSilencedAccounts(this.items, this.silenced), (g) => g.key, (g) => this.renderItem(g))}</ul>
+      ${this.items.length === 0
+        ? html`<div class="notice">Nothing to show here yet. Older notifications may follow.</div>`
+        : html`<ul class="rows">${repeat(withoutSilencedAccounts(this.items, hidden), (g) => g.key, (g) => this.renderItem(g))}</ul>`}
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
-        : nothing}
+        : this.endedHere ? html`<div class="notice end" tabindex="-1">No older notifications.</div>` : nothing}
     </div>`
   }
 

@@ -377,7 +377,9 @@ in `src/client.ts` reads a page. Both are server-safe.
   | `mention`, `reply`, `quote` | `mention` | the post itself (`uri`) |
 
   A reply and a quote show as their post, as a Mastodon mention does.
-- **Skipped, never thrown:** any other reason (`like-via-repost`,
+- **Skipped, never thrown:** the reason table is a `Map`, so a reason named
+  like an `Object` member (`constructor`, `toString`, `__proto__`) is
+  unknown, not a type. Any other reason (`like-via-repost`,
   `repost-via-repost`, `starterpack-joined`, `verified`, `unverified`,
   `subscribed-post`, `contact-match`, and any reason added later); a
   `like` or `repost` with no `reasonSubject`; a notification whose post
@@ -401,10 +403,15 @@ in `src/client.ts` reads a page. Both are server-safe.
   `indexedAt` on the AppView page, skipped ones included, and whether any
   notification on it has `isRead: false`. The store uses it for
   `updateSeen` (`packages/state` README, "Notifications").
-- **Catch-up (`sinceId`):** no `since_id` here either. As for the timeline
-  (seam 7), the client pages from the top, at most 3 pages of 50, until it
-  meets the notification whose `uri` is `sinceId` (matched before any skip).
-  Met: the answer is everything above it and `nextCursor` is `null`. Not met:
+- **Catch-up (`sinceId`, `sinceAt`):** no `since_id` here either. As for the
+  timeline (seam 7), the client pages from the top, at most 3 pages of 50,
+  until it meets the anchor: the notification whose `uri` is `sinceId`, or
+  the first one whose `indexedAt` is older than `sinceAt` (the anchor's
+  time). The time matters: an unlike or an unfollow deletes the anchor, and
+  without it a small account would read its whole list on every poll, and a
+  large one would see a false gap. One at the same time as the anchor is
+  read; the store drops the ones it holds. Matched before any skip. Met: the
+  answer is everything above it and `nextCursor` is `null`. Not met:
   everything it read, and the cursor after the last page (`null` when the
   list ended). The store calls that a gap.
 - **Unread badge:** `getUnreadCount()` →

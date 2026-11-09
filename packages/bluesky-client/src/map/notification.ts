@@ -6,22 +6,28 @@ export type NotificationView = AppBskyNotificationListNotifications.Notification
 
 /**
  * The reasons Caribou shows, and the type each one becomes (README,
- * "Notifications"). Every other reason is skipped.
+ * "Notifications"). Every other reason is skipped. A `Map`, so a reason
+ * named like an `Object` member (`constructor`, `__proto__`) is unknown.
  */
-export const NOTIFICATION_REASONS: Readonly<Record<string, NotificationType>> = Object.freeze({
-  like: 'favourite',
-  repost: 'reblog',
-  follow: 'follow',
-  mention: 'mention',
-  reply: 'mention',
-  quote: 'mention',
-})
+export const NOTIFICATION_REASONS: ReadonlyMap<string, NotificationType> = new Map<string, NotificationType>([
+  ['like', 'favourite'],
+  ['repost', 'reblog'],
+  ['follow', 'follow'],
+  ['mention', 'mention'],
+  ['reply', 'mention'],
+  ['quote', 'mention'],
+])
+
+/** The Caribou type for an AppView reason, or undefined when it is not shown. */
+export function notificationType(reason: unknown): NotificationType | undefined {
+  return typeof reason === 'string' ? NOTIFICATION_REASONS.get(reason) : undefined
+}
 
 /** The AppView reasons for a filter's Caribou types. Empty: send none (every reason). */
 export function reasonsFor(types: readonly string[] | undefined): string[] {
   const out: string[] = []
   for (const t of types ?? []) {
-    for (const [reason, type] of Object.entries(NOTIFICATION_REASONS)) {
+    for (const [reason, type] of NOTIFICATION_REASONS) {
       if (type === t && !out.includes(reason)) out.push(reason)
     }
   }
@@ -38,7 +44,7 @@ function validTime(v: unknown): v is string {
  * like or repost with no subject).
  */
 export function notificationPostUri(n: NotificationView): string | null | undefined {
-  const type = NOTIFICATION_REASONS[n.reason]
+  const type = notificationType(n.reason)
   if (!type) return undefined
   if (type === 'follow') return null
   if (type === 'mention') return n.uri
@@ -51,7 +57,7 @@ export function notificationPostUri(n: NotificationView): string | null | undefi
  * when `getPosts` did not return it (then a post reason is skipped).
  */
 export function mapNotification(n: NotificationView, author: Account, post: Status | null): Notification | null {
-  const type = NOTIFICATION_REASONS[n.reason]
+  const type = notificationType(n.reason)
   const uri = notificationPostUri(n)
   if (!type || uri === undefined || !validTime(n.indexedAt)) return null
   if (uri !== null && !post) return null

@@ -96,7 +96,7 @@ function usesGrouped(client: CaribouClient): boolean {
   return typeof client.fetchGroupedNotifications === 'function' && !withoutGrouped.has(client.userKey)
 }
 
-type PageParams = { minId?: string; cursor?: string; sinceId?: string; limit?: number }
+type PageParams = { minId?: string; cursor?: string; sinceId?: string; sinceAt?: string; limit?: number }
 
 function laterHint(a: BlueskySeenHint | null, b: BlueskySeenHint | undefined): BlueskySeenHint | null {
   if (!b) return a
@@ -210,6 +210,7 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
 
   async function load() {
     const mine = ++generation
+    firstApplied = false
     const owner = ownerGeneration()
     loading.value = true
     error.value = null
@@ -225,8 +226,22 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     }
   }
 
+  // A poll that replaces the list or its cursor starts a new generation, as
+  // load() does: an answer to a request made before it writes nothing. The
+  // request it drops no longer holds the list as loading.
+  function restart() {
+    generation++
+    loading.value = false
+  }
+
+  // Whether a first page has come in since the last load(). After it, only
+  // a first page with rows may replace the list: an empty one must not
+  // bring back a cursor the list has already read past.
+  let firstApplied = false
+
   // The first page replaces the list. Only the client's cursor ends it.
   function applyFirst(first: Awaited<ReturnType<typeof fetchFirst>>, source: CopySource) {
+    firstApplied = true
     bluesky.value = first.bluesky
     seen.value = first.bluesky ? laterHint(null, first.page.bluesky) : null
     if (first.grouped) {
@@ -307,14 +322,17 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
   // Bluesky has no min_id: the client reads from the top until it meets the
   // newest one shown. Met: merge what is above it. Not met (a gap): the list
   // starts again from what was read, and pages on from there.
-  async function pollBluesky(mine: number, owner: number, first: string, source: CopySource) {
-    const page = await fetchPage({ sinceId: first })
+  async function pollBluesky(mine: number, owner: number, first: Notification, source: CopySource) {
+    // The time too: the client stops at the first one older than it, so a
+    // deleted anchor is not read past (README, "Notifications").
+    const page = await fetchPage({ sinceId: first.id, sinceAt: first.createdAt })
     if (!current(mine, owner)) return
     seen.value = laterHint(seen.value, page.bluesky)
     if (page.nextCursor === null) {
       const fresh = withoutKnown(ingest(page, source))
       if (fresh.length > 0) items.value = [...fresh, ...items.value]
     } else {
+      restart()
       items.value = ingest(page, source)
       setCursor(page.nextCursor)
     }
@@ -325,9 +343,10 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
     const mine = generation
     const owner = ownerGeneration()
     const grouped = serverGroups.value
+    const newestBluesky = bluesky.value ? byIndexedAt(items.value)[0] : undefined
     const first = grouped
       ? newestGroupId(grouped)
-      : bluesky.value ? byIndexedAt(items.value)[0]?.id : items.value[0]?.id
+      : bluesky.value ? newestBluesky?.id : items.value[0]?.id
     const source = startRead()
     try {
       if (!first) {
@@ -335,7 +354,13 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
         const firstPage = await fetchFirst()
         if (!current(mine, owner)) return
         if ((serverGroups.value?.length ?? 0) > 0 || items.value.length > 0) return
-        applyFirst(firstPage, source)
+        const rows = firstPage.grouped ? firstPage.grouped.notificationGroups.length : firstPage.page.length
+        if (firstApplied && rows === 0) {
+          if (firstPage.bluesky) seen.value = laterHint(seen.value, firstPage.page.bluesky)
+        } else {
+          restart()
+          applyFirst(firstPage, source)
+        }
         error.value = null
         return
       }
@@ -343,8 +368,8 @@ export function createNotificationsStore(opts: CreateNotificationsStoreOpts): No
         await pollGroups(mine, owner, first, source)
         return
       }
-      if (bluesky.value) {
-        await pollBluesky(mine, owner, first, source)
+      if (bluesky.value && newestBluesky) {
+        await pollBluesky(mine, owner, newestBluesky, source)
         return
       }
       // Page forward from the newest one shown. `since_id` would give the
