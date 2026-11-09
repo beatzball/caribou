@@ -395,6 +395,25 @@ rollback, the in-flight guard and the account check.
   nothing to undo. When the post is gone, the undo fails `not_found`.
 - **A block leaves the follow.** Bluesky keeps the reader's follow
   record when they block. The ack sets only `blocking` and `blockUri`.
+- **An ack is partial.** It names only the fields the write changed. The
+  state layer never stores it as a whole relationship (state README,
+  "Bluesky acks", A1).
+- **A list's block or mute is refused (A3).** `mapRelationship` keeps the
+  list's URI (`bluesky.blockingByList`, `bluesky.mutingByList`; `null`
+  when none). Unblock and Unmute refuse when the ref names a list, or
+  when the ref does not say and the profile read finds one. Nothing is
+  deleted or sent. The error carries `userMessage`: "This block comes
+  from a list. Remove the account from the list, or unsubscribe from
+  it." (or "This mute …"). A personal block that a list also covers is
+  refused too: a personal undo would leave the account blocked.
+- **One record per click intent, even when an answer is lost.** For a
+  like, repost, follow or block, the client picks the rkey
+  (`compose.nextRkey`, a TID) and keeps it by collection and subject
+  until a write answers. If the answer was lost, the next write of the
+  same intent first reads that record (`getRecord`). Found: it answers
+  that record and writes nothing. Not found: it writes with the same
+  rkey. Any other failure of that read writes nothing (the outcome is
+  still unknown). Without `compose` the PDS picks the rkey, as before.
 - **A post with no URI and CID** is refused (`not_found`) before any
   request.
 - **No dedup.** Two clicks that reach the client are two requests. The

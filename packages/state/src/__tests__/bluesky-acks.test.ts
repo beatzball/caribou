@@ -3,7 +3,7 @@ import type { UserKey } from '@beatzball/caribou-auth'
 import type {
   CaribouClient, Relationship, RelationshipWriteAck, Status, StatusBluesky, StatusRef, StatusWriteAck,
 } from '@beatzball/caribou-mastodon-client'
-import { cacheStatus, forgetReaderFields, statusCache } from '../caches.js'
+import { cacheStatus, forgetReaderFields, readSource, statusCache } from '../caches.js'
 import { ownerGeneration } from '../keep-alive.js'
 import { _testOnlyResetMutations, toggleBookmark, toggleFavourite, toggleReblog } from '../mutations.js'
 import {
@@ -131,6 +131,27 @@ describe('status acks', () => {
   })
 })
 
+describe('an ack, then later reader copies (N3)', () => {
+  it('a lagging copy keeps the like; a caught-up copy after 60 s agrees; undo deletes the right record', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] })
+    try {
+      cacheStatus(post())
+      await toggleFavourite(get(), bsky({ favourite: async () => ack(true, LIKE_URI) }))
+      // The AppView has not seen the like yet; it does say replies are now off.
+      cacheStatus(post({}, { replyDisabled: true }), readSource(ME))
+      expect(get()).toMatchObject({ favourited: true, favouritesCount: 4, bluesky: { likeUri: LIKE_URI, replyDisabled: true } })
+      vi.setSystemTime(1_000_000 + 61_000)
+      cacheStatus(post({ favourited: true, favouritesCount: 4 }, { likeUri: LIKE_URI }), readSource(ME))
+      expect(get()).toMatchObject({ favourited: true, favouritesCount: 4, bluesky: { likeUri: LIKE_URI, replyDisabled: false } })
+      const unfavourite = vi.fn(async (_ref: StatusRef) => ack(false, null))
+      await toggleFavourite(get(), bsky({ unfavourite }))
+      expect(unfavourite.mock.calls[0]![0].bluesky!.likeUri).toBe(LIKE_URI)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('relationship acks', () => {
   const key = relationshipKey(ME, BOB.id)
   const cached = () => relationshipCache.value.get(key)
@@ -176,10 +197,4 @@ describe('relationship acks', () => {
     expect(toasts).toHaveLength(1)
   })
 
-  it('an ack with nothing cached builds the relationship from the ack', async () => {
-    await setMute(BOB, true, bsky({
-      mute: async () => ({ ack: true, id: BOB.id, flags: { muting: true, mutingNotifications: true } }),
-    }))
-    expect(cached()).toMatchObject({ id: BOB.id, muting: true, mutingNotifications: true })
-  })
 })

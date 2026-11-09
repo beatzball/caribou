@@ -16,7 +16,14 @@ export function accountRef(
 ): AccountRef {
   const b = relationship?.bluesky
   if (!b) return { id: accountId }
-  return { id: accountId, bluesky: { followUri: b.followUri, blockUri: b.blockUri } }
+  return {
+    id: accountId,
+    bluesky: {
+      followUri: b.followUri, blockUri: b.blockUri,
+      ...(b.blockingByList !== undefined ? { blockingByList: b.blockingByList } : {}),
+      ...(b.mutingByList !== undefined ? { mutingByList: b.mutingByList } : {}),
+    },
+  }
 }
 
 /** True for a Bluesky write's ack, false for a whole post or relationship. */

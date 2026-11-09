@@ -167,8 +167,8 @@ function notYet(what: string, issue: string): () => Promise<never> {
 }
 
 /**
- * The Bluesky `CaribouClient`: the read methods (rules in the README).
- * Writes and later features answer `not_found`, naming their issue.
+ * The Bluesky `CaribouClient` (rules in the README). Features not here yet
+ * answer `not_found`, naming their issue.
  */
 export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   const { userKey, agent, moderation } = opts
@@ -521,7 +521,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     fetchFilters: async () => [],
 
     // Like, repost, bookmark, follow, mute, block (#188; README, "Actions").
-    ...createActions(agent, write),
+    ...createActions(agent, write, opts.compose?.nextRkey),
 
     fetchTag: notYet('hashtags', '#193'),
     followTag: notYet('hashtags', '#193'),

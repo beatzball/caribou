@@ -517,6 +517,13 @@ export interface RelationshipBluesky {
   followUri: string | null
   /** The reader's block record, so an unblock can delete it. */
   blockUri: string | null
+  /**
+   * The list whose block covers this account, or null. A personal unblock
+   * cannot remove it. Missing means not known.
+   */
+  blockingByList?: string | null
+  /** The list whose mute covers this account, or null. Missing means not known. */
+  mutingByList?: string | null
 }
 
 // ------------------------------------------------------------ write refs

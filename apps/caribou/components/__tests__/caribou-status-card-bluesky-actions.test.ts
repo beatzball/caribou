@@ -7,6 +7,7 @@ import {
   _testOnlyResetMutations, activeClient, activeUserKey, addUserSession, cacheStatus, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-status-card.js'
+import { startShortcuts } from '../_shortcuts.js'
 import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
@@ -133,7 +134,7 @@ describe('Bluesky reader, Bluesky post', () => {
     expect(seen[1]!.detail.quote.id).toBe(POST_URI)
   })
 
-  it('replyDisabled: Reply is off and says why; a click (or the r key) opens no composer', async () => {
+  it('replyDisabled: Reply is off and says why; a click opens no composer', async () => {
     signIn('bluesky')
     const seen = composeEvents()
     const el = await mount(blueskyPost({ replyDisabled: true }))
@@ -197,5 +198,75 @@ describe('other readers', () => {
     signIn('mastodon')
     const el = await mount(mastodonPost(), 'example.social')
     expect(quote(el)).toBeNull()
+  })
+})
+
+// The click guard of the icon button is one check; the card's handler is
+// the second. These reach the handler, and the real `r` key path.
+describe('the handler checks the limits itself', () => {
+  function host(el: CaribouStatusCard, cls: string) {
+    return el.shadowRoot!.querySelector(`.actions caribou-icon-button.${cls}`) as HTMLElement & { softDisabled: boolean }
+  }
+
+  it('Reply with soft-disabled forced off still opens no composer for a limited post', async () => {
+    signIn('bluesky')
+    const seen = composeEvents()
+    const el = await mount(blueskyPost({ replyDisabled: true }))
+    const reply = host(el, 'reply')
+    reply.softDisabled = false
+    reply.click()
+    expect(seen).toHaveLength(0)
+  })
+
+  it('Quote with soft-disabled forced off still opens no composer for a limited post', async () => {
+    signIn('bluesky')
+    const seen = composeEvents()
+    const el = await mount(blueskyPost({ embeddingDisabled: true }))
+    const quoteButton = host(el, 'quote')
+    quoteButton.softDisabled = false
+    quoteButton.click()
+    expect(seen).toHaveLength(0)
+  })
+
+  it('the r key replies to an open post and does nothing on a limited one', async () => {
+    signIn('bluesky')
+    const seen = composeEvents()
+    const outlet = document.createElement('litro-outlet')
+    const list = document.createElement('ul')
+    outlet.append(list)
+    document.body.append(outlet)
+    const cards: CaribouStatusCard[] = []
+    for (const p of [blueskyPost({ replyDisabled: true }), { ...blueskyPost(), id: `${POST_URI}x` } as Status]) {
+      const li = document.createElement('li')
+      const el = document.createElement('caribou-status-card') as CaribouStatusCard
+      el.status = p
+      li.append(el)
+      list.append(li)
+      cards.push(el)
+    }
+    for (const el of cards) {
+      for (let i = 0; i < 3; i++) {
+        while (!(await el.updateComplete)) { /* settle */ }
+        await _testOnlyVeilLoaded()
+        await new Promise((r) => setTimeout(r, 0))
+      }
+    }
+    const stop = startShortcuts(window, document, { navigate: () => {}, toggleHelp: () => {}, helpOpen: () => false, enabled: () => true, now: () => 0 })
+    const key = (k: string) => {
+      let target: Element = document.activeElement ?? document.body
+      while (target.shadowRoot?.activeElement) target = target.shadowRoot.activeElement
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, composed: true, cancelable: true }))
+    }
+    try {
+      key('j')
+      key('r')
+      expect(seen).toHaveLength(0)
+      key('j')
+      key('r')
+      expect(seen).toHaveLength(1)
+      expect(seen[0]!.detail.inReplyTo.id).toBe(`${POST_URI}x`)
+    } finally {
+      stop()
+    }
   })
 })

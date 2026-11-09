@@ -152,3 +152,38 @@ test.describe('Bluesky card actions', () => {
     expect(pds.creates[0]!.record).toMatchObject({ subject: BOB })
   })
 })
+
+// Six controls (Reply, Repost, Like, Bookmark, Quote, More) on a small
+// phone with a touch pointer, where each control is at least 44 px.
+for (const width of [320, 375]) {
+  test.describe(`Bluesky action bar at ${width} px`, () => {
+    test.skip(({ browserName }) => browserName === 'webkit' && process.platform === 'darwin',
+      'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
+    test.use({ viewport: { width, height: 800 }, hasTouch: true })
+
+    test('fits inside the card', async ({ page, baseURL }) => {
+      const pds = fixturePds()
+      await installFixtureAuth(page, { xrpc: pds.answer })
+      await signIn(page, loopbackOrigin(baseURL))
+      const open = card(page, 'open post')
+      await expect(open.getByRole('button', { name: 'Quote' })).toBeVisible()
+      const box = await open.evaluate((el) => {
+        const root = el.shadowRoot!
+        const bar = root.querySelector('.actions') as HTMLElement
+        const article = root.querySelector('article') as HTMLElement
+        const last = bar.lastElementChild as HTMLElement
+        return {
+          controls: bar.children.length,
+          overflow: bar.scrollWidth - bar.clientWidth,
+          lastRight: last.getBoundingClientRect().right,
+          articleRight: article.getBoundingClientRect().right,
+          page: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        }
+      })
+      expect(box.controls).toBe(6)
+      expect(box.overflow).toBeLessThanOrEqual(0)
+      expect(box.lastRight).toBeLessThanOrEqual(box.articleRight)
+      expect(box.page).toBeLessThanOrEqual(0)
+    })
+  })
+}

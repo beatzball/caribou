@@ -361,12 +361,24 @@ server data, the card's own copy) stays page data.
 A write still out for the old account finds a new owner generation when
 it answers and writes nothing, so no slot stays marked as written to.
 
-**Relationships** (`relationships.ts`) follow the same rule. The cache
-is keyed by the reader's UserKey, so every read is the reader's copy. A
-read does not replace the cached relationship while a write is out, when
-a write started after the read did, or inside the lag window after a
-write finished when it disagrees with what that write left
-(`following`, `requested`, `muting`, `blocking`).
+**Relationships** (`relationships.ts`) follow the same rule, by field
+group. The cache is keyed by the reader's UserKey, so every read is the
+reader's copy. A write names one group:
+
+| group | fields |
+|---|---|
+| follow | `following`, `requested`, `bluesky.followUri` |
+| block | `blocking`, `bluesky.blockUri`, `bluesky.blockingByList` |
+| mute | `muting`, `mutingNotifications`, `bluesky.mutingByList` |
+
+A read is judged one group at a time. It keeps the cached fields of a
+group when a write to that group is out, when a write to that group
+started after the read did, or inside the lag window after a write to
+that group finished, when the read disagrees with what the write left:
+any flag **or** the record URI. So a read that says `following: true`
+with another `followUri` is refused too (**A2**). Every other field,
+and every other group, always comes from the read. A Mastodon client's
+lag window is 0.
 
 **Network.** Each post and account says its network: it has a `bluesky`
 field or it is Mastodon (`resourceNetwork` in the client package). The
@@ -388,11 +400,28 @@ commit step differs.
   (one click is one write) and the account check (`ownerGeneration`: an
   ack that lands after an account change writes nothing) are as for
   Mastodon.
-- **Relationships (`relationships.ts`).** The ack's flags and record refs
-  go over the last answer (`queue.confirmed`); every other field stays.
-  With nothing cached, the ack alone is the relationship. The next write
-  builds its ref from that, so an unfollow names the follow record the
-  follow made.
+- **Relationships (`relationships.ts`).** **An ack is partial (A1).**
+  It names only the fields its write changed: the flag and its record
+  URI. They go over the last answer (`queue.confirmed`); every other
+  field stays. With nothing cached, only the named fields are stored, and
+  every other field is unknown: absent, neither true nor false. A screen
+  shows no Follow / Unfollow choice while `following` is unknown
+  (`relationshipKnown`); the profile header and search load the
+  relationship, and that read fills the unknown fields (the group rule
+  above). `toggleFollow` does nothing while `following` is unknown. The
+  next write builds its ref from the last answer, so an unfollow names
+  the follow record the follow made.
+- **A Bluesky block leaves the follow.** The optimistic block patch
+  changes `following` only on Mastodon, whose block ends the follow.
+- **An undo never claims more than it removed (A3).** A Bluesky block or
+  mute can come from a list (`bluesky.blockingByList`,
+  `bluesky.mutingByList`: the list's URI). A personal undo cannot remove
+  it, so Unblock and Unmute **refuse** it: nothing is sent, the cache
+  stays as it is, and the toast says "This block comes from a list.
+  Remove the account from the list, or unsubscribe from it." (or "This
+  mute comes from a list. …"). The client refuses the same case when
+  its own read finds the list, and its error carries that message
+  (`userMessage`), which the toast shows.
 - **Mastodon** still answers the whole post or relationship, and that path
   is unchanged.
 

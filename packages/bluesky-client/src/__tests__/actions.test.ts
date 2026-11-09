@@ -14,13 +14,13 @@ function xrpcError(status: number, error: string, message = error) {
   return Object.assign(new Error(message), { status, error })
 }
 
-function setup() {
+function setup(rkeys?: string[]) {
   let n = 0
   const repo = {
-    createRecord: vi.fn(async (input: { repo: string; collection: string }) =>
-      ({ data: { uri: `at://${input.repo}/${input.collection}/3knew${++n}`, cid: 'bafyrec' } })),
+    createRecord: vi.fn(async (input: { repo: string; collection: string; rkey?: string }) =>
+      ({ data: { uri: `at://${input.repo}/${input.collection}/${input.rkey ?? `3knew${++n}`}`, cid: 'bafyrec' } })),
     deleteRecord: vi.fn(async () => ({ data: {} })),
-    getRecord: vi.fn(),
+    getRecord: vi.fn(async (): Promise<unknown> => { throw xrpcError(400, 'RecordNotFound', 'Could not locate record') }),
     uploadBlob: vi.fn(),
   }
   const bookmark = { createBookmark: vi.fn(async () => ({ data: {} })), deleteBookmark: vi.fn(async () => ({ data: {} })) }
@@ -38,6 +38,7 @@ function setup() {
     agent: agent as unknown as BlueskyAgent,
     moderation: { post: (v) => moderationFor(v.uri), profile: (v) => moderationFor(v.did) },
     onUnauthorized,
+    ...(rkeys ? { compose: { nextRkey: () => rkeys.shift()!, detectFacets: async () => [] } } : {}),
   })
   return { client, agent, repo, bookmark, graph, onUnauthorized }
 }
@@ -167,7 +168,7 @@ describe('Bluesky relationship actions', () => {
       ack: true, id: 'did:plc:alice', flags: { blocking: true }, bluesky: { blockUri: `at://${ME}/app.bsky.graph.block/3knew1` },
     })
     expect(repo.deleteRecord).not.toHaveBeenCalled()
-    await client.unblock(acct({ blockUri: BLOCK }))
+    await client.unblock({ id: 'did:plc:alice', bluesky: { followUri: null, blockUri: BLOCK, blockingByList: null } })
     expect(repo.deleteRecord).toHaveBeenCalledWith({ repo: ME, collection: 'app.bsky.graph.block', rkey: '3kblock' })
   })
 
@@ -177,12 +178,99 @@ describe('Bluesky relationship actions', () => {
     expect(repo.deleteRecord).not.toHaveBeenCalled()
   })
 
+  const LIST = 'at://did:plc:carol/app.bsky.graph.list/3l1'
+  const LIST_BLOCK = 'This block comes from a list. Remove the account from the list, or unsubscribe from it.'
+  const LIST_MUTE = 'This mute comes from a list. Remove the account from the list, or unsubscribe from it.'
+
+  it('refuses to unblock a list block named by the ref, with a message; deletes nothing', async () => {
+    const { client, repo } = setup()
+    const call = client.unblock({ id: 'did:plc:alice', bluesky: { followUri: null, blockUri: BLOCK, blockingByList: LIST } })
+    await expect(call).rejects.toMatchObject({ userMessage: LIST_BLOCK })
+    expect(repo.deleteRecord).not.toHaveBeenCalled()
+  })
+
+  it('refuses to unblock when its read finds a list block, even with a personal block too', async () => {
+    const { client, repo, agent } = setup()
+    agent.getProfile.mockResolvedValueOnce({ data: { did: 'did:plc:alice', handle: 'alice.example.com', viewer: { blocking: BLOCK, blockingByList: { uri: LIST } } as never } })
+    await expect(client.unblock({ id: 'did:plc:alice' })).rejects.toMatchObject({ userMessage: LIST_BLOCK })
+    expect(repo.deleteRecord).not.toHaveBeenCalled()
+  })
+
+  it('reads the profile before an unblock whose list state is unknown', async () => {
+    const { client, repo, agent } = setup()
+    agent.getProfile.mockResolvedValueOnce({ data: { did: 'did:plc:alice', handle: 'alice.example.com', viewer: { blocking: BLOCK } } })
+    await client.unblock({ id: 'did:plc:alice', bluesky: { followUri: null, blockUri: BLOCK } })
+    expect(agent.getProfile).toHaveBeenCalledTimes(1)
+    expect(repo.deleteRecord).toHaveBeenCalledWith({ repo: ME, collection: 'app.bsky.graph.block', rkey: '3kblock' })
+  })
+
+  it('refuses to unmute a list mute; reads first when the ref does not say', async () => {
+    const { client, graph, agent } = setup()
+    await expect(client.unmute({ id: 'did:plc:alice', bluesky: { followUri: null, blockUri: null, mutingByList: LIST } }))
+      .rejects.toMatchObject({ userMessage: LIST_MUTE })
+    agent.getProfile.mockResolvedValueOnce({ data: { did: 'did:plc:alice', handle: 'alice.example.com', viewer: { muted: true, mutedByList: { uri: LIST } } as never } })
+    await expect(client.unmute({ id: 'did:plc:alice' })).rejects.toMatchObject({ userMessage: LIST_MUTE })
+    expect(graph.unmuteActor).not.toHaveBeenCalled()
+  })
+
   it('mute and unmute call muteActor and unmuteActor; no record', async () => {
     const { client, graph, repo } = setup()
     expect(await client.mute(acct())).toEqual({ ack: true, id: 'did:plc:alice', flags: { muting: true, mutingNotifications: true } })
     expect(graph.muteActor).toHaveBeenCalledWith({ actor: 'did:plc:alice' })
-    expect(await client.unmute(acct())).toEqual({ ack: true, id: 'did:plc:alice', flags: { muting: false, mutingNotifications: false } })
+    expect(await client.unmute({ id: 'did:plc:alice', bluesky: { followUri: null, blockUri: null, mutingByList: null } }))
+      .toEqual({ ack: true, id: 'did:plc:alice', flags: { muting: false, mutingNotifications: false } })
     expect(graph.unmuteActor).toHaveBeenCalledWith({ actor: 'did:plc:alice' })
     expect(repo.createRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe('N2: the client picks the rkey, so a lost answer never makes a second record', () => {
+  const lost = () => Object.assign(new TypeError('Failed to fetch'))
+
+  it('a like is written with the rkey the client picked', async () => {
+    const { client, repo } = setup(['3kpick1aaaaaa'])
+    const ack = await client.favourite(ref())
+    expect(repo.createRecord).toHaveBeenCalledWith(expect.objectContaining({ rkey: '3kpick1aaaaaa', collection: 'app.bsky.feed.like' }))
+    expect(ack).toMatchObject({ record: `at://${ME}/app.bsky.feed.like/3kpick1aaaaaa` })
+  })
+
+  it('answer lost, record written: the retry finds it and writes nothing', async () => {
+    const { client, repo } = setup(['3kpick1aaaaaa', '3kpick2aaaaaa'])
+    repo.createRecord.mockRejectedValueOnce(lost())
+    await expect(client.favourite(ref())).rejects.toBeInstanceOf(CaribouError)
+    repo.getRecord.mockResolvedValueOnce({ data: { uri: `at://${ME}/app.bsky.feed.like/3kpick1aaaaaa`, cid: 'bafyrec', value: {} } })
+    const ack = await client.favourite(ref())
+    expect(repo.getRecord).toHaveBeenCalledWith({ repo: ME, collection: 'app.bsky.feed.like', rkey: '3kpick1aaaaaa' })
+    expect(repo.createRecord).toHaveBeenCalledTimes(1)
+    expect(ack).toMatchObject({ on: true, record: `at://${ME}/app.bsky.feed.like/3kpick1aaaaaa` })
+  })
+
+  it('answer lost, record not written: the retry writes with the same rkey', async () => {
+    const { client, repo } = setup(['3kpick1aaaaaa', '3kpick2aaaaaa'])
+    repo.createRecord.mockRejectedValueOnce(lost())
+    await expect(client.follow({ id: 'did:plc:alice' })).rejects.toBeInstanceOf(CaribouError)
+    await client.follow({ id: 'did:plc:alice' })
+    expect(repo.createRecord).toHaveBeenCalledTimes(2)
+    expect(repo.createRecord.mock.calls[1]![0]).toMatchObject({ rkey: '3kpick1aaaaaa', collection: 'app.bsky.graph.follow' })
+  })
+
+  it('the check fails: nothing is written, and the next retry checks again', async () => {
+    const { client, repo } = setup(['3kpick1aaaaaa'])
+    repo.createRecord.mockRejectedValueOnce(lost())
+    await expect(client.reblog(ref())).rejects.toBeInstanceOf(CaribouError)
+    repo.getRecord.mockRejectedValueOnce(xrpcError(502, 'UpstreamFailure'))
+    await expect(client.reblog(ref())).rejects.toBeInstanceOf(CaribouError)
+    expect(repo.createRecord).toHaveBeenCalledTimes(1)
+    await client.reblog(ref())
+    expect(repo.getRecord).toHaveBeenCalledTimes(2)
+    expect(repo.createRecord.mock.calls[1]![0]).toMatchObject({ rkey: '3kpick1aaaaaa' })
+  })
+
+  it('after a write that answered, the next one picks a new rkey', async () => {
+    const { client, repo } = setup(['3kpick1aaaaaa', '3kpick2aaaaaa'])
+    await client.block({ id: 'did:plc:alice' })
+    await client.block({ id: 'did:plc:alice' })
+    expect(repo.getRecord).not.toHaveBeenCalled()
+    expect(repo.createRecord.mock.calls.map((c) => (c[0] as { rkey: string }).rkey)).toEqual(['3kpick1aaaaaa', '3kpick2aaaaaa'])
   })
 })

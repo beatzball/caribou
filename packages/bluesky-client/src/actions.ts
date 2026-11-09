@@ -14,7 +14,7 @@ const BLOCK = 'app.bsky.graph.block'
 
 /** The parts of a signed-in `Agent` the actions call. */
 export type BlueskyActionsAgent = Pick<Agent, 'did' | 'getPosts' | 'getProfile'> & {
-  com: { atproto: { repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'deleteRecord'> } }
+  com: { atproto: { repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'deleteRecord' | 'getRecord'> } }
   app: {
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'createBookmark' | 'deleteBookmark'>
@@ -29,12 +29,29 @@ type ActionMethods = Pick<CaribouClient,
 
 type Write = <T>(fn: () => Promise<T>) => Promise<T>
 
+const LIST_BLOCK = 'This block comes from a list. Remove the account from the list, or unsubscribe from it.'
+const LIST_MUTE = 'This mute comes from a list. Remove the account from the list, or unsubscribe from it.'
+
+// A refusal the reader can act on: `userMessage` is what the toast says.
+function listRefusal(message: string): CaribouError {
+  return Object.assign(new CaribouError('unknown', `Bluesky: ${message}`), { userMessage: message })
+}
+
+function isRecordMissing(err: unknown): boolean {
+  return (err as { error?: unknown } | null)?.error === 'RecordNotFound'
+}
+
 /**
  * The Bluesky writes for the card and profile actions. Each answers an ack
  * (no post, no relationship): what the write left. `write` normalizes
  * errors and never shares a request.
  */
-export function createActions(agent: BlueskyActionsAgent, write: Write): ActionMethods {
+export function createActions(agent: BlueskyActionsAgent, write: Write, nextRkey?: () => string): ActionMethods {
+  // The rkey of a write whose answer did not arrive, by collection and
+  // subject. The next write of the same intent checks for that record
+  // first and reuses the rkey, so a lost answer never makes two records.
+  const unanswered = new Map<string, string>()
+
   function did(): string {
     if (!agent.did) throw new CaribouError('unauthorized', 'no active session')
     return agent.did
@@ -46,10 +63,27 @@ export function createActions(agent: BlueskyActionsAgent, write: Write): ActionM
     return { uri: b.uri, cid: b.cid }
   }
 
-  async function create(collection: string, record: Record<string, unknown>): Promise<string> {
+  async function create(collection: string, subject: string, record: Record<string, unknown>): Promise<string> {
+    const repo = did()
+    const intent = `${collection} ${subject}`
+    const kept = unanswered.get(intent)
+    if (kept) {
+      try {
+        const { data } = await agent.com.atproto.repo.getRecord({ repo, collection, rkey: kept })
+        unanswered.delete(intent)
+        return data.uri
+      } catch (err) {
+        // Any other failure leaves the outcome unknown: write nothing.
+        if (!isRecordMissing(err)) throw err
+      }
+    }
+    const rkey = kept ?? nextRkey?.()
+    if (rkey) unanswered.set(intent, rkey)
     const { data } = await agent.com.atproto.repo.createRecord({
-      repo: did(), collection, record: { $type: collection, ...record, createdAt: new Date().toISOString() },
+      repo, collection, ...(rkey ? { rkey } : {}),
+      record: { $type: collection, ...record, createdAt: new Date().toISOString() },
     })
+    unanswered.delete(intent)
     return data.uri
   }
 
@@ -78,9 +112,13 @@ export function createActions(agent: BlueskyActionsAgent, write: Write): ActionM
 
   async function profileRecord(ref: AccountRef, field: 'following' | 'blocking'): Promise<string | null> {
     const known = field === 'following' ? ref.bluesky?.followUri : ref.bluesky?.blockUri
-    if (known) return known
+    // An unblock also needs to know whether a list blocks the account.
+    const listKnown = field === 'following' || ref.bluesky?.blockingByList !== undefined
+    if (field === 'blocking' && ref.bluesky?.blockingByList) throw listRefusal(LIST_BLOCK)
+    if (known && listKnown) return known
     const { data } = await agent.getProfile({ actor: ref.id })
-    return data.viewer?.[field] ?? null
+    if (field === 'blocking' && data.viewer?.blockingByList) throw listRefusal(LIST_BLOCK)
+    return known || (data.viewer?.[field] ?? null)
   }
 
   const status = (ref: StatusRef, on: boolean, record: string | null): StatusWriteAck =>
@@ -108,9 +146,9 @@ export function createActions(agent: BlueskyActionsAgent, write: Write): ActionM
   }
 
   return {
-    favourite: (ref) => write(async () => status(ref, true, await create(LIKE, { subject: post(ref) }))),
+    favourite: (ref) => write(async () => status(ref, true, await create(LIKE, post(ref).uri, { subject: post(ref) }))),
     unfavourite: (ref) => undoPost(ref, 'like', LIKE),
-    reblog: (ref) => write(async () => status(ref, true, await create(REPOST, { subject: post(ref) }))),
+    reblog: (ref) => write(async () => status(ref, true, await create(REPOST, post(ref).uri, { subject: post(ref) }))),
     unreblog: (ref) => undoPost(ref, 'repost', REPOST),
     // A bookmark is private and has no record: only the flag.
     bookmark: (ref) => write(async () => {
@@ -123,7 +161,7 @@ export function createActions(agent: BlueskyActionsAgent, write: Write): ActionM
     }),
 
     follow: (ref) => write(async () => {
-      const followUri = await create(FOLLOW, { subject: ref.id })
+      const followUri = await create(FOLLOW, ref.id, { subject: ref.id })
       return { ack: true, id: ref.id, flags: { following: true }, bluesky: { followUri } }
     }),
     unfollow: (ref) => undoProfile(ref, 'following', FOLLOW,
@@ -133,13 +171,18 @@ export function createActions(agent: BlueskyActionsAgent, write: Write): ActionM
       await agent.app.bsky.graph.muteActor({ actor: ref.id })
       return { ack: true, id: ref.id, flags: { muting: true, mutingNotifications: true } }
     }),
+    // A list's mute is not the reader's to remove here (state README, A3).
     unmute: (ref) => write(async () => {
+      let list = ref.bluesky?.mutingByList
+      if (list === undefined) list = (await agent.getProfile({ actor: ref.id })).data.viewer?.mutedByList?.uri ?? null
+      if (list) throw listRefusal(LIST_MUTE)
       await agent.app.bsky.graph.unmuteActor({ actor: ref.id })
       return { ack: true, id: ref.id, flags: { muting: false, mutingNotifications: false } }
     }),
     // A block is a public record. It leaves the reader's follow record alone.
+    // An unblock refuses a list's block (state README, A3).
     block: (ref) => write(async () => {
-      const blockUri = await create(BLOCK, { subject: ref.id })
+      const blockUri = await create(BLOCK, ref.id, { subject: ref.id })
       return { ack: true, id: ref.id, flags: { blocking: true }, bluesky: { blockUri } }
     }),
     unblock: (ref) => undoProfile(ref, 'blocking', BLOCK,

@@ -107,6 +107,12 @@ function hostOf(url: string): string {
   try { return new URL(url).host } catch { return '' }
 }
 
+// The button hint when Reply or Quote is off on a Bluesky post (spec 9).
+// The composer says it in its own words at submit
+// (`caribou-compose-dialog.ts`).
+const REPLY_OFF_HINT = 'The author limited replies'
+const QUOTE_OFF_HINT = 'The author turned off quotes'
+
 // Posts whose content warning the reader opened. Module scope, so a card the
 // page cache paints again stays open. Only a click adds to it, so the server
 // render and the first client render are both collapsed.
@@ -114,11 +120,6 @@ function hostOf(url: string): string {
 // A status id is minted per instance, so the key is the instance the status
 // came from plus its id: another instance's post with the same id stays
 // collapsed. A keep-alive empties itself when the active account changes.
-// Why Reply or Quote is off on a Bluesky post (spec 9). The composer
-// checks the same flags again on submit.
-const REPLY_LIMITED = 'The author limited replies'
-const QUOTE_LIMITED = 'The author turned off quotes'
-
 const openedWarnings = createKeepAlive<boolean>(500)
 // Posts hidden by a filter's warning that the reader showed. Same rules.
 const shownFiltered = createKeepAlive<boolean>(500)
@@ -297,6 +298,17 @@ export class CaribouStatusCard extends LitElement {
       caribou-button.edited::part(button) { padding-inline: var(--space-2); }
     }
     .actions caribou-menu.more { margin-inline-start: auto; }
+    /* A Bluesky bar has six controls (it has Quote). On a small phone six
+       44 px targets do not fit beside the avatar: the bar starts under the
+       avatar and the space between controls shrinks. A Mastodon bar has
+       no Quote and is as it was. */
+    @media (max-width: 480px) {
+      .actions:has(> caribou-icon-button.quote) {
+        gap: 0; justify-content: space-between;
+        margin-inline-start: calc(-1 * (48px + var(--space-3)));
+      }
+      .actions:has(> caribou-icon-button.quote) caribou-menu.more { margin-inline-start: 0; }
+    }
     .actions caribou-menu.more::part(trigger) { color: var(--fg-muted); }
     @media (pointer: fine) {
       .actions caribou-menu.more::part(trigger) { min-inline-size: 2.25rem; min-block-size: 2.25rem; }
@@ -877,8 +889,8 @@ export class CaribouStatusCard extends LitElement {
     const own = this.status?.reblog ?? this.status
     const b = this.liveBluesky !== undefined && post.id === own?.id ? this.liveBluesky : post.bluesky
     return {
-      reply: b?.replyDisabled ? REPLY_LIMITED : '',
-      quote: b?.embeddingDisabled ? QUOTE_LIMITED : '',
+      reply: b?.replyDisabled ? REPLY_OFF_HINT : '',
+      quote: b?.embeddingDisabled ? QUOTE_OFF_HINT : '',
     }
   }
 

@@ -84,6 +84,11 @@ export function mapRelationship(view: ProfileView): Relationship {
     endorsed: false,
     note: null,
     requestedBy: false,
-    bluesky: { followUri: v.following ?? null, blockUri: v.blocking ?? null },
+    bluesky: {
+      followUri: v.following ?? null,
+      blockUri: v.blocking ?? null,
+      blockingByList: v.blockingByList?.uri ?? null,
+      mutingByList: v.mutedByList?.uri ?? null,
+    },
   }
 }
