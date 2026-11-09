@@ -31,8 +31,8 @@ export interface FixtureAuth {
   tokenRequests: URLSearchParams[]
   /** Tokens the revocation endpoint got. */
   revoked: string[]
-  /** `Authorization` headers on XRPC calls to the PDS, by method. */
-  pdsCalls: { method: string; authorization: string | null; dpop: boolean }[]
+  /** `Authorization` headers on XRPC calls to the PDS, by method, and the `atproto-accept-labelers` sent. */
+  pdsCalls: { method: string; authorization: string | null; dpop: boolean; acceptLabelers: string | null }[]
   /** When true, the PDS refuses every token (the session ended at the server). */
   revokedAtServer: boolean
 }
@@ -98,8 +98,19 @@ function profile(did: string) {
 export type XrpcAnswer = (method: string, url: URL, body: string | null) =>
   { status?: number; body: unknown; headers?: Record<string, string> } | undefined
 
+/** The header a real AppView sends and a real PDS does not expose (#233). */
+const CONTENT_LABELERS = 'atproto-content-labelers'
+
 /** Installs the fixture servers on `page`. */
-export async function installFixtureAuth(page: Page, opts: { sub?: string; xrpc?: XrpcAnswer } = {}): Promise<FixtureAuth> {
+export async function installFixtureAuth(page: Page, opts: {
+  sub?: string
+  xrpc?: XrpcAnswer
+  /**
+   * Expose `atproto-content-labelers` to the page. Off by default, as on the
+   * real AppView and PDS: the page cannot read it (#233).
+   */
+  exposeContentLabelers?: boolean
+} = {}): Promise<FixtureAuth> {
   const state: FixtureAuth = { sub: opts.sub ?? null, tokenRequests: [], revoked: [], pdsCalls: [], revokedAtServer: false }
   const pars = new Map<string, URLSearchParams>()
   const codes = new Map<string, URLSearchParams>()
@@ -177,7 +188,10 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string; xrpc?
     const url = new URL(req.url())
     const method = url.pathname.replace('/xrpc/', '')
     const headers = req.headers()
-    state.pdsCalls.push({ method, authorization: headers['authorization'] ?? null, dpop: !!headers['dpop'] })
+    state.pdsCalls.push({
+      method, authorization: headers['authorization'] ?? null, dpop: !!headers['dpop'],
+      acceptLabelers: headers['atproto-accept-labelers'] ?? null,
+    })
     if (state.revokedAtServer) {
       return route.fulfill({
         status: 401,
@@ -187,14 +201,16 @@ export async function installFixtureAuth(page: Page, opts: { sub?: string; xrpc?
     }
     const own = opts.xrpc?.(method, url, req.postData())
     if (own) {
-      // A spec's own headers are exposed to the page, as a PDS must for
-      // `atproto-content-labelers`.
+      // A spec's own headers are sent and exposed to the page, except
+      // `atproto-content-labelers`: sent, but exposed only when the spec
+      // asks (the real servers do not expose it).
       const extra = own.headers ?? {}
+      const exposed = Object.keys(extra).filter((k) => opts.exposeContentLabelers || k.toLowerCase() !== CONTENT_LABELERS)
       return route.fulfill({
         status: own.status ?? 200,
         headers: {
           ...CORS, 'content-type': 'application/json', ...extra,
-          ...(Object.keys(extra).length > 0 ? { 'access-control-expose-headers': Object.keys(extra).join(', ') } : {}),
+          ...(exposed.length > 0 ? { 'access-control-expose-headers': exposed.join(', ') } : {}),
         },
         body: JSON.stringify(own.body),
       })
