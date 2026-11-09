@@ -3,16 +3,19 @@ import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_b
 
 // Bluesky delete and redraft through the real SDK (#190; app README,
 // "Bluesky delete and redraft"). The record and its image are read from the
-// fixture PDS first, then the post is deleted with `deleteRecord`, the image
-// uploaded again, and the new draft posts with a new rkey.
+// fixture PDS first; the image is re-encoded and uploaded, and the draft
+// stored, before the post is deleted with `deleteRecord`. The new draft
+// posts with a new rkey.
 
 const PDS = 'https://pds.example.test'
 const OLD_RKEY = '3lalicepost1'
 const OLD_URI = `at://${ALICE}/app.bsky.feed.post/${OLD_RKEY}`
 const POST_CID = 'bafyreib7upx3s2pfhghouqwntlb4vsokgkwi7kmeqfsyddvum2xle33riq'
-// The raw CID of IMAGE_BYTES, as a PDS computes it.
-const BLOB_CID = 'bafkreibsiyovxulxgajkz3ylufldm5jjjg6xylhfb6ixefm5t5lm6dozv4'
-const IMAGE_BYTES = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
+// A 1×1 PNG the browser can decode and re-encode, and its raw CID.
+const IMAGE_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
+const BLOB_CID = 'bafkreidlp6sdj6jkroakvmbntpy2clsj77foijheae5byt3iwz7d2k542a'
+// The CID the fixture answers for the re-encoded upload.
+const NEW_CID = 'bafkreibsiyovxulxgajkz3ylufldm5jjjg6xylhfb6ixefm5t5lm6dozv4'
 // Bluesky's own labeler. The AppView says which labelers' labels an answer
 // carries; with it, and the labeler's definitions, the reader's check settles.
 const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
@@ -25,7 +28,7 @@ const RECORD = {
   embed: {
     $type: 'app.bsky.embed.images',
     images: [{
-      image: { $type: 'blob', ref: { $link: BLOB_CID }, mimeType: 'image/jpeg', size: IMAGE_BYTES.length },
+      image: { $type: 'blob', ref: { $link: BLOB_CID }, mimeType: 'image/png', size: IMAGE_BYTES.length },
       alt: 'a deer in snow', aspectRatio: { width: 4, height: 3 },
     }],
   },
@@ -51,6 +54,8 @@ interface Pds {
   creates: { rkey: string; record: Record<string, unknown> }[]
   deleted: string[]
   failDelete: boolean
+  /** The delete is done, but its answer is lost. */
+  loseDeleteAnswer: boolean
 }
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }
@@ -74,7 +79,7 @@ function appview(pds: Pds): XrpcAnswer {
 }
 
 function newPds(): Pds {
-  return { calls: [], creates: [], deleted: [], failDelete: false }
+  return { calls: [], creates: [], deleted: [], failDelete: false, loseDeleteAnswer: false }
 }
 
 async function fixturePds(page: Page, pds: Pds): Promise<void> {
@@ -92,17 +97,18 @@ async function fixturePds(page: Page, pds: Pds): Promise<void> {
           : json({ error: 'RecordNotFound', message: 'Could not locate record' }, 400))
       case 'com.atproto.sync.getBlob':
         pds.calls.push(`getBlob ${url.searchParams.get('cid')}`)
-        return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'image/jpeg' }, body: IMAGE_BYTES })
+        return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'application/octet-stream' }, body: IMAGE_BYTES })
       case 'com.atproto.repo.deleteRecord': {
         const body = req.postDataJSON() as { repo: string; collection: string; rkey: string }
         pds.calls.push(`deleteRecord ${body.repo} ${body.collection} ${body.rkey}`)
         if (pds.failDelete) return route.fulfill(json({ error: 'InternalServerError', message: 'Internal Server Error' }, 500))
         pds.deleted.push(body.rkey)
+        if (pds.loseDeleteAnswer) return route.abort('timedout')
         return route.fulfill(json({}))
       }
       case 'com.atproto.repo.uploadBlob':
-        pds.calls.push('uploadBlob')
-        return route.fulfill(json({ blob: { $type: 'blob', ref: { $link: BLOB_CID }, mimeType: 'image/jpeg', size: IMAGE_BYTES.length } }))
+        pds.calls.push(`uploadBlob ${req.headers()['content-type']}`)
+        return route.fulfill(json({ blob: { $type: 'blob', ref: { $link: NEW_CID }, mimeType: 'image/jpeg', size: 100 } }))
       case 'com.atproto.repo.createRecord': {
         const body = req.postDataJSON() as { repo: string; collection: string; rkey: string; record: Record<string, unknown> }
         pds.calls.push('createRecord')
@@ -142,7 +148,8 @@ test.describe('Bluesky delete and redraft', () => {
     'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
   // A signed-in timeline card stays covered ("checking your moderation
   // settings") until #233 passes labeler coverage for the timeline, so the
-  // menu cannot be reached. Both tests passed with the timeline covered.
+  // menu cannot be reached. All tests passed with the timeline covered.
+  // Turn on: #239.
   test.fixme(true, 'needs #233: signed-in timeline moderation never settles')
 
   test('reads the record and image, deletes, and posts the redraft as a new record', async ({ page, baseURL }) => {
@@ -157,8 +164,9 @@ test.describe('Bluesky delete and redraft', () => {
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole('textbox', { name: 'Post text' })).toHaveValue('a deer photo')
     await expect(dialog.getByRole('textbox', { name: /Alt text for/ })).toHaveValue('a deer in snow')
+    // Read, then the re-encoded upload, then the delete.
     expect(pds.calls.slice(0, 4)).toEqual([
-      `getRecord ${OLD_RKEY}`, `getBlob ${BLOB_CID}`, `deleteRecord ${ALICE} app.bsky.feed.post ${OLD_RKEY}`, 'uploadBlob',
+      `getRecord ${OLD_RKEY}`, `getBlob ${BLOB_CID}`, 'uploadBlob image/jpeg', `deleteRecord ${ALICE} app.bsky.feed.post ${OLD_RKEY}`,
     ])
 
     await dialog.getByRole('button', { name: 'Post' }).click()
@@ -168,7 +176,7 @@ test.describe('Bluesky delete and redraft', () => {
     expect(pds.creates[0]!.rkey).not.toBe(OLD_RKEY)
     expect(pds.creates[0]!.record).toMatchObject({
       $type: 'app.bsky.feed.post', text: 'a deer photo', langs: ['en'],
-      embed: { $type: 'app.bsky.embed.images', images: [{ alt: 'a deer in snow', image: { ref: { $link: BLOB_CID } } }] },
+      embed: { $type: 'app.bsky.embed.images', images: [{ alt: 'a deer in snow', image: { ref: { $link: NEW_CID } } }] },
     })
   })
 
@@ -183,6 +191,29 @@ test.describe('Bluesky delete and redraft', () => {
     await expect(page.getByText('Could not delete this post. Try again.')).toBeVisible()
     await expect(page.getByRole('dialog', { name: 'New post' })).toBeHidden()
     await expect(page.getByRole('button', { name: 'More actions for your post' })).toBeVisible()
-    expect(pds.calls).not.toContain('uploadBlob')
+    // The draft was stored before the delete; the refused delete removed it.
+    await page.keyboard.press('Escape')
+    const dialog = page.getByRole('dialog', { name: 'New post' })
+    await expect(async () => {
+      await page.locator('body').click({ position: { x: 1, y: 1 } })
+      await page.keyboard.press('n')
+      await expect(dialog).toBeVisible({ timeout: 1000 })
+    }).toPass({ timeout: 15_000 })
+    await expect(dialog.getByRole('textbox', { name: 'Post text' })).toHaveValue('')
+  })
+
+  test('a delete whose answer is lost: getRecord says it is gone, and the redraft opens', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    const pds = newPds()
+    await installFixtureAuth(page, { xrpc: appview(pds) })
+    await fixturePds(page, pds)
+    pds.loseDeleteAnswer = true
+    await signIn(page, origin)
+    await chooseRedraft(page)
+    const dialog = page.getByRole('dialog', { name: 'New post' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByRole('textbox', { name: 'Post text' })).toHaveValue('a deer photo')
+    expect(pds.calls).toContain(`getRecord ${OLD_RKEY}`)
+    expect(pds.calls.filter((c) => c.startsWith('getRecord'))).toHaveLength(2)
   })
 })

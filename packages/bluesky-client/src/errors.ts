@@ -67,3 +67,15 @@ export class BlueskyBlobNotFound extends CaribouError {
     this.cid = cid
   }
 }
+
+/**
+ * A delete whose outcome is not known (README, "Delete"): the delete got no
+ * clear answer, and reading the record failed too. The record may be gone
+ * or still there; a caller must not say "not deleted".
+ */
+export class BlueskyDeleteUnknown extends CaribouError {
+  constructor(message: string) {
+    super('unknown', message)
+    this.name = 'BlueskyDeleteUnknown'
+  }
+}

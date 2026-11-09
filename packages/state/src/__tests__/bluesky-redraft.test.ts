@@ -1,10 +1,15 @@
+import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, deletedStatusIds, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
 import { ownerGeneration } from '../keep-alive.js'
-import { deleteOwnStatus } from '../own-posts.js'
-import { finishBlueskyRedraft, readBlueskyRedraft, redraftTextOf } from '../bluesky-redraft.js'
+import { deleteOwnStatus, deleteOwnStatusOutcome } from '../own-posts.js'
+import {
+  discardBlueskyRedraft, readBlueskyRedraft, redraftTextOf, storeBlueskyRedraft, type PreparedImage,
+} from '../bluesky-redraft.js'
+import { findRedraftSlot, loadDraft } from '../compose.js'
+import { getDraftFiles, _testOnlyClearDraftFiles, _testOnlyFailNextPut } from '../draft-files.js'
 
 const DID = 'did:plc:reader'
 const KEY = `${DID}@bsky` as const
@@ -43,12 +48,15 @@ function fakeClient(record: BlueskyPostRecord | null = RECORD) {
     userKey: KEY,
     blueskyGetOwnPost: vi.fn(async (rkey: string): Promise<BlueskyOwnPost | null> =>
       record ? { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafyold', value: record } : null),
-    blueskyGetBlob: vi.fn(async (cid: string) => new Blob([`bytes of ${cid}`], { type: 'image/jpeg' })),
+    // A PDS may type a blob as octet-stream: the record's type wins.
+    blueskyGetBlob: vi.fn(async (cid: string) => new Blob([`bytes of ${cid}`], { type: 'application/octet-stream' })),
+    blueskyNextRkey: vi.fn(async () => '3knewkey00001'),
+    fetchStatus: vi.fn(async (id: string): Promise<Status> => post({}, id)),
     blueskyDeletePost: vi.fn(async () => {}),
     blueskyUploadBlob: vi.fn(async (b: Blob) => {
       uploads.push(b)
       const text = await b.text()
-      return { $type: 'blob' as const, ref: { $link: text.replace('bytes of ', '') }, mimeType: b.type, size: b.size }
+      return { $type: 'blob' as const, ref: { $link: `new-${text}` }, mimeType: b.type, size: b.size }
     }),
     deleteStatus: vi.fn(async () => { throw new Error('not for Bluesky') }),
   }
@@ -65,7 +73,14 @@ function deferred<T>() {
 const toasts: string[] = []
 const onToast = (e: Event) => { toasts.push((e as CustomEvent<{ message: string }>).detail.message) }
 
-beforeEach(() => {
+// The canvas re-encode, as the card passes it: new bytes, so a new CID.
+const prepareImage = vi.fn(async (b: Blob): Promise<PreparedImage> =>
+  ({ blob: new Blob([`re ${await b.text()}`], { type: 'image/jpeg' }), width: 8, height: 6 }))
+
+beforeEach(async () => {
+  await _testOnlyClearDraftFiles()
+  localStorage.clear()
+  prepareImage.mockClear()
   activeUserKey.value = KEY
   ownerGeneration()
   statusCache.value = new Map()
@@ -114,8 +129,40 @@ describe('deleteOwnStatus, Bluesky', () => {
   })
 })
 
+describe('deleteOwnStatusOutcome, Bluesky', () => {
+  it('a delete in doubt (BlueskyDeleteUnknown): the post comes back and the toast does not say "not deleted"', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyDeletePost.mockRejectedValueOnce(Object.assign(new Error('?'), { name: 'BlueskyDeleteUnknown' }))
+    const p = post()
+    cacheStatus(p)
+    expect(await deleteOwnStatusOutcome(client, p)).toEqual({ kind: 'unknown', stale: false })
+    expect(statusCache.value.has(URI)).toBe(true)
+    expect(toasts).toEqual(['Could not tell whether the post was deleted. Reload to check.'])
+  })
+
+  it('takes the caller\'s messages, and says nothing after an account switch but still answers the outcome', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyDeletePost.mockRejectedValueOnce(new Error('400'))
+    const p = post()
+    expect(await deleteOwnStatusOutcome(client, p, { messages: { failed: 'F' } })).toEqual({ kind: 'failed', stale: false })
+    expect(toasts).toEqual(['F'])
+    const d = deferred<void>()
+    c.blueskyDeletePost.mockImplementationOnce(() => d.promise)
+    const out = deleteOwnStatusOutcome(client, p)
+    activeUserKey.value = 'did:plc:other@bsky'
+    d.resolve()
+    expect(await out).toMatchObject({ kind: 'deleted', stale: true })
+    expect(toasts).toEqual(['F'])
+  })
+})
+
+const IMG_RECORD = {
+  ...RECORD,
+  embed: { $type: 'app.bsky.embed.images', images: [{ image: sdkBlob('bafkA', 'image/png'), alt: 'a cat' }] },
+} as unknown as BlueskyPostRecord
+
 describe('readBlueskyRedraft', () => {
-  it('reads the record by the post rkey from the PDS, and each image\'s bytes', async () => {
+  it('reads the record by the post rkey, and each image\'s bytes typed from the record', async () => {
     const record = {
       ...RECORD,
       embed: { $type: 'app.bsky.embed.images', images: [
@@ -128,8 +175,32 @@ describe('readBlueskyRedraft', () => {
     expect(c.blueskyGetOwnPost).toHaveBeenCalledWith('3kold')
     expect(c.blueskyGetBlob.mock.calls.map((x) => x[0])).toEqual(['bafkA', 'bafkB'])
     expect(source!.record).toBe(record)
-    expect([...source!.files.keys()]).toEqual(['bafkA', 'bafkB'])
+    expect([...source!.files.values()].map((b) => b.type)).toEqual(['image/jpeg', 'image/png'])
+    expect(source!.targets).toEqual({ reply: null, quote: null })
     expect(c.blueskyDeletePost).not.toHaveBeenCalled()
+  })
+
+  it('checks the reply parent and the quoted post: ok, gone, limited, or unknown', async () => {
+    const record = { ...RECORD, reply: { root: ROOT, parent: PARENT }, embed: { $type: 'app.bsky.embed.record', record: QUOTED } } as unknown as BlueskyPostRecord
+    const { client, c } = fakeClient(record)
+    expect((await readBlueskyRedraft(client, post()))!.targets).toEqual({ reply: 'ok', quote: 'ok' })
+    c.fetchStatus.mockImplementation(async (id: string) => {
+      if (id === PARENT.uri) throw Object.assign(new Error('gone'), { code: 'not_found' })
+      return post({ bluesky: { uri: id, embeddingDisabled: true } } as unknown as Partial<Status>, id)
+    })
+    expect((await readBlueskyRedraft(client, post()))!.targets).toEqual({ reply: 'gone', quote: 'limited' })
+    c.fetchStatus.mockImplementation(async (id: string) => {
+      if (id === PARENT.uri) return post({ bluesky: { uri: id, replyDisabled: true } } as unknown as Partial<Status>, id)
+      throw new Error('502')
+    })
+    expect((await readBlueskyRedraft(client, post()))!.targets).toEqual({ reply: 'limited', quote: 'unknown' })
+  })
+
+  it('a feed, list or starter pack in embed.record is not a quote: not read, not kept', async () => {
+    const feed = { uri: 'at://did:plc:carol/app.bsky.feed.generator/deer', cid: 'bafyfeed' }
+    const { client, c } = fakeClient({ ...RECORD, embed: { $type: 'app.bsky.embed.record', record: feed } } as unknown as BlueskyPostRecord)
+    expect((await readBlueskyRedraft(client, post()))!.targets).toEqual({ reply: null, quote: null })
+    expect(c.fetchStatus).not.toHaveBeenCalled()
   })
 
   it('throws, and deletes nothing, when the record is not there', async () => {
@@ -139,9 +210,7 @@ describe('readBlueskyRedraft', () => {
   })
 
   it('throws when the record read fails, or an image cannot be read', async () => {
-    const { client, c } = fakeClient({
-      ...RECORD, embed: { $type: 'app.bsky.embed.images', images: [{ image: sdkBlob('bafkA'), alt: '' }] },
-    } as unknown as BlueskyPostRecord)
+    const { client, c } = fakeClient(IMG_RECORD)
     c.blueskyGetOwnPost.mockRejectedValueOnce(new Error('502'))
     await expect(readBlueskyRedraft(client, post())).rejects.toThrow('502')
     c.blueskyGetBlob.mockRejectedValueOnce(new Error('blob 502'))
@@ -165,7 +234,7 @@ describe('readBlueskyRedraft', () => {
   })
 })
 
-describe('finishBlueskyRedraft', () => {
+describe('storeBlueskyRedraft', () => {
   const full = {
     $type: 'app.bsky.feed.post',
     text: 'see example.com/long… and @bob.example.com',
@@ -179,75 +248,121 @@ describe('finishBlueskyRedraft', () => {
         { image: sdkBlob('bafkB', 'image/png', 9), alt: '' },
       ] },
     },
-    labels: { $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'nudity' }, { val: 'something-else' }] },
+    labels: { $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'sexual' }, { val: 'something-else' }] },
     langs: ['de', 'en'],
     createdAt: '2026-11-01T00:00:00.000Z',
   } as unknown as BlueskyPostRecord
 
-  it('builds a new draft: text, reply and quote refs, images uploaded again with alt, labels, language; no rkey', async () => {
-    const { client, c } = fakeClient(full)
-    const source = (await readBlueskyRedraft(client, post()))!
-    const out = (await finishBlueskyRedraft(client, source))!
-    expect(c.blueskyUploadBlob).toHaveBeenCalledTimes(2)
-    const d = out.draft
+  async function stored(record: BlueskyPostRecord = full) {
+    const f = fakeClient(record)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    return { ...f, source, out: await storeBlueskyRedraft(f.client, source, { prepareImage }) }
+  }
+
+  it('stores the whole draft before any delete: text, refs, re-encoded images, labels, language, a new rkey', async () => {
+    const { c, out } = await stored()
+    expect(c.blueskyDeletePost).not.toHaveBeenCalled()
+    expect(out!.userKey).toBe(KEY)
+    expect(out!.slot).toMatch(/^redraft:/)
+    const d = loadDraft(KEY, out!.slot)!
     expect(d.text).toBe(full.text)
     expect(d.language).toBe('de')
     expect(d.inReplyToId).toBe(PARENT.uri)
     expect(d.bluesky!.reply).toEqual({ root: ROOT, parent: PARENT })
     expect(d.bluesky!.quote).toEqual(QUOTED)
-    expect(d.bluesky!.labels).toEqual(['nudity'])
-    expect(d.bluesky!.rkey).toBeNull()
+    expect(d.bluesky!.labels).toEqual(['sexual', 'something-else'])
+    expect(d.bluesky!.rkey).toBe('3knewkey00001')
     expect(d.bluesky!.sent).toBeNull()
+    // New bytes, so new CIDs: the delete cannot take them with the old record.
     expect(d.bluesky!.images.map((i) => [i.blob.ref.$link, i.alt, i.aspectRatio, i.mime])).toEqual([
-      ['bafkA', 'a cat', { width: 4, height: 3 }, 'image/jpeg'],
-      ['bafkB', '', null, 'image/jpeg'],
+      ['new-re bytes of bafkA', 'a cat', { width: 4, height: 3 }, 'image/jpeg'],
+      ['new-re bytes of bafkB', '', { width: 8, height: 6 }, 'image/jpeg'],
     ])
-    // The dialog gets the bytes by image id, for its previews and its blob recovery.
-    expect(Object.keys(out.files).sort()).toEqual(d.bluesky!.images.map((i) => i.id).sort())
+    // The re-encoded bytes are stored with the draft, by image id.
+    const files = await getDraftFiles(KEY, out!.slot)
+    expect(Object.keys(files).sort()).toEqual(d.bluesky!.images.map((i) => i.id).sort())
+    expect(await files[d.bluesky!.images[0]!.id]!.text()).toBe('re bytes of bafkA')
+    // A new post opens it first.
+    expect(findRedraftSlot(KEY)).toBe(out!.slot)
   })
 
-  it('an upload that fails keeps the old blob ref, and its bytes go to the dialog', async () => {
-    const { client, c } = fakeClient(full)
-    const source = (await readBlueskyRedraft(client, post()))!
-    c.blueskyUploadBlob.mockRejectedValueOnce(new Error('upload 502'))
-    const out = (await finishBlueskyRedraft(client, source))!
-    const imgs = out.draft.bluesky!.images
-    expect(imgs[0]!.blob).toEqual({ $type: 'blob', ref: { $link: 'bafkA' }, mimeType: 'image/jpeg', size: 3 })
-    expect(await out.files[imgs[0]!.id]!.text()).toBe('bytes of bafkA')
+  it('a feed in recordWithMedia is not kept as a quote; its images are', async () => {
+    const feed = { uri: 'at://did:plc:carol/app.bsky.graph.starterpack/sp', cid: 'bafysp' }
+    const { out } = await stored({ ...full, reply: undefined, embed: { ...(full.embed as object), record: { $type: 'app.bsky.embed.record', record: feed } } } as unknown as BlueskyPostRecord)
+    const d = loadDraft(KEY, out!.slot)!
+    expect(d.bluesky!.quote).toBeNull()
+    expect(d.bluesky!.images).toHaveLength(2)
   })
 
-  it('a plain quote, and a plain images embed', async () => {
-    const quote = { ...RECORD, embed: { $type: 'app.bsky.embed.record', record: QUOTED } } as unknown as BlueskyPostRecord
-    let { client } = fakeClient(quote)
-    let out = (await finishBlueskyRedraft(client, (await readBlueskyRedraft(client, post()))!))!
-    expect(out.draft.bluesky!.quote).toEqual(QUOTED)
-    expect(out.draft.bluesky!.images).toEqual([])
-    expect(out.draft.inReplyToId).toBeNull()
-    const imgs = { ...RECORD, embed: { $type: 'app.bsky.embed.images', images: [{ image: sdkBlob('bafkA'), alt: 'x' }] } } as unknown as BlueskyPostRecord
-    ;({ client } = fakeClient(imgs))
-    out = (await finishBlueskyRedraft(client, (await readBlueskyRedraft(client, post()))!))!
-    expect(out.draft.bluesky!.quote).toBeNull()
-    expect(out.draft.bluesky!.images.map((i) => i.alt)).toEqual(['x'])
+  it.each([
+    ['the re-encode', (c: ReturnType<typeof fakeClient>['c']) => { void c; prepareImage.mockRejectedValueOnce(new Error('canvas')) }],
+    ['an upload', (c: ReturnType<typeof fakeClient>['c']) => { c.blueskyUploadBlob.mockRejectedValueOnce(new Error('upload 502')) }],
+    ['the rkey', (c: ReturnType<typeof fakeClient>['c']) => { c.blueskyNextRkey.mockRejectedValueOnce(new Error('no rkey')) }],
+  ])('%s fails: it throws, and nothing is stored', async (_, fail) => {
+    const f = fakeClient(full)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    fail(f.c)
+    await expect(storeBlueskyRedraft(f.client, source, { prepareImage })).rejects.toThrow()
+    expect(findRedraftSlot(KEY)).toBeNull()
   })
 
-  it('an external card or a video is not kept', async () => {
-    const ext = { ...RECORD, embed: { $type: 'app.bsky.embed.external', external: { uri: 'https://example.com', title: '', description: '' } } } as unknown as BlueskyPostRecord
-    const { client, c } = fakeClient(ext)
-    const out = (await finishBlueskyRedraft(client, (await readBlueskyRedraft(client, post()))!))!
-    expect(out.draft.bluesky!.images).toEqual([])
-    expect(out.draft.bluesky!.quote).toBeNull()
-    expect(c.blueskyGetBlob).not.toHaveBeenCalled()
+  it('storage refuses the draft: it throws, and no bytes are kept', async () => {
+    const f = fakeClient(full)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+    try {
+      await expect(storeBlueskyRedraft(f.client, source, { prepareImage })).rejects.toThrow()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(findRedraftSlot(KEY)).toBeNull()
   })
 
-  it('resolves null after an account switch during an upload', async () => {
-    const { client, c } = fakeClient(full)
-    const source = (await readBlueskyRedraft(client, post()))!
+  it('IndexedDB refuses the bytes: the draft is removed again, and it throws', async () => {
+    const f = fakeClient(full)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    _testOnlyFailNextPut()
+    await expect(storeBlueskyRedraft(f.client, source, { prepareImage })).rejects.toThrow()
+    expect(findRedraftSlot(KEY)).toBeNull()
+  })
+
+  it('an account switch during an upload stores nothing', async () => {
+    const f = fakeClient(full)
+    const source = (await readBlueskyRedraft(f.client, post()))!
     const d = deferred<never>()
-    c.blueskyUploadBlob.mockImplementationOnce(() => d.promise)
-    const out = finishBlueskyRedraft(client, source)
+    f.c.blueskyUploadBlob.mockImplementationOnce(() => d.promise)
+    const out = storeBlueskyRedraft(f.client, source, { prepareImage })
+    await vi.waitFor(() => expect(f.c.blueskyUploadBlob).toHaveBeenCalled())
     activeUserKey.value = 'did:plc:other@bsky'
     d.reject(new Error('x'))
     expect(await out).toBeNull()
+    activeUserKey.value = KEY
+    expect(findRedraftSlot(KEY)).toBeNull()
+  })
+
+  it('reads an odd record without throwing: wrong-typed labels, facets and images are skipped', async () => {
+    const odd = {
+      $type: 'app.bsky.feed.post', text: 'odd', createdAt: 't',
+      facets: [{ index: { byteStart: 0, byteEnd: 1 } }, null],
+      labels: { values: ['porn', null, { val: 7 }, { val: 'nudity' }] },
+      langs: 'en',
+      embed: { $type: 'app.bsky.embed.images', images: 'nope' },
+      reply: { root: 'x' },
+    } as unknown as BlueskyPostRecord
+    const { out } = await stored(odd)
+    const d = loadDraft(KEY, out!.slot)!
+    expect(d.text).toBe('odd')
+    expect(d.bluesky!.labels).toEqual(['nudity'])
+    expect(d.bluesky!.images).toEqual([])
+    expect(d.bluesky!.reply).toBeNull()
+    expect(d.language ?? null).toBeNull()
+  })
+
+  it('discard removes the stored draft and its bytes', async () => {
+    const { out } = await stored()
+    await discardBlueskyRedraft(out!)
+    expect(loadDraft(KEY, out!.slot)).toBeNull()
+    expect(await getDraftFiles(KEY, out!.slot)).toEqual({})
   })
 })
 

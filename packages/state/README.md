@@ -386,7 +386,7 @@ redraft), plus `bluesky`:
 | `reply` | `{ root, parent }` strong refs (`uri` + `cid`). `parent` is the post replied to; `root` is its `replyRef.root`, or the post itself when it is a top post. |
 | `quote` | the quoted post's strong ref, or `null` |
 | `images` | per image: the blob ref `uploadBlob` answered, its type and size, its alt text, its `aspectRatio` (or `null` when the browser could not read it), the file name |
-| `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `nudity` Nudity, `graphic-media` Graphic) |
+| `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `sexual` Suggestive, `nudity` Nudity, `graphic-media` Graphic), and any other self-label a redraft carries |
 | `rkey` | the record key, made (`blueskyNextRkey`) when the draft is made, and stored with its first save (R6) |
 | `sent` | the exact record a send wrote or tried to, frozen with its facets and `createdAt`, and the input it was made from (`blueskyDraftInput`) |
 
@@ -398,8 +398,9 @@ time (`blueskyDetectFacets`, which resolves mentions to DIDs) and frozen in
 `reply`; `embed` is `app.bsky.embed.images` (each image with its `alt` and
 `aspectRatio`), `app.bsky.embed.record` for a quote, or
 `app.bsky.embed.recordWithMedia` for both; `labels` as
-`com.atproto.label.defs#selfLabels`, only the menu's values, in menu order,
-and **only with images** (the menu labels media, spec 7.4); `langs` from a
+`com.atproto.label.defs#selfLabels`: the menu's values in menu order,
+**only with images** (the menu labels media, spec 7.4), then any other
+value a redraft carried, as it is (#190); `langs` from a
 redraft's language; `createdAt`.
 
 **What survives.** All of it is plain JSON in `caribou.drafts.<userKey>`.
@@ -516,63 +517,121 @@ storage refusing every click sends nothing, then one post after a reload
 blob refusal, and a facet lookup that lands late (R4); an answer after an
 account switch tells no screen.
 
-
 ## Bluesky delete and redraft (#190)
 
-`own-posts.ts` (delete) and `bluesky-redraft.ts` (redraft).
+`own-posts.ts` (delete), `bluesky-redraft.ts` (redraft), `draft-files.ts`
+(image bytes).
 
 **Delete** (`deleteOwnStatus`, the same function as Mastodon's). For a
 Bluesky client it calls `blueskyDeletePost(uri)`; for Mastodon it calls
-`deleteStatus(id)` as before. The rest is shared and unchanged: the post
-and every repost of it leave the cache at once and its id is marked
-deleted, so every list drops it; a refusal puts them back and toasts
-"Could not delete this post. Try again."; an answer that lands after an
-account switch writes nothing. On success it resolves to the post as the
-reader saw it (Bluesky's delete answers nothing). Only the author's own
-post: the card offers Delete only on it, and the client refuses another
-repo's URI.
+`deleteStatus(id)` as before. The post and every repost of it leave the
+cache at once and its id is marked deleted, so every list drops it. Only
+the author's own post: the card offers Delete only on it, and the client
+refuses another repo's URI.
 
-**Redraft.** Bluesky has no edit, so a redraft deletes the post and opens a
-new draft with what it had. Three steps, in this order:
+A Bluesky delete has three outcomes, and **only `getRecord` decides** when
+the answer is not a clear refusal (as R1 does for a create). The client
+does this (`packages/bluesky-client` README, "Delete"):
 
-1. **Read** (`readBlueskyRedraft`), before anything is deleted. The record
-   from the reader's PDS (`blueskyGetOwnPost`), not the AppView copy: it
-   has the text as typed, the facets, the exact refs and blob CIDs. Then
-   the bytes of each image (`blueskyGetBlob`). If any of it fails, or the
-   record is not there, nothing is deleted and nothing opens; it throws.
-2. **Delete** (`deleteOwnStatus`). If it fails, nothing opens.
-3. **Draft** (`finishBlueskyRedraft`). Each image is uploaded again from
-   its bytes. **Why not keep the blob refs:** the PDS deletes a blob as
-   soon as no record names it, so the old refs die with the post. The same
-   bytes give the same CID. Upload before the delete would not help: the
-   delete removes that blob too. An upload that fails keeps the old ref,
-   and the bytes go to the dialog with the draft, so the dialog's blob
-   recovery (#189) uploads them at Post. This step never throws: the post
-   is gone, and its text must open.
+| the delete | the outcome | the page |
+|---|---|---|
+| answered OK | deleted | the post stays gone |
+| no answer, a timeout or a 5xx, and `getRecord` says `RecordNotFound` | deleted | the post stays gone |
+| an answered 4xx refusal, or `getRecord` finds the record | failed | the post comes back; "Could not delete this post. Try again." |
+| `getRecord` fails too | unknown | the post comes back; "Could not tell whether the post was deleted. Reload to check." |
+
+`deleteOwnStatusOutcome` answers the outcome, and whether the account
+changed meanwhile (`stale`: then it writes nothing to the page and says
+nothing). `deleteOwnStatus` is the old shape on top of it: the post as the
+reader saw it when deleted (Bluesky's delete answers nothing), else null.
+Mastodon never has "unknown": its failures are "failed", as before.
+
+**Redraft. Rule: nothing can be lost after the delete.** Bluesky has no
+edit, so a redraft deletes the post and opens a new draft with what it
+had. Everything that can fail happens **before** the delete, and the
+draft is stored durably first. The order:
+
+1. **Read** (`readBlueskyRedraft`). The record from the reader's PDS
+   (`blueskyGetOwnPost`), not the AppView copy: it has the text as typed,
+   the exact refs and blob CIDs. Each image's bytes (`blueskyGetBlob`),
+   typed with the record's `mimeType` (a PDS may answer
+   `application/octet-stream`). The reply parent and the quoted post
+   (`fetchStatus`, cached): `gone` (`not_found`), `limited`
+   (`replyDisabled` / `embeddingDisabled`), `ok`, or `unknown` (the read
+   failed). The record not there, or any read failing except a target's,
+   throws: nothing is deleted.
+2. **Ask.** The card's confirm names what is not kept and a gone or
+   limited target (app README).
+3. **Build and store** (`storeBlueskyRedraft`). Every step can fail, and a
+   failure throws with nothing deleted and nothing left stored:
+   - the draft is built from the record (table below); an odd record
+     (missing or wrong-typed fields) is read defensively, and a throw here
+     is before the delete;
+   - each image is **re-encoded** (the caller's `prepareImage`, the
+     canvas, as compose does) and uploaded. A new encoding gives a new
+     CID, so the delete does not take the new blob with the old record
+     (the PDS deletes a blob as soon as no record names it; keeping the
+     old refs would leave dead refs);
+   - the rkey is made (`blueskyNextRkey`), so the draft's first save
+     already has it (R6);
+   - the draft is stored in a new `redraft:<key>` slot of the owner
+     account (`storeDraftIf`, refused → throw);
+   - the image bytes (the re-encoded ones) are stored in IndexedDB
+     (`draft-files.ts`), keyed by account, slot and image id. Refused →
+     the draft is removed again, and it throws.
+4. **Delete** (`deleteOwnStatusOutcome`, rules above).
+   - deleted → step 5.
+   - failed → the stored draft and its bytes are removed
+     (`discardBlueskyRedraft`): the post is still there.
+   - unknown → the stored draft stays, and the toast says so: "Could not
+     tell whether the post was deleted. Your redraft is saved and opens
+     the next time you write a new post. Check your profile first, so it
+     is not posted twice."
+5. **Open** the composer on the stored slot (app README). When it cannot
+   open (another composer is open, or the account changed), the draft
+   stays stored and opens with the account's next new post
+   (`findRedraftSlot`); a toast says so when the reader is still on that
+   account.
+
+A Bluesky redraft always goes in its own `redraft:<key>` slot, never in
+`new`, `reply:` or `quote:`. So it never overwrites another draft, and a
+new post opens it first, whatever its target, even when that target is
+gone.
+
+**Account switch.** Each step checks the account after its await
+(`ownerGeneration`). A switch before the store: nothing is stored or
+deleted. A switch after the store and before the delete: the draft and
+its bytes are removed, nothing is deleted. A switch during the delete:
+the outcome still decides storage (failed → removed; deleted or unknown →
+kept for that account), but nothing touches the new account's page.
+
+**Image bytes** (`draft-files.ts`). A stored redraft keeps each image's
+bytes in IndexedDB (`caribou-draft-files`), because its blob is not proven
+usable until the post is sent: the PDS may drop an unused blob, and the
+deleted post was the only copy. The dialog loads them when it opens the
+slot, for the previews and for #189's blob recovery, after a close, a
+reopen or a reload. `pruneDraftFiles()` removes every entry whose account,
+slot and image id is not in a stored draft: after a send, on close, and so
+after a discard or a sign-out. Images the reader picked in compose are
+not stored there: the reader has those files.
 
 **What the draft takes from the record.**
 
 | record | draft |
 |---|---|
-| `text` | `text`. A link facet whose shown text is not its URL (other apps shorten links) gets its full URL back in the text, because facets are made again from the text at send. |
-| `facets` | not kept: made again from the text at send, like any draft |
+| `text` | `text`. Facets are made again from the text at send. So a link whose shown text is not its URL (other apps shorten links) gets its full URL back in the text, and the text can then be over 300 graphemes (Post is off until the reader cuts it). A mention is resolved again from the handle in the text, so a renamed account's mention stays plain text. |
+| `facets` | not kept (see `text`) |
 | `reply` | `bluesky.reply` (same strong refs), `inReplyToId` = the parent URI |
-| `embed` record, or `recordWithMedia.record` | `bluesky.quote` (same strong ref) |
-| `embed` images, or `recordWithMedia.media` images | `bluesky.images`: the uploaded blob ref, `alt`, `aspectRatio`, type and size |
-| `labels` self-labels | `bluesky.labels`, the menu's values only (`BLUESKY_SELF_LABELS`) |
-| `langs` | `language` = the first one (compose sends one) |
-| a video, an external link card | not kept. The confirm says so first. The link stays in the text. |
+| `embed` record, or `recordWithMedia.record`, whose URI is a post (`app.bsky.feed.post`) | `bluesky.quote` (same strong ref) |
+| an embedded feed, list, starter pack or labeler | not kept (a card) |
+| `embed` images, or `recordWithMedia.media` images | `bluesky.images`: the new blob ref, `alt`, `aspectRatio` (the record's, else the new encoding's), type and size |
+| `labels` self-labels | `bluesky.labels`, every value. The menu's values (`porn`, `sexual`, `nudity`, `graphic-media`) go only with images; any other value goes as it is. |
+| `langs` | `language` = the first one; the others are not kept (compose sends one) |
+| a video, an external link card | not kept. The link's URL stays only if it is in the text. |
+| `tags` | not kept |
+| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again |
 | `createdAt` | not kept: a new post gets a new time |
 
-`rkey` and `sent` are `null`. The dialog gives the draft a **new** rkey
-when it opens it (R6): the redraft is a new record, never the old key.
-The slot is the same as for a new post of that kind (`reply:<parent uri>`,
-`quote:<uri>`, `new`), or `redraft:<key>` when that slot holds an unsent
-draft, as for Mastodon.
-
-**Account switch.** Each step checks the account after its await
-(`ownerGeneration`). A switch before the delete stops it: nothing is
-deleted. A switch after the delete opens nothing.
 ## Notifications (`notifications-store.ts`, `notification-groups.ts`)
 
 **Paging, both networks.** A list ends only when the client says so, with

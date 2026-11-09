@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createBlueskyClient, type BlueskyAgent } from '../client.js'
+import { BlueskyDeleteUnknown } from '../errors.js'
 import { moderationFor, READER } from './_helpers.js'
 
 function xrpcError(status: number, error: string, message = error) {
@@ -9,7 +10,11 @@ function xrpcError(status: number, error: string, message = error) {
 const OWN = 'at://did:plc:reader/app.bsky.feed.post/3kown'
 
 function setup() {
-  const repo = { deleteRecord: vi.fn(async () => ({ data: {} })) }
+  const repo = {
+    deleteRecord: vi.fn(async () => ({ data: {} })),
+    // After a delete in doubt: the record is gone unless a test says otherwise.
+    getRecord: vi.fn(async (): Promise<unknown> => { throw xrpcError(400, 'RecordNotFound', 'Could not locate record') }),
+  }
   const sync = {
     getBlob: vi.fn(async () => ({ data: new Uint8Array([1, 2, 3]), headers: { 'content-type': 'image/jpeg' } })),
   }
@@ -49,13 +54,42 @@ describe('blueskyDeletePost', () => {
     expect(repo.deleteRecord).toHaveBeenCalledTimes(2)
   })
 
-  it('a refusal is normalized; a 401 calls onUnauthorized', async () => {
+  it('an answered 4xx refusal is thrown as it is, with no check; a 401 calls onUnauthorized', async () => {
     const { client, repo, onUnauthorized } = setup()
-    repo.deleteRecord.mockRejectedValueOnce(xrpcError(500, 'InternalServerError'))
-    await expect(client.blueskyDeletePost!(OWN)).rejects.toMatchObject({ code: 'server_error' })
+    repo.deleteRecord.mockRejectedValueOnce(xrpcError(400, 'InvalidRequest'))
+    await expect(client.blueskyDeletePost!(OWN)).rejects.toMatchObject({ code: 'unknown', status: 400 })
     repo.deleteRecord.mockRejectedValueOnce(xrpcError(401, 'AuthRequired'))
     await expect(client.blueskyDeletePost!(OWN)).rejects.toMatchObject({ code: 'unauthorized' })
     expect(onUnauthorized).toHaveBeenCalledOnce()
+    expect(repo.getRecord).not.toHaveBeenCalled()
+  })
+
+  // Only getRecord decides a delete in doubt (README, "Delete").
+  it.each([
+    ['no answer', xrpcError(1, 'Unknown', 'fetch failed')],
+    ['a 5xx', xrpcError(502, 'UpstreamFailure')],
+  ])('%s, then the record is not found: the delete happened', async (_, err) => {
+    const { client, repo } = setup()
+    repo.deleteRecord.mockRejectedValueOnce(err)
+    await expect(client.blueskyDeletePost!(OWN)).resolves.toBeUndefined()
+    expect(repo.getRecord).toHaveBeenCalledWith({ repo: 'did:plc:reader', collection: 'app.bsky.feed.post', rkey: '3kown' })
+  })
+
+  it('a 5xx, then the record is found: the delete failed, and its error is thrown', async () => {
+    const { client, repo } = setup()
+    repo.deleteRecord.mockRejectedValueOnce(xrpcError(500, 'InternalServerError'))
+    repo.getRecord.mockResolvedValueOnce({ data: { uri: OWN, cid: 'bafy', value: {} } })
+    await expect(client.blueskyDeletePost!(OWN)).rejects.toMatchObject({ code: 'server_error' })
+  })
+
+  it('a 5xx, then the check fails too: BlueskyDeleteUnknown', async () => {
+    const { client, repo } = setup()
+    repo.deleteRecord.mockRejectedValueOnce(xrpcError(500, 'InternalServerError'))
+    repo.getRecord.mockRejectedValueOnce(xrpcError(502, 'UpstreamFailure'))
+    const err = await client.blueskyDeletePost!(OWN).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(BlueskyDeleteUnknown)
+    expect((err as BlueskyDeleteUnknown).code).toBe('unknown')
+    expect((err as Error).name).toBe('BlueskyDeleteUnknown')
   })
 
   it('the Mastodon-shaped deleteStatus and fetchStatusSource name the Bluesky methods', async () => {

@@ -142,11 +142,15 @@ describe('the record', () => {
     })
   })
 
-  it('self-labels go on a post with images, only from the menu, in menu order', () => {
+  // #190: a redraft carries any self-label; the menu's go only with images.
+  it('self-labels: the menu\'s on a post with images, in menu order, then any other value as it is', () => {
     const img = [{ id: 'i1', blob: BLOB, mime: 'image/jpeg', size: 1000, alt: '', aspectRatio: null }]
     const r = blueskyRecord(draft({}, { images: img, labels: ['graphic-media', 'nonsense', 'porn'] }), [], 't')
-    expect(r.labels).toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'porn' }, { val: 'graphic-media' }] })
-    expect(BLUESKY_SELF_LABELS.map((l) => l.value)).toEqual(['porn', 'nudity', 'graphic-media'])
+    expect(r.labels).toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'porn' }, { val: 'graphic-media' }, { val: 'nonsense' }] })
+    expect(BLUESKY_SELF_LABELS.map((l) => l.value)).toEqual(['porn', 'sexual', 'nudity', 'graphic-media'])
+    // With no images, only the values the menu does not have.
+    expect(blueskyRecord(draft({}, { labels: ['porn', 'nonsense'] }), [], 't').labels)
+      .toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'nonsense' }] })
   })
 
   it('labels without images are not sent: the menu labels media', () => {

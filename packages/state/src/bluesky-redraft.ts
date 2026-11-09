@@ -1,32 +1,55 @@
 // Bluesky delete and redraft (#190). Rules: README, "Bluesky delete and redraft".
+// The rule: nothing can be lost after the delete. Everything that can fail
+// (read, re-encode, upload, rkey, storage) happens before it.
+import type { UserKey } from '@beatzball/caribou-auth'
 import type {
   BlueskyBlobRef, BlueskyFacet, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
-import { emptyDraft, type BlueskyDraftImage, type ComposeDraft } from './compose.js'
-import { BLUESKY_SELF_LABELS, emptyBlueskyDraft } from './bluesky-compose.js'
+import { cacheStatus } from './caches.js'
+import { clearDraft, emptyDraft, storeDraftIf, type BlueskyDraftImage, type ComposeDraft, type DraftSlot } from './compose.js'
+import { emptyBlueskyDraft } from './bluesky-compose.js'
+import { putDraftFiles, removeDraftFiles } from './draft-files.js'
 import { ownerGeneration } from './keep-alive.js'
 
-/** What a redraft read before the delete: the record and each image's bytes, by CID. */
+/** What the read found about the post replied to or quoted. Null: there is none. */
+export type RedraftTarget = 'ok' | 'gone' | 'limited' | 'unknown'
+
+/** What a redraft read before anything else: the record, each image's bytes by CID, the targets. */
 export interface BlueskyRedraftSource {
   status: Status
   record: BlueskyPostRecord
   files: Map<string, Blob>
+  targets: { reply: RedraftTarget | null; quote: RedraftTarget | null }
   generation: number
 }
 
-/** The new draft, and the bytes of each of its images by image id (for the dialog). */
-export interface BlueskyRedraft {
+/** An image made again through the canvas (the card's `fitImage`). */
+export interface PreparedImage {
+  blob: Blob
+  width: number
+  height: number
+}
+
+export interface StoreRedraftOptions {
+  /** Re-encodes one image. Rejects or answers null when it cannot. */
+  prepareImage: (bytes: Blob) => Promise<PreparedImage | null>
+}
+
+/** A redraft stored for its account, before the delete. */
+export interface StoredBlueskyRedraft {
+  userKey: UserKey
+  slot: DraftSlot
   draft: ComposeDraft
-  files: Record<string, Blob>
 }
 
 interface RecordImage {
   image: unknown
   alt?: unknown
-  aspectRatio?: { width?: unknown; height?: unknown }
+  aspectRatio?: unknown
 }
 
 const LINK = 'app.bsky.richtext.facet#link'
+const POST_COLLECTION = 'app.bsky.feed.post'
 
 function need<K extends keyof CaribouClient>(client: CaribouClient, name: K): NonNullable<CaribouClient[K]> {
   const fn = client[name]
@@ -34,40 +57,69 @@ function need<K extends keyof CaribouClient>(client: CaribouClient, name: K): No
   return (fn as (...a: unknown[]) => unknown).bind(client) as NonNullable<CaribouClient[K]>
 }
 
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null
+}
+
 // A blob in a record read through the SDK has a CID object, in JSON a
 // `{ $link }`; a very old record has `{ cid, mimeType }`.
 function blobRef(b: unknown): BlueskyBlobRef | null {
-  const o = b as { ref?: { $link?: unknown; toString(): string }; cid?: unknown; mimeType?: unknown; size?: unknown } | null
-  if (!o || typeof o !== 'object') return null
-  const link = typeof o.ref?.$link === 'string' ? o.ref.$link
-    : o.ref ? o.ref.toString()
-    : typeof o.cid === 'string' ? o.cid : ''
-  if (!link || typeof o.mimeType !== 'string') return null
-  return { $type: 'blob', ref: { $link: link }, mimeType: o.mimeType, size: typeof o.size === 'number' ? o.size : 0 }
+  if (!isObject(b)) return null
+  const ref = b.ref as { $link?: unknown; toString(): string } | undefined
+  const link = isObject(ref) && typeof ref.$link === 'string' ? ref.$link
+    : isObject(ref) ? ref.toString()
+    : typeof b.cid === 'string' ? b.cid : ''
+  if (!link || typeof b.mimeType !== 'string') return null
+  return { $type: 'blob', ref: { $link: link }, mimeType: b.mimeType, size: typeof b.size === 'number' ? b.size : 0 }
 }
 
 function strongRef(r: unknown): BlueskyStrongRef | null {
-  const o = r as { uri?: unknown; cid?: unknown } | null
-  return o && typeof o.uri === 'string' && typeof o.cid === 'string' ? { uri: o.uri, cid: o.cid } : null
+  return isObject(r) && typeof r.uri === 'string' && typeof r.cid === 'string' ? { uri: r.uri, cid: r.cid } : null
 }
 
-type Embed = { $type?: string; images?: RecordImage[]; record?: unknown; media?: Embed }
+// A quote only when the embedded record is a post. A feed, list, starter
+// pack or labeler is a card, and is not kept.
+function postRef(r: unknown): BlueskyStrongRef | null {
+  const ref = strongRef(r)
+  return ref && ref.uri.split('/')[3] === POST_COLLECTION ? ref : null
+}
 
 function embedParts(record: BlueskyPostRecord): { quote: BlueskyStrongRef | null; images: RecordImage[] } {
-  const e = record.embed as Embed | undefined
-  if (!e) return { quote: null, images: [] }
-  const imagesOf = (m: Embed | undefined) => m?.$type === 'app.bsky.embed.images' && Array.isArray(m.images) ? m.images : []
-  if (e.$type === 'app.bsky.embed.record') return { quote: strongRef(e.record), images: [] }
+  const e = record.embed as unknown
+  if (!isObject(e)) return { quote: null, images: [] }
+  const imagesOf = (m: unknown): RecordImage[] => isObject(m) && m.$type === 'app.bsky.embed.images' && Array.isArray(m.images)
+    ? m.images.filter(isObject) as unknown as RecordImage[] : []
+  if (e.$type === 'app.bsky.embed.record') return { quote: postRef(e.record), images: [] }
   if (e.$type === 'app.bsky.embed.recordWithMedia') {
-    return { quote: strongRef((e.record as { record?: unknown } | undefined)?.record), images: imagesOf(e.media) }
+    return { quote: postRef(isObject(e.record) ? e.record.record : null), images: imagesOf(e.media) }
   }
   return { quote: null, images: imagesOf(e) }
 }
 
+function replyOf(record: BlueskyPostRecord): { root: BlueskyStrongRef; parent: BlueskyStrongRef } | null {
+  const r = record.reply as unknown
+  if (!isObject(r)) return null
+  const root = strongRef(r.root)
+  const parent = strongRef(r.parent)
+  return root && parent ? { root, parent } : null
+}
+
+// Reads the post replied to or quoted, into the cache for the dialog.
+async function checkTarget(client: CaribouClient, uri: string, flag: 'replyDisabled' | 'embeddingDisabled'): Promise<RedraftTarget> {
+  try {
+    const fresh = await client.fetchStatus(uri)
+    cacheStatus(fresh)
+    return fresh.bluesky?.[flag] ? 'limited' : 'ok'
+  } catch (err) {
+    return (err as { code?: unknown } | null)?.code === 'not_found' ? 'gone' : 'unknown'
+  }
+}
+
 /**
- * Reads what a redraft needs, before anything is deleted: the record from
- * the reader's PDS and each image's bytes. Throws when any of it fails or
- * the record is not there; resolves null when the account changed.
+ * Step 1: reads what a redraft needs, before anything else. The record from
+ * the reader's PDS, each image's bytes (typed from the record), and the
+ * targets. Throws when the record or an image cannot be read; resolves
+ * null when the account changed.
  */
 export async function readBlueskyRedraft(client: CaribouClient, status: Status): Promise<BlueskyRedraftSource | null> {
   const post = status.reblog ?? status
@@ -77,16 +129,25 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
   const own = await need(client, 'blueskyGetOwnPost')(rkey)
   if (generation !== ownerGeneration()) return null
   // Same rkey in another repo is another post.
-  if (!own || own.uri !== uri) throw new Error('The post is not on your server.')
+  if (!own || own.uri !== uri || !isObject(own.value)) throw new Error('The post is not on your server.')
+  const record = own.value
   const files = new Map<string, Blob>()
-  for (const img of embedParts(own.value).images) {
+  const { quote, images } = embedParts(record)
+  for (const img of images) {
     const ref = blobRef(img.image)
     if (!ref || files.has(ref.ref.$link)) continue
     const bytes = await need(client, 'blueskyGetBlob')(ref.ref.$link)
     if (generation !== ownerGeneration()) return null
-    files.set(ref.ref.$link, bytes.type ? bytes : new Blob([bytes], { type: ref.mimeType }))
+    // The record's type: a PDS may answer octet-stream.
+    files.set(ref.ref.$link, new Blob([bytes], { type: ref.mimeType }))
   }
-  return { status: post, record: own.value, files, generation }
+  const reply = replyOf(record)
+  const [replyState, quoteState] = await Promise.all([
+    reply ? checkTarget(client, reply.parent.uri, 'replyDisabled') : null,
+    quote ? checkTarget(client, quote.uri, 'embeddingDisabled') : null,
+  ])
+  if (generation !== ownerGeneration()) return null
+  return { status: post, record, files, targets: { reply: replyState, quote: quoteState }, generation }
 }
 
 /**
@@ -97,10 +158,12 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
 export function redraftTextOf(text: string, facets: readonly BlueskyFacet[] | undefined): string {
   const bytes = new TextEncoder().encode(text)
   const dec = new TextDecoder()
-  const links = (facets ?? [])
-    .map((f) => ({ f, uri: f.features.find((x) => x.$type === LINK)?.uri }))
+  const links = (Array.isArray(facets) ? facets : [])
+    .filter((f): f is BlueskyFacet => isObject(f) && isObject(f.index) && Array.isArray(f.features))
+    .map((f) => ({ f, uri: f.features.find((x) => isObject(x) && x.$type === LINK)?.uri }))
     .filter((x): x is { f: BlueskyFacet; uri: string } => typeof x.uri === 'string')
-    .filter(({ f }) => f.index.byteStart >= 0 && f.index.byteStart < f.index.byteEnd && f.index.byteEnd <= bytes.length)
+    .filter(({ f }) => Number.isInteger(f.index.byteStart) && Number.isInteger(f.index.byteEnd)
+      && f.index.byteStart >= 0 && f.index.byteStart < f.index.byteEnd && f.index.byteEnd <= bytes.length)
     .sort((a, b) => a.f.index.byteStart - b.f.index.byteStart)
   let out = ''
   let at = 0
@@ -114,51 +177,100 @@ export function redraftTextOf(text: string, facets: readonly BlueskyFacet[] | un
   return out + dec.decode(bytes.slice(at))
 }
 
+/** The record's self-label values that are strings, once each. */
+export function redraftLabelsOf(record: BlueskyPostRecord): string[] {
+  const labels = record.labels as unknown
+  const values = isObject(labels) && Array.isArray(labels.values) ? labels.values : []
+  const out: string[] = []
+  for (const v of values) {
+    if (isObject(v) && typeof v.val === 'string' && v.val !== '' && !out.includes(v.val)) out.push(v.val)
+  }
+  return out
+}
+
 /**
- * After the delete: uploads each image again (the PDS dropped the old
- * blobs with the post) and builds the new draft. A failed upload keeps the
- * old ref; its bytes go to the dialog, which uploads them at Post. Never
- * throws; resolves null when the account changed.
+ * Step 3: builds the draft, re-encodes and uploads each image, makes the
+ * rkey, and stores the draft and the image bytes for the owner account, in
+ * a new `redraft:<key>` slot. All before any delete. Throws when any step
+ * fails, leaving nothing stored. Resolves null when the account changed
+ * (nothing stored then either).
  */
-export async function finishBlueskyRedraft(client: CaribouClient, source: BlueskyRedraftSource): Promise<BlueskyRedraft | null> {
-  const { record } = source
-  if (source.generation !== ownerGeneration()) return null
+export async function storeBlueskyRedraft(
+  client: CaribouClient, source: BlueskyRedraftSource, opts: StoreRedraftOptions,
+): Promise<StoredBlueskyRedraft | null> {
+  const { record, generation } = source
+  const stale = () => generation !== ownerGeneration()
+  if (stale()) return null
   const { quote, images: recordImages } = embedParts(record)
   const images: BlueskyDraftImage[] = []
   const files: Record<string, Blob> = {}
   for (const img of recordImages) {
     const old = blobRef(img.image)
-    const file = old ? source.files.get(old.ref.$link) : undefined
-    if (!old || !file) continue
-    let blob = old
+    const bytes = old ? source.files.get(old.ref.$link) : undefined
+    if (!old || !bytes) continue
+    // A new encoding gives a new CID, so the delete cannot take the blob
+    // with the old record.
+    // A failure after an account switch is that account's no more: null.
+    let fit: PreparedImage | null
+    let blob: BlueskyBlobRef
     try {
-      blob = await need(client, 'blueskyUploadBlob')(file)
-    } catch {
-      // The dialog's blob recovery uploads the bytes at Post.
+      fit = await opts.prepareImage(bytes)
+      if (stale()) return null
+      if (!fit) throw new Error('An image could not be prepared.')
+      blob = await need(client, 'blueskyUploadBlob')(fit.blob)
+    } catch (err) {
+      if (stale()) return null
+      throw err
     }
-    if (source.generation !== ownerGeneration()) return null
+    if (stale()) return null
     const id = globalThis.crypto.randomUUID()
-    const w = img.aspectRatio?.width
-    const h = img.aspectRatio?.height
+    const ar = isObject(img.aspectRatio) ? img.aspectRatio : null
+    const w = ar?.width
+    const h = ar?.height
     images.push({
       id, blob, mime: blob.mimeType, size: blob.size,
       alt: typeof img.alt === 'string' ? img.alt : '',
-      aspectRatio: typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0 ? { width: w, height: h } : null,
+      aspectRatio: typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0
+        ? { width: w, height: h }
+        : fit.width > 0 && fit.height > 0 ? { width: fit.width, height: fit.height } : null,
     })
-    files[id] = file
+    files[id] = fit.blob
   }
-  const root = strongRef(record.reply?.root)
-  const parent = strongRef(record.reply?.parent)
-  const reply = root && parent ? { root, parent } : null
-  const menu = BLUESKY_SELF_LABELS.map((l) => l.value)
-  const labels = (record.labels?.values ?? []).map((v) => v.val).filter((v) => menu.includes(v))
-  const language = record.langs?.find((l) => typeof l === 'string' && l !== '') ?? null
+  let rkey: string
+  try {
+    rkey = await need(client, 'blueskyNextRkey')()
+  } catch (err) {
+    if (stale()) return null
+    throw err
+  }
+  if (stale()) return null
+  const reply = replyOf(record)
+  const langs = Array.isArray(record.langs) ? record.langs : []
+  const language = langs.find((l): l is string => typeof l === 'string' && l !== '') ?? null
   const draft = emptyDraft({
-    text: redraftTextOf(record.text ?? '', record.facets),
+    text: redraftTextOf(typeof record.text === 'string' ? record.text : '', record.facets),
     inReplyToId: reply?.parent.uri ?? null,
     language,
-    // A new record: the dialog gives it a new rkey (R6).
-    bluesky: emptyBlueskyDraft({ reply, quote, labels, images }),
+    // A new record with a new rkey (R6), stored with the first save.
+    bluesky: emptyBlueskyDraft({ reply, quote, labels: redraftLabelsOf(record), images, rkey }),
   })
-  return { draft, files }
+  const stored: StoredBlueskyRedraft = { userKey: client.userKey, slot: `redraft:${draft.idempotencyKey}`, draft }
+  if (!storeDraftIf(stored.userKey, stored.slot, null, draft)) throw new Error('Could not save the draft.')
+  try {
+    await putDraftFiles(stored.userKey, stored.slot, files)
+  } catch (err) {
+    clearDraft(stored.userKey, stored.slot)
+    throw err
+  }
+  if (stale()) {
+    await discardBlueskyRedraft(stored)
+    return null
+  }
+  return stored
+}
+
+/** Removes a stored redraft and its image bytes: the post was not deleted. */
+export async function discardBlueskyRedraft(stored: StoredBlueskyRedraft): Promise<void> {
+  clearDraft(stored.userKey, stored.slot)
+  await removeDraftFiles(stored.userKey, stored.slot)
 }

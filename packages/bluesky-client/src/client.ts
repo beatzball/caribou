@@ -8,7 +8,7 @@ import {
   type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { labelersCoveredBy } from './content-labelers.js'
-import { BlueskyBlobNotFound, normalizeXrpcError } from './errors.js'
+import { BlueskyBlobNotFound, BlueskyDeleteUnknown, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
 import type { MapContext } from './map/context.js'
 import { feedEntryId, mapFeedEntry } from './map/feed-entry.js'
@@ -206,6 +206,19 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (norm.code === 'unauthorized') opts.onUnauthorized?.()
       throw norm
     }
+  }
+
+  async function getOwnPost(rkey: string): Promise<BlueskyOwnPost | null> {
+    return write(async () => {
+      try {
+        const { data } = await agent.com.atproto.repo.getRecord({ repo: did(), collection: POST_COLLECTION, rkey })
+        if (typeof data.cid !== 'string') return null
+        return { uri: data.uri, cid: data.cid, value: data.value as unknown as BlueskyPostRecord }
+      } catch (err) {
+        if (isRecordMissing(err)) return null
+        throw err
+      }
+    })
   }
 
   function did(): string {
@@ -600,25 +613,28 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       })
     },
 
-    async blueskyGetOwnPost(rkey: string): Promise<BlueskyOwnPost | null> {
-      return write(async () => {
-        try {
-          const { data } = await agent.com.atproto.repo.getRecord({ repo: did(), collection: POST_COLLECTION, rkey })
-          if (typeof data.cid !== 'string') return null
-          return { uri: data.uri, cid: data.cid, value: data.value as unknown as BlueskyPostRecord }
-        } catch (err) {
-          if (isRecordMissing(err)) return null
-          throw err
-        }
-      })
-    },
+    blueskyGetOwnPost: getOwnPost,
 
     // Delete (#190): only the reader's own post record.
+    // Only getRecord decides a delete in doubt (README, "Delete").
     async blueskyDeletePost(uri: string) {
       const rkey = ownPostRkey(uri, did())
-      return write(async () => {
-        await agent.com.atproto.repo.deleteRecord({ repo: did(), collection: POST_COLLECTION, rkey })
-      })
+      try {
+        await write(async () => {
+          await agent.com.atproto.repo.deleteRecord({ repo: did(), collection: POST_COLLECTION, rkey })
+        })
+      } catch (err) {
+        const status = (err as CaribouError).status
+        // An answered refusal: the record is still there.
+        if (typeof status === 'number' && status >= 400 && status < 500) throw err
+        let found: BlueskyOwnPost | null
+        try {
+          found = await getOwnPost(rkey)
+        } catch {
+          throw new BlueskyDeleteUnknown(`Could not tell whether the post was deleted: ${(err as Error).message}`)
+        }
+        if (found) throw err
+      }
     },
 
     async blueskyGetBlob(cid: string) {

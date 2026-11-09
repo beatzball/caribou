@@ -1,6 +1,8 @@
+import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, loadDraft, saveDraft,
+  activeClient, activeUserKey, addUserSession, blueskyUserKey, emptyBlueskyDraft, emptyDraft, getDraftFiles, loadDraft,
+  putDraftFiles, saveDraft, _testOnlyClearDraftFiles, type DraftSlot,
   setBlueskyDriver, statusCache, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
@@ -1189,108 +1191,184 @@ describe('round 4 (PR #232)', () => {
   })
 })
 
-// #190: a Bluesky redraft (app README, "Bluesky delete and redraft").
+// #190: a Bluesky redraft, stored before its delete (app README, "Bluesky delete and redraft").
 describe('Bluesky redraft', () => {
   const PARENT = { uri: bobPost().id, cid: 'bafyp1' }
   const QUOTED = { uri: 'at://did:plc:carol/app.bsky.feed.post/q1', cid: 'bafyq1' }
+  const SLOT: DraftSlot = 'redraft:k1'
   const image = (id: string, link: string) => ({
     id, blob: { $type: 'blob' as const, ref: { $link: link }, mimeType: 'image/jpeg', size: 3 },
     mime: 'image/jpeg', size: 3, alt: `alt ${id}`, aspectRatio: { width: 4, height: 3 },
   })
   const redraft = (over: Partial<NonNullable<ReturnType<typeof emptyDraft>['bluesky']>> = {}) => emptyDraft({
     text: 'from the deleted post', language: 'de', inReplyToId: over.reply ? over.reply.parent.uri : null,
-    bluesky: emptyBlueskyDraft({ labels: ['nudity'], images: [image('i1', 'bafkA')], ...over }),
+    bluesky: emptyBlueskyDraft({ labels: ['nudity'], images: [image('i1', 'bafkA')], rkey: '3kredraft0001', ...over }),
   })
-  const files = () => ({ i1: new Blob(['A'], { type: 'image/jpeg' }) })
 
-  it('opens the Bluesky composer with the draft, its images shown from the bytes, and a new rkey', async () => {
+  // As storeBlueskyRedraft leaves it: the draft and the image bytes.
+  async function storeRedraft(over: Parameters<typeof redraft>[0] = {}) {
+    saveDraft(KEY, SLOT, redraft(over))
+    await putDraftFiles(KEY, SLOT, { i1: new Blob(['A'], { type: 'image/jpeg' }) })
+  }
+
+  async function openRedraft(el: CaribouComposeDialog) {
+    const detail: { blueskyRedraft: { userKey: string; slot: DraftSlot }; opened?: boolean } = { blueskyRedraft: { userKey: KEY, slot: SLOT } }
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail }))
+    await settle(el)
+    return detail.opened
+  }
+
+  // IndexedDB answers on its own schedule.
+  async function untilPreview(el: CaribouComposeDialog) {
+    for (let i = 0; i < 50 && !$(el, '[data-bsky-image="i1"] img'); i++) await settle(el)
+  }
+
+  beforeEach(async () => { await _testOnlyClearDraftFiles() })
+
+  it('opens the stored slot: the draft, its images shown from the stored bytes, and its own rkey', async () => {
     const pds = signInBluesky()
+    await storeRedraft()
     const el = await mount()
-    await open(el, { redraft: redraft(), files: files() })
+    expect(await openRedraft(el)).toBe(true)
     expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    await untilPreview(el)
     expect($(el, '[data-bsky-image="i1"] img')).not.toBeNull()
-    expect(pds.client.blueskyNextRkey).toHaveBeenCalledTimes(1)
-    const stored = loadDraft(KEY, 'new')!
-    expect(stored.text).toBe('from the deleted post')
-    expect(stored.bluesky!.rkey).toBe('3krkey0000001')
+    expect(pds.client.blueskyNextRkey).not.toHaveBeenCalled()
+    // No other draft: no "other unsent draft" note.
+    expect($(el, '[data-redraft-note]')).toBeNull()
     await submit(el)
-    expect(pds.client.blueskyCreatePost.mock.calls.map((c) => c[1])).toEqual(['3krkey0000001'])
+    expect(pds.client.blueskyCreatePost.mock.calls.map((c) => c[1])).toEqual(['3kredraft0001'])
     const sent = [...pds.records.values()][0]!
-    expect(sent.text).toBe('from the deleted post')
     expect(sent.langs).toEqual(['de'])
     expect(sent.labels).toEqual({ $type: 'com.atproto.label.defs#selfLabels', values: [{ val: 'nudity' }] })
     expect(sent.embed).toMatchObject({ $type: 'app.bsky.embed.images', images: [{ alt: 'alt i1', aspectRatio: { width: 4, height: 3 } }] })
   })
 
-  it('a reply redraft goes in the reply slot, keeps its refs, and shows the post it replies to', async () => {
-    const pds = signInBluesky()
+  it('after the post is sent and the dialog closes, the stored bytes go', async () => {
+    signInBluesky()
+    await storeRedraft()
     const el = await mount()
-    await open(el, { redraft: redraft({ reply: { root: PARENT, parent: PARENT } }), inReplyTo: bobPost() })
-    expect(loadDraft(KEY, `reply:${PARENT.uri}`)!.text).toBe('from the deleted post')
-    expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+    await openRedraft(el)
+    await untilPreview(el)
     await submit(el)
-    expect([...pds.records.values()][0]!.reply).toEqual({ root: PARENT, parent: PARENT })
+    for (let i = 0; i < 20; i++) await settle(el)
+    expect(await getDraftFiles(KEY, SLOT)).toEqual({})
   })
 
-  it('a reply redraft whose parent is not on the page reads it; a deleted parent blocks Post', async () => {
-    const pds = signInBluesky()
-    pds.client.fetchStatus.mockRejectedValue(new CaribouError('not_found', 'gone', { status: 404 }))
+  it('does not open while another composer is open, or for another account: the draft stays stored', async () => {
+    signInBluesky()
+    await storeRedraft()
     const el = await mount()
-    await open(el, { redraft: redraft({ reply: { root: PARENT, parent: PARENT } }) })
+    // A reply composer is open (a new post would open the kept redraft itself).
+    await open(el, { inReplyTo: bobPost() })
+    expect(await openRedraft(el)).toBe(false)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('')
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    activeUserKey.value = null
+    expect(await openRedraft(el)).toBe(false)
+    expect(loadDraft(KEY, SLOT)!.text).toBe('from the deleted post')
+  })
+
+  it('says "other unsent draft" only when its own kind\'s slot holds one', async () => {
+    signInBluesky()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'half written', bluesky: emptyBlueskyDraft({ rkey: '3krkeyHALF' }) }))
+    await storeRedraft()
+    const el = await mount()
+    await openRedraft(el)
+    expect($(el, '[data-redraft-note]')).not.toBeNull()
+  })
+
+  it('a redraft whose reply target is not cached: Post is off while it is read, and no create is sent', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
     expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
+    expect(postButton(el).disabled).toBe(true)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('Checking the post this replies to or quotes…')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    read.resolve(bobPost({ replyDisabled: true }))
+    await settle(el)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The author limited replies. You cannot reply to this post.')
+    expect(postButton(el).disabled).toBe(true)
+  })
+
+  it('a reply target read that answers deleted keeps Post off', async () => {
+    const pds = signInBluesky()
+    const read = deferred<Status>()
+    pds.client.fetchStatus.mockImplementationOnce(() => read.promise)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
+    const el = await mount()
+    await openRedraft(el)
+    await submit(el)
+    read.resolve(Promise.reject(new CaribouError('not_found', 'gone', { status: 404 })) as unknown as Status)
+    await settle(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
     expect($(el, '[data-compose-blocked]')!.textContent).toBe('The post you replied to was deleted.')
     expect(postButton(el).disabled).toBe(true)
   })
 
-  it('a quote redraft goes in the quote slot and keeps its ref', async () => {
+  it('a reply that also quotes: a gone quote says "quoted", not "replied to" (review N6)', async () => {
     const pds = signInBluesky()
+    statusCache.value = new Map([[PARENT.uri, bobPost()], [QUOTED.uri, bobPost({}, QUOTED.uri)]])
+    pds.client.fetchStatus.mockImplementation(async (id: string) => {
+      if (id === QUOTED.uri) throw new CaribouError('not_found', 'gone', { status: 404 })
+      return bobPost({}, id)
+    })
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT }, quote: QUOTED })
     const el = await mount()
-    await open(el, { redraft: redraft({ quote: QUOTED, images: [] }) })
-    expect(loadDraft(KEY, `quote:${QUOTED.uri}`)).not.toBeNull()
+    await openRedraft(el)
+    expect($(el, '[data-compose-blocked]')!.textContent).toBe('The post you quoted was deleted.')
+  })
+
+  it('a quote redraft keeps its ref', async () => {
+    const pds = signInBluesky()
+    await storeRedraft({ quote: QUOTED, images: [] })
+    const el = await mount()
+    await openRedraft(el)
     await submit(el)
     expect([...pds.records.values()][0]!.embed).toEqual({ $type: 'app.bsky.embed.record', record: QUOTED })
   })
 
-  it('never overwrites an unsent draft: the redraft is kept beside it, and opens first next time', async () => {
-    signInBluesky()
-    saveDraft(KEY, 'new', emptyDraft({ text: 'half written', bluesky: emptyBlueskyDraft({ rkey: '3krkeyHALF' }) }))
-    const el = await mount()
-    const d = redraft()
-    await open(el, { redraft: d, files: files() })
-    expect(loadDraft(KEY, 'new')!.text).toBe('half written')
-    expect(loadDraft(KEY, `redraft:${d.idempotencyKey}`)!.text).toBe('from the deleted post')
-    expect($(el, '[data-redraft-note]')).not.toBeNull()
-    $(el, '[data-action="cancel"]')!.click()
-    await settle(el)
-    await open(el)
-    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
-  })
-
-  it('a kept reply redraft opened as the next new post reads the post it replies to', async () => {
+  it('a kept redraft opens with the next new post, and reads the post it replies to', async () => {
     const pds = signInBluesky()
-    const d = redraft({ reply: { root: PARENT, parent: PARENT } })
-    saveDraft(KEY, `redraft:${d.idempotencyKey}`, d)
+    await storeRedraft({ reply: { root: PARENT, parent: PARENT } })
     const el = await mount()
     await open(el)
     expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
     expect(pds.client.fetchStatus).toHaveBeenCalledWith(PARENT.uri)
   })
 
-  it('a blob the PDS dropped is uploaded again from the redraft\'s bytes', async () => {
+  it('a dropped blob is uploaded again from the stored bytes, after a close and a reopen', async () => {
     const pds = signInBluesky()
-    const el = await mount()
-    await open(el, { redraft: redraft(), files: files() })
+    await storeRedraft()
+    let el = await mount()
+    await openRedraft(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    // A reload: a new dialog with nothing in memory.
+    el.remove()
+    el = await mount()
+    await open(el)
+    await untilPreview(el)
     pds.client.blueskyCreatePost.mockRejectedValueOnce(new BlueskyBlobNotFound('Could not find blob: bafkA', 'bafkA'))
     await submit(el)
     expect(pds.client.blueskyUploadBlob).toHaveBeenCalledTimes(1)
+    expect(await pds.client.blueskyUploadBlob.mock.calls[0]![0].text()).toBe('A')
     expect(toasts.at(-1)!.message).toBe('An image was uploaded again. Post again to send.')
+    expect($(el, '[data-bsky-image] .state')).toBeNull()
   })
 
-  it('opens nothing for a Mastodon account', async () => {
-    signInMastodonOffline('alice@example.social')
+  it('the label menu offers Suggestive (sexual), as the official app does', async () => {
+    signInBluesky()
+    await storeRedraft({ labels: [] })
     const el = await mount()
-    await open(el, { redraft: redraft(), files: files() })
-    expect($<HTMLDialogElement>(el, 'dialog')?.open).not.toBe(true)
-    expect(loadDraft('alice@example.social', 'new')).toBeNull()
+    await openRedraft(el)
+    const names = [...el.shadowRoot!.querySelectorAll('caribou-menu.labels button, [data-label]')].map((b) => b.textContent?.trim())
+    expect(names.join(' ')).toContain('Suggestive')
   })
 })

@@ -44,14 +44,32 @@ function replaceInBoosts(post: Status): void {
   if (out) statusCache.value = out
 }
 
+/** How a delete ended (README, "Bluesky delete and redraft"). */
+export type DeleteOutcome =
+  | { kind: 'deleted'; gone: Status; stale: boolean }
+  | { kind: 'failed'; stale: boolean }
+  /** Bluesky only: the delete had no clear answer and the check failed too. */
+  | { kind: 'unknown'; stale: boolean }
+
+export interface DeleteOptions {
+  /** The toasts to show instead of the default ones. */
+  messages?: { failed?: string; unknown?: string }
+}
+
+const FAILED = 'Could not delete this post. Try again.'
+const UNKNOWN = 'Could not tell whether the post was deleted. Reload to check.'
+
 /**
  * Deletes the reader's own post. It leaves every list at once: the post and
  * each boost of it go from the cache, and its id is marked deleted for the
- * lists that keep their own copies. When the server refuses, everything
- * comes back and a toast says so. Resolves to the deleted post as the
- * server sent it (its `text` is the source, for a redraft), or null.
+ * lists that keep their own copies. When the delete fails, or its outcome
+ * is unknown (Bluesky), everything comes back and a toast says which.
+ * `stale`: the account changed meanwhile; then nothing is written to the
+ * page and nothing is said, but the outcome is still answered.
  */
-export async function deleteOwnStatus(client: CaribouClient, status: Status): Promise<Status | null> {
+export async function deleteOwnStatusOutcome(
+  client: CaribouClient, status: Status, opts: DeleteOptions = {},
+): Promise<DeleteOutcome> {
   const post = status.reblog ?? status
   const id = post.id
   const generation = ownerGeneration()
@@ -73,12 +91,13 @@ export async function deleteOwnStatus(client: CaribouClient, status: Status): Pr
     const gone = post.bluesky && client.blueskyDeletePost
       ? await client.blueskyDeletePost(post.bluesky.uri).then(() => post)
       : await client.deleteStatus(id)
-    if (generation !== ownerGeneration()) return null
-    return gone
-  } catch {
+    return { kind: 'deleted', gone, stale: generation !== ownerGeneration() }
+  } catch (err) {
+    // The client could not tell (bluesky-client README, "Delete").
+    const kind = (err as { name?: unknown } | null)?.name === 'BlueskyDeleteUnknown' ? 'unknown' : 'failed'
     // The account changed: the change already emptied the marks, and the
     // posts are the old account's.
-    if (generation !== ownerGeneration()) return null
+    if (generation !== ownerGeneration()) return { kind, stale: true }
     batch(() => {
       const next = new Map(statusCache.peek())
       // A copy that came back meanwhile (a poll) is newer; keep it.
@@ -88,9 +107,19 @@ export async function deleteOwnStatus(client: CaribouClient, status: Status): Pr
       marks.delete(id)
       deletedStatusIds.value = marks
     })
-    toast('Could not delete this post. Try again.')
-    return null
+    toast(kind === 'unknown' ? opts.messages?.unknown ?? UNKNOWN : opts.messages?.failed ?? FAILED)
+    return { kind, stale: false }
   }
+}
+
+/**
+ * `deleteOwnStatusOutcome` in the old shape: the deleted post as the server
+ * sent it (its `text` is the source, for a Mastodon redraft), or null when
+ * it was not deleted, the outcome is unknown, or the account changed.
+ */
+export async function deleteOwnStatus(client: CaribouClient, status: Status): Promise<Status | null> {
+  const out = await deleteOwnStatusOutcome(client, status)
+  return out.kind === 'deleted' && !out.stale ? out.gone : null
 }
 
 function toast(message: string): void {

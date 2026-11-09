@@ -1,12 +1,18 @@
 // Bluesky delete and redraft on the card (#190; app README, "Bluesky delete and redraft").
+import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BlueskyOwnPost, BlueskyPostRecord, Capabilities, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUserKey, addUserSession, blueskyUserKey, deletedStatusIds, setBlueskyDriver, statusCache, users,
-  type BlueskyDriver, type ComposeDraft, type UserSession,
+  activeClient, activeUserKey, addUserSession, blueskyUserKey, deletedStatusIds, findRedraftSlot, getDraftFiles, loadDraft,
+  setBlueskyDriver, statusCache, users, _testOnlyClearDraftFiles, type BlueskyDriver, type DraftSlot, type UserSession,
 } from '@beatzball/caribou-state'
 import { BLUESKY_CAPABILITIES } from '@beatzball/caribou-bluesky-client'
 import '../caribou-status-card.js'
+
+// The canvas re-encode: new bytes, so a new CID.
+vi.mock('../_image-fit.js', () => ({
+  fitImage: vi.fn(async (b: Blob) => ({ ok: true, blob: new Blob([`re ${await b.text()}`], { type: 'image/jpeg' }), width: 4, height: 3, resized: false })),
+}))
 
 // Moderation is not under test here: the reader's check counts as done.
 vi.mock('../_bluesky-moderation.js', async (orig) => ({
@@ -69,11 +75,15 @@ function fakeClient() {
     }),
     blueskyDeletePost: vi.fn(async (uri: string) => { calls.push(`delete ${uri}`) }),
     blueskyUploadBlob: vi.fn(async (b: Blob) => {
-      calls.push('upload')
-      return { $type: 'blob' as const, ref: { $link: 'bafkA' }, mimeType: b.type, size: b.size }
+      calls.push(`upload ${await b.text()}`)
+      return { $type: 'blob' as const, ref: { $link: 'bafkNEW' }, mimeType: b.type, size: b.size }
     }),
+    blueskyNextRkey: vi.fn(async () => { calls.push('rkey'); return '3knewkey00001' }),
     deleteStatus: vi.fn(async () => { throw new Error('Mastodon only') }),
-    fetchStatus: vi.fn(() => new Promise(() => {})),
+    fetchStatus: vi.fn(async (id: string) => {
+      calls.push(`fetch ${id}`)
+      return { ...post(), id, uri: id, account: { ...me, id: 'did:plc:bob' }, bluesky: { ...post().bluesky!, uri: id } } as Status
+    }),
     fetchRelationships: vi.fn(async () => []),
     verifyCredentials: vi.fn(() => new Promise(() => {})),
   }
@@ -128,7 +138,8 @@ const onCompose = (e: Event) => events.push(e as CustomEvent)
 const toasts: { kind: string; message: string }[] = []
 const onToast = (e: Event) => toasts.push((e as CustomEvent).detail)
 
-beforeEach(() => {
+beforeEach(async () => {
+  await _testOnlyClearDraftFiles()
   document.body.replaceChildren()
   statusCache.value = new Map()
   deletedStatusIds.value = new Set()
@@ -182,74 +193,148 @@ describe('<caribou-status-card> own Bluesky post', () => {
     expect(toasts.at(-1)).toEqual({ kind: 'error', message: 'Could not delete this post. Try again.' })
   })
 
-  it('Delete & redraft reads the record and images, deletes, uploads again, and opens a new Bluesky draft', async () => {
+  it('Delete & redraft: read, ask, build and store, then delete, then open the stored draft', async () => {
     signIn()
-    const parent = { ...post({}, {}), id: PARENT.uri, uri: PARENT.uri } as Status
-    statusCache.value = new Map([[PARENT.uri, parent]])
     const el = await mount(post())
+    // The draft is stored before the delete is sent.
+    let storedAtDelete: string | null = null
+    pds.blueskyDeletePost.mockImplementationOnce(async (uri: string) => {
+      calls.push(`delete ${uri}`)
+      storedAtDelete = loadDraft(KEY, findRedraftSlot(KEY)!)?.text ?? null
+    })
     item(el, 'redraft')!.click()
     await settle(el)
     expect(confirmText()).toContain('Its likes, reposts and replies are lost.')
+    expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
     confirmYes()
     await settle(el)
-    expect(calls).toEqual(['read 3kold', 'blob bafkA', `delete ${URI}`, 'upload'])
+    expect(calls).toEqual(['read 3kold', 'blob bafkA', `fetch ${PARENT.uri}`, 'upload re abc', 'rkey', `delete ${URI}`])
+    expect(storedAtDelete).toBe('hello')
     expect(events).toHaveLength(1)
-    const detail = events[0]!.detail as { redraft: ComposeDraft; files: Record<string, Blob>; inReplyTo?: Status }
-    expect(detail.redraft.text).toBe('hello')
-    expect(detail.redraft.language).toBe('en')
-    expect(detail.redraft.bluesky!.reply).toEqual({ root: PARENT, parent: PARENT })
-    expect(detail.redraft.bluesky!.rkey).toBeNull()
-    expect(detail.redraft.bluesky!.images.map((i) => i.alt)).toEqual(['a cat'])
-    expect(Object.keys(detail.files)).toEqual([detail.redraft.bluesky!.images[0]!.id])
-    expect(detail.inReplyTo?.id).toBe(PARENT.uri)
+    const detail = events[0]!.detail as { blueskyRedraft: { userKey: string; slot: DraftSlot } }
+    expect(detail.blueskyRedraft.userKey).toBe(KEY)
+    const d = loadDraft(KEY, detail.blueskyRedraft.slot)!
+    expect(d.text).toBe('hello')
+    expect(d.language).toBe('en')
+    expect(d.bluesky!.reply).toEqual({ root: PARENT, parent: PARENT })
+    expect(d.bluesky!.rkey).toBe('3knewkey00001')
+    expect(d.bluesky!.images.map((i) => [i.alt, i.blob.ref.$link])).toEqual([['a cat', 'bafkNEW']])
+    const files = await getDraftFiles(KEY, detail.blueskyRedraft.slot)
+    expect(await files[d.bluesky!.images[0]!.id]!.text()).toBe('re abc')
   })
 
-  it('the question says a video or a link card is not kept', async () => {
+  it('when no composer opens it (one is open already), the draft stays stored and a toast says where', async () => {
     signIn()
+    const el = await mount(post())
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    expect(events).toHaveLength(1)
+    expect(findRedraftSlot(KEY)).not.toBeNull()
+    expect(toasts.at(-1)).toEqual({ kind: 'info', message: 'Your redraft is saved. It opens the next time you write a new post.' })
+  })
+
+  it('a second click while a redraft runs does nothing, and a status line says what it is doing', async () => {
+    signIn()
+    const el = await mount(post())
+    let release!: () => void
+    pds.blueskyGetOwnPost.mockImplementationOnce(async (rkey) => {
+      await new Promise<void>((r) => { release = r })
+      return { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafyold', value: RECORD }
+    })
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect($(el, '.redraft-status[role="status"]')!.textContent).toBe('Reading the post…')
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(pds.blueskyGetOwnPost).toHaveBeenCalledTimes(1)
+    release()
+    await settle(el)
+    expect($(el, '.redraft-status')!.textContent).toBe('')
+  })
+
+  it('the question says what is not kept, and a gone reply target', async () => {
+    signIn()
+    pds.fetchStatus.mockRejectedValue(Object.assign(new Error('gone'), { code: 'not_found' }))
     const el = await mount(post({ mediaAttachments: [{ id: 'v', type: 'video', url: 'https://x.example/v.m3u8' }], card: { url: 'https://example.com' } }))
     item(el, 'redraft')!.click()
     await settle(el)
     expect(confirmText()).toContain('The video is not kept.')
     expect(confirmText()).toContain('The link card is not kept.')
+    expect(confirmText()).toContain('The post it replies to is gone, so the redraft cannot be posted as a reply.')
   })
 
-  it('when the record cannot be read, nothing is deleted and no compose opens', async () => {
+  it('when the record cannot be read, nothing is deleted or stored, and nothing opens', async () => {
     signIn()
     const el = await mount(post())
     pds.blueskyGetOwnPost.mockRejectedValueOnce(new Error('502'))
     item(el, 'redraft')!.click()
     await settle(el)
-    confirmYes()
-    await settle(el)
     expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
-    expect(statusCache.value.has(URI)).toBe(true)
+    expect(confirmEl()?.shadowRoot?.querySelector('dialog[open]') ?? null).toBeNull()
     expect(events).toEqual([])
+    expect(findRedraftSlot(KEY)).toBeNull()
     expect(toasts.at(-1)).toEqual({ kind: 'error', message: 'Could not read this post, so it was not deleted.' })
   })
 
-  it('when an image cannot be read, nothing is deleted', async () => {
+  it('when an image cannot be uploaded, nothing is deleted or stored, and a toast says why', async () => {
     signIn()
     const el = await mount(post())
-    pds.blueskyGetBlob.mockRejectedValueOnce(new Error('502'))
+    pds.blueskyUploadBlob.mockRejectedValueOnce(new Error('Upload refused.'))
     item(el, 'redraft')!.click()
     await settle(el)
     confirmYes()
     await settle(el)
     expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
-    expect(events).toEqual([])
+    expect(findRedraftSlot(KEY)).toBeNull()
+    expect(toasts.at(-1)).toEqual({ kind: 'error', message: 'Could not get the redraft ready, so the post was not deleted: Upload refused' })
   })
 
-  it('when the delete fails, no compose opens and the post comes back', async () => {
+  it('when the delete fails, the stored draft and its bytes go, and nothing opens', async () => {
     signIn()
     const el = await mount(post())
-    pds.blueskyDeletePost.mockRejectedValueOnce(new Error('500'))
+    pds.blueskyDeletePost.mockRejectedValueOnce(new Error('400'))
     item(el, 'redraft')!.click()
     await settle(el)
     confirmYes()
     await settle(el)
     expect(events).toEqual([])
-    expect(pds.blueskyUploadBlob).not.toHaveBeenCalled()
+    expect(findRedraftSlot(KEY)).toBeNull()
     expect(statusCache.value.has(URI)).toBe(true)
+    expect(toasts.at(-1)).toEqual({ kind: 'error', message: 'Could not delete this post. Try again.' })
+  })
+
+  it('a delete in doubt keeps the stored draft and says so, without saying "not deleted"', async () => {
+    signIn()
+    const el = await mount(post())
+    pds.blueskyDeletePost.mockRejectedValueOnce(Object.assign(new Error('?'), { name: 'BlueskyDeleteUnknown' }))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    expect(events).toEqual([])
+    expect(loadDraft(KEY, findRedraftSlot(KEY)!)!.text).toBe('hello')
+    expect(toasts.at(-1)!.message).toBe('Could not tell whether the post was deleted. Your redraft is saved and opens the next time you write a new post. '
+      + 'Check your profile first, so it is not posted twice.')
+  })
+
+  it('an account switch during the delete: the draft stays stored for that account, nothing opens or is said', async () => {
+    signIn()
+    const el = await mount(post())
+    let release!: () => void
+    pds.blueskyDeletePost.mockImplementationOnce(() => new Promise<void>((r) => { release = r }))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    confirmYes()
+    await settle(el)
+    const before = toasts.length
+    activeUserKey.value = null
+    release()
+    await settle(el)
+    expect(events).toEqual([])
+    expect(toasts.length).toBe(before)
+    expect(loadDraft(KEY, findRedraftSlot(KEY)!)!.text).toBe('hello')
   })
 
   it('an account switch while the record is read deletes nothing', async () => {
@@ -261,8 +346,6 @@ describe('<caribou-status-card> own Bluesky post', () => {
       return { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafyold', value: RECORD }
     })
     item(el, 'redraft')!.click()
-    await settle(el)
-    confirmYes()
     await settle(el)
     activeUserKey.value = null
     release()

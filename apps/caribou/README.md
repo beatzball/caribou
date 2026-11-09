@@ -636,7 +636,7 @@ stays off until it is removed.
 
 **Labels instead of a content warning** (spec 7.4). With at least one
 image, a `<caribou-menu>` "Label this media" (anchored, the shared menu's
-focus rules) lists Adult, Nudity and Graphic. Each is a toggle button with
+focus rules) lists Adult, Suggestive, Nudity and Graphic. Each is a toggle button with
 `aria-pressed`; the menu's name lists the labels on. Labels go in the
 record only with images. Known: the shared menu closes after each choice, so
 two labels take two openings (review note N7, left as it is for day one).
@@ -691,24 +691,51 @@ counter, a TID rkey, facets, and a lost answer across a reload is one post).
 ### Bluesky delete and redraft (#190)
 
 The card's Delete and "Delete & redraft" on the reader's own Bluesky post.
-Rules in `packages/state` README, "Bluesky delete and redraft".
+Rules, and the order of the steps, in `packages/state` README, "Bluesky
+delete and redraft". The rule: nothing can be lost after the delete.
 
 - **Delete** asks first, as for Mastodon. The post leaves every list at
-  once; a refusal brings it back with a toast. Focus goes as for Mastodon.
-- **Delete & redraft** asks first. The confirm adds "The video is not
-  kept." or "The link card is not kept." when the post has one. Then the
-  card reads the record and its images. If that fails, a toast says "Could
-  not read this post, so it was not deleted." and nothing changes. Then it
-  deletes. If the delete fails, the composer does not open. Then the
-  dialog opens with the new draft (`caribou:compose` with `redraft`, and
-  the image bytes in `files`).
-- The dialog opens a Bluesky redraft like a Bluesky new post, reply or
-  quote (`showBluesky`), with the draft's refs, images and labels, and a
-  new rkey. The images show from the bytes. The post replied to or quoted
-  is taken from the page's cache, or read (`fetchStatus`); deleted, it
-  shows the "deleted" note and Post is off, as for any reply.
-- A kept Bluesky redraft that opens as the next new post reads its reply
-  or quote target the same way.
+  once. A refusal brings it back: "Could not delete this post. Try
+  again." A delete whose outcome cannot be known brings it back too:
+  "Could not tell whether the post was deleted. Reload to check." Focus
+  goes as for Mastodon.
+- **Delete & redraft.** One flow at a time per card: a second click while
+  one runs does nothing. A visible `role="status"` line under the post
+  says "Reading the post…", then "Getting the draft ready…", then
+  "Deleting the post…".
+  1. The card reads the record, its images and its reply and quote
+     targets. A failure: "Could not read this post, so it was not
+     deleted."
+  2. The confirm, "Delete and redraft this post?", says what is lost, and
+     adds a sentence for each that applies: "The video is not kept.",
+     "The link card is not kept.", "Its labels are not kept." (a menu
+     label on a post with no images), "The post it replies to is gone, so
+     the redraft cannot be posted as a reply." / "The author of the post
+     it replies to limited replies.", and the same for the quoted post.
+  3. The draft is built, the images re-encoded and uploaded, and the draft
+     and image bytes stored. A failure: "Could not get the redraft ready,
+     so the post was not deleted: <reason>".
+  4. Delete. Failed: as Delete, and the stored draft is removed. Unknown:
+     the draft stays, and the toast says so (state README).
+  5. The dialog opens on the stored slot (`caribou:compose` with
+     `blueskyRedraft: { userKey, slot }`; the dialog sets `opened` on the
+     detail). When it cannot open (another composer is open), a toast
+     says "Your redraft is saved. It opens the next time you write a new
+     post."
+- **The dialog** opens a stored Bluesky slot like a Bluesky new post: its
+  refs, images, labels and rkey. It loads the slot's image bytes from
+  IndexedDB for the previews and for blob recovery (after a close, a
+  reopen or a reload too). The note "Your other unsent draft stays as it
+  is…" shows only when the draft's own slot (`new`, `reply:`, `quote:`)
+  holds another unsent draft.
+- **Targets.** A draft with a reply or quote ref shows the post it names,
+  from the cache or read (`fetchStatus`). **While a target is being read,
+  Post is off**, and a send is refused ("Checking the post this replies to
+  or quotes. Post again in a moment."). Gone or limited, the dialog's note
+  names the kind ("The post you replied to was deleted." or "The post you
+  quoted was deleted."), and Post stays off, as for any reply or quote.
+- **Labels.** The label menu has four items: Adult (`porn`), Suggestive
+  (`sexual`), Nudity, Graphic, as the official app.
 - Mastodon's delete and redraft do not change.
 
 ### Bluesky SSR (#185, #186)
