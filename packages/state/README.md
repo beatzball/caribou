@@ -387,7 +387,7 @@ redraft), plus `bluesky`:
 | `quote` | the quoted post's strong ref, or `null` |
 | `images` | per image: the blob ref `uploadBlob` answered, its type and size, its alt text, its `aspectRatio` (or `null` when the browser could not read it), the file name |
 | `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `nudity` Nudity, `graphic-media` Graphic) |
-| `rkey` | the record key, picked (`blueskyNextRkey`) before the first send |
+| `rkey` | the record key, made (`blueskyNextRkey`) when the draft is made, and stored with its first save (R6) |
 | `sent` | the exact record a send wrote or tried to, frozen with its facets and `createdAt`, and the input it was made from (`blueskyDraftInput`) |
 
 Facets are not kept on their own: they are made from the text at send
@@ -425,7 +425,7 @@ the error. It is read from `blueskyGetOwnPost(rkey)`:
 
 | the check | result |
 |---|---|
-| found, and it is the frozen record (same `createdAt` and `text`) | posted |
+| found, and it has this send's content (R7) | posted |
 | found, but another record | `earlier-posted`: the reader's current draft is kept with a new rkey |
 | absent (`RecordNotFound` only) | the rkey is unused: unfreeze (`sent: null`, same rkey), keep the reader's **current** draft, and throw the create's error |
 | the check failed | unknown: the send stays pending, nothing more is sent, the create's error is thrown; the next Post checks again |
@@ -437,8 +437,10 @@ Only `RecordNotFound` means absent. A 404, `AccountDeactivated`,
 `sent`) is checked first, by the table above. Found → posted or
 `earlier-posted`, nothing is sent. Absent → the **current** draft is frozen
 on the same rkey and sent. A late first write is still safe: the second
-create fails ("exists"), the check finds the first record, the compare says
-it is not this one, and the result is `earlier-posted` with the edit kept.
+create fails ("exists"), the check finds the first record, the compare (R7)
+says it is another content, and the result is `earlier-posted` with the edit
+kept. With no edit, the compare says it is this content, and the result is
+`posted`.
 No edit is ever replaced by older text, and no draft is stuck: a record the
 PDS refuses (a missing blob) unfreezes, so removing the image lets it go.
 
@@ -455,7 +457,7 @@ reads the slot's revision when it starts, and each write it makes (freeze,
 unfreeze, clear on success, the kept draft after `earlier-posted`) happens
 only if the stored revision is still the one it owns; a write it makes
 moves its own revision on. After every await inside the send (the check,
-the rkey, facet detection) it checks the revision again before the freeze,
+facet detection) it checks the revision again before the freeze,
 and stops (`DraftChanged`, nothing sent) if another save came in. After the
 create it only skips its writes. So a dialog closed and reopened during
 the send, then edited, keeps its edit: that edit is a pending draft, and its
@@ -464,6 +466,25 @@ next Post finds the record and keeps the edit (R2).
 **R5. Every message is true.** "Could not save the draft, so the post was
 not sent." only when the freeze was refused. "An image was uploaded again"
 only when one was.
+
+**R6. A draft gets its rkey when the draft is made**, like a Mastodon
+draft's `idempotencyKey`. The dialog makes it (`blueskyNextRkey`) when it
+opens a draft that has none, and it goes to storage with the draft's first
+save. Every copy of the draft (a reopened dialog, a reload) then has the
+same rkey, so one draft makes at most one record, even when two copies are
+posted at once. The rkey is kept through an unfreeze. It changes only after
+`earlier-posted`, for the kept edits. `postBlueskyDraft` refuses a draft
+with no rkey (a `TypeError`): the send never makes one.
+
+**R7. "This is our post" means the same content, not the same `createdAt`.**
+A found record is this send's post when its content matches the frozen
+record's, field by field: text, facets, reply refs, quote ref, image CIDs and
+alt text, self-labels, langs. The whole record is never deep-compared:
+`getRecord` gives the SDK's `BlobRef` objects for images, so a CID is read
+from `ref.$link` or from the CID object's string. An rkey belongs to one
+draft (R6), so the same content at it is this draft's post. This is what
+makes "no answer, the check says absent, the write lands late, Post again"
+end as `posted`, not as a second post.
 
 The dialog side (rule 4 of round 1, kept): the dialog captures its owner
 (client, account, slot, dialog session) before each await (fit, upload,

@@ -864,3 +864,141 @@ describe('review fixes (PR #232)', () => {
     expect(a.getAttribute('rel')).toBe('noopener')
   })
 })
+
+function pdsState(el: CaribouComposeDialog, pds: ReturnType<typeof fakeBluesky>) {
+  return {
+    open: $<HTMLDialogElement>(el, 'dialog')?.open ?? false,
+    records: [...pds.records.entries()].map(([k, r]) => `${k}=${r.text}`),
+  }
+}
+
+describe('round 3 (PR #232)', () => {
+  it('Post, Cancel while the mention lookup runs, open again, Post: one post (R6, Fable R3-B2, probe A)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'only once @alice.example.com')
+    const facets = deferred<never[]>()
+    pds.client.blueskyDetectFacets.mockImplementationOnce(() => facets.promise)
+    await submit(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    await open(el)
+    facets.resolve([])
+    await settle(el)
+    await submit(el)
+    expect(pdsState(el, pds).records).toEqual(['3krkey0000001=only once @alice.example.com'])
+  })
+
+  it('no answer, the check says absent, the record lands late, no edit, Post again: posted, one record (R7, Fable R3-B1, probe B)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'only once')
+    let late: BlueskyPostRecord | null = null
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record: BlueskyPostRecord) => {
+      late = record
+      throw new CaribouError('server_error', 'Gateway Timeout', { status: 504 })
+    })
+    await submit(el)
+    pds.records.set('3krkey0000001', late!)
+    await new Promise((r) => setTimeout(r, 5))
+    await submit(el)
+    expect(pdsState(el, pds)).toEqual({ open: false, records: ['3krkey0000001=only once'] })
+    expect(toasts.at(-1)).toMatchObject({ kind: 'info', message: 'Post published' })
+  })
+
+  it('control: Cancel and reopen after the freeze, Post: one post (probe C)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'only once')
+    const gate = deferred<void>()
+    pds.client.blueskyCreatePost.mockImplementationOnce(async (record: BlueskyPostRecord, rkey: string) => {
+      await gate.promise
+      pds.records.set(rkey, record)
+      return { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafynew' }
+    })
+    await submit(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    await open(el)
+    gate.resolve()
+    await settle(el)
+    await submit(el)
+    expect(pds.records.size).toBe(1)
+  })
+
+  it('the draft has its rkey before Post: a draft opened with none gets one, and Post waits for it (R6)', async () => {
+    const pds = signInBluesky()
+    const rk = deferred<string>()
+    pds.client.blueskyNextRkey.mockImplementationOnce(() => rk.promise)
+    const el = await mount()
+    await open(el)
+    await type(el, 'hello')
+    expect(postButton(el).disabled).toBe(true)
+    rk.resolve('3krkeyfromopen')
+    await settle(el)
+    expect(postButton(el).disabled).toBe(false)
+    expect(loadDraft(KEY, 'new')!.bluesky!.rkey).toBe('3krkeyfromopen')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost.mock.calls[0]![1]).toBe('3krkeyfromopen')
+  })
+
+  it('"The last send did not finish." shows only when no send is running (R5, Fable R3-B3)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'slow')
+    const gate = deferred<void>()
+    pds.client.blueskyCreatePost.mockImplementationOnce(async () => {
+      await gate.promise
+      throw new CaribouError('unreachable', 'timeout')
+    })
+    pds.client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    void submit(el)
+    await settle(el)
+    expect($(el, '[data-send-unknown]')).toBeNull()
+    gate.resolve()
+    await settle(el)
+    expect($(el, '[data-send-unknown]')).not.toBeNull()
+  })
+
+  it('an old send that ends absent after close and reopen does not put its draft into the reopened dialog (Fable R3-N2)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'v1')
+    const gate = deferred<void>()
+    pds.client.blueskyCreatePost.mockImplementationOnce(async () => {
+      await gate.promise
+      throw new CaribouError('server_error', 'Bad Gateway', { status: 502 })
+    })
+    void submit(el)
+    await settle(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    await open(el)
+    await type(el, 'v2 in the reopened dialog')
+    gate.resolve()
+    await settle(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('v2 in the reopened dialog')
+  })
+
+  it('a send stopped by a change from elsewhere says so (DraftChanged, Fable R3-N3)', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'mine')
+    const facets = deferred<never[]>()
+    pds.client.blueskyDetectFacets.mockImplementationOnce(() => facets.promise)
+    void submit(el)
+    await settle(el)
+    // Another tab saves this slot.
+    saveDraft(KEY, 'new', { ...loadDraft(KEY, 'new')!, text: 'from another tab' })
+    facets.resolve([])
+    await settle(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    expect(toasts.at(-1)).toMatchObject({ kind: 'error', message: 'The draft changed while it was being sent, so nothing was sent.' })
+  })
+})

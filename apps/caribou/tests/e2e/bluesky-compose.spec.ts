@@ -126,6 +126,9 @@ test.describe('Bluesky compose', () => {
     // The check right after the lost answer fails too: the outcome is unknown.
     pds.failNextGet = true
     await dialog.getByRole('button', { name: 'Post' }).click()
+    // Wait for the send to end (its toast), not only for the note: a reload
+    // while the check is still running would leave the 502 for after it.
+    await expect(page.getByText('Post again to retry', { exact: false })).toBeVisible()
     await expect(dialog.getByText('The last send did not finish.', { exact: false })).toBeVisible()
 
     // A reload keeps the draft, its rkey and the frozen record.

@@ -123,9 +123,48 @@ function need<K extends keyof CaribouClient>(client: CaribouClient, name: K): No
   return (fn as (...a: unknown[]) => unknown).bind(client) as NonNullable<CaribouClient[K]>
 }
 
-/** The record on the PDS is the one this send froze (R1). */
-function sameRecord(a: BlueskyPostRecord, b: BlueskyPostRecord): boolean {
-  return a.createdAt === b.createdAt && a.text === b.text
+/** A blob's CID, from the JSON form (`{ $link }`) or the SDK's CID object. */
+function cidOf(blob: unknown): string {
+  const ref = (blob as { ref?: unknown } | null)?.ref as { $link?: unknown } | undefined
+  if (!ref) return ''
+  return typeof ref.$link === 'string' ? ref.$link : String(ref)
+}
+
+function strongRef(r: unknown): string {
+  const x = r as { uri?: unknown; cid?: unknown } | null | undefined
+  return x ? `${String(x.uri)} ${String(x.cid)}` : ''
+}
+
+/**
+ * A record's content, field by field (R7): text, facets, reply and quote
+ * refs, image CIDs and alt text, self-labels, langs. Never `createdAt`, and
+ * never a deep compare: `getRecord` gives the SDK's `BlobRef` objects.
+ */
+function contentOf(r: BlueskyPostRecord): string {
+  const embed = r.embed as {
+    $type?: string; images?: { image?: unknown; alt?: unknown }[]
+    record?: { record?: unknown } & Record<string, unknown>; media?: { images?: { image?: unknown; alt?: unknown }[] }
+  } | undefined
+  const images = embed?.images ?? embed?.media?.images ?? []
+  const quote = embed?.$type === 'app.bsky.embed.record' ? embed.record
+    : embed?.$type === 'app.bsky.embed.recordWithMedia' ? embed.record?.record : null
+  return JSON.stringify({
+    text: r.text,
+    facets: (r.facets ?? []).map((f) => ({
+      s: f.index.byteStart, e: f.index.byteEnd,
+      f: f.features.map((x) => [x.$type, x['uri'] ?? x['did'] ?? x['tag'] ?? null]),
+    })),
+    reply: r.reply ? [strongRef(r.reply.root), strongRef(r.reply.parent)] : null,
+    quote: quote ? strongRef(quote) : null,
+    images: images.map((i) => [cidOf(i.image), String(i.alt ?? '')]),
+    labels: (r.labels?.values ?? []).map((l) => l.val),
+    langs: r.langs ?? [],
+  })
+}
+
+/** The record found at the rkey is this send's post (R7). */
+function sameContent(found: BlueskyPostRecord, sent: BlueskyPostRecord): boolean {
+  return contentOf(found) === contentOf(sent)
 }
 
 /**
@@ -155,7 +194,7 @@ export async function postBlueskyDraft(
   // The found record decides (R1). Edits, or another record, keep the
   // reader's current draft with a new rkey.
   const settle = async (found: { uri: string; value: BlueskyPostRecord }, sent: BlueskySentRecord): Promise<BlueskyPostOutcome> => {
-    if (sameRecord(found.value, sent.record) && input === sent.input) {
+    if (sameContent(found.value, sent.record) && input === sent.input) {
       write(null)
       return posted(client, found.uri, opts)
     }
@@ -165,10 +204,14 @@ export async function postBlueskyDraft(
     return { kind: 'earlier-posted', uri: found.uri, draft: kept }
   }
 
+  // R6: the draft has carried its rkey since it was made.
+  if (!b.rkey) throw new TypeError('A Bluesky draft has its rkey from the start (README, R6)')
+  const rkey = b.rkey
+
   // R2: a pending send is checked first. A failed check throws: nothing sent.
   let reuse: BlueskySentRecord | null = null
-  if (b.rkey && b.sent) {
-    const found = await getOwnPost(b.rkey)
+  if (b.sent) {
+    const found = await getOwnPost(rkey)
     if (found) return settle(found, b.sent)
     stillOwned()
     // Absent: the rkey is unused. Unchanged, the frozen record goes again
@@ -176,8 +219,6 @@ export async function postBlueskyDraft(
     if (b.sent.input === input) reuse = b.sent
   }
 
-  const rkey = b.rkey ?? await nextRkey()
-  stillOwned()
   let sent: BlueskySentRecord = reuse ?? { input, record: blueskyRecord(draft, [], '') }
   if (!reuse) {
     const facets = await need(client, 'blueskyDetectFacets')(draft.text)

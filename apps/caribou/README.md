@@ -667,7 +667,10 @@ checked at once (R1): found, the dialog closes as posted; absent, the draft
 is open again with the reader's text; the check failed, the toast says
 "Post again to retry; it is never sent twice." and the dialog shows "The
 last send did not finish. Post checks first, so the post is never sent
-twice." When another version is the one posted (a late first write after an
+twice." (only while no send runs: during a send it would not be true). The
+draft gets its rkey when the dialog opens it (state R6), so a dialog closed
+and opened again during a send posts the same record, not a second one;
+Post waits for the rkey. When another version is the one posted (a late first write after an
 edit), the dialog stays open with the edits and says "Your earlier version
 was posted." with a link to it (`/@<did>/<rkey>`) that opens in a new tab,
 so the open dialog does not cover a page change. After a blob refusal the

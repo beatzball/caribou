@@ -572,7 +572,24 @@ export class CaribouComposeDialog extends LitElement {
     const images = bluesky.images.map((i) => i.id ? i : { ...i, id: crypto.randomUUID() })
     this.draft = { ...(stored ?? emptyDraft({ inReplyToId: inReplyTo?.id ?? null })), bluesky: { ...bluesky, images } }
     this.finishOpen()
+    this.ensureRkey()
     if (target) void this.refreshTarget(client, target)
+  }
+
+  // R6 (`packages/state` README): a draft gets its rkey when it is made, so
+  // every copy of it (a reopened dialog, a reload) posts at most one record.
+  // Post waits for it.
+  private ensureRkey(): void {
+    const owner = this.owner()
+    if (!owner || this.draft.bluesky?.rkey || !owner.client.blueskyNextRkey) return
+    owner.client.blueskyNextRkey().then((rkey) => {
+      if (!this.owns(owner) || this.draft.bluesky?.rkey) return
+      this.draft = { ...this.draft, bluesky: { ...(this.draft.bluesky ?? emptyBlueskyDraft()), rkey } }
+      // Stored with the draft (an empty draft is not stored; its next save is).
+      saveDraft(owner.client.userKey, owner.slot, this.draft)
+    }, (err: unknown) => {
+      if (this.owns(owner)) toast('error', `Could not get the post ready: ${errorText(err)}. Open the composer again.`)
+    })
   }
 
   private get isBluesky(): boolean {
@@ -693,7 +710,7 @@ export class CaribouComposeDialog extends LitElement {
   private get canPostBluesky(): boolean {
     const b = this.draft.bluesky
     const count = this.bskyCount
-    if (!b || !count || !this.bsky || this.blocked || this.missingBlobs.size > 0) return false
+    if (!b || !b.rkey || !count || !this.bsky || this.blocked || this.missingBlobs.size > 0) return false
     if (b.images.length > this.caps.maxImages) return false
     const hasContent = this.draft.text.trim() !== '' || b.images.length > 0 || b.quote !== null
     return hasContent && this.bsky.postFits(count) && this.pending.length === 0 && !this.posting
@@ -1164,7 +1181,7 @@ export class CaribouComposeDialog extends LitElement {
           ${this.blocked ? html`<p class="note problem" data-compose-blocked role="status">${this.blocked}</p>` : nothing}
           ${this.earlierPosted ? html`<p class="note" data-earlier-posted role="status">Your earlier version was posted.
             <a href=${this.earlierPosted} target="_blank" rel="noopener">Open it</a> (in a new tab). Your edits are still here; Post sends them as a new post.</p>` : nothing}
-          ${bluesky && d.bluesky?.sent && !this.earlierPosted ? html`<p class="note" data-send-unknown>The last send did not finish. Post checks first, so the post is never sent twice.</p>` : nothing}
+          ${bluesky && d.bluesky?.sent && !this.earlierPosted && !busy ? html`<p class="note" data-send-unknown>The last send did not finish. Post checks first, so the post is never sent twice.</p>` : nothing}
           ${this.keptRedraft ? html`
             <p class="note" data-redraft-note>Your other unsent draft stays as it is. This redraft is kept on its own and opens first the next time you write a new post.</p>` : nothing}
           ${d.cw && caps.contentWarningText ? html`
