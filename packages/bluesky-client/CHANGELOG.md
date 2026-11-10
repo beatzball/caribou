@@ -1,5 +1,11 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.1.4
+
+### Patch Changes
+
+- [#244](https://github.com/beatzball/caribou/pull/244) [`4f7a387`](https://github.com/beatzball/caribou/commit/4f7a3876bc12bf489b1eba26e6b342fc9744c582) Thanks [@beatzball](https://github.com/beatzball)! - The README no longer names the Bluesky browser flag. It says when the app loads the `bsky` chunk, including a deferred public Bluesky page.
+
 ## 0.1.3
 
 ### Patch Changes

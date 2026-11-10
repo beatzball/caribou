@@ -1,5 +1,16 @@
 # caribou-app
 
+## 0.11.0
+
+### Minor Changes
+
+- [#244](https://github.com/beatzball/caribou/pull/244) [`4f7a387`](https://github.com/beatzball/caribou/commit/4f7a3876bc12bf489b1eba26e6b342fc9744c582) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky is on for everyone. The landing page shows the Mastodon and Bluesky sign-in panels to every visitor, with no browser flag. The server renders Bluesky profiles and posts by default. Set `BLUESKY_SSR` to `0`, `false`, `off` or `no` to turn that off; the server logs which it is at start. A tab chosen or a handle typed while the page loads is kept.
+
+### Patch Changes
+
+- Updated dependencies [[`4f7a387`](https://github.com/beatzball/caribou/commit/4f7a3876bc12bf489b1eba26e6b342fc9744c582)]:
+  - @beatzball/caribou-bluesky-client@0.1.4
+
 ## 0.10.11
 
 ### Patch Changes
