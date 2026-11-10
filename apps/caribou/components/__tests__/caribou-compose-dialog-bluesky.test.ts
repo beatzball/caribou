@@ -7,7 +7,7 @@ import {
   setBlueskyDriver, statusCache, users, type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
-  CaribouError, type BlueskyOwnPost, type BlueskyPostRecord, type Capabilities, type CaribouClient, type Status,
+  CaribouError, type BlueskyGates, type BlueskyOwnPost, type BlueskyPostRecord, type Capabilities, type CaribouClient, type Status,
 } from '@beatzball/caribou-mastodon-client'
 import { BLUESKY_CAPABILITIES, BlueskyBlobNotFound } from '@beatzball/caribou-bluesky-client'
 import * as compose from '../../../../packages/bluesky-client/src/compose.js'
@@ -81,14 +81,15 @@ function bobPost(over: Partial<NonNullable<Status['bluesky']>> = {}, id = 'at://
 }
 
 /** A fake PDS behind the Bluesky client, as the session driver restores it. */
-function fakeBluesky() {
+function fakeBluesky(userKey: string = KEY, listTitle = 'Friends') {
   const records = new Map<string, BlueskyPostRecord>()
+  const gates = new Map<string, BlueskyGates>()
   let n = 0
   let blobs = 0
   const cids = new Map<string, string>()
   const loseNext = { value: false }
   const client = {
-    userKey: KEY,
+    userKey,
     capabilities: BLUESKY_CAPABILITIES,
     timelineOrder: () => null,
     blueskyNextRkey: vi.fn(async () => `3krkey${String(++n).padStart(7, '0')}`),
@@ -99,9 +100,10 @@ function fakeBluesky() {
       if (!cids.has(bytes)) cids.set(bytes, `bafkblob${++blobs}`)
       return { $type: 'blob' as const, ref: { $link: cids.get(bytes)! }, mimeType: b.type || 'image/jpeg', size: b.size }
     }),
-    blueskyCreatePost: vi.fn(async (record: BlueskyPostRecord, rkey: string) => {
+    blueskyCreatePost: vi.fn(async (record: BlueskyPostRecord, rkey: string, g?: BlueskyGates | null) => {
       if (records.has(rkey)) throw new CaribouError('server_error', 'Internal Server Error', { status: 500 })
       records.set(rkey, record)
+      if (g) gates.set(rkey, g)
       if (loseNext.value) {
         loseNext.value = false
         throw new CaribouError('unreachable', 'timeout')
@@ -112,11 +114,15 @@ function fakeBluesky() {
       const value = records.get(rkey)
       return value ? { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafynew', value } : null
     }),
+    // The gate records at the rkey (#199): what the create was sent with.
+    blueskyGetOwnGates: vi.fn(async (rkey: string): Promise<BlueskyGates> => gates.get(rkey) ?? { replies: null, quotes: true }),
     fetchStatus: vi.fn(async (id: string) => id.includes(DID)
       ? { ...bobPost({}, id), account: { id: DID, acct: 'reader.example.com', username: 'reader', displayName: '' } } as Status
       : bobPost({}, id)),
     fetchInstance: vi.fn(),
     verifyCredentials: vi.fn(() => new Promise(() => {})),
+    // The reader's own lists, for "who can reply" (#199).
+    fetchLists: vi.fn(async () => [{ id: '3kllaaaaaaaa2', title: listTitle, repliesPolicy: 'list', exclusive: false }]),
   }
   const driver: BlueskyDriver = {
     capabilities: BLUESKY_CAPABILITIES as Readonly<Capabilities>,
@@ -1723,5 +1729,178 @@ describe('Bluesky redraft', () => {
     await openRedraft(el)
     const names = [...el.shadowRoot!.querySelectorAll('caribou-menu.labels button, [data-label]')].map((b) => b.textContent?.trim())
     expect(names.join(' ')).toContain('Suggestive')
+  })
+})
+
+describe('Bluesky compose: who can reply, and quotes (#199)', () => {
+  function gates(el: CaribouComposeDialog) {
+    return $(el, 'caribou-bluesky-gates')
+  }
+  function g$<T extends Element = HTMLElement>(el: CaribouComposeDialog, sel: string): T | null {
+    return gates(el)!.shadowRoot!.querySelector<T>(sel)
+  }
+  async function click(el: CaribouComposeDialog, sel: string) {
+    g$(el, sel)!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    await settle(el)
+  }
+  async function openPanel(el: CaribouComposeDialog) {
+    await click(el, '[data-action="gates"]')
+    expect(g$(el, '[data-gates-panel]')).not.toBeNull()
+  }
+
+  it('G2, G6: a new post says the default in plain words and sends no limits', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    expect(g$(el, '[data-gates-text]')!.textContent).toBe('Everyone can reply. Quotes are on.')
+    expect(g$(el, '[data-action="gates"]')!.getAttribute('aria-expanded')).toBe('false')
+    await type(el, 'hello')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost.mock.calls[0]).toHaveLength(2)
+  })
+
+  it('G3, G5, G6: rules and a list, quotes off: said in words, kept in the draft, sent with the post', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'hello')
+    await openPanel(el)
+    await click(el, '[data-gates="follower"]')
+    await click(el, '[data-gates="mention"]')
+    const select = g$<HTMLSelectElement>(el, '[data-gates-list-select]')!
+    expect([...select.options].map((o) => o.textContent)).toEqual(['no list', 'Friends'])
+    select.value = '3kllaaaaaaaa2'
+    select.dispatchEvent(new Event('change'))
+    await settle(el)
+    await click(el, '[data-gates="quotes"]')
+    expect(g$(el, '[data-gates-text]')!.textContent)
+      .toBe('Only people you mention, your followers and people on Friends can reply. Quotes are off.')
+    // The draft keeps it (a reload keeps it).
+    expect(loadDraft(KEY, 'new')!.bluesky!.gates).toEqual({
+      replies: [{ kind: 'mention' }, { kind: 'follower' }, { kind: 'list', id: '3kllaaaaaaaa2', title: 'Friends' }], quotes: false,
+    })
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).toHaveBeenCalledOnce()
+    expect(pds.client.blueskyCreatePost.mock.calls[0]![2]).toEqual({
+      replies: [{ kind: 'mention' }, { kind: 'follower' }, { kind: 'list', id: '3kllaaaaaaaa2' }], quotes: false,
+    })
+  })
+
+  it('G5: nobody, then everyone again', async () => {
+    signInBluesky()
+    const el = await mount()
+    await open(el)
+    await openPanel(el)
+    await click(el, '[data-gates="nobody"]')
+    expect(g$(el, '[data-gates-text]')!.textContent).toBe('Nobody can reply. Quotes are on.')
+    await click(el, '[data-gates="everyone"]')
+    expect(g$(el, '[data-gates-text]')!.textContent).toBe('Everyone can reply. Quotes are on.')
+  })
+
+  it('the lists cannot load: it says so, and the other rules still work', async () => {
+    const pds = signInBluesky()
+    pds.client.fetchLists.mockRejectedValue(new CaribouError('unreachable', 'offline'))
+    const el = await mount()
+    await open(el)
+    await openPanel(el)
+    expect(g$(el, '[data-gates-lists-status]')!.textContent).toBe('Could not load your lists.')
+    expect(g$(el, '[data-gates-list-select]')).toBeNull()
+    await click(el, '[data-gates="following"]')
+    expect(g$(el, '[data-gates-text]')!.textContent).toBe('Only people you follow can reply. Quotes are on.')
+  })
+
+  it('a reloaded draft shows its stored limit', async () => {
+    signInBluesky()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'kept', bluesky: emptyBlueskyDraft({ rkey: '3krkeykept001', gates: { replies: [], quotes: false } }) }))
+    const el = await mount()
+    await open(el)
+    expect(g$(el, '[data-gates-text]')!.textContent).toBe('Nobody can reply. Quotes are off.')
+  })
+
+  it('a quote has the control; G1: a reply does not, and sends no limits', async () => {
+    const pds = signInBluesky()
+    const el = await mount()
+    await open(el, { quote: bobPost() })
+    expect(gates(el)).not.toBeNull()
+    $(el, 'caribou-button[data-action="cancel"]')!.click()
+    await settle(el)
+    await open(el, { inReplyTo: bobPost() })
+    expect($(el, 'h2')!.textContent).toBe('Reply')
+    expect(gates(el)).toBeNull()
+    await type(el, 'a reply')
+    await submit(el)
+    expect(pds.client.blueskyCreatePost.mock.calls[0]).toHaveLength(2)
+  })
+
+  it('a Mastodon account has no such control', async () => {
+    signInMastodonOffline('alice@example.social')
+    const el = await mount()
+    await open(el)
+    expect(gates(el)).toBeNull()
+  })
+
+  it('review 1 (Codex 2): close, switch to another Bluesky account, open: its own lists, never the old ones', async () => {
+    const OTHER_DID = 'did:plc:other'
+    const a = fakeBluesky(KEY, 'Alice list')
+    const b = fakeBluesky(blueskyUserKey(OTHER_DID), 'Other list')
+    setBlueskyDriver({ ...a.driver, restore: async (session) => (session.did === DID ? a.client : b.client) as unknown as CaribouClient })
+    addUserSession({ network: 'bluesky', userKey: KEY, did: DID, handle: 'reader.example.com', pds: 'https://pds.example.test', account: null, createdAt: 1 } as UserSession)
+    const el = await mount()
+    await open(el)
+    await openPanel(el)
+    const options = () => [...g$<HTMLSelectElement>(el, '[data-gates-list-select]')!.options].map((o) => o.textContent)
+    expect(options()).toEqual(['no list', 'Alice list'])
+    $(el, 'caribou-button[data-action="cancel"]')!.click()
+    await settle(el)
+    addUserSession({ network: 'bluesky', userKey: blueskyUserKey(OTHER_DID), did: OTHER_DID, handle: 'other.example.com', pds: 'https://pds.example.test', account: null, createdAt: 2 } as UserSession)
+    await settle(el)
+    expect(activeUserKey.value).toBe(blueskyUserKey(OTHER_DID))
+    await open(el)
+    // The same element, reset: closed, then the other account's lists.
+    expect(g$(el, '[data-gates-panel]')).toBeNull()
+    await openPanel(el)
+    expect(options()).toEqual(['no list', 'Other list'])
+    expect(b.client.fetchLists).toHaveBeenCalledOnce()
+  })
+
+  it('review 1 (Codex 3): a limit chosen before any text is kept through close and reopen', async () => {
+    signInBluesky()
+    const el = await mount()
+    await open(el)
+    await openPanel(el)
+    await click(el, '[data-gates="nobody"]')
+    $(el, 'caribou-button[data-action="cancel"]')!.click()
+    await settle(el)
+    expect(loadDraft(KEY, 'new')?.bluesky?.gates).toEqual({ replies: [], quotes: true })
+    await open(el)
+    expect(g$(el, '[data-gates-text]')!.textContent).toBe('Nobody can reply. Quotes are on.')
+  })
+
+  it('F1: the list select follows the draft after the reader picked in it (property, not attribute)', async () => {
+    signInBluesky()
+    const el = await mount()
+    await open(el)
+    await type(el, 'x')
+    await openPanel(el)
+    const select = () => g$<HTMLSelectElement>(el, '[data-gates-list-select]')!
+    for (const v of ['3kllaaaaaaaa2', '', '3kllaaaaaaaa2']) {
+      select().value = v
+      select().dispatchEvent(new Event('change'))
+      await settle(el)
+    }
+    await click(el, '[data-gates="everyone"]')
+    expect(select().value).toBe('')
+  })
+
+  it('F2, F3: "Allow quotes" is outside the "Who can reply" group; one live region for the lists', async () => {
+    signInBluesky()
+    const el = await mount()
+    await open(el)
+    const status = g$(el, '[data-gates-lists-status]')!
+    expect(status.getAttribute('role')).toBe('status')
+    await openPanel(el)
+    expect(g$(el, '[data-gates-lists-status]')).toBe(status)
+    expect(g$(el, 'fieldset [data-gates="quotes"]')).toBeNull()
+    expect(g$(el, '[data-gates="quotes"]')).not.toBeNull()
   })
 })

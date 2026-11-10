@@ -11,7 +11,7 @@ import {
 } from '@beatzball/caribou-state'
 import {
   CaribouError, MASTODON_CAPABILITIES, MediaProcessingTimeout, type CaribouClient, type AccountCredentials,
-  type Capabilities, type Status, type StatusSource, type StatusVisibility,
+  type BlueskyGates, type Capabilities, type Status, type StatusSource, type StatusVisibility,
 } from '@beatzball/caribou-mastodon-client'
 import { BlueskyBlobNotFound } from '@beatzball/caribou-bluesky-client'
 import { boxReset } from './_shared-styles.js'
@@ -20,6 +20,7 @@ import './caribou-icon-button.js'
 import { countChars, plainText, replyMentions, replyVisibility } from './_compose-text.js'
 import { draftMediaOf, POLL_EDIT_REFUSED } from './_redraft.js'
 import './caribou-menu.js'
+import './caribou-bluesky-gates.js'
 import { loadBluesky, type BlueskyBrowser } from './_bluesky.js'
 import { fitImage, type FitResult } from './_image-fit.js'
 
@@ -811,6 +812,10 @@ export class CaribouComposeDialog extends LitElement {
     if (!this.editing) saveDraft(this.client.userKey, this.draftKey, this.draft)
   }
 
+  // The dialog's client, for the lists in "who can reply" (#199). A
+  // function: the client itself is not a value a template may hold.
+  private gatesClient = () => this.client
+
   private patchBluesky(patch: Partial<BlueskyDraft>) {
     this.patchDraft({ bluesky: { ...(this.draft.bluesky ?? emptyBlueskyDraft()), ...patch } })
   }
@@ -1431,6 +1436,10 @@ export class CaribouComposeDialog extends LitElement {
               })}
             </ul>` : nothing}
           ${this.activePoll ? this.renderPoll(this.activePoll, busy) : nothing}
+          ${bluesky && !editing && !this.replyTo && !d.bluesky?.reply ? html`
+            <!-- #199: reply and quote limits, for a new post or a quote only. -->
+            <caribou-bluesky-gates .gates=${d.bluesky?.gates} .clientSource=${this.gatesClient} .account=${this.client?.userKey ?? null} ?disabled=${busy}
+              @gates-change=${(e: CustomEvent<BlueskyGates>) => this.patchBluesky({ gates: e.detail })}></caribou-bluesky-gates>` : nothing}
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space
                  clicks it, and the click opens the hidden file input. -->
