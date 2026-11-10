@@ -33,7 +33,6 @@ export class CaribouBlueskyGates extends LitElement {
       color: var(--accent); background: none; border: 1px solid var(--border); border-radius: var(--radius-md);
       cursor: pointer; text-align: start;
     }
-    .toggle:disabled { color: var(--fg-muted); cursor: default; }
     .toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     fieldset {
       margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3);
@@ -46,7 +45,9 @@ export class CaribouBlueskyGates extends LitElement {
     input { margin: 0; accent-color: var(--accent); }
     select { font: inherit; min-block-size: 2.25rem; max-inline-size: 100%; }
     .note { margin: 0; color: var(--fg-muted); font-size: 0.875rem; }
-    .problem { color: var(--danger); }
+    .note:empty { display: none; }
+    .note[data-problem] { color: var(--danger); }
+    .quotes { margin-top: var(--space-1); }
     @media (pointer: coarse) {
       .toggle, label, select { min-block-size: 44px; }
     }
@@ -59,6 +60,12 @@ export class CaribouBlueskyGates extends LitElement {
    * client is not a value a template may hold.
    */
   @property({ attribute: false }) clientSource: () => CaribouClient | null = () => null
+  /**
+   * The dialog's account (its `userKey`). A change resets the panel: the
+   * dialog keeps this element across openings, and the lists are per
+   * account (review 1, Codex 2).
+   */
+  @property({ attribute: false }) account: CaribouClient['userKey'] | null = null
   /** True while a send runs: nothing can change. */
   @property({ type: Boolean }) disabled = false
 
@@ -71,8 +78,8 @@ export class CaribouBlueskyGates extends LitElement {
   override connectedCallback() {
     super.connectedCallback()
     this.dispose = effect(() => {
-      const key = this.clientSource()?.userKey
-      this.lists = key ? listsCache.value.get(key) : undefined
+      const cache = listsCache.value
+      this.lists = this.account ? cache.get(this.account) : undefined
     })
   }
 
@@ -83,12 +90,13 @@ export class CaribouBlueskyGates extends LitElement {
   }
 
   // The account the lists were read for; another account's are not this one's.
-  private listsFor: string | null = null
+  private listsFor: CaribouClient['userKey'] | null = null
 
   override willUpdate() {
-    const key = this.clientSource()?.userKey ?? null
+    const key = this.account
     if (key !== this.listsFor) {
       this.listsFor = key
+      this.open = false
       this.loaded = 'idle'
       this.lists = key ? listsCache.peek().get(key) : undefined
     }
@@ -104,13 +112,14 @@ export class CaribouBlueskyGates extends LitElement {
 
   private async loadLists() {
     const client = this.clientSource()
-    if (!client || this.loaded === 'loading' || this.loaded === 'ready') return
+    const account = this.account
+    if (!client || client.userKey !== account || this.loaded === 'loading' || this.loaded === 'ready') return
     this.loaded = 'loading'
     try {
       await loadLists({ clientSource: () => client })
-      if (client === this.clientSource()) this.loaded = 'ready'
+      if (account === this.account) this.loaded = 'ready'
     } catch {
-      if (client === this.clientSource()) this.loaded = 'error'
+      if (account === this.account) this.loaded = 'error'
     }
   }
 
@@ -131,25 +140,26 @@ export class CaribouBlueskyGates extends LitElement {
     this.emit(toggleBlueskyReplyRule(g, { kind: 'list', id, ...(list ? { title: list.title } : {}) }))
   }
 
+  // What the panel says about the lists, in its one live region (F3).
+  private listsStatus(chosen: Extract<BlueskyReplyRule, { kind: 'list' }> | undefined): string {
+    const lists = this.lists ?? []
+    if (this.loaded === 'error') return 'Could not load your lists.'
+    if (lists.length > 0 || chosen) return ''
+    return this.loaded === 'ready' ? 'You have no lists.' : 'Loading your lists…'
+  }
+
   private renderLists(chosen: Extract<BlueskyReplyRule, { kind: 'list' }> | undefined) {
     const busy = this.disabled
-    if (this.loaded === 'error') {
-      return html`<p class="note problem" data-gates-lists-error role="status">Could not load your lists.</p>`
-    }
     const lists = this.lists ?? []
-    if (this.loaded !== 'ready' && lists.length === 0) {
-      return chosen ? html`<p class="note" data-gates-list>People on ${chosen.title ?? 'your list'}</p>`
-        : html`<p class="note">Loading your lists…</p>`
-    }
-    if (lists.length === 0 && !chosen) return html`<p class="note" data-gates-no-lists>You have no lists.</p>`
+    if (this.loaded === 'error' || (lists.length === 0 && !chosen)) return nothing
     // A chosen list missing from the loaded ones (deleted since) stays
     // shown, so the select never says something the draft does not hold.
     const shown = chosen && !lists.some((l) => l.id === chosen.id)
       ? [...lists, { id: chosen.id, title: chosen.title ?? 'your list' } as List] : lists
     return html`<label>People on
       <select data-gates-list-select ?disabled=${busy} @change=${this.onList}>
-        <option value="" ?selected=${!chosen}>no list</option>
-        ${shown.map((l) => html`<option value=${l.id} ?selected=${chosen?.id === l.id}>${l.title}</option>`)}
+        <option value="" .selected=${!chosen}>no list</option>
+        ${shown.map((l) => html`<option value=${l.id} .selected=${chosen?.id === l.id}>${l.title}</option>`)}
       </select></label>`
   }
 
@@ -167,7 +177,8 @@ export class CaribouBlueskyGates extends LitElement {
         <span data-gates-text>${text}</span>
       </button>
       ${this.open ? html`
-      <fieldset id="gates-panel" data-gates-panel ?disabled=${busy}>
+      <div id="gates-panel" data-gates-panel>
+      <fieldset ?disabled=${busy}>
         <legend>Who can reply</legend>
         <div class="group">
           <label><input type="radio" name="gates-who" data-gates="everyone" .checked=${replies === null}
@@ -182,9 +193,13 @@ export class CaribouBlueskyGates extends LitElement {
             @change=${() => this.emit(toggleBlueskyReplyRule(g, { kind: r.kind }))}>${r.label}</label>`)}
           ${this.renderLists(chosenList)}
         </div>
-        <label><input type="checkbox" data-gates="quotes" .checked=${g.quotes}
-          @change=${(e: Event) => this.emit(setBlueskyQuotes(g, (e.target as HTMLInputElement).checked))}>Allow quotes</label>
-      </fieldset>` : nothing}
+      </fieldset>
+      <!-- Not in the "Who can reply" group (F2). -->
+      <label class="quotes"><input type="checkbox" data-gates="quotes" .checked=${g.quotes} ?disabled=${busy}
+        @change=${(e: Event) => this.emit(setBlueskyQuotes(g, (e.target as HTMLInputElement).checked))}>Allow quotes</label>
+      </div>` : nothing}
+      <!-- One live region, there from the start, so a change is read out (F3). -->
+      <p class="note" ?data-problem=${this.loaded === 'error'} role="status" data-gates-lists-status>${this.open ? this.listsStatus(chosenList) : ''}</p>
     </div>`
   }
 }

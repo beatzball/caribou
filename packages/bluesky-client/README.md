@@ -899,6 +899,7 @@ never fails a post.
 | `blueskyUploadBlob(file)` | `com.atproto.repo.uploadBlob`, `encoding` = the file's type | the blob ref as JSON: `{ $type: 'blob', ref: { $link }, mimeType, size }` |
 | `blueskyCreatePost(record, rkey)` | `com.atproto.repo.createRecord` on the reader's repo, collection `app.bsky.feed.post`, that `rkey` | `{ uri, cid }` |
 | `blueskyCreatePost(record, rkey, gates)` | with limits (#199): one `com.atproto.repo.applyWrites` on the reader's repo: create the post, then the thread gate, then the post gate, all at that `rkey` | the post's `{ uri, cid }` |
+| `blueskyGetOwnGates(rkey)` | `com.atproto.repo.getRecord` of `app.bsky.feed.threadgate` and `app.bsky.feed.postgate` at that `rkey`, on the PDS (#199) | `BlueskyGates`: no thread gate is `replies: null`, a post gate with `#disableRule` is `quotes: false`. `RecordNotFound` is "no record"; any other error throws. A list in the reader's repo is read back by its id; another repo's list or an unknown rule keeps its raw value, so it never equals a sent limit |
 | `blueskyGetOwnPost(rkey)` | `com.atproto.repo.getRecord` on the reader's repo, on the PDS (the agent's own host, not the AppView, which can lag) | `{ uri, cid, value }`, or `null` for `RecordNotFound` |
 
 **Reply and quote limits (#199).** `gates` is `BlueskyGates` (rules in

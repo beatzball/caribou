@@ -55,3 +55,35 @@ export function gatedPostWrites(
   }
   return out
 }
+
+/**
+ * The limits a post has, from its thread gate and post gate records (`null`
+ * when absent). A list rule names a list by its id only when the list is in
+ * the reader's repo; any other list, or a rule this code does not know, is
+ * kept as a list rule with the raw value as its id, so it never equals a
+ * limit the composer sent (README, "Compose").
+ */
+export function readGates(did: string, threadgate: unknown, postgate: unknown): BlueskyGates {
+  let replies: BlueskyReplyRule[] | null = null
+  const allow = (threadgate as { allow?: unknown } | null)?.allow
+  if (threadgate && Array.isArray(allow)) {
+    const ownList = `at://${did}/app.bsky.graph.list/`
+    replies = allow.map((r): BlueskyReplyRule => {
+      const rule = r as { $type?: unknown; list?: unknown }
+      switch (rule.$type) {
+        case `${THREADGATE}#mentionRule`: return { kind: 'mention' }
+        case `${THREADGATE}#followingRule`: return { kind: 'following' }
+        case `${THREADGATE}#followerRule`: return { kind: 'follower' }
+        case `${THREADGATE}#listRule`: {
+          const uri = String(rule.list)
+          const id = uri.startsWith(ownList) ? uri.slice(ownList.length) : ''
+          return { kind: 'list', id: id && !id.includes('/') ? id : uri }
+        }
+        default: return { kind: 'list', id: `unknown:${String(rule.$type)}` }
+      }
+    })
+  }
+  const rules = (postgate as { embeddingRules?: unknown } | null)?.embeddingRules
+  const quotes = !(Array.isArray(rules) && rules.some((r) => (r as { $type?: unknown }).$type === `${POSTGATE}#disableRule`))
+  return { replies, quotes }
+}

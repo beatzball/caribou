@@ -131,6 +131,11 @@ export interface CaribouClient {
   blueskyCreatePost?(record: BlueskyPostRecord, rkey: string, gates?: BlueskyGates | null): Promise<BlueskyStrongRef>
   /** `getRecord` on the reader's own PDS for that key, or null when there is none. */
   blueskyGetOwnPost?(rkey: string): Promise<BlueskyOwnPost | null>
+  /**
+   * The limits the reader's post at that key has: its thread gate and post
+   * gate records on the PDS (#199). No records is `{ replies: null, quotes: true }`.
+   */
+  blueskyGetOwnGates?(rkey: string): Promise<BlueskyGates>
   /** `deleteRecord` of the reader's own post (#190). Refuses any other URI. */
   blueskyDeletePost?(uri: string): Promise<void>
   /** The bytes of a blob in the reader's own repo (`com.atproto.sync.getBlob`), for a redraft. */

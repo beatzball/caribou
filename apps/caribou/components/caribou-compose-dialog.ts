@@ -1438,7 +1438,7 @@ export class CaribouComposeDialog extends LitElement {
           ${this.activePoll ? this.renderPoll(this.activePoll, busy) : nothing}
           ${bluesky && !editing && !this.replyTo && !d.bluesky?.reply ? html`
             <!-- #199: reply and quote limits, for a new post or a quote only. -->
-            <caribou-bluesky-gates .gates=${d.bluesky?.gates} .clientSource=${this.gatesClient} ?disabled=${busy}
+            <caribou-bluesky-gates .gates=${d.bluesky?.gates} .clientSource=${this.gatesClient} .account=${this.client?.userKey ?? null} ?disabled=${busy}
               @gates-change=${(e: CustomEvent<BlueskyGates>) => this.patchBluesky({ gates: e.detail })}></caribou-bluesky-gates>` : nothing}
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space

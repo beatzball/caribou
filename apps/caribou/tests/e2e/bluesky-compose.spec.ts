@@ -20,6 +20,8 @@ interface Pds {
   failNextGet: boolean
   /** Each `applyWrites` call's writes (#199). */
   applies: { collection: string; rkey: string; value: Record<string, unknown> }[][]
+  /** Gate records by `<collection>/<rkey>`. */
+  gates: Map<string, Record<string, unknown>>
 }
 
 // One of the reader's curate lists, for "who can reply" (#199).
@@ -28,7 +30,7 @@ const LIST_RKEY = '3kllaaaaaaaa2'
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }
 
 async function fixturePds(page: Page): Promise<Pds> {
-  const pds: Pds = { creates: [], gets: [], records: new Map(), loseNextAnswer: false, failNextGet: false, applies: [] }
+  const pds: Pds = { creates: [], gets: [], records: new Map(), loseNextAnswer: false, failNextGet: false, applies: [], gates: new Map() }
   const json = (body: unknown, status = 200) => ({ status, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify(body) })
   // Registered after the auth fixture, so these answer first.
   await page.route(`${PDS}/xrpc/**`, async (route) => {
@@ -51,8 +53,14 @@ async function fixturePds(page: Page): Promise<Pds> {
       const body = req.postDataJSON() as { repo: string; writes: { collection: string; rkey: string; value: Record<string, unknown> }[] }
       pds.applies.push(body.writes)
       // One commit: every write lands, or none.
-      const post = body.writes.find((w) => w.collection === 'app.bsky.feed.post')!
-      pds.records.set(post.rkey, post.value)
+      for (const w of body.writes) {
+        if (w.collection === 'app.bsky.feed.post') pds.records.set(w.rkey, w.value)
+        else pds.gates.set(`${w.collection}/${w.rkey}`, w.value)
+      }
+      if (pds.loseNextAnswer) {
+        pds.loseNextAnswer = false
+        return route.abort('timedout')
+      }
       return route.fulfill(json({
         commit: { cid: CID, rev: '3krev' },
         results: body.writes.map((w) => ({ $type: 'com.atproto.repo.applyWrites#createResult', uri: `at://${body.repo}/${w.collection}/${w.rkey}`, cid: CID })),
@@ -63,6 +71,13 @@ async function fixturePds(page: Page): Promise<Pds> {
         uri: `at://${ALICE}/app.bsky.graph.list/${LIST_RKEY}`, cid: CID,
         value: { $type: 'app.bsky.graph.list', purpose: 'app.bsky.graph.defs#curatelist', name: 'Friends', createdAt: '2026-11-01T00:00:00.000Z' },
       }] }))
+    }
+    if (method === 'com.atproto.repo.getRecord' && url.searchParams.get('collection') !== 'app.bsky.feed.post') {
+      const key = `${url.searchParams.get('collection')}/${url.searchParams.get('rkey')}`
+      const value = pds.gates.get(key)
+      return route.fulfill(value
+        ? json({ uri: `at://${ALICE}/${key}`, cid: CID, value })
+        : json({ error: 'RecordNotFound', message: 'Could not locate record' }, 400))
     }
     if (method === 'com.atproto.repo.getRecord') {
       const rkey = url.searchParams.get('rkey') ?? ''
@@ -208,5 +223,40 @@ test.describe('Bluesky compose', () => {
       post, allow: [{ $type: 'app.bsky.feed.threadgate#followerRule' }, { $type: 'app.bsky.feed.threadgate#listRule', list: `at://${ALICE}/app.bsky.graph.list/${LIST_RKEY}` }],
     })
     expect(writes[2]!.value).toMatchObject({ post, embeddingRules: [{ $type: 'app.bsky.feed.postgate#disableRule' }] })
+  })
+
+  test('the list select follows the choice after picking in it (review 1, F1)', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    await fixturePds(page)
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    await dialog.getByRole('textbox', { name: 'Post text' }).fill('x')
+    await dialog.getByRole('button', { name: 'Everyone can reply. Quotes are on.' }).click()
+    const select = dialog.getByRole('combobox', { name: 'People on' })
+    await select.selectOption({ label: 'Friends' })
+    await select.selectOption({ label: 'no list' })
+    await select.selectOption({ label: 'Friends' })
+    await dialog.getByRole('radio', { name: 'Everyone' }).check()
+    await expect(dialog.getByRole('button', { name: 'Everyone can reply. Quotes are on.' })).toBeVisible()
+    await expect(select).toHaveValue('')
+  })
+
+  test('limits survive a lost answer: the check reads the gate records too (review 1)', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    const pds = await fixturePds(page)
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    await dialog.getByRole('textbox', { name: 'Post text' }).fill('gated, checked')
+    await dialog.getByRole('button', { name: 'Everyone can reply. Quotes are on.' }).click()
+    await dialog.getByRole('radio', { name: 'Nobody' }).check()
+    pds.loseNextAnswer = true
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    // The check finds the post and its thread gate as sent: posted, once.
+    await expect(dialog).toBeHidden()
+    expect(pds.applies).toHaveLength(1)
+    expect(pds.gates.size).toBe(1)
+    expect(pds.gets).toHaveLength(1)
   })
 })

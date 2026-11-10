@@ -640,6 +640,17 @@ unchanged frozen record sends the frozen limits (R2). A limit changed after
 a send in doubt is an edit: when the earlier post is found, the result is
 `earlier-posted` and the new choice stays in the draft.
 
+The post record alone cannot say which limits landed: a retry that
+changed only the limits re-freezes on the same rkey, and the earlier
+write may still land first. So when the **check** finds the post (R1, R2),
+and its content and input match, the send also reads the gate records at
+that rkey (`blueskyGetOwnGates`) and compares them with `sent.gates`
+(`sameBlueskyGates`: the same rules in order, no titles; no records is no
+limit). Same: `posted`. Different: `earlier-posted`, and the reader's
+current choice stays with a new rkey. A failed gate read is "the check
+failed": nothing more is sent and the send stays pending. A send answered
+by its own create needs no read: that answer is for the limits it sent.
+
 **G5. Who can reply.** `replies` is `null` (everyone), `[]` (nobody), or
 some of: people you mention (`mention`), people you follow (`following`),
 your followers (`follower`), and one of your own lists (`list`, its id; the client makes the URI in the reader's repo, so no other list can be named).
@@ -652,12 +663,24 @@ can reply." / "Nobody can reply." / "Only people you mention, people you
 follow, your followers and people on Friends can reply.", then "Quotes are
 on." or "Quotes are off."
 
+**G7. A limit alone is draft content.** `isDraftEmpty` is false for a
+draft whose limit is not the default, so a limit chosen before any text
+is kept through a close or a reload. The default alone is still empty.
+
+**G8. The panel belongs to one account.** The dialog keeps its panel
+across openings and passes it the account (`account`). A new account
+closes the panel and forgets its lists; they load again for that account
+on the next open. A list from another account is never offered.
+
 Tests (`bluesky-gates.test.ts`, `bluesky-compose.test.ts`): each rule's
 record shape, the order, nobody, the plain words, a reply never sends
 limits (G1), the default sends `createRecord` and keeps the old input (G2),
 a limit sends one `applyWrites` call with one rkey (G3), a lost answer then
-a retry is one post with its limits, and a limit changed after a lost
-answer is `earlier-posted` (G4).
+a retry is one post with its limits, a limit changed after a lost
+answer is `earlier-posted`, and (review 1) a pending send with no limits,
+then only the limits changed, the check absent, the first write landing
+before the retry, is `earlier-posted` with the new limits kept; a failed
+gate read stays pending (G4); a limit alone is kept (G7).
 
 ## Bluesky delete and redraft (#190)
 
@@ -869,7 +892,7 @@ not stored there: the reader has those files.
 | `langs` | `language` = the first one; the others are not kept (compose sends one) |
 | a video, an external link card | not kept. The link's URL stays only if it is in the text. |
 | `tags` | not kept |
-| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again |
+| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again (#262) |
 | `createdAt` | not kept: a new post gets a new time |
 
 ## Lists (`lists.ts`; Mastodon #51, Bluesky #195)

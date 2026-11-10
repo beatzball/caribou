@@ -3,6 +3,7 @@ import type {
   BlueskyBlobRef, BlueskyGates, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, MediaAttachmentType, Status, StatusVisibility,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
+import { hasBlueskyGates } from './bluesky-gates.js'
 
 export interface DraftMedia {
   id: string
@@ -155,8 +156,10 @@ export function isDraftEmpty(d: ComposeDraft): boolean {
     && !(d.poll?.options.some((o) => o.trim() !== '') ?? false)
     // A Bluesky draft that can be posted is never empty: images or a quote
     // alone can be posted, and a send whose outcome is not known yet is kept
-    // whatever it holds (README, "Bluesky drafts").
+    // whatever it holds (README, "Bluesky drafts"). A reply or quote limit
+    // other than the default is the reader's choice, kept too (G7, #199).
     && (d.bluesky?.images.length ?? 0) === 0 && !d.bluesky?.quote && !d.bluesky?.sent
+    && !hasBlueskyGates(d.bluesky?.gates)
 }
 
 /** The options a poll sends: the filled ones, trimmed. */

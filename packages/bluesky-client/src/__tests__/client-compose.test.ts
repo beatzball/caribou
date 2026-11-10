@@ -160,6 +160,67 @@ describe('blueskyCreatePost with reply and quote limits (#199)', () => {
   })
 })
 
+describe('blueskyGetOwnGates (#199)', () => {
+  const RKEY = '3kabcdefghij2'
+  function records(threadgate: unknown, postgate: unknown) {
+    return async ({ collection }: { collection: string }) => {
+      const value = collection === 'app.bsky.feed.threadgate' ? threadgate : collection === 'app.bsky.feed.postgate' ? postgate : undefined
+      if (value === undefined) throw xrpcError(400, 'RecordNotFound', 'Could not locate record')
+      return { data: { uri: `at://did:plc:reader/${collection}/${RKEY}`, cid: 'bafy', value } }
+    }
+  }
+
+  it('no gate records: everyone, quotes on', async () => {
+    const { client, repo } = setup()
+    repo.getRecord.mockImplementation(records(undefined, undefined))
+    expect(await client.blueskyGetOwnGates!(RKEY)).toEqual({ replies: null, quotes: true })
+    expect(repo.getRecord).toHaveBeenCalledWith({ repo: 'did:plc:reader', collection: 'app.bsky.feed.threadgate', rkey: RKEY })
+    expect(repo.getRecord).toHaveBeenCalledWith({ repo: 'did:plc:reader', collection: 'app.bsky.feed.postgate', rkey: RKEY })
+  })
+
+  it('reads every rule back as it was sent, an own list by its id; quotes off', async () => {
+    const { client, repo } = setup()
+    repo.getRecord.mockImplementation(records({
+      $type: 'app.bsky.feed.threadgate', post: 'x', createdAt: 't',
+      allow: [
+        { $type: 'app.bsky.feed.threadgate#mentionRule' }, { $type: 'app.bsky.feed.threadgate#followingRule' },
+        { $type: 'app.bsky.feed.threadgate#followerRule' },
+        { $type: 'app.bsky.feed.threadgate#listRule', list: 'at://did:plc:reader/app.bsky.graph.list/3kllaaaaaaaa2' },
+      ],
+    }, { $type: 'app.bsky.feed.postgate', post: 'x', createdAt: 't', embeddingRules: [{ $type: 'app.bsky.feed.postgate#disableRule' }] }))
+    expect(await client.blueskyGetOwnGates!(RKEY)).toEqual({
+      replies: [{ kind: 'mention' }, { kind: 'following' }, { kind: 'follower' }, { kind: 'list', id: '3kllaaaaaaaa2' }],
+      quotes: false,
+    })
+  })
+
+  it('nobody is allow: []; a thread gate with no allow is everyone', async () => {
+    const { client, repo } = setup()
+    repo.getRecord.mockImplementation(records({ allow: [] }, undefined))
+    expect(await client.blueskyGetOwnGates!(RKEY)).toEqual({ replies: [], quotes: true })
+    repo.getRecord.mockImplementation(records({ post: 'x' }, { embeddingRules: [] }))
+    expect(await client.blueskyGetOwnGates!(RKEY)).toEqual({ replies: null, quotes: true })
+  })
+
+  it('another repo\'s list and an unknown rule never read as a sent rule', async () => {
+    const { client, repo } = setup()
+    repo.getRecord.mockImplementation(records({ allow: [
+      { $type: 'app.bsky.feed.threadgate#listRule', list: 'at://did:plc:bob/app.bsky.graph.list/3kllaaaaaaaa2' },
+      { $type: 'app.bsky.feed.threadgate#newRule' },
+    ] }, undefined))
+    expect(await client.blueskyGetOwnGates!(RKEY)).toEqual({ replies: [
+      { kind: 'list', id: 'at://did:plc:bob/app.bsky.graph.list/3kllaaaaaaaa2' },
+      { kind: 'list', id: 'unknown:app.bsky.feed.threadgate#newRule' },
+    ], quotes: true })
+  })
+
+  it('a failed read throws: never read as "no limits"', async () => {
+    const { client, repo } = setup()
+    repo.getRecord.mockRejectedValue(xrpcError(502, 'UpstreamFailure'))
+    await expect(client.blueskyGetOwnGates!(RKEY)).rejects.toMatchObject({ code: 'server_error' })
+  })
+})
+
 describe('blueskyGetOwnPost', () => {
   it('reads the record from the reader repo on the PDS', async () => {
     const { client, repo } = setup()

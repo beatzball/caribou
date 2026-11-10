@@ -7,7 +7,7 @@ import {
   draftRev, loadDraft, storeDraftIf,
   type BlueskyDraft, type BlueskySentRecord, type ComposeDraft, type DraftSlot, type PostedDetail,
 } from './compose.js'
-import { blueskySentGates } from './bluesky-gates.js'
+import { blueskySentGates, sameBlueskyGates } from './bluesky-gates.js'
 import { activeUserKey } from './users.js'
 
 /**
@@ -188,6 +188,9 @@ export async function postBlueskyDraft(
   const b = draft.bluesky ?? emptyBlueskyDraft()
   const input = blueskyDraftInput(draft)
   // R4: the revision this send owns. Every write is conditional on it.
+  // R6: the draft has carried its rkey since it was made.
+  if (!b.rkey) throw new TypeError('A Bluesky draft has its rkey from the start (README, R6)')
+  const rkey = b.rkey
   let rev = draftRev(userKey, slot)
   const stillOwned = () => {
     if (draftRev(userKey, slot) !== rev) throw new DraftChanged()
@@ -199,9 +202,15 @@ export async function postBlueskyDraft(
     return true
   }
   // The found record decides (R1). Edits, or another record, keep the
-  // reader's current draft with a new rkey.
-  const settle = async (found: { uri: string; value: BlueskyPostRecord }, sent: BlueskySentRecord): Promise<BlueskyPostOutcome> => {
-    if (sameContent(found.value, sent.record) && input === sent.input) {
+  // reader's current draft with a new rkey. `checked`: found by the check,
+  // not answered by this send's own create. Then the gate records are read
+  // too (G4): an earlier send on this rkey may have had other limits, and
+  // the post record alone cannot tell. A failed read throws: still pending.
+  const settle = async (
+    found: { uri: string; value: BlueskyPostRecord }, sent: BlueskySentRecord, checked: boolean,
+  ): Promise<BlueskyPostOutcome> => {
+    if (sameContent(found.value, sent.record) && input === sent.input
+      && (!checked || sameBlueskyGates(await need(client, 'blueskyGetOwnGates')(rkey), sent.gates))) {
       write(null)
       return posted(client, found.uri, opts)
     }
@@ -211,15 +220,12 @@ export async function postBlueskyDraft(
     return { kind: 'earlier-posted', uri: found.uri, draft: kept }
   }
 
-  // R6: the draft has carried its rkey since it was made.
-  if (!b.rkey) throw new TypeError('A Bluesky draft has its rkey from the start (README, R6)')
-  const rkey = b.rkey
 
   // R2: a pending send is checked first. A failed check throws: nothing sent.
   let reuse: BlueskySentRecord | null = null
   if (b.sent) {
     const found = await getOwnPost(rkey)
-    if (found) return settle(found, b.sent)
+    if (found) return settle(found, b.sent, true)
     stillOwned()
     // Absent: the rkey is unused. Unchanged, the frozen record goes again
     // as it is; edited, the current draft is frozen on the same rkey.
@@ -256,13 +262,20 @@ export async function postBlueskyDraft(
     } catch {
       throw err
     }
-    if (found) return settle(found, sent)
+    if (found) {
+      try {
+        return await settle(found, sent, true)
+      } catch {
+        // The gate read failed: unknown, still pending (R1).
+        throw err
+      }
+    }
     // Absent: the rkey is unused. Unfreeze, keeping the current draft.
     write(unfrozen)
     opts.onDraft?.(unfrozen)
     throw err
   }
-  return settle({ uri: ref.uri, value: sent.record }, sent)
+  return settle({ uri: ref.uri, value: sent.record }, sent, false)
 }
 
 async function posted(client: CaribouClient, uri: string, opts: PostBlueskyOptions): Promise<BlueskyPostOutcome> {

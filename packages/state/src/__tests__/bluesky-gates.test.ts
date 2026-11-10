@@ -101,3 +101,18 @@ describe('G1, G2: what is sent', () => {
     expect(blueskyDraftInput(a)).toBe(blueskyDraftInput(b))
   })
 })
+
+describe('G7: a limit alone is draft content (review 1)', () => {
+  it('a draft with only a limit is kept; the default alone is empty', async () => {
+    const { isDraftEmpty, saveDraft, loadDraft } = await import('../compose.js')
+    const KEY = 'did:plc:reader@bsky' as never
+    const limited = emptyDraft({ bluesky: emptyBlueskyDraft({ rkey: '3krkey0000001', gates: { replies: [], quotes: false } }) })
+    expect(isDraftEmpty(limited)).toBe(false)
+    saveDraft(KEY, 'new', limited)
+    expect(loadDraft(KEY, 'new')?.bluesky?.gates).toEqual({ replies: [], quotes: false })
+    const quotesOnly = emptyDraft({ bluesky: emptyBlueskyDraft({ gates: { replies: null, quotes: false } }) })
+    expect(isDraftEmpty(quotesOnly)).toBe(false)
+    const plain = emptyDraft({ bluesky: emptyBlueskyDraft({ gates: { replies: null, quotes: true } }) })
+    expect(isDraftEmpty(plain)).toBe(true)
+  })
+})
