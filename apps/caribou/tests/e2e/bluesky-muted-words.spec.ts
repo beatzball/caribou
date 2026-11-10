@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from '@playwright/test'
-import { installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+import { installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
 
 // Bluesky muted words (#196; app README, "Bluesky muted words"). The
 // filters screen lists and edits them; a write changes only the muted-words
@@ -61,7 +61,7 @@ async function signIn(page: Page, origin: string) {
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill('alice.example.com')
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL(`${origin}/home`)
+  await waitForSignedInHome(page, origin)
 }
 
 // An in-app move, as a link click makes it: no page load.

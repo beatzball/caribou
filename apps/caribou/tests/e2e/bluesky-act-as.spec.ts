@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALICE, BOB, installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+import { ALICE, BOB, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
 
 // "Act as another account" (#197; app README, "Act as another account").
 // Two Bluesky accounts sign in through the real SDK. Bob is active; the
@@ -62,7 +62,7 @@ async function signIn(page: Page, origin: string, handle: string, path: string) 
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill(handle)
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL(`${origin}/home`)
+  await waitForSignedInHome(page, origin)
   await page.waitForLoadState('networkidle')
 }
 
