@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from './_fixtures.js'
 import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 import { startAppViewStub, type AppViewStub } from './_appview-stub.js'
+import { routeHlsFixture } from './_hls-fixture.js'
 import {
   HANA_SECRETS, NORA_SECRETS, PARTIAL_SECRETS,
 } from '../../../../packages/bluesky-client/src/__fixtures__/ssr-appview.js'
@@ -312,6 +313,75 @@ test.describe('hydration, signed out', () => {
     await page.goto(`${base}/@did:plc:alice/3kalicefocus`)
     await settled(page)
     await expect(page).toHaveURL(`${base}/@alice.example.com/3kalicefocus`)
+  })
+})
+
+type VideoWindow = { __videoMarkup(el: Element): string; __serverVideo?: string }
+
+test.describe('a server-painted video (#261)', () => {
+  const PATH = '/@alice.example.com/3kalicevideo'
+
+  test('rule 2: the poster hydrates in place, equals the first client render, and plays by keyboard', async ({ page }) => {
+    const errors = collectErrors(page)
+    const served = await routeHlsFixture(page)
+    // Every `a.poster` the server sent must be the same node when the page
+    // is swapped (a second render would make new ones).
+    await watchServerPage(page, 'a.poster')
+    await page.addInitScript(() => {
+      const w = window as unknown as VideoWindow
+      // The video's shadow root as tags, sorted attributes and text. Lit's
+      // comment markers and the <style> are left out: only the server writes
+      // them (the client adopts its styles).
+      w.__videoMarkup = (el) => {
+        const walk = (n: Node): string => n.nodeType === Node.TEXT_NODE ? (n.textContent ?? '').replace(/\s+/g, ' ')
+          : !(n instanceof Element) || n.localName === 'style' ? ''
+          : `<${n.localName}${[...n.attributes].map((a) => ` ${a.name}="${a.value}"`).sort().join('')}>`
+            + `${[...n.childNodes].map(walk).join('')}</${n.localName}>`
+        return [...el.shadowRoot!.childNodes].map(walk).join('').trim()
+      }
+      const find = (root: ParentNode): Element | null => {
+        const hit = root.querySelector('caribou-bluesky-video')
+        if (hit) return hit
+        for (const el of root.querySelectorAll('*')) {
+          const inner = el.shadowRoot && find(el.shadowRoot)
+          if (inner) return inner
+        }
+        return null
+      }
+      // `interactive` comes before any module script: the markup is what
+      // the server sent.
+      document.addEventListener('readystatechange', () => {
+        if (document.readyState !== 'interactive') return
+        const el = find(document)
+        if (el?.shadowRoot) w.__serverVideo = w.__videoMarkup(el)
+      })
+    })
+
+    await page.goto(`${base}${PATH}`)
+    await settled(page)
+
+    const report = await serverPageReport(page)
+    expect(report).toEqual({ sent: 1, atSwap: 1, sameNodes: true, deferred: [] })
+    // The live page is the client's own render of the same post (README,
+    // "A page mounts twice"): it must equal what the server sent.
+    const sent = await page.evaluate(() => (window as unknown as VideoWindow).__serverVideo)
+    const player = livePage(page).locator('caribou-bluesky-video')
+    const client = await player.evaluate((el) => (window as unknown as VideoWindow).__videoMarkup(el))
+    expect(client).toBe(sent)
+    expect(sent).toContain('aria-label="Play video: A caribou running"')
+    // Rule 1: the thumbnail only, until the press.
+    expect(served.filter((f) => f !== 'thumbnail.jpg')).toEqual([])
+
+    // By keyboard (rules 2 and 12): Enter on the poster plays in place.
+    const play = player.getByRole('link', { name: 'Play video: A caribou running' })
+    await play.focus()
+    await page.keyboard.press('Enter')
+    const video = player.locator('video')
+    await expect(video).toBeFocused()
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 15_000 })
+      .toBeGreaterThan(0.5)
+    expect(page.url()).toBe(`${base}${PATH}`)
+    expect(errors).toEqual([])
   })
 })
 

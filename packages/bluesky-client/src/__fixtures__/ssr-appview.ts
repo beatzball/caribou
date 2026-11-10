@@ -231,6 +231,22 @@ export const adultFocus = post(alice, 'alice adult post', {
 })
 export const adultThread = { thread: node(adultFocus) }
 
+/**
+ * A thread whose focused post has a video (#261). The e2e test serves the
+ * playlist from `apps/caribou/tests/e2e/fixtures/hls/`.
+ */
+export const videoFocus = post(alice, 'alice video post', {
+  rkey: '3kalicevideo',
+  embed: {
+    $type: 'app.bsky.embed.video#view',
+    cid: 'bafkvideo',
+    playlist: 'https://video.bsky.app/watch/did%3Aplc%3Aalice/bafkvideo/playlist.m3u8',
+    thumbnail: 'https://video.bsky.app/watch/did%3Aplc%3Aalice/bafkvideo/thumbnail.jpg',
+    alt: 'A caribou running',
+    aspectRatio: { width: 16, height: 9 },
+  },
+})
+
 /** A post with a label value Bluesky's labeler did not define here: covered whatever loads (fail closed). */
 export const customLabelFocus = post(alice, 'alice custom label post', {
   rkey: '3kalicecustom',
@@ -259,6 +275,7 @@ export const threads: Record<string, unknown> = {
   [hanaFocus.uri]: hanaThread,
   [adultFocus.uri]: adultThread,
   [customLabelFocus.uri]: { thread: node(customLabelFocus) },
+  [videoFocus.uri]: { thread: node(videoFocus) },
 }
 
 /** A handle the fixture AppView fails on with a 500. */
