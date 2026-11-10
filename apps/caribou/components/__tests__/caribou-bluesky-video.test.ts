@@ -21,6 +21,22 @@ const hls = vi.hoisted(() => {
 vi.mock('../_hls-loader.js', () => ({ loadHls: hls.load }))
 
 import '../caribou-bluesky-video.js'
+
+// No network in this file. happy-dom follows a link whose click was not
+// prevented: it opens the page and runs its scripts. The poster is a real
+// link to bsky.app (rule 2), so two guards: happy-dom's own navigation is
+// off, and every click that reaches the document is prevented, after the
+// player's handler and the test's own checks have seen it.
+const happyDom = (window as unknown as { happyDOM?: { settings?: {
+  navigation: Record<string, boolean>; disableJavaScriptFileLoading: boolean
+} } }).happyDOM
+if (happyDom?.settings) {
+  Object.assign(happyDom.settings.navigation, {
+    disableMainFrameNavigation: true, disableChildFrameNavigation: true, disableChildPageNavigation: true,
+  })
+  happyDom.settings.disableJavaScriptFileLoading = true
+}
+const noNavigation = (e: Event) => e.preventDefault()
 import type { CaribouBlueskyVideo } from '../caribou-bluesky-video.js'
 
 const PLAYLIST = 'https://video.bsky.app/watch/did%3Aplc%3Aalice/bafkvideo/playlist.m3u8'
@@ -65,6 +81,7 @@ async function press(el: CaribouBlueskyVideo) {
 describe('<caribou-bluesky-video>', () => {
   let play: ReturnType<typeof vi.spyOn>
   beforeEach(() => {
+    document.addEventListener('click', noNavigation)
     document.body.replaceChildren()
     hls.instances.length = 0
     hls.load.mockClear()
@@ -73,7 +90,17 @@ describe('<caribou-bluesky-video>', () => {
     play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     nativeHls(false)
   })
-  afterEach(() => { vi.restoreAllMocks() })
+  afterEach(() => {
+    document.removeEventListener('click', noNavigation)
+    vi.restoreAllMocks()
+  })
+
+  it('no click in this file can navigate', async () => {
+    const el = await mount(videoCard())
+    const click = new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0, metaKey: true })
+    $(el, 'a.poster')!.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+  })
 
   it('rule 1: shows the thumbnail and loads nothing before the press', async () => {
     const el = await mount(videoCard())
@@ -92,10 +119,14 @@ describe('<caribou-bluesky-video>', () => {
 
   it('rule 2: a modifier click follows the link and does not play', async () => {
     const el = await mount(videoCard())
+    // Read on the host, after the player's handler and before the
+    // file's guard prevents the navigation.
+    let preventedByPlayer: boolean | null = null
+    el.addEventListener('click', (e) => { preventedByPlayer = e.defaultPrevented })
     const click = new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0, metaKey: true })
     $(el, 'a.poster')!.dispatchEvent(click)
     await el.updateComplete
-    expect(click.defaultPrevented).toBe(false)
+    expect(preventedByPlayer).toBe(false)
     expect($(el, 'video')).toBeNull()
   })
 
@@ -171,8 +202,11 @@ describe('<caribou-bluesky-video>', () => {
   it('rule 6: a failed load of hls.js shows the error', async () => {
     hls.load.mockImplementationOnce(async () => { throw new Error('chunk failed') })
     const el = await mount(videoCard())
-    await press(el)
-    expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
+    $(el, 'a.poster')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0 }))
+    await vi.waitFor(async () => {
+      await el.updateComplete
+      expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
+    })
   })
 
   it('rule 7: the alt text names the control and the video, and the ALT badge shows it', async () => {
