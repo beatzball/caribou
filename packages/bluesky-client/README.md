@@ -473,8 +473,11 @@ definitions). It imports the SDK for types only; `./browser` exports it.
 - **Writes:** like, repost, bookmark, follow, mute and block are in
   "Actions (#188)" below; compose is in "Compose".
 - **Search and the hashtag timeline:** see "Search (#192, #193)".
+- **Tag follow:** `fetchTag`, `followTag` and `unfollowTag` throw
+  `CaribouError('not_found')` "Bluesky cannot follow a tag". Bluesky has
+  no such feature; the tag page hides Follow by `capabilities.followTags`.
 - **Not here yet:** `local`, `public` and list timelines, delete,
-  polls, edit, lists and tags throw
+  polls, edit and lists throw
   `CaribouError('not_found')` naming the issue that adds them. A screen
   hides those by `capabilities`.
 - **Errors (`normalizeXrpcError`):** 401 → `unauthorized` (and

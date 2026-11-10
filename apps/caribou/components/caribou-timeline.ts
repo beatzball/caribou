@@ -75,6 +75,10 @@ export class CaribouTimeline extends LitElement {
   @property({ reflect: true }) tag = ''
   // The list's id, for `kind="list"`. Set once, like `tag`.
   @property({ reflect: true }) list = ''
+  // `bsky` on the Bluesky hashtag page (`/tags/<tag>?net=bsky`). That page
+  // is another list from the Mastodon one: it keeps its own store, and the
+  // older-posts link keeps the query. Set once, like `tag`.
+  @property({ reflect: true }) net = ''
   // The first page, fetched by the page's `pageData` on the server. The
   // server renders straight from it; the client seeds its store with it, so
   // the first client render equals the server render and no fetch runs.
@@ -145,7 +149,7 @@ export class CaribouTimeline extends LitElement {
     }
     const keep = KEPT.has(this.kind) && isFirstPage()
     // One kept store per tag; `#AI` and `#ai` are one tag.
-    const keepKey = this.kind === 'hashtag' ? `hashtag:${normalizeTagName(this.tag)}`
+    const keepKey = this.kind === 'hashtag' ? `hashtag:${this.net ? `${this.net}:` : ''}${normalizeTagName(this.tag)}`
       : this.kind === 'list' ? `list:${this.list}` : this.kind
     const kept = keep ? stores.get(keepKey) : undefined
     if (kept) {
@@ -348,7 +352,7 @@ export class CaribouTimeline extends LitElement {
         ${failed && failedOlder
           ? this.renderFailed()
           : hasMore
-          ? html`<a href="?max_id=${encodeURIComponent(nextCursor!)}" rel="next" data-sentinel
+          ? html`<a href="?${this.net ? `net=${encodeURIComponent(this.net)}&` : ''}max_id=${encodeURIComponent(nextCursor!)}" rel="next" data-sentinel
                     @click=${this.onSentinelClick}>Older posts →</a>`
           : nothing}
       </div>

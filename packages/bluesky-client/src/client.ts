@@ -194,6 +194,10 @@ function searchError(err: CaribouError): CaribouError {
 
 const NO_SEARCH_CURSORS = { accountsCursor: null, statusesCursor: null }
 
+function noTagFollow(): Promise<never> {
+  return Promise.reject(new CaribouError('not_found', 'Bluesky cannot follow a tag'))
+}
+
 function notYet(what: string, issue: string): () => Promise<never> {
   return () => Promise.reject(new CaribouError('not_found', `Bluesky: ${what} comes in ${issue}`))
 }
@@ -668,9 +672,11 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     // Like, repost, bookmark, follow, mute, block (#188; README, "Actions").
     ...createActions(agent, write, opts.compose?.nextRkey),
 
-    fetchTag: notYet('hashtags', '#193'),
-    followTag: notYet('hashtags', '#193'),
-    unfollowTag: notYet('hashtags', '#193'),
+    // Bluesky has no tag follow (spec 9). The tag page hides Follow by
+    // `capabilities.followTags`.
+    fetchTag: noTagFollow,
+    followTag: noTagFollow,
+    unfollowTag: noTagFollow,
 
     fetchLists: notYet('lists', '#195'),
     fetchList: notYet('lists', '#195'),

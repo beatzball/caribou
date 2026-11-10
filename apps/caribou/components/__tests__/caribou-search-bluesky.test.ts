@@ -227,4 +227,105 @@ describe('<caribou-search> with a Bluesky account', () => {
     expect(search).toHaveBeenCalledWith({ q: 'https://bsky.app/profile/carol.example.com', limit: 20 })
     expect(text(el)).not.toContain('Press Enter')
   })
+
+  // #251 review (Codex 3): the busy button keeps focus, and when the last
+  // page removes it, focus moves to the first new result.
+  it('keeps More focused while it loads, then focuses the first new person', async () => {
+    search.mockResolvedValueOnce(answer({ accounts: [person('carol')] }, { accountsCursor: 'A2', statusesCursor: null }))
+    const el = await mount('cats')
+    let finish!: (s: Search) => void
+    search.mockImplementationOnce(() => new Promise<Search>((r) => { finish = r }))
+    const button = more(el)!
+    button.focus()
+    expect(el.shadowRoot!.activeElement).toBe(button)
+    button.click()
+    await settle(el)
+    expect(more(el)).toBe(button)
+    expect((button as HTMLElement & { loading: boolean }).loading).toBe(true)
+    expect(el.shadowRoot!.activeElement).toBe(button)
+    finish(answer({ accounts: [person('dan')] }))
+    await settle(el)
+    expect(button.isConnected).toBe(false)
+    expect(el.shadowRoot!.activeElement).toBe(rows(el)[1])
+  })
+
+  it('focuses the list when the last page adds nothing new', async () => {
+    search.mockResolvedValueOnce(answer({ statuses: [post('p1')] }, { accountsCursor: null, statusesCursor: 'P2' }))
+    const el = await mount('cats', 'statuses')
+    search.mockResolvedValueOnce(answer({ statuses: [post('p1')] }))
+    more(el)!.focus()
+    more(el)!.click()
+    await settle(el)
+    expect(more(el)).toBeNull()
+    expect(el.shadowRoot!.activeElement).toBe(el.shadowRoot!.querySelector('ul.statuses'))
+  })
+
+  // #251 review (Fable 2, Codex 4): paging one kind leaves the other's cursor.
+  it('pages each kind with its own cursor', async () => {
+    search.mockResolvedValueOnce(answer({ accounts: [person('carol')], statuses: [post('p1')] }, { accountsCursor: 'A2', statusesCursor: 'P2' }))
+    const el = await mount('cats')
+    search.mockResolvedValueOnce(answer({ accounts: [person('dan')] }, { accountsCursor: 'A3', statusesCursor: null }))
+    more(el)!.click()
+    await settle(el)
+    expect(search).toHaveBeenLastCalledWith({ q: 'cats', type: 'accounts', cursor: 'A2', limit: 20 })
+    await tab(el, 'Posts')
+    search.mockResolvedValueOnce(answer({ statuses: [post('p2')] }))
+    more(el)!.click()
+    await settle(el)
+    expect(search).toHaveBeenLastCalledWith({ q: 'cats', type: 'statuses', cursor: 'P2', limit: 20 })
+    expect(el.shadowRoot!.querySelectorAll('caribou-status-card')).toHaveLength(2)
+    await tab(el, 'People')
+    // People still page on from their own cursor.
+    search.mockResolvedValueOnce(answer({ accounts: [person('erin')] }))
+    more(el)!.click()
+    await settle(el)
+    expect(search).toHaveBeenLastCalledWith({ q: 'cats', type: 'accounts', cursor: 'A3', limit: 20 })
+    expect(rows(el)).toHaveLength(3)
+  })
+
+  // A page that lands after a new query or a new account is dropped: no row
+  // and no error from it.
+  it.each(['a new query', 'a new account'])('drops a late More page after %s', async (change) => {
+    search.mockResolvedValueOnce(answer({ accounts: [person('carol')] }, { accountsCursor: 'A2', statusesCursor: null }))
+    const el = await mount('cats')
+    let finishOk!: (s: Search) => void
+    search.mockImplementationOnce(() => new Promise<Search>((r) => { finishOk = r }))
+    more(el)!.click()
+    await settle(el)
+    search.mockResolvedValue(answer({ accounts: [person('zed')] }))
+    if (change === 'a new query') {
+      const input = el.shadowRoot!.querySelector('input')!
+      input.value = 'dogs'
+      input.form!.dispatchEvent(new Event('submit', { cancelable: true }))
+    } else {
+      users.value = new Map()
+      activeUserKey.value = null
+      signIn()
+    }
+    await settle(el)
+    finishOk(answer({ accounts: [person('late')] }))
+    await settle(el)
+    const names = rows(el).map((r) => r.querySelector('.acct')?.textContent)
+    expect(names).not.toContain('@late.example.com')
+    expect(names).toContain('@zed.example.com')
+    expect(text(el)).not.toContain('Could not load more.')
+  })
+
+  it('drops a late failed More page after a new query', async () => {
+    search.mockResolvedValueOnce(answer({ accounts: [person('carol')] }, { accountsCursor: 'A2', statusesCursor: null }))
+    const el = await mount('cats')
+    let fail!: (e: unknown) => void
+    search.mockImplementationOnce(() => new Promise<Search>((_, reject) => { fail = reject }))
+    more(el)!.click()
+    await settle(el)
+    search.mockResolvedValue(answer({ accounts: [person('zed')] }, { accountsCursor: 'Z2', statusesCursor: null }))
+    const input = el.shadowRoot!.querySelector('input')!
+    input.value = 'dogs'
+    input.form!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle(el)
+    fail(new CaribouError('server_error', 'boom'))
+    await settle(el)
+    expect(text(el)).not.toContain('Could not load more.')
+    expect(more(el)!.textContent).toContain('More people')
+  })
 })

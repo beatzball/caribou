@@ -158,3 +158,11 @@ describe('hashtag timeline', () => {
     })
   })
 })
+
+// Bluesky has no tag follow at all (#251 review): the message says so.
+describe('tag follow', () => {
+  it.each(['fetchTag', 'followTag', 'unfollowTag'] as const)('%s says Bluesky cannot follow a tag', async (method) => {
+    const { client } = setup()
+    await expect(client[method]('cats')).rejects.toMatchObject({ code: 'not_found', message: 'Bluesky cannot follow a tag' })
+  })
+})

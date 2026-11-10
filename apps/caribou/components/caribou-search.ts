@@ -277,6 +277,12 @@ export class CaribouSearch extends LitElement {
       return
     }
     if (seq !== this.seq || generation !== ownerGeneration() || this.results !== r) return
+    // The busy button kept focus while the page loaded (`loading` leaves it
+    // focusable). Note it now: the last page removes it.
+    const button = this.renderRoot.querySelector('caribou-button.more')
+    const hadFocus = !!button && (this.shadowRoot?.activeElement === button)
+    const list = this.renderRoot.querySelector(kind === 'accounts' ? 'ul.accounts' : 'ul.statuses')
+    const before = list?.children.length ?? 0
     this.moreLoading = null
     const next = page.bluesky ?? { accountsCursor: null, statusesCursor: null }
     const cursors = { ...(r.data.bluesky ?? { accountsCursor: null, statusesCursor: null }) }
@@ -294,6 +300,20 @@ export class CaribouSearch extends LitElement {
       data = { ...r.data, statuses: [...r.data.statuses, ...added], bluesky: cursors }
     }
     this.results = { ...r, data }
+    if (hadFocus) void this.keepFocus(button!, kind, before)
+  }
+
+  // When the last page removes the focused More button, focus goes to the
+  // first new result, or to the list when the page added none (as the
+  // timeline does for its Retry).
+  private async keepFocus(button: Element, kind: MoreKind, before: number): Promise<void> {
+    await this.updateComplete
+    if (button.isConnected) return
+    const list = this.renderRoot.querySelector<HTMLElement>(kind === 'accounts' ? 'ul.accounts' : 'ul.statuses')
+    if (!list) return
+    const target = (list.children[before] as HTMLElement | undefined) ?? list
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1')
+    target.focus()
   }
 
   // What the reader's moderation says about a Bluesky person row (README,

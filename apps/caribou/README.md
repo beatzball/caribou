@@ -1017,7 +1017,10 @@ the address rules and the "newest search wins" rule are the ones in
   posts" button sits under that list. It reads the next page of that kind
   only and adds the new items at the end (an item already shown is not
   added again). No cursor, or an empty page: no button. A failed page keeps
-  the list and says "Could not load more." with Retry. A new query, a new
+  the list and says "Could not load more." with Retry. Each kind pages from
+  its own cursor. The button stays focused while it is busy; when the last
+  page removes it, focus moves to the first new result, or to the list when
+  the page added none. A new query, a new
   account or a late answer for an older search drops the page.
 - **Empty.** "No people found for “q”." and "No posts found for “q”.", as
   on Mastodon.
@@ -1043,21 +1046,27 @@ the address rules and the "newest search wins" rule are the ones in
 - **Server.** `net=bsky` sends `{ kind: 'bluesky', tag }` and fetches
   nothing. A name that is not a hashtag is still "not a hashtag".
 - **Server render and first client render:** the tag heading and "Sign in
-  with Bluesky to see posts with this tag.", with a link "See #tag on
-  Bluesky" to `https://bsky.app/hashtag/<tag>`. So the page works with
-  JavaScript off.
+  with Bluesky to see posts with this tag.", with a "Sign in" link to
+  `/?add` (with an account active, `/` forwards to Home) and a link "See
+  #tag on Bluesky" to `https://bsky.app/hashtag/<tag>`. So the page works
+  with JavaScript off.
 - **After mount, with a Bluesky account active,** the notice gives way to
   `<caribou-timeline kind="hashtag">` with the Bluesky client. The client
   reads `searchPosts` with `q=#<tag>` and `sort=latest`, the same query
   bsky.app's hashtag page sends, 25 a page, cursor paging. A poll is a
-  catch-up by the seam 7 rule. A 429 says the same as in search; another
+  catch-up by the seam 7 rule. The timeline has `net="bsky"`: it keeps its
+  own store (`hashtag:bsky:<tag>`, apart from the Mastodon page's
+  `hashtag:<tag>`), and its "Older posts" link keeps `net=bsky`. A 429 says the same as in search; another
   failure shows the client's message (`packages/bluesky-client` README,
   "Search"). Both have Retry.
 - **With a Mastodon account or none active,** the notice stays. A switch of
   account swaps between the two.
 - **No Follow.** The tag header shows Follow only when the active client
   has `capabilities.followTags` (Bluesky does not).
-- `/tags/<tag>` without `net=bsky` is the Mastodon page, as before.
+- `/tags/<tag>` without `net=bsky` is the Mastodon page. Its timeline shows
+  only with a Mastodon account active. After mount, with a Bluesky account
+  active, the page replaces the address with `/tags/<tag>?net=bsky`
+  (`blueskyTagRedirect`; an older Mastodon page's `max_id` is dropped).
 
 **Tag links in Bluesky posts.** The facet renderer links a tag to
 `/tags/<tag>?net=bsky` (`packages/bluesky-client` README, facets). A plain

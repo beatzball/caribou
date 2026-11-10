@@ -1,7 +1,7 @@
 import { html, css } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import { activeUserKey } from '@beatzball/caribou-state'
+import { activeClient, activeUserKey } from '@beatzball/caribou-state'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRouterParams } from 'h3'
@@ -18,7 +18,7 @@ import '../../components/caribou-tag-header.js'
 import '../../components/caribou-auth-required.js'
 import '../../components/caribou-bluesky-tag.js'
 import { enterWithCache } from '../../components/_page-cache.js'
-import { parseTagParam, tagPath } from '../../components/_tag-path.js'
+import { blueskyTagRedirect, parseTagParam, tagPath } from '../../components/_tag-path.js'
 
 // `tag` is the name as the path gave it, decoded; case is kept for the
 // heading, and the server ignores it. `not-found` is a name no hashtag can
@@ -91,8 +91,25 @@ export class TagPage extends LitroPage {
   @state() private signedIn = false
   private disposeSession: (() => void) | null = null
 
+  // True after mount while a Bluesky account is active: the page then shows
+  // the Bluesky tag page in place of the Mastodon one.
+  @state() private bluesky = false
+
+  // A Bluesky reader on the Mastodon tag page gets the Bluesky one (README,
+  // "Bluesky search and hashtag page"). The Mastodon timeline is shown only
+  // with a Mastodon account active. The page renders the Bluesky body
+  // itself and only rewrites the address (`blueskyTagRedirect`): a route
+  // change during a full load's mount swap would be missed by the router.
   protected override firstUpdated() {
-    this.disposeSession = effect(() => { this.signedIn = activeUserKey.value !== null })
+    this.disposeSession = effect(() => {
+      const network = activeClient.value?.capabilities.network ?? null
+      this.signedIn = activeUserKey.value !== null && network !== 'bluesky'
+      this.bluesky = network === 'bluesky'
+      const data = this.serverData as TagPageData | null
+      if (!this.isConnected || !data || data.kind === 'not-found' || data.kind === 'bluesky' || !atTagPath(data.tag)) return
+      const to = blueskyTagRedirect(location.pathname, location.search, network)
+      if (to) history.replaceState(history.state, '', to)
+    })
   }
 
   // A revisit paints from the last copy at once, and the fresh page data
@@ -135,7 +152,7 @@ export class TagPage extends LitroPage {
         </caribou-app-shell>
       `
     }
-    if (data.kind === 'bluesky') {
+    if (data.kind === 'bluesky' || (this.bluesky && data.tag)) {
       return html`
         <caribou-app-shell instance=${inst}>
           <caribou-bluesky-tag tag=${data.tag}></caribou-bluesky-tag>

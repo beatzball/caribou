@@ -63,14 +63,16 @@ export class CaribouBlueskyTag extends LitElement {
     return html`<div><caribou-tag-header name=${this.tag}></caribou-tag-header>${this.renderBody()}</div>`
   }
 
+  // Sign in goes to the add-account page: with an account active, `/`
+  // forwards to Home (`_root-forward.ts`).
   private renderBody() {
     if (this.reader) {
       // A new account gets a new timeline: nothing from the last one stays.
-      return repeat([this.reader], (k) => k, () => html`<caribou-timeline kind="hashtag" tag=${this.tag}></caribou-timeline>`)
+      return repeat([this.reader], (k) => k, () => html`<caribou-timeline kind="hashtag" net="bsky" tag=${this.tag}></caribou-timeline>`)
     }
     return html`<p class="notice">
         Sign in with Bluesky to see posts with this tag.
-        <litro-link href="/">Sign in</litro-link>
+        <litro-link href="/?add">Sign in</litro-link>
         or <a class="outside" href=${bskyHashtagUrl(this.tag)} rel="noopener noreferrer" target="_blank">See #${this.tag} on Bluesky</a>
       </p>`
   }

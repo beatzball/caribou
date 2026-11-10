@@ -880,6 +880,44 @@ describe('<caribou-timeline> — revisit', () => {
   })
 })
 
+// #251 review: `/tags/<tag>` and `/tags/<tag>?net=bsky` are two lists.
+describe('<caribou-timeline> — a Bluesky hashtag', () => {
+  async function mountTag(net: string, initial: TimelineInitial | null) {
+    const tl = document.createElement('caribou-timeline') as CaribouTimeline
+    tl.kind = 'hashtag'
+    tl.tag = 'cats'
+    tl.net = net
+    tl.initial = initial
+    document.body.appendChild(tl)
+    await settle(tl)
+    return tl
+  }
+  const ids = (tl: CaribouTimeline) => listItems(tl).map((li) => li.firstElementChild!.getAttribute('data-status-id'))
+
+  it('keeps the Mastodon and the Bluesky list of one tag apart, each with its own cursor', async () => {
+    const mastodon = await mountTag('', asInitial([mkStatus('m1')], 'M2'))
+    mastodon.remove()
+    const bluesky = await mountTag('bsky', asInitial([mkStatus('b1')], 'B2'))
+    expect(storeOf(bluesky)).not.toBe(storeOf(mastodon))
+    expect(ids(bluesky)).toEqual(['b1'])
+    expect(storeOf(bluesky).nextCursor.value).toBe('B2')
+    bluesky.remove()
+    // And back: each one finds its own kept list.
+    const again = await mountTag('', null)
+    expect(storeOf(again)).toBe(storeOf(mastodon))
+    expect(ids(again)).toEqual(['m1'])
+    const bskyAgain = await mountTag('bsky', null)
+    expect(storeOf(bskyAgain)).toBe(storeOf(bluesky))
+  })
+
+  it('keeps `net=bsky` in the older-posts link', async () => {
+    const tl = await mountTag('bsky', asInitial([mkStatus('b1')], 'B2'))
+    expect(sentinel(tl)!.getAttribute('href')).toBe('?net=bsky&max_id=B2')
+    const mastodon = await mountTag('', asInitial([mkStatus('m1')], 'M2'))
+    expect(sentinel(mastodon)!.getAttribute('href')).toBe('?max_id=M2')
+  })
+})
+
 describe('<caribou-timeline> — a list', () => {
   async function mountList(id: string, initial: TimelineInitial | null) {
     const tl = document.createElement('caribou-timeline') as CaribouTimeline

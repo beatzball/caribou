@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import type { Capabilities, CaribouClient, TimelinePage } from '@beatzball/caribou-mastodon-client'
 import {
   activeUserKey, addUserSession, blueskyUserKey, setBlueskyDriver, users, type BlueskyDriver, type UserSession,
@@ -9,6 +10,18 @@ import type { CaribouBlueskyTag } from '../caribou-bluesky-tag.js'
 // The body of `/tags/<tag>?net=bsky` (README, "Bluesky search and hashtag
 // page"): the sign-in notice until a Bluesky account is active, then the
 // tag's posts from the reader's client.
+
+// A Mastodon account's client that never reaches the network (#251 review).
+vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
+  const real = await importOriginal<typeof ClientModule>()
+  return {
+    ...real,
+    createCaribouClient: (userKey: string) => new Proxy({ userKey, capabilities: real.MASTODON_CAPABILITIES, timelineOrder: () => null }, {
+      get: (target, prop) => prop in target ? target[prop as keyof typeof target]
+        : () => Promise.reject(new real.CaribouError('unreachable', 'test: no network')),
+    }),
+  }
+})
 
 const CAPS = { network: 'bluesky', readLagMs: 60_000, followTags: false } as unknown as Capabilities
 const alice = blueskyUserKey('did:plc:alice')
@@ -85,6 +98,37 @@ describe('<caribou-bluesky-tag>', () => {
     expect(timeline(el)).toBeNull()
   })
 
+  // The hydration rule: with a Bluesky account active, the first client
+  // render still equals the server's notice; the timeline comes after.
+  it('first renders the notice even with a Bluesky account active', async () => {
+    signInBluesky()
+    const el = document.createElement('caribou-bluesky-tag') as CaribouBlueskyTag
+    el.tag = 'Cats'
+    let first: { notice: boolean; timeline: boolean } | null = null
+    const firstUpdated = (el as unknown as { firstUpdated: () => void }).firstUpdated.bind(el)
+    ;(el as unknown as { firstUpdated: () => void }).firstUpdated = () => {
+      first = { notice: notice(el) !== null, timeline: timeline(el) !== null }
+      firstUpdated()
+    }
+    document.body.appendChild(el)
+    await el.updateComplete
+    expect(first).toEqual({ notice: true, timeline: false })
+    await vi.waitFor(() => expect(timeline(el)).not.toBeNull())
+  })
+
+  // #251 review: with a Mastodon account active, `/` forwards to Home. The
+  // add-account page is where a reader signs in with Bluesky.
+  it('sends Sign in to the add-account page, also with a Mastodon account active', async () => {
+    signInMastodon()
+    const el = await mount()
+    const signIn = notice(el)!.querySelector('litro-link')!
+    expect(signIn.getAttribute('href')).toBe('/?add')
+    const { rootForwardTarget } = await import('../_root-forward.js')
+    // `/` itself would forward this reader to Home.
+    expect(rootForwardTarget('', localStorage, sessionStorage)).not.toBeNull()
+    expect(rootForwardTarget(new URL(signIn.getAttribute('href')!, 'https://caribou.test').search, localStorage, sessionStorage)).toBeNull()
+  })
+
   it('keeps the notice signed out and with a Mastodon account', async () => {
     let el = await mount()
     expect(notice(el)).not.toBeNull()
@@ -103,6 +147,7 @@ describe('<caribou-bluesky-tag>', () => {
     expect(notice(el)).toBeNull()
     const t = timeline(el)!
     expect(t.getAttribute('kind')).toBe('hashtag')
+    expect(t.getAttribute('net')).toBe('bsky')
     expect(t.getAttribute('tag')).toBe('Cats')
     await vi.waitFor(() => expect(fetchTimeline.mock.calls[0]?.[0]).toEqual({ type: 'hashtag', tag: 'Cats' }))
   })
