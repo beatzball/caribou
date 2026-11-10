@@ -216,15 +216,25 @@ test.describe('Bluesky delete and redraft', () => {
     const dialog = page.getByRole('dialog', { name: 'New post' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByText('Only people you follow can reply. Quotes are off.')).toBeVisible()
-    expect(pds.calls).toContain('applyWrites delete app.bsky.feed.post, delete app.bsky.feed.threadgate, delete app.bsky.feed.postgate')
+    // Exactly one delete batch, after two gate reads for the redraft and two for the delete.
+    expect(pds.calls.filter((c) => c.startsWith('applyWrites delete'))).toEqual([
+      'applyWrites delete app.bsky.feed.post, delete app.bsky.feed.threadgate, delete app.bsky.feed.postgate',
+    ])
     expect(pds.calls.some((c) => c.startsWith('deleteRecord'))).toBe(false)
+    // The two reads of each pair run at once: their order is not fixed.
+    expect([...pds.gateReads].sort()).toEqual(['app.bsky.feed.postgate', 'app.bsky.feed.postgate', 'app.bsky.feed.threadgate', 'app.bsky.feed.threadgate'])
 
     await dialog.getByRole('button', { name: 'Post' }).click()
     await expect(dialog).toBeHidden()
     const sent = pds.applyWrites.at(-1)!
     expect(sent.map((w) => w.collection)).toEqual(['app.bsky.feed.post', 'app.bsky.feed.threadgate', 'app.bsky.feed.postgate'])
     expect(sent[0]!.rkey).not.toBe(OLD_RKEY)
-    expect(sent[1]!.value).toMatchObject({ allow: [{ $type: 'app.bsky.feed.threadgate#followingRule' }] })
+    // One rkey for all three; each gate names the new post.
+    expect(sent.every((w) => w.rkey === sent[0]!.rkey)).toBe(true)
+    const newPost = `at://${ALICE}/app.bsky.feed.post/${sent[0]!.rkey}`
+    expect(sent[1]!.value).toMatchObject({ post: newPost, allow: [{ $type: 'app.bsky.feed.threadgate#followingRule' }] })
+    expect(sent[2]!.value).toMatchObject({ post: newPost, embeddingRules: [{ $type: 'app.bsky.feed.postgate#disableRule' }] })
+    expect(pds.calls.filter((c) => c.startsWith('applyWrites'))).toHaveLength(2)
   })
 
   test('a refused delete opens no composer and keeps the post', async ({ page, baseURL }) => {

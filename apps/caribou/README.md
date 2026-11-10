@@ -1017,7 +1017,9 @@ delete and redraft". The rule: nothing can be lost after the delete.
      that applies: "The video is not kept.", "The link card is not
      kept.", "Its labels are not kept." (a menu label on a post with no
      images), "Its reply and quote limits are not kept." (a reply with
-     limits: a reply cannot have them, G1), "The post it replies to is gone, so the redraft cannot be
+     limits: a reply cannot have them, G1; or a reply rule the composer
+     cannot send, such as another account's list: state README, "Limits
+     a redraft keeps"), "The post it replies to is gone, so the redraft cannot be
      posted as a reply." / "The author of the post it replies to limited
      replies.", and the same for the quoted post.
   4. The draft is built, the images re-encoded and uploaded, and the draft
@@ -1036,7 +1038,8 @@ delete and redraft". The rule: nothing can be lost after the delete.
   the post's reply and quote limits with it, in one write
   (`packages/bluesky-client` README, "Delete", #262).
 - **A redraft keeps the limits** of a top-level post: the draft opens
-  with them set, as the post had them (#262).
+  with them set, as the post had them, except a rule it cannot send (the
+  confirm says so first) (#262).
 - **The dialog** opens a stored Bluesky slot like a Bluesky new post: its
   refs, images, labels and rkey. It loads the slot's image bytes from
   IndexedDB for the previews and for blob recovery (after a close, a

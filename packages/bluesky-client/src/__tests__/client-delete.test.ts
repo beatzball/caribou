@@ -125,6 +125,7 @@ describe('blueskyDeletePost', () => {
     const { client, repo } = setup(found)
     await client.blueskyDeletePost!(OWN)
     expect(repo.deleteRecord).not.toHaveBeenCalled()
+    expect(repo.applyWrites).toHaveBeenCalledOnce()
     const del = (collection: string) => ({ $type: 'com.atproto.repo.applyWrites#delete', collection, rkey: '3kown' })
     expect(repo.applyWrites).toHaveBeenCalledWith({
       repo: 'did:plc:reader',

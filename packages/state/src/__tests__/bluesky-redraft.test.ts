@@ -8,7 +8,7 @@ import { deleteOwnStatus, deleteOwnStatusOutcome } from '../own-posts.js'
 import {
   BlueskyRedraftGatesUnread, BlueskyRedraftGone, NOTHING_KEPT, STAGED_MAX_AGE_MS, checkRedraftSource, discardBlueskyRedraft, _testOnlyForgetStaging,
   findRedraftOf, hasOrphanStagedRedrafts, readBlueskyRedraft,
-  recoverStagedRedrafts, redraftDropsGates, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
+  recoverStagedRedrafts, redraftDropsGates, redraftGatesOf, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
 } from '../bluesky-redraft.js'
 import {
   emptyDraft, findRedraftSlot, loadDraft, patchRevealed, renameDraftIf, saveDraft, storedDrafts, _testOnlyForgetRevealed, type DraftSlot,
@@ -265,7 +265,7 @@ describe('readBlueskyRedraft', () => {
 
 // #262: a redraft keeps the post's reply and quote limits.
 describe('redraft and the reply and quote limits', () => {
-  const LIMITS: BlueskyGates = { replies: [{ kind: 'following' }, { kind: 'list', id: '3klist' }], quotes: false }
+  const LIMITS: BlueskyGates = { replies: [{ kind: 'following' }, { kind: 'list', id: '3kllaaaaaaaa2' }], quotes: false }
 
   it('reads the limits by the post rkey, with the record', async () => {
     const { client, c } = fakeClient()
@@ -300,6 +300,37 @@ describe('redraft and the reply and quote limits', () => {
     const source = (await readBlueskyRedraft(client, post()))!
     const out = await storeBlueskyRedraft(client, source, { prepareImage })
     expect(out!.draft.bluesky).not.toHaveProperty('gates')
+  })
+
+  // Rules 2 to 4 of "Limits a redraft keeps".
+  it.each([
+    ['a list in another repo', { kind: 'list', id: 'at://did:plc:bob/app.bsky.graph.list/3kllaaaaaaaa2' }],
+    ['a rule this code does not know', { kind: 'list', id: 'unknown:app.bsky.feed.threadgate#newRule' }],
+  ] as const)('%s is dropped, and the confirm is told before the delete', async (_, rule) => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: [{ kind: 'following' }, rule], quotes: false })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(true)
+    expect(redraftGatesOf(source)).toEqual({ replies: [{ kind: 'following' }], quotes: false })
+    const out = await storeBlueskyRedraft(client, source, { prepareImage })
+    expect(out!.draft.bluesky!.gates).toEqual({ replies: [{ kind: 'following' }], quotes: false })
+    expect(c.blueskyDeletePost).not.toHaveBeenCalled()
+  })
+
+  it('every reply rule dropped: nobody can reply, never everyone', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: [{ kind: 'list', id: 'at://did:plc:bob/app.bsky.graph.list/3kllaaaaaaaa2' }], quotes: true })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(true)
+    expect(redraftGatesOf(source)).toEqual({ replies: [], quotes: true })
+  })
+
+  it('an own list (a TID id) is kept, and nothing is dropped', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: [{ kind: 'list', id: '3kllaaaaaaaa2' }], quotes: true })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(false)
+    expect(redraftGatesOf(source)).toEqual({ replies: [{ kind: 'list', id: '3kllaaaaaaaa2' }], quotes: true })
   })
 
   it('a reply: the draft gets no limits (G1)', async () => {

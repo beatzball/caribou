@@ -948,8 +948,24 @@ not stored there: the reader has those files.
 | `langs` | `language` = the first one; the others are not kept (compose sends one) |
 | a video, an external link card | not kept. The link's URL stays only if it is in the text. |
 | `tags` | not kept |
-| reply and quote limits (thread gate, post gate at the post's rkey, #262) | `bluesky.gates` (`readGates`: list rules by id, no titles), for a top-level post. A reply has no limits (G1): its draft gets none, and the confirm says "Its reply and quote limits are not kept." The new post writes them again with its own rkey (G3). |
+| reply and quote limits (thread gate, post gate at the post's rkey, #262) | `bluesky.gates` (`redraftGatesOf`), for a top-level post: only the limits the composer can send. The new post writes them again with its own rkey (G3). See "Limits a redraft keeps" below. |
 | `createdAt` | not kept: a new post gets a new time |
+
+**Limits a redraft keeps** (#262). `redraftGatesOf(source)` gives the
+draft's limits; `redraftDropsGates(source)` is true when it keeps less than
+the post had. Then the confirm says "Its reply and quote limits are not
+kept." **before** the delete.
+
+1. A reply keeps no limits (G1): none in its draft.
+2. A top-level post keeps "quotes off", and each reply rule the composer
+   can send: mention, following, follower, and a list in the reader's repo
+   (its id is a record key, a TID).
+3. A rule it cannot send is dropped: a list in another repo (the id is a
+   full AT URI) or a rule this code does not know (`unknown:` id). The send
+   would refuse it ("Bluesky: not a list id") after the old post is gone.
+4. When every reply rule is dropped, the draft says "Nobody can reply."
+   It never opens replies wider than the post had them. The reader sees the
+   limit in the draft and can change it.
 
 ## Act as another account (`act-as.ts`; Bluesky #197, Mastodon #131)
 

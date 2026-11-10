@@ -273,12 +273,28 @@ export function redraftLabelsOf(record: BlueskyPostRecord): string[] {
   return out
 }
 
+// A list id the send can name: a record key (TID) in the reader's repo.
+// Another repo's list is a full AT URI; an unknown rule is `unknown:…`.
+const OWN_LIST_ID = /^[2-7a-j][2-7a-z]{12}$/
+
 /**
- * True when the post has reply or quote limits the redraft cannot keep:
- * it is a reply, and a reply has none (G1, #262).
+ * The limits the redraft's draft gets (README, "Limits a redraft keeps",
+ * #262). Null: none (a reply, G1, or no limit). Only rules the composer
+ * can send; when every reply rule is dropped, nobody can reply.
  */
+export function redraftGatesOf(source: BlueskyRedraftSource): BlueskyGates | null {
+  const g = source.gates
+  if (replyOf(source.record) || !hasBlueskyGates(g)) return null
+  if (g.replies === null) return g
+  const replies = g.replies.filter((r) => r.kind !== 'list' || OWN_LIST_ID.test(r.id))
+  return { ...g, replies }
+}
+
+/** True when the draft keeps less of the limits than the post had. */
 export function redraftDropsGates(source: BlueskyRedraftSource): boolean {
-  return !!replyOf(source.record) && hasBlueskyGates(source.gates)
+  if (!hasBlueskyGates(source.gates)) return false
+  const kept = redraftGatesOf(source)
+  return !kept || kept.replies?.length !== source.gates.replies?.length
 }
 
 /**
@@ -352,6 +368,7 @@ export async function storeBlueskyRedraft(
   }
   if (stale()) return null
   const reply = replyOf(record)
+  const gates = redraftGatesOf(source)
   const langs = Array.isArray(record.langs) ? record.langs : []
   const language = langs.find((l): l is string => typeof l === 'string' && l !== '') ?? null
   const draft = emptyDraft({
@@ -361,8 +378,8 @@ export async function storeBlueskyRedraft(
     // A new record with a new rkey (R6), stored with the first save.
     bluesky: emptyBlueskyDraft({
       reply, quote, labels: redraftLabelsOf(record), images, rkey, source: source.status.bluesky?.uri ?? source.status.id,
-      // #262: a top-level post keeps its limits; a reply has none (G1).
-      ...(!reply && hasBlueskyGates(source.gates) ? { gates: source.gates } : {}),
+      // #262: only the limits the send can write (README, "Limits a redraft keeps").
+      ...(gates ? { gates } : {}),
       // Set now, so the rename after the delete only changes its value
       // (and needs no more storage).
       sourceMaybeLive: false, stagedAt: Date.now(),
