@@ -1,5 +1,18 @@
 # @beatzball/caribou-state
 
+## 0.4.10
+
+### Patch Changes
+
+- [#249](https://github.com/beatzball/caribou/pull/249) [`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0) Thanks [@beatzball](https://github.com/beatzball)! - Add `savedFeedsCache` and `loadSavedFeeds`: a Bluesky reader's saved feeds, kept per account. Read only. A copy under 5 minutes old is used with no request; an older one is answered at once and read again in the background. `force: true` reads again.
+
+- [#247](https://github.com/beatzball/caribou/pull/247) [`58fddb9`](https://github.com/beatzball/caribou/commit/58fddb9033aee1dd0abc589537ac6299e28b4bbc) Thanks [@beatzball](https://github.com/beatzball)! - After a Bluesky Unblock, `setBlock` takes an optional page `signal` and reads the follow again at 5 s, 20 s, and 5 s before the lag window ends (55 s on Bluesky) while it is unknown and no block is known. `settleBlueskyRedraft` answers another tab's redraft of the same post when that tab removed this copy. Removed dead code in `renameDraftIf`, and fixed stale comments.
+
+- [#250](https://github.com/beatzball/caribou/pull/250) [`1f1c35e`](https://github.com/beatzball/caribou/commit/1f1c35e77bf35662942f880c6f7a9f7ed40f6abf) Thanks [@beatzball](https://github.com/beatzball)! - A list write whose outcome is unknown goes back, says "Could not tell whether … Reload to check.", and reads the lists (and the members, when shown) again. A failure with words for the reader is toasted as it is. A partly done delete brings the list back, says so, and reads the lists, the members and the memberships again. A failed re-read drops the members or memberships it was for, instead of keeping them as current.
+
+- Updated dependencies [[`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0), [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef)]:
+  - @beatzball/caribou-mastodon-client@0.4.8
+
 ## 0.4.9
 
 ### Patch Changes

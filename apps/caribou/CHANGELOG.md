@@ -1,5 +1,24 @@
 # caribou-app
 
+## 0.11.1
+
+### Patch Changes
+
+- [#249](https://github.com/beatzball/caribou/pull/249) [`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky: pinned feeds on Home. With a Bluesky account active, Home shows tabs: Following first, then your pinned feeds. Each tab is its own address, so Back keeps your place in it. A new Feeds item lists your saved feeds and opens one as a Home tab. A feed that is gone or does not load says so in its tab. Caribou only reads your feeds; it does not change them. Mastodon Home does not change. A feed's posts hide when you mute or block their author, as on Following. Retry on the Feeds page keeps focus.
+
+- [#247](https://github.com/beatzball/caribou/pull/247) [`58fddb9`](https://github.com/beatzball/caribou/commit/58fddb9033aee1dd0abc589537ac6299e28b4bbc) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky follow-ups. Back from the authorization server (page cache) no longer leaves the sign-in form stuck on "Connecting…". A later focus in a sign-in field no longer moves focus back into it on the next visit. After Unblock, the profile header shows Follow again when the AppView catches up. A redraft whose rename storage refused now gets the kept-redraft words in the composer.
+
+- [#248](https://github.com/beatzball/caribou/pull/248) [`c2d60d5`](https://github.com/beatzball/caribou/commit/c2d60d5bb6e08865d1f356639fee2474f19f01f1) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky: when a labeler in your moderation settings is gone, a notice names it and offers to remove it, after you confirm. Until then, Bluesky posts stay covered.
+
+- [#250](https://github.com/beatzball/caribou/pull/250) [`1f1c35e`](https://github.com/beatzball/caribou/commit/1f1c35e77bf35662942f880c6f7a9f7ed40f6abf) Thanks [@beatzball](https://github.com/beatzball)! - Lists work for a Bluesky account. The nav rail shows Lists. The New list and Edit list dialogs ask for the title only and say that Bluesky lists are public. A title over 64 bytes is refused. The list picker does not ask for a follow. Member rows go through moderation, and a member with no decision is covered. A Bluesky member links to its handle or DID. Mastodon lists do not change. Member rows follow the reader veil. The Bluesky delete confirm does not say the accounts stay followed, and the signed-out list placeholders name no network. An open Members panel loads again when its cache is dropped. An open list picker loads its boxes again when their cache is dropped.
+
+- [#251](https://github.com/beatzball/caribou/pull/251) [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky search and hashtag page. With a Bluesky account active, Search is in the nav. It finds people and posts, with "More people" and "More posts" buttons, and plain messages for no results, errors and rate limits. Each person row follows the reader's moderation settings. `/tags/<tag>?net=bsky` shows the tag's newest posts to a reader with a Bluesky account active; anyone else sees a sign-in note and a link to the tag on bsky.app. A tag in a Bluesky post opens this page in the app. The hashtag page hides Follow when the account's network cannot follow tags.
+
+- Updated dependencies [[`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0), [`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0), [`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0), [`58fddb9`](https://github.com/beatzball/caribou/commit/58fddb9033aee1dd0abc589537ac6299e28b4bbc), [`c2d60d5`](https://github.com/beatzball/caribou/commit/c2d60d5bb6e08865d1f356639fee2474f19f01f1), [`1f1c35e`](https://github.com/beatzball/caribou/commit/1f1c35e77bf35662942f880c6f7a9f7ed40f6abf), [`1f1c35e`](https://github.com/beatzball/caribou/commit/1f1c35e77bf35662942f880c6f7a9f7ed40f6abf), [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef), [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef)]:
+  - @beatzball/caribou-bluesky-client@0.1.5
+  - @beatzball/caribou-state@0.4.10
+  - @beatzball/caribou-mastodon-client@0.4.8
+
 ## 0.11.0
 
 ### Minor Changes
