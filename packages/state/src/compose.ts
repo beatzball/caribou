@@ -1,6 +1,6 @@
 import type { UserKey } from '@beatzball/caribou-auth'
 import type {
-  BlueskyBlobRef, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, MediaAttachmentType, Status, StatusVisibility,
+  BlueskyBlobRef, BlueskyGates, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, MediaAttachmentType, Status, StatusVisibility,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 
@@ -52,6 +52,8 @@ export interface BlueskyDraftImage {
 export interface BlueskySentRecord {
   input: string
   record: BlueskyPostRecord
+  /** The reply and quote limits sent with the record (#199, G4). Absent: none. */
+  gates?: BlueskyGates
 }
 
 /**
@@ -68,6 +70,8 @@ export interface BlueskyDraft {
   rkey: string | null
   /** Set from just before a send until its outcome is known. */
   sent: BlueskySentRecord | null
+  /** Reply and quote limits (#199). Absent: everyone, quotes on. */
+  gates?: BlueskyGates
   /** A redraft only: the URI of the post it was made from (#190). */
   source?: string
   /**

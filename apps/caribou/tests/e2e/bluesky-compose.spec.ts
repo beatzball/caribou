@@ -18,12 +18,17 @@ interface Pds {
   loseNextAnswer: boolean
   /** When true, the next getRecord fails with a 502: the outcome stays unknown. */
   failNextGet: boolean
+  /** Each `applyWrites` call's writes (#199). */
+  applies: { collection: string; rkey: string; value: Record<string, unknown> }[][]
 }
+
+// One of the reader's curate lists, for "who can reply" (#199).
+const LIST_RKEY = '3kllaaaaaaaa2'
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }
 
 async function fixturePds(page: Page): Promise<Pds> {
-  const pds: Pds = { creates: [], gets: [], records: new Map(), loseNextAnswer: false, failNextGet: false }
+  const pds: Pds = { creates: [], gets: [], records: new Map(), loseNextAnswer: false, failNextGet: false, applies: [] }
   const json = (body: unknown, status = 200) => ({ status, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify(body) })
   // Registered after the auth fixture, so these answer first.
   await page.route(`${PDS}/xrpc/**`, async (route) => {
@@ -41,6 +46,23 @@ async function fixturePds(page: Page): Promise<Pds> {
         return route.abort('timedout')
       }
       return route.fulfill(json({ uri: `at://${body.repo}/${body.collection}/${body.rkey}`, cid: CID }))
+    }
+    if (method === 'com.atproto.repo.applyWrites') {
+      const body = req.postDataJSON() as { repo: string; writes: { collection: string; rkey: string; value: Record<string, unknown> }[] }
+      pds.applies.push(body.writes)
+      // One commit: every write lands, or none.
+      const post = body.writes.find((w) => w.collection === 'app.bsky.feed.post')!
+      pds.records.set(post.rkey, post.value)
+      return route.fulfill(json({
+        commit: { cid: CID, rev: '3krev' },
+        results: body.writes.map((w) => ({ $type: 'com.atproto.repo.applyWrites#createResult', uri: `at://${body.repo}/${w.collection}/${w.rkey}`, cid: CID })),
+      }))
+    }
+    if (method === 'com.atproto.repo.listRecords' && url.searchParams.get('collection') === 'app.bsky.graph.list') {
+      return route.fulfill(json({ records: [{
+        uri: `at://${ALICE}/app.bsky.graph.list/${LIST_RKEY}`, cid: CID,
+        value: { $type: 'app.bsky.graph.list', purpose: 'app.bsky.graph.defs#curatelist', name: 'Friends', createdAt: '2026-11-01T00:00:00.000Z' },
+      }] }))
     }
     if (method === 'com.atproto.repo.getRecord') {
       const rkey = url.searchParams.get('rkey') ?? ''
@@ -156,5 +178,35 @@ test.describe('Bluesky compose', () => {
     await expect(dialog).toBeHidden()
     expect(pds.creates).toHaveLength(1)
     expect(pds.gets).toEqual([pds.creates[0]!.rkey])
+  })
+
+  test('reply and quote limits go with the post in one applyWrites, one rkey (#199)', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    const pds = await fixturePds(page)
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    await dialog.getByRole('textbox', { name: 'Post text' }).fill('limited')
+    const toggle = dialog.getByRole('button', { name: 'Everyone can reply. Quotes are on.' })
+    await toggle.click()
+    await dialog.getByRole('checkbox', { name: 'Your followers' }).check()
+    await dialog.getByRole('combobox', { name: 'People on' }).selectOption({ label: 'Friends' })
+    await dialog.getByRole('checkbox', { name: 'Allow quotes' }).uncheck()
+    await expect(dialog.getByRole('button', { name: 'Only your followers and people on Friends can reply. Quotes are off.' })).toBeVisible()
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    await expect(dialog).toBeHidden()
+
+    expect(pds.creates).toHaveLength(0)
+    expect(pds.applies).toHaveLength(1)
+    const writes = pds.applies[0]!
+    expect(writes.map((w) => w.collection)).toEqual(['app.bsky.feed.post', 'app.bsky.feed.threadgate', 'app.bsky.feed.postgate'])
+    const rkey = writes[0]!.rkey
+    expect(rkey).toMatch(TID)
+    expect(writes.every((w) => w.rkey === rkey)).toBe(true)
+    const post = `at://${ALICE}/app.bsky.feed.post/${rkey}`
+    expect(writes[1]!.value).toMatchObject({
+      post, allow: [{ $type: 'app.bsky.feed.threadgate#followerRule' }, { $type: 'app.bsky.feed.threadgate#listRule', list: `at://${ALICE}/app.bsky.graph.list/${LIST_RKEY}` }],
+    })
+    expect(writes[2]!.value).toMatchObject({ post, embeddingRules: [{ $type: 'app.bsky.feed.postgate#disableRule' }] })
   })
 })

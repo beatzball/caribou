@@ -606,6 +606,59 @@ storage refusing every click sends nothing, then one post after a reload
 blob refusal, and a facet lookup that lands late (R4); an answer after an
 account switch tells no screen.
 
+### Reply and quote limits (#199)
+
+`bluesky-gates.ts`. The author of a new post can limit who replies (a
+thread gate, `app.bsky.feed.threadgate`) and turn quotes off (a post gate,
+`app.bsky.feed.postgate`). The draft keeps the choice in `bluesky.gates`
+(`BlueskyGates`); a draft with no `gates` has the default.
+
+**G1. Only a new top-level post has limits.** The `new` and `quote:` slots.
+A reply cannot set a thread gate: the lexicon says the gate's rkey "must
+match the record key of the thread's root post", and a reply is not the
+root, so the AppView ignores it. (A post gate on a reply is valid in the
+lexicon; Caribou keeps both off for a reply, so a reply has no limit
+control at all.) `blueskySentGates` gives `null` for a reply, whatever the
+draft holds.
+
+**G2. The default writes nothing new.** "Everyone can reply, quotes on" is
+`gates` absent, or `{ replies: null, quotes: true }`. Then the send is
+`createRecord` of the post alone, as before #199, and `blueskyDraftInput`
+is the same string as before #199 (so a send pending from before still
+matches its own input, R1).
+
+**G3. Post and limits land together or not at all.** With a limit, the
+send is one `com.atproto.repo.applyWrites`: the post, then the thread gate
+(when replies are limited), then the post gate (when quotes are off). All
+three use the draft's rkey. `applyWrites` is one commit, so the PDS keeps
+all or none. The check after a failed send (R1) reads only the post: the
+post found means its limits are there too.
+
+**G4. The limits are part of the send.** They are frozen in `sent.gates`
+with the record and are part of `blueskyDraftInput`. A retry of an
+unchanged frozen record sends the frozen limits (R2). A limit changed after
+a send in doubt is an edit: when the earlier post is found, the result is
+`earlier-posted` and the new choice stays in the draft.
+
+**G5. Who can reply.** `replies` is `null` (everyone), `[]` (nobody), or
+some of: people you mention (`mention`), people you follow (`following`),
+your followers (`follower`), and one of your own lists (`list`, its id; the client makes the URI in the reader's repo, so no other list can be named).
+At most one list, so at most 4 rules (the lexicon allows 5). The rules go
+in that order, whatever order they were picked in. Turning off the last
+rule goes back to everyone, not to nobody.
+
+**G6. The limit is said in plain words** (`blueskyGatesText`): "Everyone
+can reply." / "Nobody can reply." / "Only people you mention, people you
+follow, your followers and people on Friends can reply.", then "Quotes are
+on." or "Quotes are off."
+
+Tests (`bluesky-gates.test.ts`, `bluesky-compose.test.ts`): each rule's
+record shape, the order, nobody, the plain words, a reply never sends
+limits (G1), the default sends `createRecord` and keeps the old input (G2),
+a limit sends one `applyWrites` call with one rkey (G3), a lost answer then
+a retry is one post with its limits, and a limit changed after a lost
+answer is `earlier-posted` (G4).
+
 ## Bluesky delete and redraft (#190)
 
 `own-posts.ts` (delete), `bluesky-redraft.ts` (redraft), `draft-files.ts`

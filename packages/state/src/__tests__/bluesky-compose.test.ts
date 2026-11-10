@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
-  BlueskyBlobRef, BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status,
+  BlueskyBlobRef, BlueskyGates, BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
 import { CaribouError } from '@beatzball/caribou-mastodon-client'
 import { emptyDraft, isDraftEmpty, loadDraft, saveDraft, type ComposeDraft } from '../compose.js'
@@ -36,6 +36,8 @@ function uriOf(rkey: string) {
  */
 function fakePds() {
   const records = new Map<string, BlueskyPostRecord>()
+  // The limits written with each post (#199): one call, so the same map entry.
+  const gates = new Map<string, BlueskyGates>()
   // A draft is made with rkey 0000001 (R6, `draft()`); new ones start after it.
   let rkeys = 1
   const loseNextAnswer = { value: false }
@@ -46,7 +48,7 @@ function fakePds() {
     blueskyDetectFacets: vi.fn(async (text: string) => text.includes('#tag')
       ? [{ index: { byteStart: text.indexOf('#tag'), byteEnd: text.indexOf('#tag') + 4 }, features: [{ $type: 'app.bsky.richtext.facet#tag', tag: 'tag' }] }]
       : []),
-    blueskyCreatePost: vi.fn(async (record: BlueskyPostRecord, rkey: string) => {
+    blueskyCreatePost: vi.fn(async (record: BlueskyPostRecord, rkey: string, g?: BlueskyGates | null) => {
       if (failNextBeforeWrite.value) {
         const err = failNextBeforeWrite.value
         failNextBeforeWrite.value = null
@@ -55,6 +57,7 @@ function fakePds() {
       // The PDS does not check first: a used key is a plain 500 (spec 7.2).
       if (records.has(rkey)) throw new CaribouError('server_error', 'Internal Server Error', { status: 500 })
       records.set(rkey, record)
+      if (g) gates.set(rkey, g)
       if (loseNextAnswer.value) {
         loseNextAnswer.value = false
         throw new CaribouError('unreachable', 'timeout')
@@ -67,7 +70,7 @@ function fakePds() {
     }),
     fetchStatus: vi.fn(async (id: string) => ({ id, uri: id, account: { id: 'did:plc:reader' } }) as unknown as Status),
   }
-  return { client: client as unknown as CaribouClient & typeof client, records, loseNextAnswer, failNextBeforeWrite }
+  return { client: client as unknown as CaribouClient & typeof client, records, gates, loseNextAnswer, failNextBeforeWrite }
 }
 
 // A draft as the dialog makes it: with its rkey from the start (R6).
@@ -823,5 +826,90 @@ describe('postBlueskyDraft: after the post', () => {
     expect(out.kind).toBe('posted')
     expect(seen).toHaveLength(0)
     expect(statusCache.peek().size).toBe(0)
+  })
+})
+
+describe('reply and quote limits (#199)', () => {
+  const LIMITS: BlueskyGates = { replies: [{ kind: 'follower' }, { kind: 'mention' }], quotes: false }
+
+  it('G2: the default is the post alone, with no limits argument', async () => {
+    const { client, gates } = fakePds()
+    saveDraft(KEY, 'new', draft())
+    const out = await postBlueskyDraft(client, 'new', draft(), noWait)
+    expect(out.kind).toBe('posted')
+    expect(client.blueskyCreatePost).toHaveBeenCalledTimes(1)
+    expect(client.blueskyCreatePost.mock.calls[0]).toHaveLength(2)
+    expect(gates.size).toBe(0)
+  })
+
+  it('G3: a limit goes in the same call as the post, with the same rkey, in order', async () => {
+    const { client, gates } = fakePds()
+    const d = draft({}, { gates: LIMITS })
+    saveDraft(KEY, 'new', d)
+    await postBlueskyDraft(client, 'new', d, noWait)
+    expect(client.blueskyCreatePost).toHaveBeenCalledTimes(1)
+    const [, rkey, sent] = client.blueskyCreatePost.mock.calls[0]!
+    expect(rkey).toBe('3krkey0000001')
+    expect(sent).toEqual({ replies: [{ kind: 'mention' }, { kind: 'follower' }], quotes: false })
+    expect(gates.get('3krkey0000001')).toEqual(sent)
+  })
+
+  it('G1: a reply sends no limits, whatever the draft holds', async () => {
+    const { client } = fakePds()
+    const d = draft({}, { reply: { root: ROOT, parent: PARENT }, gates: LIMITS })
+    saveDraft(KEY, `reply:${PARENT.uri}`, d)
+    await postBlueskyDraft(client, `reply:${PARENT.uri}`, d, noWait)
+    expect(client.blueskyCreatePost.mock.calls[0]).toHaveLength(2)
+  })
+
+  it('G4: a lost answer, a reload, a retry is one post with its limits', async () => {
+    const { client, records, gates, loseNextAnswer } = fakePds()
+    const d = draft({}, { gates: LIMITS })
+    saveDraft(KEY, 'new', d)
+    loseNextAnswer.value = true
+    // The check after it fails too, so the send stays pending.
+    client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'timeout'))
+    await expect(postBlueskyDraft(client, 'new', d, noWait)).rejects.toThrow()
+    const reloaded = loadDraft(KEY, 'new')!
+    expect(reloaded.bluesky?.sent?.gates).toEqual({ replies: [{ kind: 'mention' }, { kind: 'follower' }], quotes: false })
+    const out = await postBlueskyDraft(client, 'new', reloaded, noWait)
+    expect(out.kind).toBe('posted')
+    expect(client.blueskyCreatePost).toHaveBeenCalledTimes(1)
+    expect(records.size).toBe(1)
+    expect(gates.size).toBe(1)
+  })
+
+  it('G4: a pending send whose post is absent sends its frozen limits again', async () => {
+    const { client, gates, failNextBeforeWrite } = fakePds()
+    const d = draft({}, { gates: LIMITS })
+    saveDraft(KEY, 'new', d)
+    // Unknown: the create failed and so did the check, so the send stays pending.
+    failNextBeforeWrite.value = new CaribouError('unreachable', 'timeout')
+    client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'timeout'))
+    await expect(postBlueskyDraft(client, 'new', d, noWait)).rejects.toThrow()
+    const pending = loadDraft(KEY, 'new')!
+    expect(pending.bluesky?.sent).not.toBeNull()
+    const out = await postBlueskyDraft(client, 'new', pending, noWait)
+    expect(out.kind).toBe('posted')
+    expect(gates.get('3krkey0000001')).toEqual({ replies: [{ kind: 'mention' }, { kind: 'follower' }], quotes: false })
+  })
+
+  it('G4: a limit changed after a lost answer is an edit: earlier-posted, the new limit kept', async () => {
+    const { client, loseNextAnswer } = fakePds()
+    const d = draft({}, { gates: LIMITS })
+    saveDraft(KEY, 'new', d)
+    loseNextAnswer.value = true
+    // The check after it fails too, so the send stays pending.
+    client.blueskyGetOwnPost.mockRejectedValueOnce(new CaribouError('unreachable', 'timeout'))
+    await expect(postBlueskyDraft(client, 'new', d, noWait)).rejects.toThrow()
+    const stored = loadDraft(KEY, 'new')!
+    const edited: ComposeDraft = { ...stored, bluesky: { ...stored.bluesky!, gates: { replies: null, quotes: true } } }
+    saveDraft(KEY, 'new', edited)
+    const out = await postBlueskyDraft(client, 'new', loadDraft(KEY, 'new')!, noWait)
+    expect(out.kind).toBe('earlier-posted')
+    if (out.kind !== 'earlier-posted') return
+    expect(out.draft.bluesky?.gates).toEqual({ replies: null, quotes: true })
+    expect(out.draft.bluesky?.rkey).not.toBe('3krkey0000001')
+    expect(client.blueskyCreatePost).toHaveBeenCalledTimes(1)
   })
 })

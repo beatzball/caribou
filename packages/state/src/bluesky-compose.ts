@@ -7,6 +7,7 @@ import {
   draftRev, loadDraft, storeDraftIf,
   type BlueskyDraft, type BlueskySentRecord, type ComposeDraft, type DraftSlot, type PostedDetail,
 } from './compose.js'
+import { blueskySentGates } from './bluesky-gates.js'
 import { activeUserKey } from './users.js'
 
 /**
@@ -42,6 +43,8 @@ function sentLabels(b: BlueskyDraft): string[] {
  */
 export function blueskyDraftInput(d: ComposeDraft): string {
   const b = d.bluesky ?? emptyBlueskyDraft()
+  // G2: no `gates` key without a limit, so the string is as before #199.
+  const gates = blueskySentGates(b)
   return JSON.stringify({
     text: d.text,
     language: d.language ?? null,
@@ -49,6 +52,7 @@ export function blueskyDraftInput(d: ComposeDraft): string {
     quote: b.quote,
     labels: sentLabels(b),
     images: b.images.map((i) => ({ cid: i.blob.ref.$link, alt: i.alt, aspectRatio: i.aspectRatio })),
+    ...(gates ? { gates } : {}),
   })
 }
 
@@ -222,11 +226,13 @@ export async function postBlueskyDraft(
     if (b.sent.input === input) reuse = b.sent
   }
 
+  // G4: the limits are frozen with the record.
+  const gates = blueskySentGates(b)
   let sent: BlueskySentRecord = reuse ?? { input, record: blueskyRecord(draft, [], '') }
   if (!reuse) {
     const facets = await need(client, 'blueskyDetectFacets')(draft.text)
     stillOwned()
-    sent = { input, record: blueskyRecord(draft, facets, new Date().toISOString()) }
+    sent = { input, record: blueskyRecord(draft, facets, new Date().toISOString()), ...(gates ? { gates } : {}) }
   }
   const frozen: ComposeDraft = { ...draft, bluesky: { ...b, rkey, sent } }
   const unfrozen: ComposeDraft = { ...draft, bluesky: { ...b, rkey, sent: null } }
@@ -240,7 +246,8 @@ export async function postBlueskyDraft(
 
   let ref
   try {
-    ref = await createPost(sent.record, rkey)
+    // G2, G3: no limits is the post alone; limits go in the same call.
+    ref = sent.gates ? await createPost(sent.record, rkey, sent.gates) : await createPost(sent.record, rkey)
   } catch (err) {
     // R1: only the check decides. A failed check leaves the send pending.
     let found

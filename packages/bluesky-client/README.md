@@ -898,7 +898,26 @@ never fails a post.
 | `blueskyDetectFacets(text)` | `detectFacets` with the session's agent | facets as plain JSON |
 | `blueskyUploadBlob(file)` | `com.atproto.repo.uploadBlob`, `encoding` = the file's type | the blob ref as JSON: `{ $type: 'blob', ref: { $link }, mimeType, size }` |
 | `blueskyCreatePost(record, rkey)` | `com.atproto.repo.createRecord` on the reader's repo, collection `app.bsky.feed.post`, that `rkey` | `{ uri, cid }` |
+| `blueskyCreatePost(record, rkey, gates)` | with limits (#199): one `com.atproto.repo.applyWrites` on the reader's repo: create the post, then the thread gate, then the post gate, all at that `rkey` | the post's `{ uri, cid }` |
 | `blueskyGetOwnPost(rkey)` | `com.atproto.repo.getRecord` on the reader's repo, on the PDS (the agent's own host, not the AppView, which can lag) | `{ uri, cid, value }`, or `null` for `RecordNotFound` |
+
+**Reply and quote limits (#199).** `gates` is `BlueskyGates` (rules in
+the `packages/state` README, "Reply and quote limits"). `null`, or
+`{ replies: null, quotes: true }`, is no limit: the call is the
+`createRecord` above, unchanged.
+
+- `replies` not `null`: an `app.bsky.feed.threadgate` with `post` = the
+  new post's URI (`at://<DID>/app.bsky.feed.post/<rkey>`), `allow` = the
+  rules in order (`#mentionRule`, `#followingRule`, `#followerRule`,
+  `#listRule` with `list` = `at://<DID>/app.bsky.graph.list/<id>`; an id that is not a TID is refused, nothing written), `[]` for nobody, and the post's `createdAt`.
+- `quotes: false`: an `app.bsky.feed.postgate` with that `post`,
+  `embeddingRules: [{ $type: 'app.bsky.feed.postgate#disableRule' }]` and
+  the post's `createdAt`.
+- One `applyWrites` call, post first. One call is one commit: the PDS keeps
+  all of it or none. The answer is the first result's `uri` and `cid`.
+- Errors are as for `createRecord`: a missing blob is `BlueskyBlobNotFound`.
+- Reading limits is unchanged: `viewer.replyDisabled` and
+  `viewer.embeddingDisabled` from the AppView.
 
 - Writes and `getOwnPost` skip the read dedup: two sends are two requests.
 - Errors go through `normalizeXrpcError`; a 401 calls `onUnauthorized`.

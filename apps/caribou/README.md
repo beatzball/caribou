@@ -817,6 +817,17 @@ focus rules) lists Adult, Suggestive, Nudity and Graphic. Each is a toggle butto
 record only with images. Known: the shared menu closes after each choice, so
 two labels take two openings (review note N7, left as it is for day one).
 
+**Who can reply, and quotes** (#199; rules in the `packages/state`
+README, "Reply and quote limits"). A new post or a quote (never a reply)
+shows a button in the toolbar whose text is the limit in plain words, for
+example "Everyone can reply. Quotes are on.". It opens a panel
+(`<caribou-bluesky-gates>`): "Everyone" and "Nobody", then checkboxes for
+people you mention, people you follow, your followers, and one of your own
+lists (a select; the lists load when the panel first opens; if they cannot
+load, it says so and has no list choice), then "Allow quotes". The choice
+is the draft's, so it survives a reload. The panel is read-only while a
+send runs.
+
 **Reply and quote.** `caribou:compose` with `inReplyTo` (a Bluesky post) or
 `quote`. The draft takes the strong refs from the post (`reply.root` from
 its `replyRef.root`, else the post). No mentions are typed into a Bluesky

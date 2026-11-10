@@ -2,13 +2,14 @@ import type { Agent, AppBskyFeedDefs } from '@atproto/api'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
   CaribouError, createDedup,
-  type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet,
+  type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet, type BlueskyGates,
   type BlueskyModerationResult, type BlueskyOwnPost, type BlueskyPostRecord,
   type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type SavedFeed, type Search,
   type SearchInput, type Status, type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
 import { createLists } from './lists.js'
+import { gatedPostWrites, noGates } from './gates.js'
 import { answerCoverage, commonLabelers } from './content-labelers.js'
 import { BlueskyBlobNotFound, BlueskyDeleteUnknown, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
@@ -818,9 +819,18 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       })
     },
 
-    async blueskyCreatePost(record: BlueskyPostRecord, rkey: string) {
+    async blueskyCreatePost(record: BlueskyPostRecord, rkey: string, gates?: BlueskyGates | null) {
       return write(async () => {
         try {
+          // #199: limits go in one applyWrites with the post, all or none.
+          if (gates && !noGates(gates)) {
+            const { data } = await agent.com.atproto.repo.applyWrites({ repo: did(), writes: gatedPostWrites(did(), rkey, record, gates, listUri) })
+            const first = data.results?.[0] as { uri?: unknown; cid?: unknown } | undefined
+            if (typeof first?.uri !== 'string' || typeof first.cid !== 'string') {
+              throw new CaribouError('server_error', 'Bluesky: the post write answered no post')
+            }
+            return { uri: first.uri, cid: first.cid }
+          }
           const { data } = await agent.com.atproto.repo.createRecord({
             repo: did(), collection: POST_COLLECTION, rkey, record: record as unknown as Record<string, unknown>,
           })
