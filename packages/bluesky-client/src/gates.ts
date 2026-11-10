@@ -10,6 +10,10 @@ const POST = 'app.bsky.feed.post'
 const THREADGATE = 'app.bsky.feed.threadgate'
 const POSTGATE = 'app.bsky.feed.postgate'
 const CREATE = 'com.atproto.repo.applyWrites#create'
+const DELETE = 'com.atproto.repo.applyWrites#delete'
+
+/** The gate collections, in the order a write names them. */
+export const GATE_COLLECTIONS = [THREADGATE, POSTGATE] as const
 
 /** True when the limits write nothing: everyone can reply, quotes on. */
 export function noGates(g: BlueskyGates | null | undefined): boolean {
@@ -86,4 +90,20 @@ export function readGates(did: string, threadgate: unknown, postgate: unknown): 
   const rules = (postgate as { embeddingRules?: unknown } | null)?.embeddingRules
   const quotes = !(Array.isArray(rules) && rules.some((r) => (r as { $type?: unknown }).$type === `${POSTGATE}#disableRule`))
   return { replies, quotes }
+}
+
+export interface DeleteWrite {
+  $type: typeof DELETE
+  collection: string
+  rkey: string
+}
+
+/**
+ * The writes of a post delete with its limits (#262): the post, then each
+ * gate found. Only found gates: the PDS fails a whole `applyWrites` whose
+ * delete names a missing record.
+ */
+export function postDeleteWrites(rkey: string, gatesFound: readonly string[]): DeleteWrite[] {
+  return [POST, ...GATE_COLLECTIONS.filter((c) => gatesFound.includes(c))]
+    .map((collection) => ({ $type: DELETE, collection, rkey }))
 }

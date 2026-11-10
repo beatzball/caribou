@@ -3,7 +3,7 @@
 // (read, re-encode, upload, rkey, storage) happens before it.
 import type { UserKey } from '@beatzball/caribou-auth'
 import type {
-  BlueskyBlobRef, BlueskyFacet, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, Status,
+  BlueskyBlobRef, BlueskyFacet, BlueskyGates, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 import {
@@ -11,6 +11,7 @@ import {
   type BlueskyDraftImage, type ComposeDraft, type DraftSlot,
 } from './compose.js'
 import { emptyBlueskyDraft } from './bluesky-compose.js'
+import { hasBlueskyGates } from './bluesky-gates.js'
 import { putDraftFiles, removeDraftFiles } from './draft-files.js'
 import { ownerGeneration } from './keep-alive.js'
 
@@ -23,6 +24,8 @@ export interface BlueskyRedraftSource {
   record: BlueskyPostRecord
   files: Map<string, Blob>
   targets: { reply: RedraftTarget | null; quote: RedraftTarget | null }
+  /** The post's reply and quote limits, from its gate records (#262). */
+  gates: BlueskyGates
   generation: number
 }
 
@@ -57,6 +60,14 @@ export class BlueskyRedraftGone extends Error {
   override name = 'BlueskyRedraftGone'
   constructor() {
     super('This post is already deleted.')
+  }
+}
+
+/** The post's limits could not be read: a redraft would drop them (#262). */
+export class BlueskyRedraftGatesUnread extends Error {
+  override name = 'BlueskyRedraftGatesUnread'
+  constructor() {
+    super("Could not read the post's reply and quote limits, so it was not deleted.")
   }
 }
 
@@ -196,6 +207,15 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
   // Same rkey in another repo is another post.
   if (own.uri !== uri || !isObject(own.value)) throw new Error('The post is not on your server.')
   const record = own.value
+  // #262: the limits, read before anything is deleted. A failed read says so.
+  let gates: BlueskyGates
+  try {
+    gates = await need(client, 'blueskyGetOwnGates')(rkey)
+  } catch {
+    if (generation !== ownerGeneration()) return null
+    throw new BlueskyRedraftGatesUnread()
+  }
+  if (generation !== ownerGeneration()) return null
   const files = new Map<string, Blob>()
   const { quote, images } = embedParts(record)
   for (const img of images) {
@@ -212,7 +232,7 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
     quote ? checkTarget(client, quote.uri, 'embeddingDisabled', generation) : null,
   ])
   if (generation !== ownerGeneration()) return null
-  return { status: post, record, files, targets: { reply: replyState, quote: quoteState }, generation }
+  return { status: post, record, files, targets: { reply: replyState, quote: quoteState }, gates, generation }
 }
 
 /**
@@ -251,6 +271,30 @@ export function redraftLabelsOf(record: BlueskyPostRecord): string[] {
     if (isObject(v) && typeof v.val === 'string' && v.val !== '' && !out.includes(v.val)) out.push(v.val)
   }
   return out
+}
+
+// A list id the send can name: a record key (TID) in the reader's repo.
+// Another repo's list is a full AT URI; an unknown rule is `unknown:…`.
+const OWN_LIST_ID = /^[2-7a-j][2-7a-z]{12}$/
+
+/**
+ * The limits the redraft's draft gets (README, "Limits a redraft keeps",
+ * #262). Null: none (a reply, G1, or no limit). Only rules the composer
+ * can send; when every reply rule is dropped, nobody can reply.
+ */
+export function redraftGatesOf(source: BlueskyRedraftSource): BlueskyGates | null {
+  const g = source.gates
+  if (replyOf(source.record) || !hasBlueskyGates(g)) return null
+  if (g.replies === null) return g
+  const replies = g.replies.filter((r) => r.kind !== 'list' || OWN_LIST_ID.test(r.id))
+  return { ...g, replies }
+}
+
+/** True when the draft keeps less of the limits than the post had. */
+export function redraftDropsGates(source: BlueskyRedraftSource): boolean {
+  if (!hasBlueskyGates(source.gates)) return false
+  const kept = redraftGatesOf(source)
+  return !kept || kept.replies?.length !== source.gates.replies?.length
 }
 
 /**
@@ -324,6 +368,7 @@ export async function storeBlueskyRedraft(
   }
   if (stale()) return null
   const reply = replyOf(record)
+  const gates = redraftGatesOf(source)
   const langs = Array.isArray(record.langs) ? record.langs : []
   const language = langs.find((l): l is string => typeof l === 'string' && l !== '') ?? null
   const draft = emptyDraft({
@@ -333,6 +378,8 @@ export async function storeBlueskyRedraft(
     // A new record with a new rkey (R6), stored with the first save.
     bluesky: emptyBlueskyDraft({
       reply, quote, labels: redraftLabelsOf(record), images, rkey, source: source.status.bluesky?.uri ?? source.status.id,
+      // #262: only the limits the send can write (README, "Limits a redraft keeps").
+      ...(gates ? { gates } : {}),
       // Set now, so the rename after the delete only changes its value
       // (and needs no more storage).
       sourceMaybeLive: false, stagedAt: Date.now(),

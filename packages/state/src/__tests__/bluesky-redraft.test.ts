@@ -1,14 +1,14 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import type { BlueskyGates, BlueskyOwnPost, BlueskyPostRecord, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus, deletedStatusIds, statusCache } from '../caches.js'
 import { activeUserKey } from '../users.js'
 import { ownerGeneration } from '../keep-alive.js'
 import { deleteOwnStatus, deleteOwnStatusOutcome } from '../own-posts.js'
 import {
-  BlueskyRedraftGone, NOTHING_KEPT, STAGED_MAX_AGE_MS, checkRedraftSource, discardBlueskyRedraft, _testOnlyForgetStaging,
+  BlueskyRedraftGatesUnread, BlueskyRedraftGone, NOTHING_KEPT, STAGED_MAX_AGE_MS, checkRedraftSource, discardBlueskyRedraft, _testOnlyForgetStaging,
   findRedraftOf, hasOrphanStagedRedrafts, readBlueskyRedraft,
-  recoverStagedRedrafts, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
+  recoverStagedRedrafts, redraftDropsGates, redraftGatesOf, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
 } from '../bluesky-redraft.js'
 import {
   emptyDraft, findRedraftSlot, loadDraft, patchRevealed, renameDraftIf, saveDraft, storedDrafts, _testOnlyForgetRevealed, type DraftSlot,
@@ -56,6 +56,7 @@ function fakeClient(record: BlueskyPostRecord | null = RECORD) {
     // A PDS may type a blob as octet-stream: the record's type wins.
     blueskyGetBlob: vi.fn(async (cid: string) => new Blob([`bytes of ${cid}`], { type: 'application/octet-stream' })),
     blueskyNextRkey: vi.fn(async () => '3knewkey00001'),
+    blueskyGetOwnGates: vi.fn(async (_rkey: string): Promise<BlueskyGates> => ({ replies: null, quotes: true })),
     fetchStatus: vi.fn(async (id: string): Promise<Status> => post({}, id)),
     blueskyDeletePost: vi.fn(async () => {}),
     blueskyUploadBlob: vi.fn(async (b: Blob) => {
@@ -259,6 +260,87 @@ describe('readBlueskyRedraft', () => {
     activeUserKey.value = 'did:plc:other@bsky'
     d.resolve({ uri: URI, cid: 'bafyold', value: RECORD })
     expect(await out).toBeNull()
+  })
+})
+
+// #262: a redraft keeps the post's reply and quote limits.
+describe('redraft and the reply and quote limits', () => {
+  const LIMITS: BlueskyGates = { replies: [{ kind: 'following' }, { kind: 'list', id: '3kllaaaaaaaa2' }], quotes: false }
+
+  it('reads the limits by the post rkey, with the record', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce(LIMITS)
+    const source = await readBlueskyRedraft(client, post())
+    expect(c.blueskyGetOwnGates).toHaveBeenCalledWith('3kold')
+    expect(source!.gates).toEqual(LIMITS)
+  })
+
+  it('a failed limits read says so, and nothing is deleted or stored', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockRejectedValueOnce(new Error('502'))
+    const err = await readBlueskyRedraft(client, post()).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(BlueskyRedraftGatesUnread)
+    expect((err as Error).message).toBe("Could not read the post's reply and quote limits, so it was not deleted.")
+    expect(c.blueskyDeletePost).not.toHaveBeenCalled()
+    expect(storedDrafts(KEY)).toEqual([])
+  })
+
+  it('a top-level post: the draft opens with its limits', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce(LIMITS)
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(false)
+    const out = await storeBlueskyRedraft(client, source, { prepareImage })
+    expect(out!.draft.bluesky!.gates).toEqual(LIMITS)
+    expect(loadDraft(KEY, out!.slot)!.bluesky!.gates).toEqual(LIMITS)
+  })
+
+  it('no limits: the draft has no gates key (G2)', async () => {
+    const { client } = fakeClient()
+    const source = (await readBlueskyRedraft(client, post()))!
+    const out = await storeBlueskyRedraft(client, source, { prepareImage })
+    expect(out!.draft.bluesky).not.toHaveProperty('gates')
+  })
+
+  // Rules 2 to 4 of "Limits a redraft keeps".
+  it.each([
+    ['a list in another repo', { kind: 'list', id: 'at://did:plc:bob/app.bsky.graph.list/3kllaaaaaaaa2' }],
+    ['a rule this code does not know', { kind: 'list', id: 'unknown:app.bsky.feed.threadgate#newRule' }],
+  ] as const)('%s is dropped, and the confirm is told before the delete', async (_, rule) => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: [{ kind: 'following' }, rule], quotes: false })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(true)
+    expect(redraftGatesOf(source)).toEqual({ replies: [{ kind: 'following' }], quotes: false })
+    const out = await storeBlueskyRedraft(client, source, { prepareImage })
+    expect(out!.draft.bluesky!.gates).toEqual({ replies: [{ kind: 'following' }], quotes: false })
+    expect(c.blueskyDeletePost).not.toHaveBeenCalled()
+  })
+
+  it('every reply rule dropped: nobody can reply, never everyone', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: [{ kind: 'list', id: 'at://did:plc:bob/app.bsky.graph.list/3kllaaaaaaaa2' }], quotes: true })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(true)
+    expect(redraftGatesOf(source)).toEqual({ replies: [], quotes: true })
+  })
+
+  it('an own list (a TID id) is kept, and nothing is dropped', async () => {
+    const { client, c } = fakeClient()
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: [{ kind: 'list', id: '3kllaaaaaaaa2' }], quotes: true })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(redraftDropsGates(source)).toBe(false)
+    expect(redraftGatesOf(source)).toEqual({ replies: [{ kind: 'list', id: '3kllaaaaaaaa2' }], quotes: true })
+  })
+
+  it('a reply: the draft gets no limits (G1)', async () => {
+    const { client, c } = fakeClient({ ...RECORD, reply: { root: ROOT, parent: PARENT } } as unknown as BlueskyPostRecord)
+    c.blueskyGetOwnGates.mockResolvedValueOnce({ replies: null, quotes: false })
+    const source = (await readBlueskyRedraft(client, post()))!
+    expect(source.gates).toEqual({ replies: null, quotes: false })
+    expect(redraftDropsGates(source)).toBe(true)
+    const out = await storeBlueskyRedraft(client, source, { prepareImage })
+    expect(out!.draft.bluesky).not.toHaveProperty('gates')
   })
 })
 

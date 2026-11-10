@@ -1057,7 +1057,7 @@ record first and writes a new one (rules in `packages/state` README,
 
 | method | call | answer |
 |---|---|---|
-| `blueskyDeletePost(uri)` | `com.atproto.repo.deleteRecord` on the reader's repo, collection `app.bsky.feed.post`, the URI's rkey | nothing, when the record is gone |
+| `blueskyDeletePost(uri)` | `getRecord` of the thread gate and post gate at the URI's rkey, then `com.atproto.repo.deleteRecord` of the post (no gate), or one `applyWrites` that deletes the post and each gate found (#262) | nothing, when the record is gone |
 | `blueskyGetBlob(cid)` | `com.atproto.sync.getBlob` with the reader's DID, on the PDS | the blob's bytes as a `Blob`, typed from the answer (the caller types it from the record) |
 
 - **Only the reader's own post.** The URI must be
@@ -1071,6 +1071,22 @@ record first and writes a new one (rules in `packages/state` README,
   and the call resolves; found → the delete's error is thrown; the read
   fails → `BlueskyDeleteUnknown` (a `CaribouError('unknown')`, root export)
   is thrown, and the caller must not say "not deleted".
+- **The post's limits go with it** (#262). A post with reply or quote
+  limits (#199) has a thread gate (`app.bsky.feed.threadgate`) and a post
+  gate (`app.bsky.feed.postgate`) at its rkey. The delete first reads both
+  (`getRecord`, `RecordNotFound` = absent):
+  1. No gate: one `deleteRecord` of the post, as before #262.
+  2. A gate found: one `applyWrites` with the post delete, then a delete
+     of each gate found. It is one commit, so the post and its limits go
+     together or not at all, and the check in doubt (below) still reads
+     only the post.
+  3. Only gates found are named. The PDS fails a whole `applyWrites`
+     whose delete names a missing record (its MST throws "Could not find
+     a record"), while `deleteRecord` of a missing record answers OK.
+  4. A gate read that fails (not `RecordNotFound`) fails the delete, with
+     nothing written. A gate gone between the read and the write fails
+     it too (the post is found, so the error is thrown); a retry reads
+     again.
 - A delete of a record that is already gone succeeds (the PDS answers it
   as done). So a second click, or a retry after a lost answer, is safe.
 - Writes skip the read dedup. Errors go through `normalizeXrpcError`; a

@@ -11,8 +11,8 @@ import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
   actAsAccounts, activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
-  BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, findRedraftOf, forgetDeletedStatus,
-  readBlueskyRedraft, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
+  BLUESKY_SELF_LABELS, BlueskyRedraftGatesUnread, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, findRedraftOf, forgetDeletedStatus,
+  readBlueskyRedraft, redraftDropsGates, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
   type BlueskyRedraftSource, type DraftSlot, type PreparedImage,
   isOwnAccount, mergeStatus, olderEdit, ownerGeneration, loadReaderView, readSource, readerCheckFor, readerFiltered, readerQuote, relationshipCache, relationshipKey, setBlock, setMute,
   type ReaderCheck, statusCache, toggleBookmark, toggleFavourite, toggleReblog,
@@ -206,6 +206,8 @@ function blueskyRedraftQuestion(post: Status, source: BlueskyRedraftSource): str
   if (post.card || post.bluesky?.recordCard || embed === 'app.bsky.embed.external') out.push('The link card is not kept.')
   const menu = BLUESKY_SELF_LABELS.map((l) => l.value)
   if (source.files.size === 0 && redraftLabelsOf(source.record).some((v) => menu.includes(v))) out.push('Its labels are not kept.')
+  // #262: a reply has no limits (G1), so a reply's limits are not kept.
+  if (redraftDropsGates(source)) out.push('Its reply and quote limits are not kept.')
   const { reply, quote } = source.targets
   if (reply === 'gone') out.push('The post it replies to is gone, so the redraft cannot be posted as a reply.')
   if (reply === 'limited') out.push('The author of the post it replies to limited replies, so the redraft cannot be posted as a reply.')
@@ -990,7 +992,7 @@ export class CaribouStatusCard extends LitElement {
         toast('info', err.message)
         return
       }
-      toast('error', 'Could not read this post, so it was not deleted.')
+      toast('error', err instanceof BlueskyRedraftGatesUnread ? err.message : 'Could not read this post, so it was not deleted.')
       return
     }
     if (!source || !stillOwner(owner)) return

@@ -9,7 +9,7 @@ import {
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
 import { createLists } from './lists.js'
-import { gatedPostWrites, noGates, readGates } from './gates.js'
+import { GATE_COLLECTIONS, gatedPostWrites, noGates, postDeleteWrites, readGates } from './gates.js'
 import { answerCoverage, commonLabelers } from './content-labelers.js'
 import { BlueskyBlobNotFound, BlueskyDeleteUnknown, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
@@ -865,13 +865,23 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       })
     },
 
-    // Delete (#190): only the reader's own post record.
-    // Only getRecord decides a delete in doubt (README, "Delete").
+    // Delete (#190): only the reader's own post record, and its gates
+    // (#262) in the same commit. Only getRecord decides a delete in doubt
+    // (README, "Delete").
     async blueskyDeletePost(uri: string) {
       const rkey = ownPostRkey(uri, did())
+      // A failed read throws here: nothing is written.
+      const found = await write(async () => {
+        const records = await Promise.all(GATE_COLLECTIONS.map((c) => ownGateRecord(c, rkey)))
+        return GATE_COLLECTIONS.filter((_, i) => records[i] !== null)
+      })
       try {
         await write(async () => {
-          await agent.com.atproto.repo.deleteRecord({ repo: did(), collection: POST_COLLECTION, rkey })
+          if (found.length === 0) {
+            await agent.com.atproto.repo.deleteRecord({ repo: did(), collection: POST_COLLECTION, rkey })
+          } else {
+            await agent.com.atproto.repo.applyWrites({ repo: did(), writes: postDeleteWrites(rkey, found) })
+          }
         })
       } catch (err) {
         const status = (err as CaribouError).status

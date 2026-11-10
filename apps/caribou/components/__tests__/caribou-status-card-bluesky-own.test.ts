@@ -1,7 +1,7 @@
 // Bluesky delete and redraft on the card (#190; app README, "Bluesky delete and redraft").
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BlueskyOwnPost, BlueskyPostRecord, Capabilities, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
+import type { BlueskyGates, BlueskyOwnPost, BlueskyPostRecord, Capabilities, CaribouClient, Status } from '@beatzball/caribou-mastodon-client'
 import {
   activeClient, activeUserKey, addUserSession, blueskyUserKey, deletedStatusIds, findRedraftSlot, getDraftFiles, loadDraft,
   saveDraft, emptyDraft, setBlueskyDriver, statusCache, storedDrafts, users, _testOnlyClearDraftFiles,
@@ -80,6 +80,7 @@ function fakeClient() {
       return { $type: 'blob' as const, ref: { $link: 'bafkNEW' }, mimeType: b.type, size: b.size }
     }),
     blueskyNextRkey: vi.fn(async () => { calls.push('rkey'); return '3knewkey00001' }),
+    blueskyGetOwnGates: vi.fn(async (_rkey: string): Promise<BlueskyGates> => ({ replies: null, quotes: true })),
     deleteStatus: vi.fn(async () => { throw new Error('Mastodon only') }),
     fetchStatus: vi.fn(async (id: string) => {
       calls.push(`fetch ${id}`)
@@ -484,7 +485,22 @@ describe('<caribou-status-card> own Bluesky post', () => {
     expect(storedDrafts(KEY).map(([, d]) => d.text).sort()).toEqual(['left behind', 'shown and edited'])
   })
 
+  // #262: a failed limits read says so; the post is not deleted.
+  it('when the limits cannot be read, nothing is deleted, and the toast says why', async () => {
+    signIn()
+    const el = await mount(post())
+    pds.blueskyGetOwnGates.mockRejectedValueOnce(new Error('502'))
+    item(el, 'redraft')!.click()
+    await settle(el)
+    expect(pds.blueskyDeletePost).not.toHaveBeenCalled()
+    expect(findRedraftSlot(KEY)).toBeNull()
+    expect(toasts.at(-1)).toEqual({ kind: 'error', message: "Could not read the post's reply and quote limits, so it was not deleted." })
+  })
+
   it.each([
+    ['a reply with limits (G1)', RECORD,
+      () => { pds.blueskyGetOwnGates.mockResolvedValue({ replies: null, quotes: false }) },
+      'Its reply and quote limits are not kept.'],
     ['a menu label on a post with no images', { ...RECORD, embed: undefined, labels: { values: [{ val: 'porn' }] } }, () => {}, 'Its labels are not kept.'],
     ['the quoted post gone', { ...RECORD, reply: undefined, embed: { $type: 'app.bsky.embed.record', record: { uri: 'at://did:plc:carol/app.bsky.feed.post/q1', cid: 'bafyq' } } },
       () => { pds.fetchStatus.mockRejectedValue(Object.assign(new Error('gone'), { code: 'not_found' })) },
