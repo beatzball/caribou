@@ -855,7 +855,6 @@ so the open dialog does not cover a page change. After a blob refusal the
 toast says only what happened: an image uploaded again, an image to add
 again, or "The server refused an image this post named." The reply/quote
 block is read live at every render and at every Post.
-Link cards are phase 6: a link is posted as a facet with no card.
 
 Tests: `caribou-compose-dialog-bluesky.test.ts` (limits with emoji,
 combining marks, CJK and a link; one post after a lost answer, a reload and
@@ -863,6 +862,40 @@ an edit; reply and quote refs; the flags; images, alt text, labels, resize,
 the 4-image cap and blob recovery); `_image-fit.test.ts`;
 `tests/e2e/bluesky-compose.spec.ts` (the real SDK against a fixture PDS: the
 counter, a TID rkey, facets, and a lost answer across a reload is one post).
+
+### Bluesky link cards (#200)
+
+The dialog's part. The fetch rules (C1 to C5, and why `cardyb`) are in
+`packages/bluesky-client` README ("Link cards"); the draft and the record
+(K1 to K6) in `packages/state` README ("Bluesky link cards"). The watcher
+is its own module, `components/_bluesky-link-card.ts`.
+
+1. **The card follows the first link.** The text's first http or https link
+   (`cardLink`) is the card's link. No link: no card. A new first link
+   replaces the card.
+2. **No other embed.** No fetch, and no card, while the draft has an image
+   or a quote. Adding an image removes the card. Removing the last image
+   lets the card come back.
+3. **One fetch per pause, not per key.** The fetch starts 600 ms after the
+   last change to the link. A newer link aborts the older fetch.
+4. **A late answer is dropped.** An answer is used only when its link is
+   still the text's first link, the dialog is the same opening for the same
+   account, and the draft still has no other embed.
+5. **Remove.** The card's "Remove link card" button removes it and keeps that
+   link in `cardDismissed`: the same link does not fetch again. Another link
+   does.
+6. **The preview** shows the title, the description, the link's host and
+   the image (the `cardyb` URL, `referrerpolicy="no-referrer"`). It is the
+   reader's own draft, not someone's post, so no moderation runs on it.
+7. **Post.** `prepareCardThumb` (K4) runs before `postBlueskyDraft`. Post
+   says "Posting…" while it runs. A `BlueskyBlobNotFound` for the thumb
+   drops the stored thumb, so the next Post uploads it again, and says so.
+8. **Mastodon:** nothing changes. Every step above runs only when the
+   dialog's client is Bluesky.
+
+Tests: `caribou-compose-dialog-bluesky-link-card.test.ts` (debounce, a late
+answer, remove, images and quotes, the post with and without the image,
+Mastodon untouched).
 
 ### Bluesky delete and redraft (#190)
 

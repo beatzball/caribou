@@ -5,7 +5,7 @@ import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, getDraftFiles, loadDraft, postDraft, pruneDraftFiles, saveDraft,
   checkRedraftSource, draftFilesSlot, hasOrphanStagedRedrafts, recoverStagedRedrafts,
-  pollOptions, blueskyDraftInput, cacheStatus, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
+  pollOptions, blueskyDraftInput, cacheStatus, cardAllowed, prepareCardThumb, emptyBlueskyDraft, postBlueskyDraft, statusCache, BLUESKY_SELF_LABELS, DraftChanged, DraftNotSaved,
   type BlueskyDraft, type BlueskyDraftImage, type ComposeDraft, type DraftMedia, type DraftPoll, type DraftSlot,
   type UserSession,
 } from '@beatzball/caribou-state'
@@ -22,6 +22,7 @@ import { draftMediaOf, POLL_EDIT_REFUSED } from './_redraft.js'
 import './caribou-menu.js'
 import { loadBluesky, type BlueskyBrowser } from './_bluesky.js'
 import { fitImage, type FitResult } from './_image-fit.js'
+import { LinkCardWatcher, linkCardStyles, renderLinkCardPreview } from './_bluesky-link-card.js'
 
 /**
  * What `caribou:compose` asks for: a new post, a reply to `inReplyTo`, an
@@ -254,7 +255,7 @@ const mounted: CaribouComposeDialog[] = []
 
 @customElement('caribou-compose-dialog')
 export class CaribouComposeDialog extends LitElement {
-  static override styles = [boxReset, css`
+  static override styles = [boxReset, linkCardStyles, css`
     :host { display: contents; }
     dialog {
       width: min(600px, calc(100vw - 2 * var(--space-4)));
@@ -350,6 +351,8 @@ export class CaribouComposeDialog extends LitElement {
   private blobFiles = new Map<string, Blob>()
   private filesLoading: Promise<void> = Promise.resolve()
   private blobPreviews = new Map<string, string>()
+  // Bluesky only: the link card watcher of this opening (#200).
+  private cardWatcher: LinkCardWatcher | null = null
 
   @query('dialog') private dialogEl?: HTMLDialogElement
   @query('textarea') private textareaEl?: HTMLTextAreaElement
@@ -396,6 +399,31 @@ export class CaribouComposeDialog extends LitElement {
     this.unwatchUser = undefined
     for (const p of this.pending) URL.revokeObjectURL(p.previewUrl)
     super.disconnectedCallback()
+  }
+
+  // The link card follows the text (#200, README "Bluesky link cards").
+  protected override willUpdate(changed: Map<PropertyKey, unknown>) {
+    if ((changed.has('draft') || changed.has('bsky')) && this.open && this.bsky && !this.posting && !this.editing) {
+      this.cardWatcher?.check(this.draft)
+    }
+  }
+
+  private makeCardWatcher(client: CaribouClient, session: number): LinkCardWatcher {
+    const mine = () => this.client === client && this.session === session && activeUserKey.peek() === client.userKey
+    return new LinkCardWatcher({
+      findLink: (text) => this.bsky?.cardLink(text) ?? null,
+      fetchCard: (url, signal) => this.bsky ? this.bsky.fetchLinkCard(url, { signal }) : Promise.resolve(null),
+      current: () => mine() ? this.draft : null,
+      apply: (card) => { if (mine()) this.patchBluesky({ card }) },
+    })
+  }
+
+  // K4: the card's image, fetched through `cardyb` and fitted to the lexicon's 1 MB.
+  private async loadCardImage(url: string): Promise<Blob> {
+    if (!this.bsky) throw new Error('Bluesky is not loaded')
+    const fit = await fitImage(await this.bsky.fetchCardImage(url), 1_000_000)
+    if (!fit.ok) throw new Error(fit.reason)
+    return fit.blob
   }
 
   protected override updated() {
@@ -459,9 +487,12 @@ export class CaribouComposeDialog extends LitElement {
     this.targetsChecking = 0
     this.sourceLive = false
     this.filesLoading = Promise.resolve()
+    this.cardWatcher?.stop()
+    this.cardWatcher = null
     if (this.isBluesky) {
       const session = this.session
       this.bsky = null
+      this.cardWatcher = this.makeCardWatcher(client, session)
       void loadBluesky().then(
         (m) => { if (session === this.session) this.bsky = m },
         () => { if (session === this.session) toast('error', 'Could not load Bluesky. Check your connection and open the composer again.') },
@@ -788,6 +819,7 @@ export class CaribouComposeDialog extends LitElement {
   // is already stored, so closing loses nothing.
   private onClose = () => {
     this.open = false
+    this.cardWatcher?.stop()
     this.client = null
     this.editing = null
     for (const p of this.pending) URL.revokeObjectURL(p.previewUrl)
@@ -956,11 +988,21 @@ export class CaribouComposeDialog extends LitElement {
     }
     const done = this.replyTo ? 'Reply posted' : 'Post published'
     const owner = this.owner()!
-    const sentRkey = this.draft.bluesky?.rkey ?? null
-    const sentInput = blueskyDraftInput(this.draft)
     this.posting = true
     this.earlierPosted = null
+    let sentRkey: string | null = null
+    let sentInput = ''
     try {
+      // K4: the link card's image goes up first, once. Not `patchBluesky`:
+      // the editor is read-only while posting.
+      const ready = await prepareCardThumb(client, this.draft, { loadImage: (url) => this.loadCardImage(url) })
+      if (!this.owns(owner) || !ready) return
+      if (ready !== this.draft) {
+        this.draft = ready
+        saveDraft(owner.client.userKey, owner.slot, ready)
+      }
+      sentRkey = this.draft.bluesky?.rkey ?? null
+      sentInput = blueskyDraftInput(this.draft)
       const out = await postBlueskyDraft(client, owner.slot, this.draft, {
         // Rule 2: the open draft takes every draft the send makes, the
         // frozen one first, so it never holds less than storage.
@@ -1005,6 +1047,15 @@ export class CaribouComposeDialog extends LitElement {
     // A stored redraft's bytes may still be loading.
     await this.filesLoading
     if (!this.owns(owner)) return
+    // The link card's image (#200): drop the stored blob, so the next Post
+    // uploads it again (K4).
+    const card = this.draft.bluesky?.card
+    if (card?.thumb && cardAllowed(this.draft) && (err.cid === null || card.thumb.ref.$link === err.cid)) {
+      this.draft = { ...this.draft, bluesky: { ...this.draft.bluesky!, card: { ...card, thumb: null } } }
+      saveDraft(owner.client.userKey, owner.slot, this.draft)
+      toast('error', 'The server no longer has the link card’s image. Post again to upload it again.')
+      return
+    }
     const gone = (this.draft.bluesky?.images ?? []).filter((i) => err.cid === null || i.blob.ref.$link === err.cid)
     const missing = new Set(this.missingBlobs)
     const replaced = new Map<string, BlueskyDraftImage>()
@@ -1430,6 +1481,9 @@ export class CaribouComposeDialog extends LitElement {
                 </li>`
               })}
             </ul>` : nothing}
+          ${bluesky && !editing && d.bluesky?.card && cardAllowed(d)
+            ? renderLinkCardPreview(d.bluesky.card, busy, () => this.patchBluesky({ card: null, cardDismissed: d.bluesky!.card!.uri }))
+            : nothing}
           ${this.activePoll ? this.renderPoll(this.activePoll, busy) : nothing}
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space

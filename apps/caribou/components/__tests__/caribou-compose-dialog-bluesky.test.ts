@@ -15,10 +15,11 @@ import '../caribou-compose-dialog.js'
 import type { CaribouComposeDialog } from '../caribou-compose-dialog.js'
 import type { FitResult } from '../_image-fit.js'
 
-// The SDK's counter, without the rest of the browser chunk.
+// The SDK's counter, without the rest of the browser chunk. No link card
+// fetch: these tests never hit the network (#200 has its own file).
 vi.mock('../_bluesky.js', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
-  loadBluesky: async () => compose,
+  loadBluesky: async () => ({ ...compose, fetchLinkCard: async () => null, fetchCardImage: async () => { throw new Error('offline') } }),
 }))
 
 // The IndexedDB read of a slot's bytes, held when a test says so.

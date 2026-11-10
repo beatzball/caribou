@@ -53,3 +53,20 @@ export async function detectFacets(agent: Pick<AtpBaseClient, 'com'>, text: stri
   }
   return out
 }
+
+/**
+ * The link a card is for (#200, C2): the first link facet of the text, found
+ * without the network (`detectFacetsWithoutResolution`), and only http or
+ * https. Null with no such link.
+ */
+export function cardLink(text: string): string | null {
+  const rt = new RichText({ text })
+  rt.detectFacetsWithoutResolution()
+  for (const facet of rt.facets ?? []) {
+    for (const f of facet.features) {
+      const uri = (f as { uri?: unknown }).uri
+      if (f.$type === 'app.bsky.richtext.facet#link' && typeof uri === 'string' && /^https?:\/\//i.test(uri)) return uri
+    }
+  }
+  return null
+}

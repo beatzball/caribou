@@ -45,6 +45,20 @@ export interface BlueskyDraftImage {
 }
 
 /**
+ * A link card (#200): what `cardyb` gave for the text's first link, and the
+ * uploaded image once Post made it (README, "Bluesky link cards").
+ */
+export interface BlueskyDraftCard {
+  uri: string
+  title: string
+  description: string
+  /** The `cardyb` image URL; null when there is none or it failed (K4). */
+  image: string | null
+  /** The uploaded image (K4); null until Post uploads it. */
+  thumb: BlueskyBlobRef | null
+}
+
+/**
  * The exact record a send wrote, or tried to, frozen before the request
  * (spec 7.2). `input` is `blueskyDraftInput` of the draft it was made
  * from, so a retry can tell whether the reader edited since.
@@ -68,6 +82,10 @@ export interface BlueskyDraft {
   rkey: string | null
   /** Set from just before a send until its outcome is known. */
   sent: BlueskySentRecord | null
+  /** A link card (#200, K1). Sent only with no images and no quote (K2). */
+  card?: BlueskyDraftCard | null
+  /** The link whose card the reader removed: it does not come back. */
+  cardDismissed?: string | null
   /** A redraft only: the URI of the post it was made from (#190). */
   source?: string
   /**
