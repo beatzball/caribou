@@ -764,7 +764,11 @@ and one click sends it once. While it runs the button is busy.
   account is not the active reader is dropped. The glue then reloads that
   account's moderation once: at once if its new reader is already
   restored, else when its restore finishes. So the notice does not name a
-  labeler that the write already took out.
+  labeler that the write already took out. That reload never joins one
+  already running for the new reader: the running one may have read the
+  prefs before the write. It is queued after it, so the last load reads
+  the prefs after the write (#253). A muted-words edit answered while its
+  account is away does the same.
 - The cover stays the whole time, until the new reader settles it. The
   server and the first client render show only the empty live region
   (the reader signal is empty then).
