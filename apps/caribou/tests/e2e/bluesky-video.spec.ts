@@ -118,8 +118,13 @@ test.describe('Bluesky video', () => {
     await expect(play).toBeVisible({ timeout: 15_000 })
     await page.waitForLoadState('networkidle')
     expect(hlsChunk).toEqual([])
-    await play.click()
-    await expect(page.getByRole('alert').filter({ hasText: 'This video could not play.' })).toBeVisible({ timeout: 15_000 })
+    // By keyboard (rules 2 and 12): Space plays, the video takes focus, and
+    // on the error focus moves to the link.
+    await play.focus()
+    await page.keyboard.press('Space')
+    const alert = page.getByRole('alert').filter({ hasText: 'This video could not play.' })
+    await expect(alert).toBeVisible({ timeout: 15_000 })
+    await expect(alert.getByRole('link', { name: 'Watch on bsky.app' })).toBeFocused()
     expect(hlsChunk).toHaveLength(1)
     expect(playlistAsked).toContain(PLAYLIST)
   })

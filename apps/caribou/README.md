@@ -647,7 +647,8 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
 2. **The thumbnail is a link to the post on bsky.app.** The server renders
    it, and the first client render equals it (the hydration rule). Without
    JavaScript, or with a modifier click, the link opens bsky.app. A plain
-   click plays the video in place.
+   click plays the video in place. The control plays, so Space plays too,
+   as on a button (Enter already fires the click).
 3. **Safari plays the playlist natively.** A browser that answers
    `canPlayType('application/vnd.apple.mpegurl')` gets it as the `src`.
 4. **Other browsers use `hls.js`, loaded on the first press only.** It is a
@@ -655,25 +656,35 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
    with neither (no Media Source Extensions) gets the error of rule 6.
 5. **The embed's size holds the box.** The box uses the embed's
    `aspectRatio` (16:9 without one), before and after the press, so the
-   page does not jump. A very tall video is capped like an image.
+   page does not jump. A very tall video is capped like an image. A
+   thumbnail the mapper rejected leaves the alt text (or "Video") in the
+   box, not an empty box.
 6. **A stream that fails says so.** A fatal `hls.js` error, a `<video>`
    error or a failed load of `hls.js` shows "This video could not play."
    with a link "Watch on bsky.app". The thumbnail stays under it.
 7. **The alt text is shown and read.** It is the video's accessible name
    (`Play video: <alt>`, then the `<video>` label), and an ALT badge shows it,
-   as on images. With no alt text the name is "Play video".
+   as on images. With no alt text the names are "Play video" and "Video".
 8. **Leaving the DOM stops it.** When the card leaves the DOM, the `hls.js`
    instance is destroyed and the `<video>` source is removed. Back in the
-   DOM, the thumbnail shows again.
+   DOM, the thumbnail shows again. Only another video stops it: a fresh
+   copy of the same post (a new object with the same playlist and link,
+   as a timeline poll gives) keeps playing.
 9. **Moderation covers it.** A media label that hides media (`contentMedia`
    blur) shows the plain video card with no image, as before; the player
-   renders only when the media is shown. The reader veil and every other
+   renders only when the media is shown. A covered video has the notice
+   and Show (unless `noOverride`) even with no thumbnail. The reader veil and every other
    cover hide the whole post, player included. Leaving that state is rule 8.
 10. **A quote with video (`recordWithMedia`) plays the same way.** The video
     is the outer post's media; the quote card shows under it.
 11. **Mastodon does not change.** Only a Bluesky post's video card with a
     playlist becomes the player. A video card with no playlist keeps the
     play mark that links to bsky.app.
+12. **Focus follows the reader.** The press puts the `<video>` in the
+    poster's place and focuses it at once, before any download. Nothing
+    focuses it later. On an error, focus moves to the "Watch on bsky.app"
+    link only when it was on the player; focus the reader moved elsewhere
+    stays where it is.
 
 **CSP.** The pages send no Content-Security-Policy, so nothing changed.
 A CSP added later must allow `media-src https://video.bsky.app blob:` (the

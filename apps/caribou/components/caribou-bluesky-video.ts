@@ -65,6 +65,11 @@ export class CaribouBlueskyVideo extends LitElement {
       color: var(--fg-0); background: var(--bg-1); border-top: 1px solid var(--border);
     }
     .error a { color: var(--accent); }
+    .no-thumb {
+      position: absolute; inset: 0; display: flex; align-items: flex-end;
+      padding: var(--space-3); padding-block-end: var(--space-5, 2.5rem);
+      color: var(--fg-1); overflow-wrap: anywhere; overflow: hidden;
+    }
   `]
 
   @property({ attribute: false }) card: PreviewCard | null = null
@@ -84,8 +89,15 @@ export class CaribouBlueskyVideo extends LitElement {
     super.disconnectedCallback()
   }
 
+  // Rule 8: only another video stops this one. A fresh copy of the same
+  // post (a timeline poll maps it again) is a new object with the same
+  // playlist and link, and keeps playing.
   protected override willUpdate(changed: Map<PropertyKey, unknown>) {
-    if (changed.has('card') && changed.get('card') !== undefined) {
+    if (!changed.has('card')) return
+    const old = changed.get('card') as PreviewCard | null | undefined
+    if (old === undefined) return
+    const same = httpUrl(old?.embedUrl) === httpUrl(this.card?.embedUrl) && httpUrl(old?.url) === httpUrl(this.card?.url)
+    if (!same) {
       this.stop()
       this.phase = 'idle'
     }
@@ -104,9 +116,15 @@ export class CaribouBlueskyVideo extends LitElement {
     }
   }
 
+  // Rule 12: the error takes focus only when the reader's focus was on the
+  // player. Focus the reader moved elsewhere stays where it is.
   private fail() {
+    const hadFocus = this.renderRoot instanceof ShadowRoot && this.renderRoot.activeElement !== null
     this.stop()
     this.phase = 'error'
+    if (hadFocus) {
+      void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.error a')?.focus())
+    }
   }
 
   // Rule 2: a plain click plays in place; a modifier click, or no
@@ -114,9 +132,28 @@ export class CaribouBlueskyVideo extends LitElement {
   private onPosterClick = (e: MouseEvent) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
+    this.start()
+  }
+
+  // Rule 2: the control plays, so Space plays too, as on a button. Enter
+  // already fires a click.
+  private onPosterKeydown = (e: KeyboardEvent) => {
+    if (e.key !== ' ' || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    this.start()
+  }
+
+  // Rule 12: the <video> replaces the poster and takes its focus at once,
+  // before any download. Nothing focuses it later.
+  private start() {
+    if (this.phase === 'playing') return
     this.phase = 'playing'
     const run = ++this.run
-    void this.updateComplete.then(() => this.attach(run))
+    void this.updateComplete.then(() => {
+      if (run !== this.run) return
+      this.video?.focus()
+      void this.attach(run)
+    })
   }
 
   private async attach(run: number) {
@@ -145,7 +182,6 @@ export class CaribouBlueskyVideo extends LitElement {
       h.loadSource(playlist)
       h.attachMedia(v)
     }
-    v.focus()
     void v.play().catch(() => { /* the browser refused; the controls stay */ })
   }
 
@@ -170,16 +206,20 @@ export class CaribouBlueskyVideo extends LitElement {
     if (!card || !href || !httpUrl(card.embedUrl)) return nothing
     const alt = altOf(card)
     const thumb = httpUrl(card.image) ?? undefined
-    const poster = html`<img src=${ifDefined(thumb)} alt="" loading="lazy" decoding="async" />`
+    // Rule 5: a thumbnail the mapper rejected leaves the alt text (or
+    // "Video") in the box, not an empty box.
+    const poster = thumb
+      ? html`<img src=${thumb} alt="" loading="lazy" decoding="async" />`
+      : html`<span class="no-thumb">${card.title || NO_ALT_TITLE}</span>`
     return html`
       <div class="box" style="--ar: ${videoAspect(card)}">
         ${this.phase === 'playing'
-          ? html`<video poster=${ifDefined(thumb)} aria-label=${ifDefined(alt || undefined)}
+          ? html`<video poster=${ifDefined(thumb)} aria-label=${alt || NO_ALT_TITLE}
               controls playsinline preload="none" @error=${this.onVideoError}></video>`
           : this.phase === 'error'
             ? poster
             : html`<a class="poster" href=${href} target="_blank" rel="noopener noreferrer"
-                aria-label=${alt ? `Play video: ${alt}` : 'Play video'} @click=${this.onPosterClick}>
+                aria-label=${alt ? `Play video: ${alt}` : 'Play video'} @click=${this.onPosterClick} @keydown=${this.onPosterKeydown}>
                 ${poster}<span class="play" aria-hidden="true">▶</span>
               </a>`}
         ${this.phase === 'error'

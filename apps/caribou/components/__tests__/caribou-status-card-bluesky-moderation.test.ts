@@ -214,6 +214,35 @@ describe('a video under moderation', () => {
     expect(player(el)).toBeNull()
   })
 
+  it.each([
+    ['alone', false],
+    ['in a quote (recordWithMedia)', true],
+  ])('rule 9: a covered video with no thumbnail still has the notice and Show (%s)', async (_name, quoted) => {
+    const { thumbnail: _t, ...noThumb } = videoView
+    let view = withEmbed(noThumb, [label('graphic-media', BSKY_LABELER)])
+    if (quoted) {
+      view = quoting({})
+      ;(view as { labels: unknown }).labels = [label('graphic-media', BSKY_LABELER)]
+      ;(view as { embed: unknown }).embed = { $type: 'app.bsky.embed.recordWithMedia#view', record: view.embed, media: noThumb }
+    }
+    signIn(WARN)
+    const el = await mount(await mappedPost(view, WARN))
+    expect(player(el)).toBeNull()
+    expect($(el, '.media-label')!.textContent).toContain('Media hidden by a content label')
+    $(el, 'button.media-toggle')!.click()
+    await settle(el)
+    expect(player(el)).not.toBeNull()
+  })
+
+  it('rule 9: a no-override label on a video with no thumbnail: the notice, no Show', async () => {
+    const { thumbnail: _t, ...noThumb } = videoView
+    signIn()
+    const el = await mount(await mappedPost(withEmbed(noThumb, [label('porn', BSKY_LABELER)])), 'focused')
+    expect(player(el)).toBeNull()
+    expect($(el, '.media-label')).not.toBeNull()
+    expect($(el, 'button.media-toggle')).toBeNull()
+  })
+
   it('rule 9: a no-override label never shows the player', async () => {
     signIn()
     const el = await mount(await mappedPost(withEmbed(videoView, [label('porn', BSKY_LABELER)])), 'focused')

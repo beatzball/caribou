@@ -125,9 +125,12 @@ describe('<caribou-bluesky-video>', () => {
   it('rule 4: a browser with neither shows the error', async () => {
     hls.FakeHls.isSupported.mockReturnValue(false)
     const el = await mount(videoCard())
-    await press(el)
+    $(el, 'a.poster')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0 }))
+    await vi.waitFor(async () => {
+      await el.updateComplete
+      expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
+    })
     expect(hls.instances).toHaveLength(0)
-    expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
   })
 
   it('rule 5: the box takes the embed aspect ratio, and 16:9 without one', async () => {
@@ -185,6 +188,88 @@ describe('<caribou-bluesky-video>', () => {
     const el = await mount(videoCard({ title: 'Video' }))
     expect($(el, 'a.poster')!.getAttribute('aria-label')).toBe('Play video')
     expect($(el, '.alt')).toBeNull()
+  })
+
+  it('rule 7: with no alt text the playing video is named "Video"', async () => {
+    nativeHls(true)
+    const el = await mount(videoCard({ title: 'Video' }))
+    await press(el)
+    expect($(el, 'video')!.getAttribute('aria-label')).toBe('Video')
+  })
+
+  it('rule 2: Space on the play control plays too', async () => {
+    nativeHls(true)
+    const el = await mount(videoCard())
+    const key = new KeyboardEvent('keydown', { key: ' ', bubbles: true, composed: true, cancelable: true })
+    $(el, 'a.poster')!.dispatchEvent(key)
+    expect(key.defaultPrevented).toBe(true)
+    await vi.waitFor(async () => {
+      await el.updateComplete
+      expect($(el, 'video')?.getAttribute('src')).toBe(PLAYLIST)
+    })
+  })
+
+  it('rule 5: a rejected thumbnail shows the alt text in the box, not an empty box', async () => {
+    const el = await mount(videoCard({ image: null }))
+    expect($(el, 'a.poster img')).toBeNull()
+    expect($(el, 'a.poster .no-thumb')!.textContent).toBe('A caribou running')
+    const plain = await mount(videoCard({ image: null, title: 'Video' }))
+    expect($(plain, 'a.poster .no-thumb')!.textContent).toBe('Video')
+  })
+
+  it('rule 12: the press moves focus to the video at once, before hls.js loads', async () => {
+    let release!: () => void
+    hls.load.mockImplementationOnce(() => new Promise((r) => { release = () => r({ default: hls.FakeHls } as never) }))
+    const el = await mount(videoCard())
+    $(el, 'a.poster')!.focus()
+    $(el, 'a.poster')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0 }))
+    await vi.waitFor(() => expect(hls.load).toHaveBeenCalled())
+    expect(el.shadowRoot!.activeElement).toBe($(el, 'video'))
+    release()
+  })
+
+  it('rule 12: focus the reader moved during the load is never taken back', async () => {
+    let release!: () => void
+    hls.load.mockImplementationOnce(() => new Promise((r) => { release = () => r({ default: hls.FakeHls } as never) }))
+    const el = await mount(videoCard())
+    const other = document.createElement('button')
+    document.body.appendChild(other)
+    $(el, 'a.poster')!.focus()
+    $(el, 'a.poster')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0 }))
+    await vi.waitFor(() => expect(hls.load).toHaveBeenCalled())
+    other.focus()
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    release()
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    // A fatal error now: still nothing takes focus.
+    hls.instances[0]!.fail(true)
+    await el.updateComplete
+    for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(focus).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(other)
+  })
+
+  it('rule 12: an error while the video has focus moves focus to the error link', async () => {
+    const el = await mount(videoCard())
+    $(el, 'a.poster')!.focus()
+    await press(el)
+    expect(el.shadowRoot!.activeElement).toBe($(el, 'video'))
+    hls.instances[0]!.fail(true)
+    await vi.waitFor(async () => {
+      await el.updateComplete
+      expect(el.shadowRoot!.activeElement?.textContent).toBe('Watch on bsky.app')
+    })
+  })
+
+  it('rule 8: a fresh copy of the same card keeps playing', async () => {
+    const el = await mount(videoCard())
+    await press(el)
+    const h = hls.instances[0]!
+    const v = $(el, 'video')
+    el.card = { ...el.card! }
+    await el.updateComplete
+    expect(h.destroy).not.toHaveBeenCalled()
+    expect($(el, 'video')).toBe(v)
   })
 
   it('rule 8: leaving the DOM destroys hls.js and removes the source; back in, the thumbnail', async () => {
