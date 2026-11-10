@@ -1353,8 +1353,11 @@ the address rules and the "newest search wins" rule are the ones in
   active, the page replaces the address with `/tags/<tag>?net=bsky`
   (`blueskyTagRedirect`; an older Mastodon page's `max_id` is dropped) and
   shows the Bluesky body. Once rewritten, the page stays the Bluesky page
-  whatever account is active, so the address and the body agree. New page
-  data on the same element checks again.
+  whatever account is active, so the address and the body agree. A page
+  whose data is for the Mastodon page but whose address already has
+  `net=bsky` counts as rewritten: on a full load the router's copy of the
+  page gets the server's data after the first copy rewrote the address
+  (#254). New page data on the same element checks again.
 
 **Tag links in Bluesky posts.** The facet renderer links a tag to
 `/tags/<tag>?net=bsky` (`packages/bluesky-client` README, facets). A plain

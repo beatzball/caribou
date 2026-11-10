@@ -94,9 +94,11 @@ export class TagPage extends LitroPage {
   // True after mount while a Bluesky account is active: the page then shows
   // the Bluesky tag page in place of the Mastodon one.
   @state() private bluesky = false
-  // True once this page rewrote its address to `?net=bsky`. From then on it
-  // is the Bluesky page, whatever account is active, so the address and the
-  // body agree (#251). New page data starts over.
+  // True once the address of this page's data is `?net=bsky`: this page
+  // rewrote it, or an earlier copy did (on a full load the router swaps in a
+  // second copy with the same data after the first one rewrote it, #254).
+  // From then on it is the Bluesky page, whatever account is active, so the
+  // address and the body agree (#251). New page data starts over.
   @state() private routed = false
   private network: string | null = null
 
@@ -121,9 +123,14 @@ export class TagPage extends LitroPage {
   }
 
   // Rewrites `/tags/<tag>` to `/tags/<tag>?net=bsky` for a Bluesky reader.
+  // An address that already has `net=bsky` counts as rewritten.
   private routeToBluesky() {
     const data = this.serverData as TagPageData | null
     if (!this.isConnected || !data || data.kind === 'not-found' || data.kind === 'bluesky' || !atTagPath(data.tag)) return
+    if (new URLSearchParams(location.search).get('net') === 'bsky') {
+      this.routed = true
+      return
+    }
     const to = blueskyTagRedirect(location.pathname, location.search, this.network)
     if (!to) return
     history.replaceState(history.state, '', to)
