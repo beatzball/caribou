@@ -1,5 +1,13 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.8
+
+### Patch Changes
+
+- [#249](https://github.com/beatzball/caribou/pull/249) [`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0) Thanks [@beatzball](https://github.com/beatzball)! - Add the `feed` timeline kind and the `SavedFeed` type for Bluesky feeds. The Mastodon client answers a `feed` timeline with `not_found`.
+
+- [#251](https://github.com/beatzball/caribou/pull/251) [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef) Thanks [@beatzball](https://github.com/beatzball)! - `Search` has an optional `bluesky` field with the next-page cursor of each kind, and `SearchInput` has an optional `cursor`. Mastodon ignores both.
+
 ## 0.4.7
 
 ### Patch Changes

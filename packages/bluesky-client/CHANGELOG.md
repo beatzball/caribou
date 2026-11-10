@@ -1,5 +1,20 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.1.5
+
+### Patch Changes
+
+- [#249](https://github.com/beatzball/caribou/pull/249) [`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0) Thanks [@beatzball](https://github.com/beatzball)! - Read the reader's saved feeds (`blueskySavedFeeds`, from `savedFeedsPrefV2`) and a custom feed's posts (`fetchTimeline({ type: 'feed', uri })`, through `getFeed`). A gone feed is `not_found`; `UnknownFeed` is now `not_found` too. Saved feeds are read for at most 200 feeds, with one `getFeedGenerators` request at a time. A feed's catch-up reads one page. `FEED_GONE` and `FEED_FAILED` are exported.
+
+- [#248](https://github.com/beatzball/caribou/pull/248) [`c2d60d5`](https://github.com/beatzball/caribou/commit/c2d60d5bb6e08865d1f356639fee2474f19f01f1) Thanks [@beatzball](https://github.com/beatzball)! - `goneLabelers` lists the labelers in the reader's prefs with no `getServices` view. The restored client gives `gone` after two misses in a row, and `removeGoneLabeler` takes one out of the reader's prefs. It checks once more first, and it changes no other pref. Every moderation load, check and removal of a client now runs one at a time, through one queue.
+
+- [#250](https://github.com/beatzball/caribou/pull/250) [`1f1c35e`](https://github.com/beatzball/caribou/commit/1f1c35e77bf35662942f880c6f7a9f7ed40f6abf) Thanks [@beatzball](https://github.com/beatzball)! - The client reads and writes the reader's curate lists: view, create, rename, delete, add and remove members, the list feed, and the lists that hold an account. Lists and members are read from the PDS. Creates use client-picked rkeys. A write in doubt is decided by a read, and `BlueskyWriteUnknown` says when that read failed. Moderation lists and starter-pack lists are left out. A delete or removal refuses when the list items could not all be read. A delete that removed some members but not the list throws `BlueskyListPartlyDeleted`. A removal checks that the list is a curate list. After a delete, a sweep removes items added meanwhile; when it fails, the error says the list is gone and some members may remain. A sweep write in doubt is read once more before it warns.
+
+- [#251](https://github.com/beatzball/caribou/pull/251) [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef) Thanks [@beatzball](https://github.com/beatzball)! - The Bluesky client can search: `search` reads `searchActors` and `searchPosts` with a cursor for each kind, and the hashtag timeline reads `searchPosts` with `#<tag>`, newest first. A rate limit or no answer from these reads carries a message a screen can show.
+
+- Updated dependencies [[`56cb752`](https://github.com/beatzball/caribou/commit/56cb7521f8830515a9a19be4c65421d9de0839c0), [`f9e07a4`](https://github.com/beatzball/caribou/commit/f9e07a4f90492b1240fe32478bea7f60a197a6ef)]:
+  - @beatzball/caribou-mastodon-client@0.4.8
+
 ## 0.1.4
 
 ### Patch Changes
