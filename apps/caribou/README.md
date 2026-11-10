@@ -636,18 +636,31 @@ With a Mastodon account active, or none, a Bluesky card settles at once.
 
 **A gone labeler (#238).** A labeler in the reader's prefs that
 `getServices` has no view for keeps every Bluesky card covered (bluesky
-README, "A gone labeler"). `<caribou-gone-labelers>`, in the app shell,
-then shows one notice per gone labeler: "A labeler in your Bluesky
-moderation settings is gone: <DID>. Bluesky posts stay covered until you
-remove it." with a "Remove" button. The button asks first
-(`confirmDialog`, "Remove labeler?"). Only a yes sends the write, and one
-click sends it once. While it runs the button is busy. When the answer
-lands for another account than the one it was sent for, nothing changes
-on screen. On `removed` or `back` the glue sets the reader again, and the
-notice goes when the labeler is no longer gone. On an error the notice
-stays and says "Could not remove the labeler. Try again." The cover stays
-the whole time, until the new reader settles it. The server and the first
-client render show nothing (the reader signal is empty then).
+README, "A gone labeler"). After two misses in a row (the first load plus
+a Retry or a recheck), `<caribou-gone-labelers>`, in the app shell, shows
+one notice per gone labeler: "A labeler in your Bluesky moderation
+settings is gone: <DID>. Bluesky posts stay covered until you remove it."
+with a "Remove" button, named "Remove labeler <DID>". The button asks
+first (`confirmDialog`, "Remove labeler?"). Only a yes sends the write,
+and one click sends it once. While it runs the button is busy.
+
+- **One account.** The busy and failed state belong to the account that
+  started the removal. An account switch clears them, and an answer for
+  the earlier account changes nothing on screen.
+- **Answers.** On `removed`, `absent` or `back` the glue sets the reader
+  again, and the notice goes when the labeler is no longer gone. A live
+  region that is always there says "Labeler removed." (`removed`,
+  `absent`) or "The labeler is back. Nothing was removed." (`back`).
+  Focus moves to the next Remove button, or to `main`. On an error the
+  notice stays and says "Could not remove the labeler. Try again." (plain
+  text in the notice's status, no nested alert).
+- **Switch away and back.** If the reader switches away during a removal
+  and back before its answer lands, the answer is dropped, and the glue
+  loads the reader's moderation again, so the notice does not name a
+  labeler that the write already took out.
+- The cover stays the whole time, until the new reader settles it. The
+  server and the first client render show only the empty live region
+  (the reader signal is empty then).
 
 ### Bluesky compose (#189)
 

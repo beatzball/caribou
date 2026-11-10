@@ -67,7 +67,12 @@ export function removeActiveGoneLabeler(did: string): Promise<RemoveOutcome> {
   const running = a.removing.get(did)
   if (running) return running
   const p = a.restored.removeGoneLabeler(did).then((r): RemoveOutcome => {
-    if (active !== a || activeUserKey.peek() !== a.userKey) return 'stale'
+    if (active !== a || activeUserKey.peek() !== a.userKey) {
+      // Switched away and back: the new reader may have loaded before this
+      // write landed. Load it again (app README, "A gone labeler").
+      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
+      return 'stale'
+    }
     a.checkedAt = Date.now()
     publishReader(a.userKey, r)
     return r.outcome

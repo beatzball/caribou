@@ -312,15 +312,28 @@ labeler. `getServices` then answers with no view for it. It has no
 definitions, so veil rule 1 covers every Bluesky post and profile, and
 Retry does not help. Caribou does not remove it on its own.
 
-- **Which labelers are gone** (`goneLabelers(prefs, labelDefs)`, in
+- **Which labelers are missing** (`goneLabelers(prefs, labelDefs)`, in
   `./moderation`): each DID in `prefs.labelers` with no entry in
   `labelDefs`, in prefs order, once each. Bluesky's own labeler is never
   listed: a reader cannot unsubscribe from it. Prefs or definitions not
-  loaded (`null`): none. A failed `getServices` is not "gone".
-  `restoreClient` gives the list as `gone`, and `reloadModeration`,
-  `recheckLabelers` and `removeGoneLabeler` return it.
+  loaded (`null`): none. A failed `getServices` is not "missing".
+- **Gone is two misses in a row.** Each published load or check counts a
+  miss for every missing labeler, and clears the count of every labeler
+  it has a view for. A labeler is `gone` (offered for removal) only after
+  two misses in a row: the first load plus one Retry or recheck. So a
+  labeler the AppView has not indexed yet is not offered at once. The
+  cover is there from the first miss. `restoreClient` gives the list as
+  `gone`, and `reloadModeration`, `recheckLabelers` and
+  `removeGoneLabeler` return it.
 - **The cover stays** until the reader removes the labeler or it comes
   back. Nothing here changes the veil.
+- **Loads in order.** Every full moderation load (restore, Retry, the
+  reload after a removal) gets a sequence number. It builds prefs and
+  definitions locally, and publishes the pair only if no newer full load
+  started. A definitions check (`recheckLabelers`, and the one after a
+  `back`) publishes only if no full load started after it. So an older
+  answer never replaces a newer pair, and prefs and definitions always
+  come from the same load.
 - **Removal** (`removeGoneLabeler(did)`, only after the reader confirms):
   1. A DID not in `gone` now (Bluesky's labeler, a labeler that is not
      gone, a DID not in the prefs): refused, no request.
@@ -337,8 +350,9 @@ Retry does not help. Caribou does not remove it on its own.
      `putPreferences` has no swap check, so a write from another app
      between the read and the put can still be lost. The Bluesky app's
      own writes have the same window.
-  4. Then a full `reloadModeration`, so `prefs`, `labelDefs` and `gone`
-     come from the server. The answer is `removed`.
+  4. Then a full load (in order, as above), so `prefs`, `labelDefs` and
+     `gone` come from the server. The answer is `removed`. If a newer
+     load started meanwhile, that newer load's pair stands.
 
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 

@@ -73,12 +73,15 @@ test.describe('a gone labeler in the reader’s prefs', () => {
 
     const card = page.locator('page-home caribou-status-card').first()
     await expect(card).toContainText('Checking this post against your moderation settings')
-    const notice = page.locator('caribou-gone-labelers [role="status"]')
+    const notice = page.locator('caribou-gone-labelers .notice')
+    // One miss: covered, not offered yet. A Retry is the second miss.
+    await expect(notice).toHaveCount(0)
+    await card.getByRole('button', { name: 'Retry' }).click()
     await expect(notice).toHaveCount(1)
     await expect(notice).toContainText(GONE)
 
     // Cancel: nothing is written, the cover stays.
-    await notice.getByRole('button', { name: 'Remove' }).click()
+    await notice.getByRole('button', { name: `Remove labeler ${GONE}` }).click()
     const dialog = page.getByRole('dialog', { name: 'Remove labeler?' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: 'Cancel' }).click()
@@ -88,9 +91,10 @@ test.describe('a gone labeler in the reader’s prefs', () => {
     await expect(card).toContainText('Checking this post against your moderation settings')
 
     // Remove: one write, only that labeler out, every other pref as it was.
-    await notice.getByRole('button', { name: 'Remove' }).click()
+    await notice.getByRole('button', { name: `Remove labeler ${GONE}` }).click()
     await page.getByRole('dialog', { name: 'Remove labeler?' }).getByRole('button', { name: 'Remove' }).click()
     await expect(notice).toHaveCount(0)
+    await expect(page.locator('caribou-gone-labelers .announce')).toHaveText('Labeler removed.')
     expect(puts).toEqual([[ADULT, labelers([]), SAVED]])
     await expect(card).not.toContainText('Checking this post against your moderation settings')
     await expect(card.locator('article')).toBeVisible()

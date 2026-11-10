@@ -382,21 +382,39 @@ export async function restoreClient(
   const labelerDidsOf = (p: ModerationPrefs | null) => [...new Set([BSKY_LABELER_DID, ...(p?.labelers ?? []).map((l) => l.did)])]
   const loadDefs = (dids: string[]) => agent.app.bsky.labeler.getServices({ dids, detailed: true })
     .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), failed)
-  // A full load started after a check began wins over that check.
+  // Loads in order (README, "A gone labeler"). Each full load has a
+  // sequence number, builds its pair locally, and publishes it only if no
+  // newer full load started. A check publishes only if no full load
+  // started after it.
   let loads = 0
+  // Misses in a row, by labeler DID: two make it gone.
+  const misses = new Map<string, number>()
+  function countMisses() {
+    if (!prefs || !labelDefs) return
+    const missing = new Set(goneLabelers(prefs, labelDefs))
+    for (const did of [...misses.keys()]) if (!missing.has(did)) misses.delete(did)
+    for (const did of missing) misses.set(did, (misses.get(did) ?? 0) + 1)
+  }
   async function loadModeration() {
-    loads++
-    prefs = await agent.getPreferences().then((p) => p.moderationPrefs, failed)
-    const labelerDids = labelerDidsOf(prefs)
+    const at = ++loads
+    const p = await agent.getPreferences().then((r) => r.moderationPrefs, failed)
+    if (at !== loads) return
+    const labelerDids = labelerDidsOf(p)
     agent.configureLabelers(labelerDids)
-    labelDefs = await loadDefs(labelerDids)
+    const d = await loadDefs(labelerDids)
+    if (at !== loads) return
+    prefs = p
+    labelDefs = d
+    countMisses()
   }
   // Only a successful answer replaces the definitions: a labeler it has no
   // view for (taken down, gone) then has none, and the veil covers again.
   async function recheckLabelers() {
     const at = loads
     const fresh = await loadDefs(labelerDidsOf(prefs))
-    if (fresh && at === loads) labelDefs = fresh
+    if (!fresh || at !== loads) return
+    labelDefs = fresh
+    countMisses()
   }
   await loadModeration()
 
@@ -413,14 +431,15 @@ export async function restoreClient(
     compose: { nextRkey, detectFacets: (text) => detectFacets(agent, text) },
     ...(opts.onMapError ? { onMapError: opts.onMapError } : {}),
   })
+  const goneNow = () => goneLabelers(prefs, labelDefs).filter((did) => (misses.get(did) ?? 0) >= 2)
   const inputs = (): ModerationInputs => {
     out.prefs = prefs
     out.labelDefs = labelDefs
-    out.gone = goneLabelers(prefs, labelDefs)
+    out.gone = goneNow()
     return { prefs, labelDefs, gone: out.gone }
   }
   const out: RestoredClient = {
-    client, agent, prefs, labelDefs, gone: goneLabelers(prefs, labelDefs),
+    client, agent, prefs, labelDefs, gone: goneNow(),
     async reloadModeration() {
       await loadModeration()
       return inputs()

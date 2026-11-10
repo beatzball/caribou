@@ -240,6 +240,21 @@ describe('a gone labeler', () => {
     expect(blueskyGoneLabelers.value).toBeNull()
   })
 
+  it('switch away and back before the answer: the answer is dropped and the reader loads again', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    removeGoneLabeler.mockReturnValue(new Promise((r) => { finish = r }))
+    const a = removeActiveGoneLabeler(GONE)
+    activeUserKey.value = null
+    activeUserKey.value = KEY
+    await blueskyDriver.restore(bsky(), hooks)
+    reloadModeration.mockResolvedValue({ prefs: null, labelDefs: {}, gone: [] })
+    finish({ prefs: null, labelDefs: {}, gone: [], outcome: 'removed' })
+    expect(await a).toBe('stale')
+    expect(reloadModeration).toHaveBeenCalledTimes(1)
+  })
+
   it('a failed removal throws and leaves the reader as it was', async () => {
     addUserSession(bsky())
     await blueskyDriver.restore(bsky(), hooks)
