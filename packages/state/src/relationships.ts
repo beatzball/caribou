@@ -478,7 +478,7 @@ async function readFollowAfterUnblock(client: CaribouClient, accountId: string, 
     await wait(Math.max(0, start + at - Date.now()), signal)
     if (signal.aborted || ownerGeneration() !== generation) return
     const rel = relationshipCache.value.get(key)
-    if (!rel || relationshipKnown(rel) || rel.blocking === true) return
+    if (!rel || typeof rel.following === 'boolean' || rel.blocking === true) return
     await loadRelationship(accountId, opts)
   }
 }

@@ -602,7 +602,7 @@ describe('settleBlueskyRedraft: other posts, other tabs, and the page overlay (#
     const spy = refuseWrites()
     try {
       await settleBlueskyRedraft(stored, 'unknown')
-      const [[slot, d]] = storedDrafts(KEY)
+      const [slot, d] = storedDrafts(KEY)[0]!
       expect(slot).toBe(stored.slot)
       expect(d.bluesky).toMatchObject({ exposed: true, sourceMaybeLive: true })
     } finally {
