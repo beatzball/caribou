@@ -1035,8 +1035,10 @@ server-safe modules stay pure and the chunk rule has one place to look.
 ## When the chunk loads
 
 Bluesky is on for everyone in the app; there is no browser flag. The app
-loads the `bsky` chunk only when a Bluesky account restores or a reader
-starts a Bluesky sign-in. A Mastodon reader never requests it.
+loads the `bsky` chunk only when a Bluesky account restores, a reader
+starts a Bluesky sign-in, or a public Bluesky page is deferred after an
+AppView 429 (the browser then runs moderation itself). A Mastodon page
+never requests it.
 
 ## Fixtures
 

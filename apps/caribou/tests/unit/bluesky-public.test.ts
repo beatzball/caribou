@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fx from '../../../../packages/bluesky-client/src/__fixtures__/ssr-appview.js'
+import { blueskySsrStartupLine } from '../../server/lib/bluesky-flag.js'
 import {
   blueskySsrEnabled, guardActor, fetchBlueskyProfilePage, fetchBlueskyThread, publicAppView,
   signedOutStatus, validActor, validRecordKey,
@@ -45,10 +46,17 @@ function expectNone(v: unknown, secrets: readonly string[]) {
 
 describe('config and syntax', () => {
   it('reads the kill switch and the AppView origin', () => {
-    // On by default (#169); only `0` turns it off.
+    // On by default (#169). `0`, `false`, `off` or `no`, in any case and
+    // with spaces around, turn it off.
     expect(blueskySsrEnabled({})).toBe(true)
+    expect(blueskySsrEnabled({ BLUESKY_SSR: '' })).toBe(true)
     expect(blueskySsrEnabled({ BLUESKY_SSR: '1' })).toBe(true)
-    expect(blueskySsrEnabled({ BLUESKY_SSR: '0' })).toBe(false)
+    expect(blueskySsrEnabled({ BLUESKY_SSR: 'on' })).toBe(true)
+    for (const off of ['0', 'false', 'off', 'no', ' OFF ', 'False', 'NO\n']) {
+      expect(blueskySsrEnabled({ BLUESKY_SSR: off }), off).toBe(false)
+    }
+    expect(blueskySsrStartupLine({})).toBe('[caribou] Bluesky SSR is on (unset)')
+    expect(blueskySsrStartupLine({ BLUESKY_SSR: 'Off' })).toBe('[caribou] Bluesky SSR is off (BLUESKY_SSR="Off")')
     expect(publicAppView({})).toBe('https://public.api.bsky.app')
     expect(publicAppView({ BLUESKY_PUBLIC_APPVIEW: 'http://127.0.0.1:9/x/' })).toBe('http://127.0.0.1:9')
     expect(publicAppView({ BLUESKY_PUBLIC_APPVIEW: 'file:///etc/passwd' })).toBe('https://public.api.bsky.app')

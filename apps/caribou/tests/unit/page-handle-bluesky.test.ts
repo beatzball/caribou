@@ -8,8 +8,8 @@ import {
 } from '../../components/__tests__/_bluesky-helpers.js'
 
 // The profile and thread pages swap in a client render for a Bluesky route
-// after hydration (#184; app README, "Bluesky views"): only with the flag on
-// and a Bluesky account active, and never in the first render.
+// after hydration (#184; app README, "Bluesky views"): only with a Bluesky
+// account active, and never in the first render.
 
 vi.mock('../../server/lib/resolve-instance.js', () => ({ resolveInstanceForRoute: vi.fn() }))
 vi.mock('../../server/lib/instance-cookie.js', () => ({ getInstance: vi.fn() }))

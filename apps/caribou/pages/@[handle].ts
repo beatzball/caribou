@@ -56,9 +56,10 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   const query = getQuery(event)
   const tab = parseTab(query.tab)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
-  // A Bluesky route (spec 8.4; README, "Bluesky SSR"), behind the server flag.
+  // A Bluesky route (spec 8.4; README, "Bluesky SSR"), unless the kill
+  // switch is off.
   const route = routeOf(handle)
-  // The flag is read before the import: with it off, no SDK load.
+  // The switch is read before the import: with it off, no SDK load.
   if (route.network === 'bluesky' && blueskySsrEnabled()) {
     const bsky = await import('../server/lib/bluesky-public.js')
     if (!bsky.validActor(route.actor)) {

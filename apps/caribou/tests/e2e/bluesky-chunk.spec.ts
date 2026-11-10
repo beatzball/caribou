@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { installFixtureAuth, loopbackOrigin } from './_bluesky-auth.js'
+import { BOB, homeWith, signIn as signInMastodon, status } from './_moderation.js'
 
 // The atproto libraries load only in their own lazy chunk (Bluesky spec 12.2,
 // the `bsky` group in vite.config.ts). Without that group, rolldown puts its
@@ -31,10 +32,27 @@ async function scriptsFetched(page: Page, path: string): Promise<{ url: string; 
   return Promise.all(scripts)
 }
 
-test('a first visit and a Mastodon page do not request the atproto libraries', async ({ page }) => {
+test('a first visit does not request the atproto libraries', async ({ page }) => {
   const scripts = await scriptsFetched(page, '/')
   expect(scripts.length).toBeGreaterThan(0)
   expect(scripts.filter((s) => isAtproto(s.body)).map((s) => s.url)).toEqual([])
+})
+
+test('a signed-in Mastodon reader on home, with compose open, does not request them', async ({ page }) => {
+  const scripts: Promise<{ url: string; body: string }>[] = []
+  page.on('response', (res) => {
+    if (res.request().resourceType() === 'script' || res.url().endsWith('.js')) {
+      scripts.push(res.text().then((body) => ({ url: res.url(), body }), () => ({ url: res.url(), body: '' })))
+    }
+  })
+  await signInMastodon(page)
+  await homeWith(page, [status('s1', BOB)])
+  await page.getByRole('button', { name: 'New post' }).click()
+  await expect(page.getByRole('dialog', { name: 'New post' })).toBeVisible()
+  await page.waitForLoadState('networkidle')
+  const fetched = await Promise.all(scripts)
+  expect(fetched.length).toBeGreaterThan(0)
+  expect(fetched.filter((s) => isAtproto(s.body)).map((s) => s.url)).toEqual([])
 })
 
 test('a Bluesky sign-in brings the libraries, in the bsky chunk', async ({ page, baseURL, browserName }) => {

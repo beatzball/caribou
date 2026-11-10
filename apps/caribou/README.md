@@ -520,11 +520,17 @@ shortcut there and in `onKey` together. `n` belongs here too: it sends
 
 **Bluesky is on for everyone (#169).** The browser has no Bluesky flag. The
 landing page shows the Mastodon and Bluesky sign-in panels on the server and
-in the first client render, so the two match. Nothing loads the atproto
-libraries until a Bluesky account restores or a reader starts a Bluesky
-sign-in, so a Mastodon reader never downloads them.
-The server has a kill switch: `BLUESKY_SSR=0` stops it from rendering
-Bluesky routes (README, "Bluesky SSR"). Any other value, or none, leaves it on.
+in the first client render, so the two match. A tab chosen or text typed
+before the router's swap carries over to the new page
+(`caribou-signin-panels.ts`). The atproto libraries load in three cases
+only: a Bluesky account restores, a reader starts a Bluesky sign-in, or a
+public Bluesky page is deferred because the AppView rate limited the server
+(#187; the browser then loads the moderation code itself). A Mastodon page
+never loads them.
+The server has a kill switch: `BLUESKY_SSR` set to `0`, `false`, `off` or
+`no` (any case) stops it from rendering Bluesky routes (README, "Bluesky
+SSR"). Any other value, or none, leaves it on. The server logs which it is
+once at start.
 `components/_bluesky.ts` is the only door to the atproto libraries (`loadBluesky()`, a dynamic `import()`); they build into the `bsky` chunk group in `vite.config.ts`, which a Mastodon page never requests (`packages/bluesky-client/README.md`).
 
 ### Bluesky views (#184)
@@ -851,8 +857,11 @@ Phase 3. The server paints a Bluesky profile and thread with no token
 them.
 
 **The kill switch.** The server paints Bluesky routes unless the env var
-`BLUESKY_SSR=0` is set (`server/lib/bluesky-flag.ts`, read before the SDK
-loads). Unset, or any other value, means on. With it off, a Bluesky route
+`BLUESKY_SSR` is `0`, `false`, `off` or `no`, in any case
+(`server/lib/bluesky-flag.ts`, read before the SDK loads). Unset, or any
+other value, means on. At start the server logs one line,
+`[caribou] Bluesky SSR is on (unset)` or `… is off (BLUESKY_SSR="0")`
+(`server/plugins/bluesky-ssr-log.ts`). With it off, a Bluesky route
 renders as it did in phase 2b: the client renders it for a Bluesky account.
 Deploy notes: `docs/deploy.md`, "App env vars for Bluesky".
 
