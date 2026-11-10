@@ -82,12 +82,14 @@ test.describe('Act as another Bluesky account', () => {
 
     const card = page.locator('caribou-status-card').filter({ hasText: 'open post' })
     await expect(card.getByRole('button', { name: 'Favourite' })).not.toHaveAttribute('aria-disabled', 'true')
-    await card.getByRole('button', { name: /More actions for post by/ }).click()
+    const more = card.getByRole('button', { name: 'More actions for post by @erin.example.com' })
+    await more.click()
     await card.locator('[data-action="act-as"]').click()
 
     const dialog = page.getByRole('dialog', { name: 'Act as another account' })
-    // Only Alice: Bob is the active account.
+    // Only Alice: Bob is the active account. Focus starts on her row.
     await expect(dialog.getByRole('listitem')).toHaveCount(1)
+    await expect(dialog.getByRole('button', { name: 'Act as @alice.example.com' })).toBeFocused()
     await dialog.getByRole('button', { name: 'Favourite as @alice.example.com' }).click()
     await expect(dialog.getByRole('status')).toHaveText('Favourited as @alice.example.com.')
     await expect(dialog.getByRole('button', { name: 'Unfavourite as @alice.example.com' })).toHaveAttribute('aria-pressed', 'true')
@@ -100,8 +102,10 @@ test.describe('Act as another Bluesky account', () => {
       record: { $type: 'app.bsky.feed.like', subject: { uri: POST, cid: CID } },
     })
 
-    await dialog.getByRole('button', { name: 'Done' }).click()
+    // Escape closes it, and focus goes back to More.
+    await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
+    await expect(more).toBeFocused()
     // Bob's view: not favourited, count as it was.
     const fav = card.locator('caribou-icon-button.favourite')
     await expect(fav).toHaveAttribute('pressed', 'false')

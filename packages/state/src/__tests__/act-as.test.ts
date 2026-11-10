@@ -289,3 +289,185 @@ describe('rule 7: every answer is true', () => {
     })
   })
 })
+
+// A client whose reads lag its writes: every read shows the post as it was.
+function stale(made: Fake[]) {
+  made[0]!.client.fetchStatus!.mockImplementation(async () => post({ viewerOf: BOB }))
+}
+
+describe('rule 8: an acked write holds through read lag', () => {
+  it('a like, then a stale reread: still liked with the acked record; the undo deletes it; no second like', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    const liked = await actAs(BOB, 'favourite', post(), VIEW)
+    expect(liked).toMatchObject({ kind: 'ok', view: { favourited: true, likeUri: BOB_LIKE } })
+    const reread = await readAsAccount(BOB, post())
+    expect(reread).toEqual({ kind: 'ok', view: { ...VIEW, favourited: true, likeUri: BOB_LIKE } })
+    await actAs(BOB, 'favourite', post(), (reread as { view: ActAsView }).view)
+    expect(made[0]!.client.favourite).toHaveBeenCalledTimes(1)
+    expect(made[0]!.client.unfavourite).toHaveBeenCalledWith(expect.objectContaining({
+      bluesky: expect.objectContaining({ likeUri: BOB_LIKE }),
+    }))
+    // The undo is kept too: a stale read that still shows the like does not bring it back.
+    made[0]!.client.fetchStatus!.mockImplementation(async () => post({ likeUri: BOB_LIKE, viewerOf: BOB }, { favourited: true }))
+    expect(await readAsAccount(BOB, post())).toMatchObject({ view: { favourited: false, likeUri: null } })
+  })
+
+  it('a repost, then a stale reread: still reposted with the acked record', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    await actAs(BOB, 'reblog', post(), VIEW)
+    expect(await readAsAccount(BOB, post())).toMatchObject({
+      view: { reblogged: true, repostUri: 'at://did:plc:bob/app.bsky.feed.repost/3kr' },
+    })
+    expect(made[0]!.client.reblog).toHaveBeenCalledTimes(1)
+  })
+
+  it('after the lag window, the read wins', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    await actAs(BOB, 'favourite', post(), VIEW)
+    clock.mockReturnValue(now + 59_999)
+    expect(await readAsAccount(BOB, post())).toMatchObject({ view: { favourited: true } })
+    clock.mockReturnValue(now + 60_000)
+    expect(await readAsAccount(BOB, post())).toMatchObject({ view: { favourited: false, likeUri: null } })
+  })
+
+  it('a read waits for a write to the post that is still out', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    let release!: () => void
+    made[0]!.client.favourite!.mockImplementationOnce(() => new Promise((r) => {
+      release = () => r({ ack: true, id: POST, on: true, record: BOB_LIKE })
+    }))
+    const write = actAs(BOB, 'favourite', post(), VIEW)
+    const read = readAsAccount(BOB, post())
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    expect(made[0]!.client.fetchStatus).toHaveBeenCalledTimes(1)
+    release()
+    await write
+    expect(await read).toMatchObject({ view: { favourited: true, likeUri: BOB_LIKE } })
+  })
+
+  it('a read that started before the write finished does not undo it, even after the window', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    let answer!: () => void
+    made[0]!.client.fetchStatus!.mockImplementationOnce(() => new Promise((r) => { answer = () => r(post({ viewerOf: BOB })) }))
+    const read = readAsAccount(BOB, post())
+    await vi.waitFor(() => expect(answer).toBeTypeOf('function'))
+    const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+    await actAs(BOB, 'favourite', post(), VIEW)
+    vi.spyOn(Date, 'now').mockReturnValue(now + 120_000)
+    answer()
+    expect(await read).toMatchObject({ view: { favourited: true, likeUri: BOB_LIKE } })
+  })
+
+  it('a failed write keeps nothing', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    made[0]!.client.favourite!.mockRejectedValueOnce(new CaribouError('unreachable', 'offline'))
+    await actAs(BOB, 'favourite', post(), VIEW)
+    expect(await readAsAccount(BOB, post())).toMatchObject({ view: { favourited: false } })
+  })
+
+  it('the kept answer belongs to its account: another account reads its own view', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'), bsky('did:plc:carol'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    await actAs(BOB, 'favourite', post(), VIEW)
+    await readAsAccount(CAROL, post())
+    made[1]!.client.fetchStatus!.mockImplementation(async () => post({ viewerOf: CAROL }))
+    expect(await readAsAccount(CAROL, post())).toMatchObject({ view: { favourited: false, likeUri: null } })
+  })
+})
+
+describe('rule 5: expiry voids older answers', () => {
+  it('an ack that lands after the session expired answers expired', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    let release!: () => void
+    made[0]!.client.favourite!.mockImplementationOnce(() => new Promise((r) => {
+      release = () => r({ ack: true, id: POST, on: true, record: BOB_LIKE })
+    }))
+    const write = actAs(BOB, 'favourite', post(), VIEW)
+    made[0]!.client.bookmark!.mockImplementationOnce(async () => {
+      made[0]!.expire()
+      throw new CaribouError('unauthorized', 'gone')
+    })
+    expect(await actAs(BOB, 'bookmark', post(), VIEW)).toEqual({ kind: 'expired' })
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    release()
+    expect(await write).toEqual({ kind: 'expired' })
+  })
+
+  it('a read that lands after the session expired answers expired', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    let answer!: () => void
+    made[0]!.client.fetchStatus!.mockImplementationOnce(() => new Promise((r) => { answer = () => r(post({ viewerOf: BOB })) }))
+    const read = readAsAccount(BOB, post())
+    await vi.waitFor(() => expect(answer).toBeTypeOf('function'))
+    markExpired(BOB, 'G-did:plc:bob')
+    answer()
+    expect(await read).toEqual({ kind: 'expired' })
+  })
+
+  it('an answer for an older sign-in is not kept and says to try again', async () => {
+    const { made } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    let release!: () => void
+    made[0]!.client.favourite!.mockImplementationOnce(() => new Promise((r) => {
+      release = () => r({ ack: true, id: POST, on: true, record: BOB_LIKE })
+    }))
+    const write = actAs(BOB, 'favourite', post(), VIEW)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob', { generation: 'G2' }))
+    release()
+    expect(await write).toEqual({ kind: 'failed', message: '@bob.example.com signed in again. Try again.' })
+  })
+})
+
+describe('rule 9: an old sign-in is forgotten', () => {
+  it('a new sign-in gets a new client and none of the old kept answers', async () => {
+    const { made, restore } = setup()
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob'))
+    activeUserKey.value = ALICE
+    await readAsAccount(BOB, post())
+    stale(made)
+    await actAs(BOB, 'favourite', post(), VIEW)
+    signIn(bsky('did:plc:alice'), bsky('did:plc:bob', { generation: 'G2' }))
+    await readAsAccount(BOB, post())
+    expect(restore).toHaveBeenCalledTimes(2)
+    made[1]!.client.fetchStatus!.mockImplementation(async () => post({ viewerOf: BOB }))
+    expect(await readAsAccount(BOB, post())).toMatchObject({ view: { favourited: false } })
+  })
+})

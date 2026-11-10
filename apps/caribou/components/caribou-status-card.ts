@@ -1144,7 +1144,7 @@ export class CaribouStatusCard extends LitElement {
           ?soft-disabled=${off || !!limits.quote}
           @click=${this.onQuote}></caribou-icon-button>` : nothing}
         ${this.mine ? this.renderOwnMenu() : this.canAct && !this.ownPost ? this.renderMenu(post)
-          : this.actAsShown ? this.renderActAsMenu() : nothing}
+          : this.actAsShown ? this.renderActAsMenu(post) : nothing}
         ${this.mine ? html`<p class="redraft-status" role="status">${this.redraftNote ?? ''}</p>` : nothing}
       </div>
     `
@@ -1169,9 +1169,10 @@ export class CaribouStatusCard extends LitElement {
       : nothing
   }
 
-  // The reader cannot act on the post, but another account can.
-  private renderActAsMenu() {
-    return html`<caribou-menu class="more" anchored icon="ellipsis" label="More actions for this post">
+  // No other item for this reader (cannot act, or the own post before the
+  // account loads), but another account can act.
+  private renderActAsMenu(post: Status) {
+    return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for post by @${post.account.acct}`}>
       ${this.renderActAsItem()}
     </caribou-menu>`
   }

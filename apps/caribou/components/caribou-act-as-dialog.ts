@@ -5,7 +5,7 @@ import { effect } from '@preact/signals-core'
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { Status } from '@beatzball/caribou-mastodon-client'
 import {
-  actAs, actAsAccounts, activeUserKey, readAsAccount, userName,
+  actAs, actAsAccounts, activeUserKey, readAsAccount, userName, users,
   type ActAsResult, type ActAsView, type StatusAction, type UserSession,
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
@@ -86,7 +86,7 @@ export class CaribouActAsDialog extends LitElement {
       this.accounts = status ? actAsAccounts(status) : []
       // An account that expired while picked says so (rule 5).
       const picked = this.accounts.find((u) => u.userKey === this.picked)
-      if (picked?.expired && this.loaded.status !== 'expired') this.loaded = { status: 'expired' }
+      if (picked?.expired && this.loaded.status !== 'expired') this.toExpired()
     })
   }
 
@@ -104,10 +104,10 @@ export class CaribouActAsDialog extends LitElement {
     return new Promise((resolve) => {
       this.resolve = resolve
       dialog.showModal()
-      // One account: it is picked at once.
+      // Focus starts on the first account. One account: it is picked at once.
+      this.renderRoot.querySelector<HTMLElement>('ul caribou-button')?.focus()
       const only = this.accounts.length === 1 ? this.accounts[0]! : null
-      if (only) this.onPick(only)
-      else this.renderRoot.querySelector<HTMLElement>('ul caribou-button')?.focus()
+      if (only) void this.onPick(only)
     })
   }
 
@@ -133,13 +133,26 @@ export class CaribouActAsDialog extends LitElement {
     this.failure = ''
     this.busy = new Set()
     if (account.expired) {
-      this.loaded = { status: 'expired' }
+      this.toExpired()
       return
     }
     this.loaded = { status: 'loading' }
     const out = await readAsAccount(account.userKey, status)
     if (n !== this.pick || this.cancelled) return
-    this.loaded = this.loadedFrom(out, { status: 'loading' })
+    this.loaded = this.signedOut(account.userKey) ? { status: 'expired' } : this.loadedFrom(out, { status: 'loading' })
+  }
+
+  // A signed-out account: no buttons, and no line that says it did something.
+  private toExpired() {
+    this.loaded = { status: 'expired' }
+    this.said = ''
+  }
+
+  // Rule 5: once the picked account is expired or gone, no answer brings
+  // its buttons back.
+  private signedOut(userKey: UserKey): boolean {
+    const s = users.peek().get(userKey)
+    return !s || s.expired === true || this.loaded.status === 'expired'
   }
 
   private loadedFrom(out: ActAsResult, before: Loaded): Loaded {
@@ -156,6 +169,9 @@ export class CaribouActAsDialog extends LitElement {
     if (!status || !userKey || loaded.status !== 'ready' || this.busy.has(action) || this.cancelled) return
     const n = this.pick
     const wasOn = loaded.view[FLAG[action]]
+    // The handle as it is now: the account may be gone when the answer lands.
+    const picked = this.accounts.find((u) => u.userKey === userKey)
+    const name = picked ? userName(picked) : ''
     this.busy = new Set(this.busy).add(action)
     this.said = ''
     this.failure = ''
@@ -164,13 +180,13 @@ export class CaribouActAsDialog extends LitElement {
     const busy = new Set(this.busy)
     busy.delete(action)
     this.busy = busy
+    if (out.kind === 'expired' || this.signedOut(userKey)) {
+      this.toExpired()
+      return
+    }
     if (out.kind === 'busy') return
     if (out.kind === 'failed') {
       this.failure = out.message
-      return
-    }
-    if (out.kind === 'expired') {
-      this.loaded = { status: 'expired' }
       return
     }
     // Only this action's flag and record come from the answer; another
@@ -180,8 +196,7 @@ export class CaribouActAsDialog extends LitElement {
     if (action === 'favourite') view.likeUri = out.view.likeUri
     if (action === 'reblog') view.repostUri = out.view.repostUri
     this.loaded = { status: 'ready', view }
-    const account = this.accounts.find((u) => u.userKey === userKey)
-    this.said = `${spec.done[wasOn ? 1 : 0]} as @${account ? userName(account) : ''}.`
+    this.said = `${spec.done[wasOn ? 1 : 0]} as @${name}.`
   }
 
   private renderAccount(u: UserSession) {

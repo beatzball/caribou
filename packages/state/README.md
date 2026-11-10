@@ -853,11 +853,29 @@ in #131; `actAsAccounts` answers no account for a Mastodon post until then.
    `expired`. A request that finds the session gone (the client answers
    `unauthorized`) marks it expired, through `caribou:session-expired`, and
    answers `expired` too.
+   **Expiry voids older answers.** After every await, `actAs` and
+   `readAsAccount` look at the session again. Expired now: the answer is
+   `expired`, whatever the server said. Signed in again (a new
+   `generation`): the answer is `failed` and is not kept.
 6. **One write per account, action and post at a time.** A second call
    while the first is out answers `{ kind: 'busy' }` and sends nothing.
 7. **Every answer is true.** `ok` carries the view the server left (the
    flag and record from the ack). `failed` carries a message; the caller
    keeps its old view.
+8. **An acked write holds through read lag.** The AppView can show a new
+   like up to `readLagMs` (60 s) late. So each write that the server
+   acked is kept, apart from the active reader's slots: by account,
+   sign-in `generation`, post and action, with its flag, its record and
+   the time. `readAsAccount` first waits for that account's writes to the
+   post that are still out. Then, for each action, the kept answer wins
+   over the read when the read started before the write finished, or
+   when the read disagrees with it within `readLagMs`. After that the
+   read wins. So a reopened dialog still shows the like, and its undo
+   deletes the acked record; a click never makes a second like. A failed
+   write keeps nothing new.
+9. **An old sign-in is forgotten.** When a client is made, the clients
+   and kept answers of every sign-in that is no longer stored (signed out,
+   or signed in again) are dropped.
 
 ## Lists (`lists.ts`; Mastodon #51, Bluesky #195)
 

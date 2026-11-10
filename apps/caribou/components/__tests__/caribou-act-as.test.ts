@@ -4,7 +4,7 @@ import {
 } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import {
-  _testOnlyResetActAs, _testOnlyResetMutations, activeUserKey, blueskyUserKey, markExpired, saveToStorage,
+  _testOnlyResetActAs, _testOnlyResetMutations, activeUserKey, blueskyUserKey, cacheStatus, markExpired, saveToStorage,
   setBlueskyDriver, statusCache, users,
   type BlueskyDriver, type BlueskySession, type UserSession,
 } from '@beatzball/caribou-state'
@@ -236,7 +236,10 @@ describe('rule 4: the card does not change', () => {
     reader(ALICE)
     const el = await mount(blueskyPost())
     await openDialog(el)
+    // The reader's own copy is cached, so "unchanged" means something.
+    cacheStatus(blueskyPost())
     const before = statusCache.value.get(POST)
+    expect(before).toBeDefined()
     actionButton('favourite').shadowRoot!.querySelector('button')!.click()
     await settle(dialog()!)
     expect(made[0]!.client.favourite).toHaveBeenCalledTimes(1)
@@ -322,6 +325,7 @@ describe('rule 6: the dialog closes when the active account changes', () => {
     signIn(bsky('alice'), bsky('bob'))
     reader(ALICE)
     const el = await mount(blueskyPost())
+    cacheStatus(blueskyPost())
     await openDialog(el)
     let release!: () => void
     made[0]!.client.favourite.mockImplementationOnce(() => new Promise((r) => {
@@ -335,6 +339,126 @@ describe('rule 6: the dialog closes when the active account changes', () => {
     release()
     await settle(d)
     expect(d.shadowRoot!.querySelector('[role="status"]')!.textContent).toBe('')
-    expect(statusCache.value.get(POST)?.favourited ?? false).toBe(false)
+    // The switch drops the old reader's viewer fields; none is bob's like.
+    const after = statusCache.value.get(POST)
+    expect(after).toBeDefined()
+    expect(after!.favourited).not.toBe(true)
+    expect(after!.bluesky!.likeUri ?? null).toBeNull()
+  })
+})
+
+const click = (cls: string) => actionButton(cls).shadowRoot!.querySelector('button')!.click()
+
+// A gate: the call waits until `open()`.
+function held<T>(value: T) {
+  let open!: () => void
+  const promise = new Promise<T>((r) => { open = () => r(value) })
+  return { promise, open: () => open() }
+}
+
+describe('rule 5: an expired account stays signed out, whatever lands after', () => {
+  async function twoActions() {
+    signIn(bsky('alice'), bsky('bob'))
+    reader(ALICE)
+    const el = await mount(blueskyPost())
+    await openDialog(el)
+    const fav = held({ ack: true, id: POST, on: true, record: BOB_LIKE })
+    made[0]!.client.favourite.mockImplementationOnce(() => fav.promise)
+    // Bob has bookmarked the post, so the bookmark click is an unbookmark.
+    // It answers 401 when `mark` opens.
+    const mark = held(null)
+    made[0]!.client.unbookmark.mockImplementationOnce(async () => {
+      await mark.promise
+      ;(made[0]!.client as unknown as { expire(): void }).expire()
+      throw new CaribouError('unauthorized', 'gone')
+    })
+    click('favourite')
+    click('bookmark')
+    await settle(dialog()!)
+    return { fav, mark }
+  }
+
+  const signedOut = () => {
+    expect(inDialog('[role="alert"]')!.textContent).toBe('@bob.example.com is signed out. Sign in again to use it.')
+    expect(inDialog('.actions')).toBeNull()
+    expect(inDialog('[role="status"]')!.textContent).toBe('')
+  }
+
+  it('401 first, then the other ack: still signed out', async () => {
+    const { fav, mark } = await twoActions()
+    mark.open()
+    await settle(dialog()!)
+    signedOut()
+    fav.open()
+    await settle(dialog()!)
+    signedOut()
+  })
+
+  it('the ack first, then 401: signed out', async () => {
+    const { fav, mark } = await twoActions()
+    fav.open()
+    await settle(dialog()!)
+    expect(actionButton('favourite').pressed).toBe(true)
+    mark.open()
+    await settle(dialog()!)
+    signedOut()
+  })
+
+  it('a read that lands after expiry shows signed out, not the buttons', async () => {
+    signIn(bsky('alice'), bsky('bob'))
+    reader(ALICE)
+    const el = await mount(blueskyPost())
+    const read = held({ ...blueskyPost(BOB) })
+    restore.mockImplementationOnce(async (s: BlueskySession, hooks: { onExpired(): void }) => {
+      const c = clientFor(s, hooks) as unknown as Record<string, Fn>
+      c.fetchStatus!.mockImplementationOnce(() => read.promise)
+      return c as unknown as CaribouClient
+    })
+    await openDialog(el)
+    markExpired(BOB, 'G-bob')
+    read.open()
+    await settle(dialog()!)
+    signedOut()
+  })
+})
+
+describe('rule 3: a reopened dialog keeps the acked like while reads lag', () => {
+  it('like, close, reopen with a stale read: Unfavourite; its click deletes the acked like; no second like', async () => {
+    signIn(bsky('alice'), bsky('bob'))
+    reader(ALICE)
+    const el = await mount(blueskyPost())
+    await openDialog(el)
+    // The AppView lags: every read shows the post as before the like.
+    made[0]!.client.fetchStatus.mockImplementation(async () => blueskyPost(BOB))
+    click('favourite')
+    await settle(dialog()!)
+    inDialog<HTMLElement>('caribou-button.done')!.click()
+    await vi.waitFor(() => expect(dialog()).toBeNull())
+    await openDialog(el)
+    expect(made[0]!.client.fetchStatus).toHaveBeenCalledTimes(2)
+    expect(actionButton('favourite').label).toBe('Unfavourite as @bob.example.com')
+    // Picking the account again reads again; the like still holds.
+    ;(inDialog(`li[data-user-key="${BOB}"] caribou-button`) as HTMLElement).click()
+    await settle(dialog()!)
+    expect(actionButton('favourite').pressed).toBe(true)
+    click('favourite')
+    await settle(dialog()!)
+    expect(made[0]!.client.favourite).toHaveBeenCalledTimes(1)
+    expect(made[0]!.client.unfavourite.mock.calls[0]![0]).toMatchObject({ bluesky: { likeUri: BOB_LIKE } })
+  })
+})
+
+describe('rule 1: menu names and the own post', () => {
+  it('the More menu with only the item has the same name as the full one', async () => {
+    signIn(masto('dave'), bsky('bob'))
+    const el = await mount(blueskyPost(null))
+    expect(el.shadowRoot!.querySelector('caribou-menu.more')!.getAttribute('label')).toBe('More actions for post by @erin.example.com')
+  })
+
+  it('the reader own post, before the account loads, still offers the item', async () => {
+    signIn(bsky('erin'), bsky('bob'))
+    reader(blueskyUserKey('did:plc:erin'))
+    const el = await mount(blueskyPost(blueskyUserKey('did:plc:erin')))
+    expect(menuItems(el)).toEqual(['act-as'])
   })
 })
