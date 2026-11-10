@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
+import { forceHlsJs, noNewTab, routeHlsFixture, THUMB_BYTES } from './_hls-fixture.js'
 
 // A Bluesky video in a real browser (#198; app README, "Bluesky video").
-// The timeline answers one post with a video. The playlist host answers
-// 404, so the test never reaches video.bsky.app and sees rule 6's error.
+// The timeline answers one post with a video. The test never reaches
+// video.bsky.app: the first two tests answer 404 there and see rule 6's
+// error; the last two get the tiny stream in `fixtures/hls/` and see it play.
 
 const POST_URI = `at://${ALICE}/app.bsky.feed.post/3lalicevideo`
 const CID = 'bafyreib7upx3s2pfhghouqwntlb4vsokgkwi7kmeqfsyddvum2xle33riq'
@@ -11,8 +13,6 @@ const BSKY_LABELER = 'did:plc:ar7c4by46qjdydhdevvrndac'
 const COVERED = { 'atproto-content-labelers': `${BSKY_LABELER};redact` }
 const VIDEO_HOST = 'https://video.bsky.app'
 const PLAYLIST = `${VIDEO_HOST}/watch/${encodeURIComponent(ALICE)}/bafkvideo/playlist.m3u8`
-// A 1×1 PNG for the thumbnail.
-const THUMB_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
 const POST_VIEW = {
   $type: 'app.bsky.feed.defs#postView',
@@ -95,13 +95,7 @@ test.describe('Bluesky video', () => {
   })
 
   test('rule 4: without native HLS, hls.js loads once, on the press, and a fatal error shows rule 6', async ({ page, baseURL }) => {
-    // As in a browser with no native HLS (Firefox, older Chromium).
-    await page.addInitScript(() => {
-      const real = HTMLMediaElement.prototype.canPlayType
-      HTMLMediaElement.prototype.canPlayType = function (type: string) {
-        return /mpegurl/i.test(type) ? '' : real.call(this, type)
-      }
-    })
+    await forceHlsJs(page)
     const origin = loopbackOrigin(baseURL)
     const hlsChunk: string[] = []
     const playlistAsked: string[] = []
@@ -127,5 +121,48 @@ test.describe('Bluesky video', () => {
     await expect(alert.getByRole('link', { name: 'Watch on bsky.app' })).toBeFocused()
     expect(hlsChunk).toHaveLength(1)
     expect(playlistAsked).toContain(PLAYLIST)
+  })
+
+  // Rules 3 and 4 with a real stream: the playback position moves.
+  async function pressPlayAndWatch(page: Page, baseURL: string | undefined, how: 'native' | 'hls.js') {
+    const origin = loopbackOrigin(baseURL)
+    const hlsChunk: string[] = []
+    page.on('request', (req) => { if (/\/hls-[^/]*\.js$/.test(req.url())) hlsChunk.push(req.url()) })
+    const served = await routeHlsFixture(page)
+    // Rule 2: a plain click plays here. A new tab (bsky.app) would mean the
+    // click was not stopped; `page.url()` cannot see that.
+    const popups: string[] = []
+    page.on('popup', (p) => popups.push(p.url()))
+    await installFixtureAuth(page, { xrpc: appview })
+    await signIn(page, origin)
+    const play = page.getByRole('link', { name: 'Play video: A caribou running' })
+    await expect(play).toBeVisible({ timeout: 15_000 })
+    await page.waitForLoadState('networkidle')
+    expect(served.filter((f) => f !== 'thumbnail.jpg')).toEqual([])
+    await play.click()
+    const video = page.locator('caribou-bluesky-video video')
+    await expect(video).toBeFocused()
+    // The stream is two seconds long. Past half a second it really played.
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 15_000 })
+      .toBeGreaterThan(0.5)
+    const state = await video.evaluate((v: HTMLVideoElement) => ({ error: v.error?.code ?? null, blob: v.src.startsWith('blob:') }))
+    expect(state).toEqual({ error: null, blob: how === 'hls.js' })
+    expect(served).toEqual(expect.arrayContaining(['playlist.m3u8', 'video.m3u8', 'seg0.m2ts']))
+    expect(hlsChunk).toHaveLength(how === 'hls.js' ? 1 : 0)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    expect(await noNewTab(page, popups)).toEqual([])
+  }
+
+  // In CI, Chromium is the browser that runs this one: Playwright's Chromium
+  // answers `canPlayType` for HLS, while WebKit on Linux and Firefox do not.
+  test('rule 3: a browser with native HLS plays the stream itself', async ({ page, baseURL }) => {
+    const native = await page.evaluate(() => document.createElement('video').canPlayType('application/vnd.apple.mpegurl') !== '')
+    test.skip(!native, 'this browser has no native HLS (the next test covers hls.js)')
+    await pressPlayAndWatch(page, baseURL, 'native')
+  })
+
+  test('rule 4: with hls.js the stream plays', async ({ page, baseURL }) => {
+    await forceHlsJs(page)
+    await pressPlayAndWatch(page, baseURL, 'hls.js')
   })
 })

@@ -686,6 +686,13 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
     link only when it was on the player; focus the reader moved elsewhere
     stays where it is.
 
+**Tests.** `tests/e2e/bluesky-video.spec.ts` plays a tiny HLS stream from
+`tests/e2e/fixtures/hls/` (about 4 KB; `make.sh` there makes it again) and
+checks that the playback position moves, natively and with `hls.js`.
+`tests/e2e/bluesky-ssr.spec.ts` ("a server-painted video") checks that the
+server's poster hydrates in place, equals the client's render, and plays
+by keyboard.
+
 **CSP.** The pages send no Content-Security-Policy, so nothing changed.
 A CSP added later must allow `media-src https://video.bsky.app blob:` (the
 `hls.js` player gives the `<video>` a `blob:` source) and `worker-src blob:`
