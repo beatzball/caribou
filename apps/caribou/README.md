@@ -556,8 +556,8 @@ Mastodon post, account or client renders as before.
   account up by its DID. Server rendering is in "Bluesky SSR" below.
 
 **Nav.** With a Bluesky account active the rail hides Local and Public (by
-`capabilities`), and Search until phase 5 (by network). Lists show for
-both networks (#195).
+`capabilities`). Search shows for Bluesky ("Bluesky search and hashtag
+page" below), and Lists show for both networks (#195).
 
 **A list that is empty but not ended.** A list ends only on a null cursor
 (`packages/state` README). A page can be empty with more behind it (five
@@ -1120,6 +1120,88 @@ is not documented (spec 12.1). So a 429 never becomes an error page.
 Mastodon reader's server for its copy of server-rendered posts. It never
 sends a Bluesky post there: the id means nothing to that server, and the
 post would end up "Could not check".
+
+### Bluesky search and hashtag page (#192, #193)
+
+Spec 8.2 and 9. Both render on the client only: post search needs a token
+(the public AppView answers 403), and the server does not know the reader.
+
+**Search** (`<caribou-search>`) with a Bluesky account active. The page,
+the address rules and the "newest search wins" rule are the ones in
+"Search" above. The server render does not change.
+
+- **Who asks.** The active Bluesky client, with the reader's token:
+  `searchActors` for People and `searchPosts` for Posts, 20 of each,
+  asked together. If either one fails, the search shows its error.
+- **Hashtags.** Bluesky has no hashtag search. The tab shows the query as
+  one hashtag, linked to `/tags/<tag>?net=bsky`, when the query (less one
+  leading `#`) is a hashtag name (`parseTagParam`). Otherwise it says
+  "Bluesky does not search hashtags. Type a hashtag name to open its page."
+- **A web address** is searched as text. Bluesky has no `resolve`, so no
+  address note shows.
+- **More results.** When an answer has a cursor, a "More people" or "More
+  posts" button sits under that list. It reads the next page of that kind
+  only and adds the new items at the end (an item already shown is not
+  added again). No cursor, or an empty page: no button. A failed page keeps
+  the list and says "Could not load more." with Retry. Each kind pages from
+  its own cursor. The button stays focused while it is busy; when the last
+  page removes it, focus moves to the first new result; else to the list
+  (the page added none); else to the "No … found" notice (every row was
+  filtered, so the list went too). Never to the body. A new query, a new
+  account or a late answer for an older search drops the page.
+- **Empty.** "No people found for “q”." and "No posts found for “q”.", as
+  on Mastodon.
+- **Errors.** A 429 says "Bluesky is getting too many requests. Wait a
+  minute, then try again." Any other failure says "Search failed." Both
+  have Retry.
+- **People and moderation.** Each row reads the account's own
+  `bluesky.moderation` (the client runs `moderateProfile` on every actor).
+  Until the decision is settled for the reader (`blueskyDecisionSettled`),
+  the row shows "Checking this account against your moderation settings…"
+  with a blurred face, no name, no link and no Follow. Then:
+  `profileList.filter` leaves the row out; `profileList.blur` shows
+  "Someone (Content warning: …)" with no name, link or Follow;
+  `avatar.blur` blurs the face. No decision is covered (fail closed). A
+  row links to `/@<handle>`, or `/@<did>` when the handle is not valid,
+  with the handle (no host) under the name. Follow works as on Mastodon,
+  through the relationship cache.
+- **Posts** render with `<caribou-status-card>`, the same as the
+  timeline: the card applies the labels, mutes, blocks and the veil.
+
+**Hashtag page** `/tags/<tag>?net=bsky`.
+
+- **Server.** `net=bsky` sends `{ kind: 'bluesky', tag }` and fetches
+  nothing. A name that is not a hashtag is still "not a hashtag".
+- **Server render and first client render:** the tag heading and "Sign in
+  with Bluesky to see posts with this tag.", with a "Sign in" link to
+  `/?add` (with an account active, `/` forwards to Home) and a link "See
+  #tag on Bluesky" to `https://bsky.app/hashtag/<tag>`. So the page works
+  with JavaScript off.
+- **After mount, with a Bluesky account active,** the notice gives way to
+  `<caribou-timeline kind="hashtag">` with the Bluesky client. The client
+  reads `searchPosts` with `q=#<tag>` and `sort=latest`, the same query
+  bsky.app's hashtag page sends, 25 a page, cursor paging. A poll is a
+  catch-up by the seam 7 rule. The timeline has `net="bsky"`: it keeps its
+  own store (`hashtag:bsky:<tag>`, apart from the Mastodon page's
+  `hashtag:<tag>`), and its "Older posts" link keeps `net=bsky`. A 429 says the same as in search; another
+  failure shows the client's message (`packages/bluesky-client` README,
+  "Search"). Both have Retry.
+- **With a Mastodon account or none active,** the notice stays. A switch of
+  account swaps between the two.
+- **No Follow.** The tag header shows Follow only when the active client
+  has `capabilities.followTags` (Bluesky does not).
+- `/tags/<tag>` without `net=bsky` is the Mastodon page. Its timeline shows
+  only with a Mastodon account active. After mount, with a Bluesky account
+  active, the page replaces the address with `/tags/<tag>?net=bsky`
+  (`blueskyTagRedirect`; an older Mastodon page's `max_id` is dropped) and
+  shows the Bluesky body. Once rewritten, the page stays the Bluesky page
+  whatever account is active, so the address and the body agree. New page
+  data on the same element checks again.
+
+**Tag links in Bluesky posts.** The facet renderer links a tag to
+`/tags/<tag>?net=bsky` (`packages/bluesky-client` README, facets). A plain
+click on one, in a Bluesky card or quote, opens it in the app when the tag
+is one of the post's `tags`; any other link is left to the browser.
 
 ## Accounts
 

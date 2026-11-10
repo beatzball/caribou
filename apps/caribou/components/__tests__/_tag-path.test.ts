@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTagParam, tagPath } from '../_tag-path.js'
+import { blueskyTagRedirect, parseTagParam, tagPath } from '../_tag-path.js'
 
 describe('tagPath', () => {
   it('builds the in-app path, keeping the case the post wrote', () => {
@@ -46,5 +46,22 @@ describe('parseTagParam', () => {
       'ai%3Fx', 'ai%23x', 'a%5Cb', '%F0%9F%98%80', '%E0%A4%A', 'x'.repeat(201)]) {
       expect(parseTagParam(raw), raw).toBeNull()
     }
+  })
+})
+
+// #251 review: `/tags/<tag>` is the Mastodon page. A Bluesky reader goes to
+// the Bluesky one.
+describe('blueskyTagRedirect', () => {
+  it('moves a Bluesky reader from the Mastodon tag page to `?net=bsky`', () => {
+    expect(blueskyTagRedirect('/tags/Cats', '', 'bluesky')).toBe('/tags/Cats?net=bsky')
+    expect(blueskyTagRedirect('/tags/caf%C3%A9', '?max_id=5', 'bluesky')).toBe('/tags/caf%C3%A9?net=bsky')
+  })
+
+  it('leaves the page alone for a Mastodon reader, no reader, or the Bluesky page itself', () => {
+    expect(blueskyTagRedirect('/tags/Cats', '', 'mastodon')).toBeNull()
+    expect(blueskyTagRedirect('/tags/Cats', '', null)).toBeNull()
+    expect(blueskyTagRedirect('/tags/Cats', '?net=bsky', 'bluesky')).toBeNull()
+    expect(blueskyTagRedirect('/tags/Cats', '?net=bsky&max_id=x', 'bluesky')).toBeNull()
+    expect(blueskyTagRedirect('/home', '', 'bluesky')).toBeNull()
   })
 })

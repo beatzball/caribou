@@ -385,4 +385,32 @@ describe('a time link that leaves Caribou (postPath, #187 review)', () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('litro-link.permalink')!.hasAttribute('aria-label')).toBe(false)
   })
+
+  // #193: a Bluesky tag link (`/tags/<tag>?net=bsky`, from the facet
+  // renderer) opens the Bluesky hashtag page in the app.
+  it('routes a tag link in a Bluesky post to its Bluesky tag page', async () => {
+    const uri = 'at://did:plc:alice/app.bsky.feed.post/3kpost'
+    const clean = { filter: false, blur: false, alert: false, inform: false, noOverride: false, reasons: [] }
+    const contexts = Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView'].map((c) => [c, clean]))
+    const el = await mount(post({
+      id: uri, uri, url: null, mentions: [],
+      account: { id: 'did:plc:alice', acct: 'alice.example.com', username: 'alice.example.com', displayName: 'Alice', avatar: '', avatarStatic: '', bluesky: { did: 'did:plc:alice', handleInvalid: false, labels: [] } },
+      content: '<p>hi <a href="/tags/Cats?net=bsky">#Cats</a> <a href="/tags/Dogs?net=bsky">#Dogs</a></p>',
+      tags: [{ name: 'Cats', url: 'https://bsky.app/hashtag/Cats' }],
+      bluesky: {
+        uri, cid: 'c', likeUri: null, repostUri: null, replyRef: null, replyDisabled: false, embeddingDisabled: false,
+        labels: [], moderation: { contexts, labelersCovered: [] }, viewerOf: null,
+      },
+    }), '')
+    const e = click(el, '/tags/Cats?net=bsky')
+    await flush()
+    expect(e.defaultPrevented).toBe(true)
+    expect(goSpy).toHaveBeenCalledWith('/tags/Cats?net=bsky')
+    goSpy.mockClear()
+    // A tag the post does not list is left to the browser.
+    const other = click(el, '/tags/Dogs?net=bsky')
+    await flush()
+    expect(other.defaultPrevented).toBe(false)
+    expect(goSpy).not.toHaveBeenCalled()
+  })
 })

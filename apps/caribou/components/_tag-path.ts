@@ -34,3 +34,17 @@ export function parseTagParam(raw: string): string | null {
   if (!TAG_NAME.test(name)) return null
   return name
 }
+
+/**
+ * Where a Bluesky reader on the Mastodon tag page goes: the Bluesky tag
+ * page for the same tag (`/tags/<tag>?net=bsky`). Null when the reader is
+ * not on Bluesky, or is already there. An older Mastodon page's `max_id`
+ * means nothing to Bluesky, so it is dropped.
+ */
+export function blueskyTagRedirect(pathname: string, search: string, network: string | null): string | null {
+  if (network !== 'bluesky') return null
+  const m = /^\/tags\/([^/]+)$/.exec(pathname)
+  if (!m) return null
+  if (new URLSearchParams(search).get('net') === 'bsky') return null
+  return `/tags/${m[1]}?net=bsky`
+}

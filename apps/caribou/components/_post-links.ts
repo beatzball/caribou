@@ -24,3 +24,23 @@ export function hashtagOf(a: HTMLAnchorElement, tags: readonly { name: string }[
   if (!name || !tags?.some((t) => normalizeTagName(t.name) === wanted)) return null
   return name
 }
+
+// A tag link in a Bluesky post: the facet renderer writes
+// `/tags/<tag>?net=bsky` (bluesky-client README, facets). It counts only on
+// a Bluesky post that lists the tag, so a look-alike link opens nothing.
+const BLUESKY_TAG_HREF = /^\/tags\/([^/?#]+)\?net=bsky$/
+
+/** The in-app path a tag link in a Bluesky post opens, or null. */
+export function blueskyTagPathOf(
+  a: HTMLAnchorElement,
+  post: { tags?: readonly { name: string }[] | undefined; bluesky?: unknown } | null | undefined,
+): string | null {
+  if (!post?.bluesky) return null
+  const href = a.getAttribute('href') ?? ''
+  const m = BLUESKY_TAG_HREF.exec(href)
+  if (!m) return null
+  let name: string
+  try { name = decodeURIComponent(m[1]!) } catch { return null }
+  const wanted = normalizeTagName(name)
+  return post.tags?.some((t) => normalizeTagName(t.name) === wanted) ? href : null
+}
