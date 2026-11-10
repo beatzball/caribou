@@ -70,7 +70,8 @@ function mastodonPost(): Status {
 }
 
 type Fn = ReturnType<typeof vi.fn>
-interface Made { userKey: string; client: Record<string, Fn> }
+type Methods = 'fetchStatus' | 'favourite' | 'unfavourite' | 'reblog' | 'bookmark' | 'unbookmark'
+interface Made { userKey: string; client: Record<Methods, Fn> }
 let made: Made[] = []
 let restore: Fn
 
@@ -86,7 +87,7 @@ function clientFor(s: BlueskySession, hooks: { onExpired(): void }): CaribouClie
     bookmark: vi.fn(async (ref: { id: string }) => ({ ack: true, id: ref.id, on: true, record: null })),
     expire: () => hooks.onExpired(),
   }
-  made.push({ userKey: s.userKey, client: client as Record<string, Fn> })
+  made.push({ userKey: s.userKey, client: client as Record<Methods, Fn> })
   return client as unknown as CaribouClient
 }
 
