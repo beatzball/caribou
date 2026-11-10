@@ -11,6 +11,7 @@ import { boxReset } from './_shared-styles.js'
 import { profilePath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import './caribou-button.js'
+import './caribou-muted-words.js'
 
 
 interface AccountList {
@@ -97,6 +98,8 @@ export class CaribouModerationSettings extends LitElement {
   @state() private filters: FilterList = { status: 'loading' }
   @state() private lists: Record<Kind, AccountList> = { mutes: emptyList(), blocks: emptyList() }
   @state() private server = ''
+  // A Bluesky account edits its muted words here instead (#196).
+  @state() private bluesky = false
   // Changes on every relationship write, so the buttons follow the cache.
   @state() private relRevision = 0
 
@@ -112,6 +115,7 @@ export class CaribouModerationSettings extends LitElement {
       this.server = activeUser.value?.server ?? ''
       if (client && client !== this.loadedFor) {
         this.loadedFor = client
+        this.bluesky = client.capabilities.network === 'bluesky'
         void this.load(client)
       }
     })
@@ -126,7 +130,8 @@ export class CaribouModerationSettings extends LitElement {
   private async load(client: CaribouClient) {
     this.filters = { status: 'loading' }
     this.lists = { mutes: emptyList(), blocks: emptyList() }
-    await Promise.all([this.loadFilters(client), this.loadPage(client, 'mutes'), this.loadPage(client, 'blocks')])
+    const filters = client.capabilities.network === 'bluesky' ? null : this.loadFilters(client)
+    await Promise.all([filters, this.loadPage(client, 'mutes'), this.loadPage(client, 'blocks')])
   }
 
   private async loadFilters(client: CaribouClient) {
@@ -262,10 +267,15 @@ export class CaribouModerationSettings extends LitElement {
     void this.relRevision
     return html`<div>
       <h1>Filters, mutes and blocks</h1>
-      <section aria-labelledby="filters-h">
-        <h2 id="filters-h">Filters</h2>
-        ${this.renderFilters()}
-      </section>
+      ${this.bluesky
+        ? html`<section aria-labelledby="muted-words-h">
+            <h2 id="muted-words-h">Muted words</h2>
+            <caribou-muted-words></caribou-muted-words>
+          </section>`
+        : html`<section aria-labelledby="filters-h">
+            <h2 id="filters-h">Filters</h2>
+            ${this.renderFilters()}
+          </section>`}
       <section aria-labelledby="mutes-h">
         <h2 id="mutes-h">${KINDS.mutes.heading}</h2>
         ${this.renderAccounts('mutes')}

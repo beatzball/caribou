@@ -44,6 +44,7 @@ own files; ask in your report for a change in another's.
 | `src/errors.ts` | `normalizeXrpcError(err) → CaribouError` | #177 |
 | `src/browser.ts` | the SDK classes, the client and the OAuth glue, for the lazy chunk | #177, #182 |
 | `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
+| `src/muted-words.ts` | `checkMutedWordEdit`, `applyMutedWordEdit`: the edit a muted-words write applies (browser only, through `./oauth`) | #196 |
 | `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
 | `src/compose.ts` | `countPost`, `postFits`, `nextRkey`, `detectFacets` over the SDK's `RichText` and `TID` (browser only, through `./browser`) | #189 |
 | `src/actions.ts` | `createActions`: like, repost, bookmark, follow, mute, block and their undos (the client spreads them in) | #188 |
@@ -360,6 +361,57 @@ Retry does not help. Caribou does not remove it on its own.
   4. Then a full load, in the same job, so `prefs`, `labelDefs` and
      `gone` come from the server. The answer is `removed`. A Retry asked
      for during the removal runs after it.
+
+#### Muted words (#196)
+
+Bluesky's keyword filter is the reader's `mutedWordsPref`. Each word has a
+`value`, `targets` (`content`: text and tags; `tag`: tags only), an
+`actorTarget` (`all`, or `exclude-following`: only people the reader does
+not follow) and an optional `expiresAt`.
+
+1. **Read.** The words are the SDK's `prefs.mutedWords` (`getPreferences`,
+   from the last valid `mutedWordsPref`). They come with the moderation
+   load, so every load, Retry and write that reloads gives the new list.
+2. **Apply.** `moderate()` passes the reader's prefs to `moderatePost`, so
+   a match is a `mute-word` cause on every post the reader's client maps:
+   timeline, thread, profile, search, hashtag, feeds, notifications and
+   quoted posts. The SDK hides it in `contentList` (filter and blur) and
+   covers it in `contentView` (blur, with Show). It never hides the
+   reader's own posts. Signed out, there are no muted words.
+3. **Expiry.** The SDK skips a word whose `expiresAt` is past. Nothing
+   deletes an expired word: not a read, not a write of another word.
+4. **Who.** The SDK skips an `exclude-following` word on a post by an
+   account the reader follows.
+5. **Write** (`editMutedWords(edit)`): add one word, or remove one. One
+   job in the moderation queue (rule Q above), so two quick edits run one
+   after the other and neither is lost. The write is the SDK's
+   `updatePreferences`: a fresh read under the agent's prefs lock, then a
+   put of what the edit returns. The edit changes only the last
+   `mutedWordsPref`, or adds one at the end when there is none. Every other
+   pref (also types Caribou does not know), its order, and every other
+   muted word (also an item the SDK cannot read) stay as read. Then a full
+   load, in the same job, whatever the outcome: after `exists` or `absent`
+   too, the fresh read may show words the held prefs lack (another app's
+   change), so the answer's `prefs` are the server's. `wordsChanged` says
+   whether the loaded words differ from the ones held before the job.
+   Nothing else in the queue runs until that load is done.
+6. **Add.** The value is `sanitizeMutedWordValue` of the input (trimmed,
+   one leading `#` dropped). Refused with no request when it is empty, or
+   when `targets` is empty or names something other than `content` and
+   `tag`, or `actorTarget` is not `all` or `exclude-following`, or
+   `expiresAt` is not a future time. A new word gets a TID `id`. A word
+   with the same value (case does not count) in the fresh read that still
+   mutes (no `expiresAt`, or a future one): nothing is written, the answer
+   is `exists`. If every word with that value has expired, the first of
+   them is replaced in place by the new word (`added`); the others stay.
+7. **Remove.** By `id`; a word with no `id` (an old app wrote it) by its
+   `value`. Not in the fresh read: nothing is written, `absent`.
+8. **A pref Caribou cannot edit.** A `mutedWordsPref` with no `items`
+   array: the write throws and writes nothing.
+9. **Failures.** A failed read or put throws, and nothing changes here. A
+   401 also ends the session ("401"). When the put worked but the load
+   after it failed, the answer says so (`reloadFailed: true`) and `prefs`
+   is `null` (fail closed, as for any failed load).
 
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 
@@ -1298,10 +1350,10 @@ are pure functions.
 `./moderation` and `./syntax` (SSR runs moderation with logged-out defaults,
 and checks a route's syntax). The client loads `./moderation` and
 `./browser` lazily, and never `./syntax`. `src/oauth.ts` is browser only
-and loads through `./browser`.
+and loads through `./browser`; so does `src/muted-words.ts`, through it.
 
 `src/__tests__/server-safe.test.ts` fails on a runtime `@atproto` import in
-any module other than the doors and `src/oauth.ts`: a value import, a side-effect import, or a
+any module other than the doors, `src/oauth.ts` and `src/muted-words.ts`: a value import, a side-effect import, or a
 dynamic `import()`. A lazy load of the SDK belongs in a door too, so the
 server-safe modules stay pure and the chunk rule has one place to look.
 

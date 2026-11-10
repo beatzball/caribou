@@ -10,7 +10,7 @@ import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { BLUESKY_CAPABILITIES } from '@beatzball/caribou-bluesky-client'
 import {
-  activeUserKey, addUserSession, blueskyUserKey, isBlueskySession, renewSession, setBlueskyDriver, users,
+  activeUserKey, addUserSession, blueskyUserKey, clearKeptAlive, isBlueskySession, renewSession, setBlueskyDriver, users,
   BlueskySessionGone,
   type BlueskyDriver,
 } from '@beatzball/caribou-state'
@@ -34,6 +34,8 @@ let active: {
   userKey: string; restored: Restored; reloading: Promise<void> | null
   rechecking: Promise<void> | null; checkedAt: number
   removing?: Map<string, Promise<RemoveOutcome>>
+  /** The muted-words edits in flight: the client's calls wait for them (their load). */
+  editing?: Set<Promise<unknown>>
 } | null = null
 
 /**
@@ -86,6 +88,61 @@ export function removeActiveGoneLabeler(did: string): Promise<RemoveOutcome> {
   }).finally(() => { a.removing?.delete(did) })
   a.removing.set(did, p)
   return p
+}
+
+/** One muted-words edit (`packages/bluesky-client`, "Muted words"). */
+export type MutedWordEdit = Parameters<Restored['editMutedWords']>[0]
+
+/** How a muted-words save ended. `stale`: the account changed; nothing was shown. */
+export interface MutedWordsSave {
+  outcome: Awaited<ReturnType<Restored['editMutedWords']>>['outcome'] | 'stale'
+  /** Written, but the load after it failed. */
+  reloadFailed: boolean
+}
+
+/**
+ * Adds or removes one of the active reader's muted words (#196; app
+ * README, "Bluesky muted words"). The client's queue runs the writes one
+ * after the other, and the client's calls wait for an edit in flight. The
+ * answer, or a failure, is shown only while its account is still active
+ * (else `stale`); then the reader is set from it and, when the words
+ * changed (this write, or another app's), every kept page is emptied, so
+ * the next page is fetched and judged with the new words. Throws on a
+ * refused or failed write; the reader stays as it was.
+ */
+export async function editActiveMutedWords(edit: MutedWordEdit): Promise<MutedWordsSave> {
+  const a = active
+  if (!a || activeUserKey.peek() !== a.userKey) return { outcome: 'stale', reloadFailed: false }
+  const stale = () => active !== a || activeUserKey.peek() !== a.userKey
+  // The client's calls wait for this edit (its load after the write), so a
+  // page opened meanwhile is judged with the new words.
+  const job = a.restored.editMutedWords(edit)
+  a.editing ??= new Set()
+  a.editing.add(job)
+  let r: Awaited<typeof job>
+  try {
+    r = await job
+  } catch (err) {
+    // A failure of an account that is not active now is not shown.
+    if (stale()) return { outcome: 'stale', reloadFailed: false }
+    throw err
+  } finally {
+    a.editing.delete(job)
+  }
+  const changed = r.outcome === 'added' || r.outcome === 'removed' || r.wordsChanged
+  if (stale()) {
+    // As for a removal: its account's next reader may have loaded before
+    // this answer, so it loads once more.
+    if (changed) {
+      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
+      else reloadAfterRestore.add(a.userKey)
+    }
+    return { outcome: 'stale', reloadFailed: false }
+  }
+  a.checkedAt = Date.now()
+  publishReader(a.userKey, r)
+  if (changed) clearKeptAlive()
+  return { outcome: r.outcome, reloadFailed: r.reloadFailed }
 }
 
 /** Loads the active reader's moderation inputs again. One at a time. */
@@ -142,7 +199,9 @@ function afterReload(client: CaribouClient, userKey: string): CaribouClient {
       const value = Reflect.get(target, prop, receiver)
       if (typeof value !== 'function' || prop === 'timelineOrder') return value
       return (...args: unknown[]) => {
-        const pending = active?.userKey === userKey ? active.reloading : null
+        const a = active?.userKey === userKey ? active : null
+        const waits = [a?.reloading, ...(a?.editing ?? [])].filter((p): p is Promise<unknown> => !!p)
+        const pending = waits.length ? Promise.all(waits.map((p) => p.catch(() => {}))) : null
         if (!pending) return (value as (...a: unknown[]) => unknown).apply(target, args)
         return pending.then(() => (value as (...a: unknown[]) => unknown).apply(target, args))
       }
