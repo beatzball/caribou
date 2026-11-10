@@ -4,7 +4,7 @@ import {
   CaribouError, createDedup,
   type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet,
   type BlueskyModerationResult, type BlueskyOwnPost, type BlueskyPostRecord,
-  type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type Search,
+  type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type SavedFeed, type Search,
   type SearchInput, type Status, type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
@@ -40,6 +40,8 @@ export const BLUESKY_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
 export type BlueskyAgent = Pick<Agent,
   'did' | 'getTimeline' | 'getAuthorFeed' | 'getPostThread' | 'getPosts' | 'getProfile' | 'getProfiles'
 > & Pick<Agent, 'listNotifications' | 'countUnreadNotifications' | 'updateSeenNotifications'>
+  // Saved feeds (#194). Read only: never `overwriteSavedFeeds` and the like.
+  & Partial<Pick<Agent, 'getPreferences'>>
   // What the SDK sends in `atproto-accept-labelers` (README, "Labeler
   // coverage"). Missing: none sent, so no coverage.
   & Partial<Pick<Agent, 'labelers' | 'appLabelers'>> & {
@@ -53,9 +55,9 @@ export type BlueskyAgent = Pick<Agent,
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'getBookmarks'>
       graph: Pick<Agent['app']['bsky']['graph'], 'getMutes' | 'getBlocks'>
-      // Search (#192, #193). Optional so a fake agent without it still types.
+      // Search (#192, #193) and feeds (#194). Optional so a fake agent without them still types.
       actor?: Pick<Agent['app']['bsky']['actor'], 'searchActors'>
-      feed?: Pick<Agent['app']['bsky']['feed'], 'searchPosts'>
+      feed?: Pick<Agent['app']['bsky']['feed'], 'searchPosts' | 'getFeed' | 'getFeedGenerators'>
     }
   }
 } & BlueskyActionsAgent
@@ -135,6 +137,8 @@ function blobMissing(err: unknown): BlueskyBlobNotFound | null {
 export const CATCH_UP_PAGE_SIZE = 50
 /** Pages a catch-up reads before it calls the answer a gap (spec 6.3, seam 7). */
 export const CATCH_UP_MAX_PAGES = 3
+/** Pages a custom feed's catch-up reads (README, "Feeds"). */
+export const FEED_CATCH_UP_MAX_PAGES = 1
 /** Pages of only unavailable bookmarks the client reads past before it stops. */
 export const BOOKMARK_SKIP_PAGES = 5
 /** The AppView's limit for `getPosts` and `getProfiles`. */
@@ -196,6 +200,27 @@ const NO_SEARCH_CURSORS = { accountsCursor: null, statusesCursor: null }
 
 function noTagFollow(): Promise<never> {
   return Promise.reject(new CaribouError('not_found', 'Bluesky cannot follow a tag'))
+}
+
+// A feed generator's AT URI: `at://<did>/app.bsky.feed.generator/<rkey>`.
+const FEED_URI = /^at:\/\/(did:[a-z0-9]+:[^/]+)\/app\.bsky\.feed\.generator\/([^/]+)$/i
+
+/**
+ * The most saved feeds the client resolves (README, "Feeds"): the prefs
+ * have no limit, and each 25 cost a request.
+ */
+export const SAVED_FEEDS_MAX = 200
+
+/** The messages a feed's tab shows (README, "Feeds"). */
+export const FEED_GONE = 'This feed is gone. Its owner may have deleted it.'
+export const FEED_FAILED = 'This feed did not load. Try again later.'
+
+// A part of the agent this read needs. A test agent may leave one out; the
+// real one has them all. Methods are called on it, never detached: the SDK's
+// need their `this`.
+function need<T>(part: T | undefined, name: string): T {
+  if (!part) throw new CaribouError('unknown', `Bluesky agent has no ${name}`)
+  return part
 }
 
 function notYet(what: string, issue: string): () => Promise<never> {
@@ -312,11 +337,12 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   async function catchUp(
     fetchPage: (cursor: string | undefined) => Promise<{ data: { feed: AppBskyFeedDefs.FeedViewPost[]; cursor?: string }; coverage: BlueskyCoverage }>,
     sinceId: string,
+    maxPages = CATCH_UP_MAX_PAGES,
   ): Promise<TimelinePage> {
     const out: AppBskyFeedDefs.FeedViewPost[] = []
     const covered: BlueskyCoverage[] = []
     let cursor: string | undefined
-    for (let i = 0; i < CATCH_UP_MAX_PAGES; i++) {
+    for (let i = 0; i < maxPages; i++) {
       const { data, coverage } = await fetchPage(cursor)
       covered.push(coverage)
       const at = data.feed.findIndex((e) => feedEntryId(e) === sinceId)
@@ -344,6 +370,72 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return run(`home:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
       const { data, coverage } = await fetchPage(params.cursor, params.limit)
       return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
+    })
+  }
+
+  // README, "Feeds". The feed's own errors get words a reader can act on.
+  async function customFeed(uri: string, params: { sinceId?: string; cursor?: string; limit?: number }): Promise<TimelinePage> {
+    const feeds = need(agent.app.bsky.feed, 'app.bsky.feed')
+    const fetchPage = (cursor: string | undefined, limit: number | undefined) =>
+      answer(() => feeds.getFeed({ feed: uri, ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }))
+    try {
+      if (params.sinceId) {
+        const sinceId = params.sinceId
+        // One page: a custom feed may reorder, so the known top is rarely
+        // further down, and more pages would only cost requests.
+        return await run(`feed:${uri}:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId, FEED_CATCH_UP_MAX_PAGES))
+      }
+      return await run(`feed:${uri}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
+        const { data, coverage } = await fetchPage(params.cursor, params.limit)
+        return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
+      })
+    } catch (err) {
+      const norm = err as CaribouError
+      if (norm.code === 'unauthorized') throw norm
+      const gone = norm.code === 'not_found'
+      const status = norm.status
+      throw new CaribouError(gone ? 'not_found' : norm.code, gone ? FEED_GONE : FEED_FAILED,
+        status !== undefined ? { status } : {})
+    }
+  }
+
+  async function savedFeeds(): Promise<SavedFeed[]> {
+    return run('saved-feeds', async () => {
+      if (typeof agent.getPreferences !== 'function') throw new CaribouError('unknown', 'Bluesky agent has no getPreferences')
+      const prefs = await agent.getPreferences()
+      const seen = new Set<string>()
+      const kept: { id: string; kind: SavedFeed['kind']; uri: string; pinned: boolean }[] = []
+      for (const it of prefs.savedFeeds ?? []) {
+        if (typeof it?.value !== 'string' || seen.has(it.value)) continue
+        if (it.type === 'timeline') kept.push({ id: it.id, kind: 'timeline', uri: '', pinned: !!it.pinned })
+        else if (it.type === 'feed' && FEED_URI.test(it.value)) kept.push({ id: it.id, kind: 'feed', uri: it.value, pinned: !!it.pinned })
+        else continue
+        seen.add(it.value)
+        if (kept.length >= SAVED_FEEDS_MAX) break
+      }
+      const uris = kept.filter((f) => f.kind === 'feed').map((f) => f.uri)
+      const ns = uris.length > 0 ? need(agent.app.bsky.feed, 'app.bsky.feed') : null
+      // One request at a time: a long list must not burst at the AppView.
+      const answers: Awaited<ReturnType<NonNullable<BlueskyAgent['app']['bsky']['feed']>['getFeedGenerators']>>[] = []
+      for (const feeds of ns ? chunks(uris, BATCH) : []) answers.push(await ns!.getFeedGenerators({ feeds }))
+      const views = new Map(answers.flatMap((a) => a.data.feeds).map((v) => [v.uri, v]))
+      return kept.map((f): SavedFeed => {
+        if (f.kind === 'timeline') {
+          return { ...f, name: 'Following', description: '', avatar: null, creator: null, available: true }
+        }
+        const v = views.get(f.uri)
+        if (!v) {
+          return { ...f, name: FEED_URI.exec(f.uri)![2]!, description: '', avatar: null, creator: null, available: false }
+        }
+        return {
+          ...f,
+          name: v.displayName || FEED_URI.exec(f.uri)![2]!,
+          description: v.description ?? '',
+          avatar: v.avatar ?? null,
+          creator: v.creator?.handle && v.creator.handle !== 'handle.invalid' ? v.creator.handle : null,
+          available: true,
+        }
+      })
     })
   }
 
@@ -583,6 +675,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     async fetchTimeline(kind: TimelineKind, params = {}) {
       if (kind === 'home') return timeline(params)
       if (kind === 'bookmarks') return bookmarks(params)
+      if (typeof kind === 'object' && kind.type === 'feed') return customFeed(kind.uri, params)
       if (kind === 'local' || kind === 'public') {
         throw new CaribouError('not_found', `Bluesky has no ${kind} timeline`)
       }
@@ -696,6 +789,8 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     waitForMedia: notBluesky('waitForMedia', 'blueskyUploadBlob'),
     updateMedia: notBluesky('updateMedia', 'the draft (alt text is in the embed)'),
     fetchInstance: notBluesky('fetchInstance', 'capabilities'),
+
+    blueskySavedFeeds: savedFeeds,
 
     async blueskyNextRkey() {
       if (!opts.compose) throw new CaribouError('not_found', 'Bluesky compose is not loaded')

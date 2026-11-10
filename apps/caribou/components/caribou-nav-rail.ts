@@ -20,10 +20,13 @@ import './caribou-signout-form.js'
 // `needs`: the item shows only when the active account's network has it.
 // `notOn`: the item hides while an account on that network is active, for a
 // feature not built for it yet (spec 2.1: Lists for Bluesky until phase 5).
+// `onlyOn`: the item shows only while an account on that network is active,
+// and so never before mount (Feeds, #194).
 interface NavItem {
   label: string; icon: IconName; href: string; more?: boolean; dot?: boolean; signedIn?: boolean
   needs?: 'localTimeline' | 'publicTimeline'
   notOn?: Network
+  onlyOn?: Network
 }
 
 // The items above New post. DOM order is the visual order at every width,
@@ -35,6 +38,7 @@ const ITEMS: NavItem[] = [
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
   { label: 'Search',  icon: 'search', href: '/search', more: true },
   { label: 'Public',  icon: 'globe', href: '/public', more: true, needs: 'publicTimeline' },
+  { label: 'Feeds', icon: 'hash', href: '/feeds', more: true, signedIn: true, onlyOn: 'bluesky' },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
   { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true, notOn: 'bluesky' },
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
@@ -340,10 +344,13 @@ export class CaribouNavRail extends LitElement {
     this.caps = activeClient.value?.capabilities ?? null
   }
 
-  // The items the active account's network has; all of them before mount.
+  // The items the active account's network has; before mount, all of them
+  // but the ones for one network only.
   private shown(items: NavItem[]): NavItem[] {
     const caps = this.caps
-    return caps ? items.filter((it) => (!it.needs || caps[it.needs]) && it.notOn !== caps.network) : items
+    if (!caps) return items.filter((it) => !it.onlyOn)
+    return items.filter((it) => (!it.needs || caps[it.needs]) && it.notOn !== caps.network
+      && (!it.onlyOn || it.onlyOn === caps.network))
   }
 
   private readAccounts(all: Map<string, UserSession>, key: string | null) {

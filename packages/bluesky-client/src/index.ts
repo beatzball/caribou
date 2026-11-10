@@ -12,4 +12,6 @@ export { isNoUnauthenticated, isProvenVisible } from './no-unauthenticated.js'
 // The capabilities only: the app's session driver needs them at once,
 // before the lazy chunk loads.
 export { BLUESKY_CAPABILITIES } from './client.js'
+// The words a feed's tab shows (README, "Feeds"), one copy for the app.
+export { FEED_GONE, FEED_FAILED } from './client.js'
 export { BlueskyBlobNotFound, BlueskyDeleteUnknown } from './errors.js'

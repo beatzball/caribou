@@ -190,6 +190,18 @@ both networks. These add to them:
   with `loadMore` cursor.
 - `createAccountCache(clientSource)` — handle → Account memo with
   in-flight dedup.
+- `savedFeedsCache`, `loadSavedFeeds(opts)` (`saved-feeds.ts`, #194) — a
+  Bluesky reader's saved feeds, keyed by `userKey`, so one account never
+  sees another's. `loadSavedFeeds` reads through
+  `client.blueskySavedFeeds()`. A copy loaded less than 5 minutes ago
+  (`SAVED_FEEDS_FRESH_MS`) answers with no request, so a Home tab click
+  does not read the prefs again. An older copy answers at once and is read
+  again in the background; a failure there keeps it. With no copy, or with
+  `force: true` (a Retry), it reads and throws when the read fails, keeping
+  what the cache had. Two loads for one account in flight share one
+  request. An answer that lands after the active account changed is still
+  stored under the account that read it. A Mastodon client (by `capabilities.network`)
+  stores nothing and answers `[]`. Read only: nothing here writes prefs.
 
 **Glue**
 
@@ -427,6 +439,18 @@ commit step differs.
   still shows Unblock when `blocking` is known. After an Unblock ack, the
   relationship is read again, and that read fills the follow. So Unblock
   never leads to a second follow record.
+- **The read after Unblock can still see the block (#242).** The AppView
+  lags, so that first read can leave the follow unknown. When the caller
+  passes its page's `signal` (`setBlock(account, false, { signal })`), the
+  relationship is read again at 5 s, at 20 s, and 5 s before the client's
+  lag window (`readLagMs`) ends: 55 s on Bluesky. Every read is sent
+  inside the window, so a read that still shows the block and answers in
+  time cannot undo the Unblock. A slow answer that lands after the window
+  ends can still show the old block. The reads go on while the follow is unknown and no block is
+  known. The account is taken before the Unblock write starts. No read is
+  made once the signal aborts (the page goes) or the active account
+  changes, even if it changes back. The profile header passes its signal;
+  other callers read once.
 - **An undo never claims more than it removed (A3).** A Bluesky block or
   mute can come from a list (`bluesky.blockingByList`,
   `bluesky.mutingByList`: the list's URI). A personal undo cannot remove
@@ -715,6 +739,20 @@ soon as storage takes a write (the reveal tries at once; opening the
 slot stores them). A new post finds it (`findRedraftSlot` takes an
 exposed `staged:` slot), after a reload too once the flag is stored; its
 bytes load by their real key.
+
+**Known gap: a refused rename, a refused reveal write, then a reload.**
+When storage refuses the rename and also every later write, the flag
+`exposed` lives only in this page. After a reload, the `staged:` slot is
+unexposed again, so it is hidden as a staged copy: a new post does not
+find it. Recovery finds it (`recoverStagedRedrafts`): at once when the
+post is gone, or after `STAGED_MAX_AGE_MS` (a day) when the post is still
+up. So the draft is hidden for up to a day, never lost.
+
+**Known cost of rule E (accepted).** If a tab closes before its delete
+goes out, and the reader later uses plain Delete on that post, the next
+new post offers a redraft the reader no longer wants. The reader discards
+it. Plain Delete removes no draft (rule E), so this is the price of never
+losing one.
 
 **Rule D4: the stored redraft wins.** A stored redraft of the same post
 (the same `bluesky.source`: a `redraft:` slot, or an exposed `staged:`

@@ -513,9 +513,11 @@ export class CaribouComposeDialog extends LitElement {
     this.finishOpen()
   }
 
-  // The open draft is a redraft kept beside another draft (`redraft:<key>`).
+  // The open draft is a redraft kept beside another draft: a `redraft:<key>`
+  // slot, or a `staged:<key>` one whose rename storage refused. A composer
+  // opens a `staged:` slot only once it is exposed (#243).
   private get keptRedraft(): boolean {
-    return this.draftKey.startsWith('redraft:')
+    return this.draftKey.startsWith('redraft:') || this.draftKey.startsWith('staged:')
   }
 
   /**

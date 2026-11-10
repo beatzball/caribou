@@ -1,7 +1,7 @@
 import { createRestAPIClient, type mastodon } from 'masto'
 import type {
   Account, AccountCredentials, AccountRef, BlueskyBlobRef, BlueskyFacet, BlueskyOwnPost, BlueskyPostRecord, BlueskyStrongRef, Capabilities, Filter, Instance, List, ListRepliesPolicy,
-  MediaAttachment, Notification, NotificationType, Poll, Relationship, Search,
+  MediaAttachment, Notification, NotificationType, Poll, Relationship, SavedFeed, Search,
   Status, StatusEdit, StatusRef, StatusWriteAck, RelationshipWriteAck, StatusSource, StatusVisibility, Tag,
 } from './types.js'
 // Loads masto-mapping's correction to masto's declarations (see there).
@@ -15,6 +15,8 @@ import type { SessionSource } from './session-source.js'
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks'
   | { type: 'hashtag'; tag: string }
   | { type: 'list'; id: string }
+  /** A Bluesky custom feed, by its generator's AT URI (#194). */
+  | { type: 'feed'; uri: string }
 
 /**
  * How a timeline's posts are ordered: a compare function that sorts two
@@ -157,6 +159,11 @@ export interface CaribouClient {
    * a group of one. An older server answers 404 (`not_found`).
    */
   fetchGroupedNotifications(params?: FetchGroupedNotificationsParams): Promise<GroupedNotificationsPage>
+  /**
+   * The reader's saved feeds, in their order (#194). Bluesky only; read
+   * only. Rules: `packages/bluesky-client` README, "Feeds".
+   */
+  blueskySavedFeeds?(): Promise<SavedFeed[]>
   /** Every account in one notification group (`GET /api/v2/notifications/:group_key/accounts`). */
   fetchNotificationGroupAccounts(groupKey: string): Promise<Account[]>
   /**
@@ -494,6 +501,7 @@ export function createCaribouClient(userKey: UserKey, session: SessionSource): C
         if (kind === 'public') return pageByLastId(await c.v1.timelines.public.list(listParams))
         if (kind === 'bookmarks') return fetchBookmarkTimeline(c, params)
         if (kind.type === 'hashtag') return pageByLastId(await c.v1.timelines.tag.$select(encodeURIComponent(kind.tag)).list(listParams))
+        if (kind.type === 'feed')    throw new CaribouError('not_found', 'Mastodon has no custom feeds')
         if (kind.type === 'list')    return pageByLastId(await c.v1.timelines.list.$select(encodeURIComponent(kind.id)).list(listParams))
         throw new CaribouError('unknown', `unhandled timeline kind: ${JSON.stringify(kind)}`)
       })

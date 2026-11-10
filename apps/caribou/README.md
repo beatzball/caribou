@@ -635,6 +635,88 @@ active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
 
+**A gone labeler (#238).** A labeler in the reader's prefs that
+`getServices` has no view for keeps every Bluesky card covered (bluesky
+README, "A gone labeler"). After two misses in a row (the first load plus
+a Retry or a recheck), `<caribou-gone-labelers>`, in the app shell, shows
+one notice per gone labeler: "A labeler in your Bluesky moderation
+settings is gone: <DID>. Bluesky posts stay covered until you remove it."
+with a "Remove" button, named "Remove labeler <DID>". The button asks
+first (`confirmDialog`, "Remove labeler?"). Only a yes sends the write,
+and one click sends it once. While it runs the button is busy.
+
+- **One account.** The busy and failed state belong to the account that
+  started the removal, by an operation token. Every owner change (A to B,
+  and B back to A) makes the earlier tokens stale, so an earlier answer or
+  error changes nothing on screen.
+- **Answers.** On `removed`, `absent` or `back` the glue sets the reader
+  again, and the notice goes when the labeler is no longer gone. A live
+  region that is always there says "Labeler removed." (`removed`,
+  `absent`) or "The labeler is back. Nothing was removed." (`back`). It
+  is cleared when a removal starts, so a second removal is announced too.
+  Focus moves to the next Remove button, or to `main`. `main` gets
+  `tabindex="-1"` for that only when it has none, and loses it on blur. On an error the
+  notice stays and says "Could not remove the labeler. Try again." (plain
+  text in the notice's status, no nested alert).
+- **Switch away and back.** A removal's answer that lands while its
+  account is not the active reader is dropped. The glue then reloads that
+  account's moderation once: at once if its new reader is already
+  restored, else when its restore finishes. So the notice does not name a
+  labeler that the write already took out.
+- The cover stays the whole time, until the new reader settles it. The
+  server and the first client render show only the empty live region
+  (the reader signal is empty then).
+
+### Bluesky feeds (#194)
+
+Client render only: every part needs the reader's token. Read only:
+Caribou never changes the reader's saved or pinned feeds. The list of feeds
+and the rules for reading it are in the `packages/bluesky-client` README,
+"Feeds".
+
+**Home tabs.** With a Bluesky account active, Home shows a row of tabs
+(`<caribou-feed-tabs>`, built on `<caribou-tabs>`) above the timeline.
+Following is first, always, at `/home`. Then each pinned feed, in the
+reader's order, at `/home?feed=<feed URI>`. If the address names a feed that
+is not pinned, it gets one more tab at the end. While the reader's feeds
+load, or if they fail to load, the row is Following alone. The list is
+kept per account; a copy under 5 minutes old is used with no request, so a
+tab click does not read the prefs again (`packages/state` README); a row of only
+Following is not shown. With a Mastodon account active, or none, Home is as
+before and ignores `?feed=`.
+
+**A feed's tab.** `<caribou-timeline kind="feed" feed="<uri>">`. Its posts
+go through the same card and moderation as Following, and it has Home's
+filter context: a card hides when its author is muted or blocked, at once,
+as on Following. It does not poll
+every 30 s (only Following does), and it is kept like the other timelines
+(`feed:<uri>`), so going back to it shows its posts at once. The tab does
+not wait for the saved list: it asks for the feed's posts at once. When the
+saved list says the feed is gone, the tab shows "This feed is gone. Its
+owner may have deleted it." in place of the timeline; once the list is
+known, no request goes out for a gone feed's posts. A feed that fails shows
+its error with Retry (`getFeed`'s `UnknownFeed` says the feed is gone),
+never an empty page. An address whose `?feed=` is not a feed URI says so
+(`role="status"`), with a link to Following.
+
+**Scroll.** Each tab is its own address. So, as on Home today, Back and
+Forward bring the reader back to where they were on that tab, and a tab
+click starts at the top.
+
+**Feeds page.** `/feeds` lists the reader's saved feeds in their order:
+Following, then each feed with its avatar, name, creator and description.
+Pinned feeds say "Pinned". Each links to its Home tab. A gone feed says
+"Not available" and has no link. A failed load shows its error with Retry.
+Retry reads again (`force`); its button stays, busy, until the answer. A
+failure keeps focus on it; success moves focus to the list. Signed out, the page asks the reader to
+sign in. With a Mastodon account active it says that feeds are a Bluesky
+feature.
+
+**Nav.** Feeds is a nav item (`onlyOn: 'bluesky'`), in More on a phone. It
+shows only after mount and only while a Bluesky account is active: the
+server and the first client render do not know the account, so both leave
+it out.
+
 ### Bluesky compose (#189)
 
 `<caribou-compose-dialog>` with a Bluesky account active. Every rule here

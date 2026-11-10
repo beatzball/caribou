@@ -484,6 +484,26 @@ export interface BlueskyPostRecord {
 }
 
 /** A post record read back from the reader's own PDS. */
+/**
+ * One of a Bluesky reader's saved feeds (#194): Following, or a custom feed.
+ * Rules: `packages/bluesky-client` README, "Feeds".
+ */
+export interface SavedFeed {
+  /** The pref item's own id. */
+  id: string
+  kind: 'timeline' | 'feed'
+  /** The feed generator's AT URI; '' for Following. */
+  uri: string
+  pinned: boolean
+  name: string
+  description: string
+  avatar: string | null
+  /** The creator's handle, or null when not known. */
+  creator: string | null
+  /** False when the AppView did not return the feed: it is gone. */
+  available: boolean
+}
+
 export interface BlueskyOwnPost {
   uri: string
   cid: string

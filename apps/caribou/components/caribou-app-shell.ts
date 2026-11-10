@@ -5,6 +5,7 @@ import './caribou-right-rail.js'
 import './caribou-toaster.js'
 import './caribou-compose-dialog.js'
 import './caribou-session-expired.js'
+import './caribou-gone-labelers.js'
 
 @customElement('caribou-app-shell')
 export class CaribouAppShell extends LitElement {
@@ -44,6 +45,7 @@ export class CaribouAppShell extends LitElement {
   override render() {
     return html`
       <caribou-session-expired></caribou-session-expired>
+      <caribou-gone-labelers></caribou-gone-labelers>
       <div class="shell-grid">
         <caribou-nav-rail></caribou-nav-rail>
         <main><slot></slot></main>

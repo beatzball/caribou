@@ -305,6 +305,61 @@ Tracked in #240. The owner accepted it on 2026-11-09.
   gap: a labeler taken down after its definitions loaded …". If the window
   is closed, change it to expect the cover at once.
 
+#### A gone labeler (#238)
+
+A labeler in the reader's prefs can be gone: deleted, taken down, or not a
+labeler. `getServices` then answers with no view for it. It has no
+definitions, so veil rule 1 covers every Bluesky post and profile, and
+Retry does not help. Caribou does not remove it on its own.
+
+- **Which labelers are missing** (`goneLabelers(prefs, labelDefs)`, in
+  `./moderation`): each DID in `prefs.labelers` with no entry in
+  `labelDefs`, in prefs order, once each. Bluesky's own labeler is never
+  listed: a reader cannot unsubscribe from it. Prefs or definitions not
+  loaded (`null`): none. A failed `getServices` is not "missing".
+- **Gone is two misses in a row.** Each published load or check counts a
+  miss for every missing labeler, and clears the count of every labeler
+  it has a view for. A labeler is `gone` (offered for removal) only after
+  two misses in a row: the first load plus one Retry or recheck. So a
+  labeler the AppView has not indexed yet is not offered at once. The
+  cover is there from the first miss. `restoreClient` gives the list as
+  `gone`, and `reloadModeration`, `recheckLabelers` and
+  `removeGoneLabeler` return it.
+- **The cover stays** until the reader removes the labeler or it comes
+  back. Nothing here changes the veil.
+- **One at a time (rule Q).** Each restored client runs every moderation
+  load and check through one serial queue: the restore's load, Retry
+  (`reloadModeration`), a removal (its "is it back" check, its write and
+  its reload, as one job), and every definitions check
+  (`recheckLabelers`: the 10-minute one, the foreground one). Nothing
+  overlaps, so no answer is published against prefs it did not read, and
+  no older prefs read calls `configureLabelers` last. A load or a check
+  that is asked for while one of the same kind waits in the queue (not
+  yet started) joins that one. One that is asked for while its kind runs
+  is queued after it, because the running one may have read old prefs.
+- **Removal** (`removeGoneLabeler(did)`, only after the reader confirms):
+  1. A DID not in `gone` when asked (Bluesky's labeler, a labeler that is
+     not gone, a DID not in the prefs): refused, no request. When the job
+     starts, a DID no longer gone (a load in front of it saw it) is not
+     checked or written: the answer is `back` if the prefs still name it,
+     else `absent`.
+  2. `getServices` for that DID once more. A view: the labeler is back.
+     Nothing is written; the definitions are checked again
+     (`recheckLabelers`), and the answer is `back`. A failed request
+     throws, and nothing is written. A 401 here or in the write also ends
+     the session ("401").
+  3. The write is the SDK's `updatePreferences`: it reads the prefs again,
+     under the agent's prefs lock, and puts back what the edit returns.
+     The edit takes out only that DID from each `labelersPref`. Every other
+     pref, and its order, stays as read. If the fresh read does not have
+     the DID (another app removed it), nothing is written (`absent`).
+     `putPreferences` has no swap check, so a write from another app
+     between the read and the put can still be lost. The Bluesky app's
+     own writes have the same window.
+  4. Then a full load, in the same job, so `prefs`, `labelDefs` and
+     `gone` come from the server. The answer is `removed`. A Retry asked
+     for during the removal runs after it.
+
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 
 A signed-out profile page or thread from the public AppView, with no
@@ -592,6 +647,39 @@ rollback, the in-flight guard and the account check.
 - **No dedup.** Two clicks that reach the client are two requests. The
   state layer's in-flight guard is what stops a double click.
 - **Errors** are normalized as for reads; a 401 calls `onUnauthorized`.
+
+## Feeds (#194, spec 9)
+
+Read only. Caribou never writes the reader's feed prefs.
+
+- **Saved feeds (`blueskySavedFeeds()`).** The list comes from
+  `getPreferences().savedFeeds`. The SDK reads `savedFeedsPrefV2` there,
+  and the old `savedFeedsPref` only when there is no V2. The answer keeps
+  the stored order. Each item keeps its pref `id` and `pinned`.
+- **What is kept.** A `timeline` item (Following), and a `feed` item whose
+  value is an `at://<did>/app.bsky.feed.generator/<rkey>` URI. A `list`
+  item waits for lists (#195). An unknown type, or a bad URI, is left out.
+  A second item with the same value is left out.
+- **At most 200.** The prefs have no limit. The client keeps the first 200
+  kept items (`SAVED_FEEDS_MAX`), in the reader's order, and leaves out the
+  rest.
+- **Names.** Feed items get their name, description, avatar and creator
+  handle from `getFeedGenerators`, 25 per request, one request at a time. A feed the AppView does
+  not return is still in the answer with `available: false` and its rkey
+  as its name: the reader saved it, so the screen says it is gone instead
+  of dropping it. If `getPreferences` or `getFeedGenerators` fails, the
+  call fails (errors as for reads).
+- **A feed's posts.** `fetchTimeline({ type: 'feed', uri })` →
+  `app.bsky.feed.getFeed`. Paging and moderation are the same as for
+  Following: the posts go through the same mapper and the reader's
+  moderation. Catch-up reads one page, not three
+  (`FEED_CATCH_UP_MAX_PAGES`): a custom feed may reorder, so the known top
+  is rarely further down. A miss is a gap ("Many new posts"). A pin reason or another unknown reason is a plain entry.
+- **A feed that fails.** `UnknownFeed` (the feed is gone) is `not_found`
+  with the message "This feed is gone. Its owner may have deleted it." Any
+  other failure except a 401 keeps its code with the message "This feed
+  did not load. Try again later." A 401 is as for reads. The screen shows
+  the message in the feed's place, never an empty page.
 
 ## Notifications (#191, spec 9)
 

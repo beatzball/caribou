@@ -83,6 +83,13 @@ export function setBlueskyReader(next: BlueskyReader | null): void {
   blueskyReader.value = next
 }
 
+/**
+ * The labelers in the active reader's prefs that are gone (#238; bluesky
+ * README, "A gone labeler"), for `<caribou-gone-labelers>`. The session glue
+ * sets it with the reader. Null: no Bluesky reader loaded.
+ */
+export const blueskyGoneLabelers = signal<{ userKey: string; dids: readonly string[] } | null>(null)
+
 function ensureCheck(): void {
   if (check.peek() || loading) return
   loading = loadBlueskyModeration().then(
@@ -118,6 +125,7 @@ export function blueskyVeilSettled(
 /** Tests only: forget the reader and the loaded check. */
 export function _testOnlyResetBlueskyVeil(): void {
   blueskyReader.value = null
+  blueskyGoneLabelers.value = null
   check.value = null
   loading = null
 }
