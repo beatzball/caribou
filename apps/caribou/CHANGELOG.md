@@ -1,5 +1,28 @@
 # caribou-app
 
+## 0.10.11
+
+### Patch Changes
+
+- [#236](https://github.com/beatzball/caribou/pull/236) [`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky card actions. Reply and Quote are off, with a reason, when the author limited replies or quotes. A new Quote button (Bluesky posts only) opens the composer. The Bluesky block confirm says blocks are public. On a small phone a Bluesky bar has less padding and short counts (2.1K). A busy post fits on one row from 360 px; at 320 px the bar can wrap, and the page never scrolls sideways. Follow waits until the follow state is known. A known block still shows Unblock. Add an e2e spec for the Mastodon boost paths.
+
+- [#232](https://github.com/beatzball/caribou/pull/232) [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky compose: a 300-grapheme and 3000-byte counter, images resized in the browser to 2 MB, alt text in the embed, a label menu, reply and quote with strong refs, and a retry that checks the PDS so a post is never sent twice. Behind the Bluesky flag.
+
+- [#235](https://github.com/beatzball/caribou/pull/235) [`c8344a4`](https://github.com/beatzball/caribou/commit/c8344a4a5939ee33876feff78cd636ff5c0333f1) Thanks [@beatzball](https://github.com/beatzball)! - The Bluesky e2e fixture server no longer exposes `atproto-content-labelers` unless a test asks, as on the real servers. A new e2e test checks that a clean post in Following shows with no moderation cover.
+
+  The active Bluesky reader's label definitions are checked again every 10 minutes while the page is visible, and when the app comes back to the foreground.
+
+- [#231](https://github.com/beatzball/caribou/pull/231) [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky notifications (behind the Bluesky flag). The list groups likes, reposts and follows, says "liked" and "reposted", and links each account by its handle. It sends `updateSeen` when the full list is on screen, once per new notification. A list whose first page is empty but has a cursor shows "Load older" instead of "No notifications yet". Each Bluesky author gets the reader's moderation decision (filter, cover, avatar blur). When a "Load older" click ends the list, focus moves to the end notice. An author's decision counts only once it is settled for the reader; until then the author is covered. Focus moves to the end notice only if the reader has not moved it. Notices go by the rows left after filters.
+
+- [#237](https://github.com/beatzball/caribou/pull/237) [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky: Delete and "Delete & redraft" on your own post. Redraft reads the post, asks, then re-encodes and uploads the images and stores the draft (with the image bytes) before it deletes the post, so nothing can be lost after the delete. The new post gets a new record key. A post with nothing that can be kept is not deleted. A post already deleted leaves the list. A second redraft of a post opens the stored one instead. Post waits while a reply or quote target is checked. The label menu adds Suggestive. Mastodon delete and redraft do not change.
+
+- [#241](https://github.com/beatzball/caribou/pull/241) [`110d0fa`](https://github.com/beatzball/caribou/commit/110d0fa17b52bc976344d7aef1d8412797b2771c) Thanks [@beatzball](https://github.com/beatzball)! - A remote profile whose server refuses Caribou's server (a 401 or a 403) no longer shows "Couldn't load profile". Signed in with a Mastodon account, the profile and its posts load through your own server, which resolves the account by search when it has not seen it yet. If your server fails to answer, the page says it couldn't load the account and offers a Retry. The posts link to and act on your own server. Signed out, the page says that server does not allow it and links to the account's own page. The server waits 60 seconds before it asks a refusing server again.
+
+- Updated dependencies [[`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f), [`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f), [`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f), [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0), [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0), [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0), [`c8344a4`](https://github.com/beatzball/caribou/commit/c8344a4a5939ee33876feff78cd636ff5c0333f1), [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1), [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1), [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1), [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc), [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc), [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc)]:
+  - @beatzball/caribou-bluesky-client@0.1.3
+  - @beatzball/caribou-state@0.4.9
+  - @beatzball/caribou-mastodon-client@0.4.7
+
 ## 0.10.10
 
 ### Patch Changes

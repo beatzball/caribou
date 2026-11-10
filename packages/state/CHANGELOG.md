@@ -1,5 +1,20 @@
 # @beatzball/caribou-state
 
+## 0.4.9
+
+### Patch Changes
+
+- [#236](https://github.com/beatzball/caribou/pull/236) [`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f) Thanks [@beatzball](https://github.com/beatzball)! - Status actions and relationship writes accept a Bluesky ack. An ack commits the flag and the record ref and keeps the count the click set. A relationship ack is partial: with nothing cached, other fields stay unknown, and `relationshipKnown` says when Follow can show. A read is judged per field group, and the lag guard compares the record URI too. Unblock and Unmute refuse a list block or mute. A Bluesky block leaves the follow, and after an Unblock the relationship is read again. A Mastodon write still drops a read that started before it, whole, as before.
+
+- [#232](https://github.com/beatzball/caribou/pull/232) [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0) Thanks [@beatzball](https://github.com/beatzball)! - Add the Bluesky draft contract and `postBlueskyDraft`: the rkey and the frozen record are stored before a send, and a retry checks the PDS first, so one click is one post.
+
+- [#231](https://github.com/beatzball/caribou/pull/231) [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1) Thanks [@beatzball](https://github.com/beatzball)! - The notifications list ends only on a null `nextCursor`, for both networks: an empty page with a cursor keeps "Load older". Bluesky lists group on the client (type, post, UTC day), order by `indexedAt`, and poll by catch-up. The unread badge reads `getUnreadCount` for a Bluesky account, and `markBlueskyNotificationsSeen` sends `updateSeen` once, only for the active sign-in. Mastodon is unchanged. A list or cursor that a poll replaces starts a new generation: an older "Load older" answer writes nothing. A poll on an empty list does not bring "Load older" back after the end. An empty first page brings "Load older" back only when its raw top changed (new notifications arrived).
+
+- [#237](https://github.com/beatzball/caribou/pull/237) [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky delete and redraft. `deleteOwnStatusOutcome` answers deleted, failed or unknown (`deleteOwnStatus` keeps its shape). `readBlueskyRedraft`, `storeBlueskyRedraft`, `settleBlueskyRedraft` and `discardBlueskyRedraft` read the post, stage the redraft in a hidden `staged:` slot before the delete, then move or remove it by the outcome. The move after the delete renames the slot in place, so it needs no more storage. A redraft keeps its source post; a stored redraft of the same post wins over a new one, so no edit is lost. A redraft whose delete was in doubt is checked when it opens. A draft is removed only by its send, by the reader, or, while no one could see it yet, by its own redraft flow (rule E); a staged draft of a post still up after a day becomes a normal redraft with a note. `forgetDeletedStatus` drops a post found already deleted. `draft-files.ts` keeps a stored redraft's image bytes in IndexedDB. The label menu adds `sexual` (Suggestive), and a redraft carries any other self-label.
+
+- Updated dependencies [[`ee3d0e4`](https://github.com/beatzball/caribou/commit/ee3d0e4055687c132cb0db1426f1cb3ba8ba885f), [`1b953ac`](https://github.com/beatzball/caribou/commit/1b953acbdcbf6a354230144d2aa9527d5bcc60e0), [`847d947`](https://github.com/beatzball/caribou/commit/847d947229bc06343cccb3a712c54db848b2aba1), [`1ce053d`](https://github.com/beatzball/caribou/commit/1ce053d1d3d9bf7deb1e279e5319dacfc64838fc)]:
+  - @beatzball/caribou-mastodon-client@0.4.7
+
 ## 0.4.8
 
 ### Patch Changes
