@@ -431,9 +431,10 @@ commit step differs.
   lags, so that first read can leave the follow unknown. When the caller
   passes its page's `signal` (`setBlock(account, false, { signal })`), the
   relationship is read again at 5 s, at 20 s, and 5 s before the client's
-  lag window (`readLagMs`) ends: 55 s on Bluesky. Every read lands inside
-  the window, so a read that still shows the block cannot undo the
-  Unblock. The reads go on while the follow is unknown and no block is
+  lag window (`readLagMs`) ends: 55 s on Bluesky. Every read is sent
+  inside the window, so a read that still shows the block and answers in
+  time cannot undo the Unblock. A slow answer that lands after the window
+  ends can still show the old block. The reads go on while the follow is unknown and no block is
   known. The account is taken before the Unblock write starts. No read is
   made once the signal aborts (the page goes) or the active account
   changes, even if it changes back. The profile header passes its signal;
