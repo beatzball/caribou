@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type { Page } from '@playwright/test'
 
 // The tiny HLS stream in `fixtures/hls/` (how it is made: `make.sh` there),
@@ -22,8 +22,11 @@ export async function routeHlsFixture(page: Page): Promise<string[]> {
     const cors = { 'access-control-allow-origin': '*' }
     if (name === 'thumbnail.jpg') return route.fulfill({ status: 200, contentType: 'image/png', body: THUMB_BYTES })
     const type = TYPES[name.split('.').pop() ?? '']
-    if (!type || !/^[\w.]+$/.test(name)) return route.fulfill({ status: 404, headers: cors, body: 'not found' })
-    return route.fulfill({ status: 200, headers: cors, contentType: type, body: readFileSync(new URL(name, DIR)) })
+    const file = new URL(name, DIR)
+    if (!type || !/^[\w.]+$/.test(name) || !existsSync(file)) {
+      return route.fulfill({ status: 404, headers: cors, body: 'not found' })
+    }
+    return route.fulfill({ status: 200, headers: cors, contentType: type, body: readFileSync(file) })
   })
   return served
 }
@@ -36,4 +39,12 @@ export async function forceHlsJs(page: Page): Promise<void> {
       return /mpegurl/i.test(type) ? '' : real.call(this, type)
     }
   })
+}
+
+// A new tab opened by a press shows up late (after a keyboard press, more
+// than a second later in Chromium). Wait a moment for one before saying
+// there was none. `seen` holds the ones that came already.
+export async function noNewTab(page: Page, seen: string[]): Promise<string[]> {
+  const late = await page.waitForEvent('popup', { timeout: 2_000 }).then((p) => p.url(), () => null)
+  return late && !seen.includes(late) ? [...seen, late] : seen
 }

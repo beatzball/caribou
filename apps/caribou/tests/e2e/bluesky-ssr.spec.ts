@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from './_fixtures.js'
 import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 import { startAppViewStub, type AppViewStub } from './_appview-stub.js'
-import { routeHlsFixture } from './_hls-fixture.js'
+import { noNewTab, routeHlsFixture } from './_hls-fixture.js'
 import {
   HANA_SECRETS, NORA_SECRETS, PARTIAL_SECRETS,
 } from '../../../../packages/bluesky-client/src/__fixtures__/ssr-appview.js'
@@ -324,6 +324,10 @@ test.describe('a server-painted video (#261)', () => {
   test('rule 2: the poster hydrates in place, equals the first client render, and plays by keyboard', async ({ page }) => {
     const errors = collectErrors(page)
     const served = await routeHlsFixture(page)
+    // Rule 2: Enter plays here. A new tab (bsky.app) would mean the click
+    // was not stopped; `page.url()` cannot see that.
+    const popups: string[] = []
+    page.on('popup', (p) => popups.push(p.url()))
     // Every `a.poster` the server sent must be the same node when the page
     // is swapped (a second render would make new ones).
     await watchServerPage(page, 'a.poster')
@@ -370,6 +374,7 @@ test.describe('a server-painted video (#261)', () => {
     expect(client).toBe(sent)
     expect(sent).toContain('aria-label="Play video: A caribou running"')
     // Rule 1: the thumbnail only, until the press.
+    await page.waitForLoadState('networkidle')
     expect(served.filter((f) => f !== 'thumbnail.jpg')).toEqual([])
 
     // By keyboard (rules 2 and 12): Enter on the poster plays in place.
@@ -381,6 +386,7 @@ test.describe('a server-painted video (#261)', () => {
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 15_000 })
       .toBeGreaterThan(0.5)
     expect(page.url()).toBe(`${base}${PATH}`)
+    expect(await noNewTab(page, popups)).toEqual([])
     expect(errors).toEqual([])
   })
 })
