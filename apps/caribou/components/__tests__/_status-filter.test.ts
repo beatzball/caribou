@@ -65,6 +65,7 @@ describe('timelineFilterContext', () => {
   it('maps each timeline to its filter context', () => {
     expect(timelineFilterContext('home')).toBe('home')
     expect(timelineFilterContext('list')).toBe('home')
+    expect(timelineFilterContext('feed')).toBe('home')
     expect(timelineFilterContext('local')).toBe('public')
     expect(timelineFilterContext('public')).toBe('public')
     expect(timelineFilterContext('hashtag')).toBe('public')

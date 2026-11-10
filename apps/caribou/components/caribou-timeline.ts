@@ -17,7 +17,7 @@ import { timelineFilterContext } from './_status-filter.js'
 import { findShell, loadReaderViewFrom } from './_shell.js'
 import { settleSplash } from './_splash.js'
 
-export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag' | 'list'
+export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag' | 'list' | 'feed'
 
 export interface TimelineInitial {
   statuses: Status[]
@@ -50,7 +50,7 @@ const isFirstPage = () => !new URLSearchParams(location.search).has('max_id')
 
 // The timelines that are kept. Bookmarks are not, yet: their pages run by a
 // bookmark cursor, and a `since_id` check by status id does not fit them.
-const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public', 'hashtag', 'list'])
+const KEPT: ReadonlySet<TimelineKind> = new Set(['home', 'local', 'public', 'hashtag', 'list', 'feed'])
 
 @customElement('caribou-timeline')
 export class CaribouTimeline extends LitElement {
@@ -75,6 +75,8 @@ export class CaribouTimeline extends LitElement {
   @property({ reflect: true }) tag = ''
   // The list's id, for `kind="list"`. Set once, like `tag`.
   @property({ reflect: true }) list = ''
+  // The Bluesky feed's AT URI, for `kind="feed"` (#194). Set once, like `tag`.
+  @property({ reflect: true }) feed = ''
   // The first page, fetched by the page's `pageData` on the server. The
   // server renders straight from it; the client seeds its store with it, so
   // the first client render equals the server render and no fetch runs.
@@ -146,7 +148,8 @@ export class CaribouTimeline extends LitElement {
     const keep = KEPT.has(this.kind) && isFirstPage()
     // One kept store per tag; `#AI` and `#ai` are one tag.
     const keepKey = this.kind === 'hashtag' ? `hashtag:${normalizeTagName(this.tag)}`
-      : this.kind === 'list' ? `list:${this.list}` : this.kind
+      : this.kind === 'list' ? `list:${this.list}`
+      : this.kind === 'feed' ? `feed:${this.feed}` : this.kind
     const kept = keep ? stores.get(keepKey) : undefined
     if (kept) {
       this.store = kept
@@ -165,7 +168,8 @@ export class CaribouTimeline extends LitElement {
       return
     }
     const storeKind = this.kind === 'hashtag' ? { type: 'hashtag' as const, tag: this.tag }
-      : this.kind === 'list' ? { type: 'list' as const, id: this.list } : this.kind
+      : this.kind === 'list' ? { type: 'list' as const, id: this.list }
+      : this.kind === 'feed' ? { type: 'feed' as const, uri: this.feed } : this.kind
     this.store = createTimelineStore(storeKind, {
       clientSource: () => activeClient.value,
       ...(this.initial ? { initial: this.initial } : {}),
@@ -212,7 +216,8 @@ export class CaribouTimeline extends LitElement {
   protected override updated() {
     // The timeline has something to show: posts, an error, or the empty
     // notice. The loading screen of a forward from `/` to it goes (issue 142).
-    if (this.store && !(this.loading && this.statuses.length === 0)) settleSplash(`/${this.kind}`)
+    // A feed is a tab of Home.
+    if (this.store && !(this.loading && this.statuses.length === 0)) settleSplash(this.kind === 'feed' ? '/home' : `/${this.kind}`)
     // The "Older posts" anchor is the no-JS pagination link. With JS and a
     // signed-in client it is also the infinite-scroll sentinel: when it
     // scrolls into view the next page loads in place. Without a client it
@@ -321,7 +326,8 @@ export class CaribouTimeline extends LitElement {
     if (!last && !hasMore) {
       const empty = this.kind === 'bookmarks' ? 'No bookmarks yet.'
         : this.kind === 'hashtag' ? `No posts with #${this.tag} yet.`
-        : this.kind === 'list' ? 'No posts in this list yet.' : 'No posts yet.'
+        : this.kind === 'list' ? 'No posts in this list yet.'
+        : this.kind === 'feed' ? 'No posts in this feed yet.' : 'No posts yet.'
       return html`<div class="notice">${empty}</div>`
     }
     // Keyed by status id, and each card gets the status object itself. A

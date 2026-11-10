@@ -16,8 +16,9 @@ function isXrpcErrorLike(e: unknown): e is XrpcErrorLike {
 }
 
 // The AppView answers a missing post, profile or thread with 400 and an
-// error name or message, not 404.
-const NOT_FOUND_ERRORS = new Set(['NotFound', 'ProfileNotFound', 'AccountTakedown', 'AccountDeactivated'])
+// error name or message, not 404. `UnknownFeed`: a feed generator that is
+// gone (`getFeed`, #194).
+const NOT_FOUND_ERRORS = new Set(['NotFound', 'ProfileNotFound', 'AccountTakedown', 'AccountDeactivated', 'UnknownFeed'])
 
 function retryAfterSeconds(headers: Record<string, string> | undefined): number | undefined {
   const reset = headers?.['ratelimit-reset']
