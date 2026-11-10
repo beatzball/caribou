@@ -56,9 +56,8 @@ export type BlueskyAgent = Pick<Agent,
   app: {
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'getBookmarks'>
-      feed: Pick<Agent['app']['bsky']['feed'], 'getListFeed'>
       graph: Pick<Agent['app']['bsky']['graph'], 'getMutes' | 'getBlocks'>
-      feed?: Pick<Agent['app']['bsky']['feed'], 'getFeed' | 'getFeedGenerators'>
+      feed?: Pick<Agent['app']['bsky']['feed'], 'getFeed' | 'getFeedGenerators' | 'getListFeed'>
     }
   }
 } & BlueskyActionsAgent
@@ -348,7 +347,9 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   async function timeline(params: { sinceId?: string; cursor?: string; limit?: number }, list?: string): Promise<TimelinePage> {
     const fetchPage = (cursor: string | undefined, limit: number | undefined) => {
       const q = { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }
-      return answer(() => (list ? agent.app.bsky.feed.getListFeed({ list, ...q }) : agent.getTimeline(q)))
+      return answer(() => (list
+        ? need(agent.app.bsky.feed, 'app.bsky.feed').getListFeed({ list, ...q })
+        : agent.getTimeline(q)))
     }
     const key = list ? `list:${list}` : 'home'
     if (params.sinceId) {
