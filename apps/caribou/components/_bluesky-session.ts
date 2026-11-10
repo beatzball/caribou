@@ -50,6 +50,10 @@ function publishReader(userKey: string, r: { prefs: Restored['prefs']; labelDefs
   blueskyGoneLabelers.value = { userKey, dids: r.gone ?? [] }
 }
 
+// Accounts whose next restore must reload once: a removal answered while
+// that account was not the active reader.
+const reloadAfterRestore = new Set<string>()
+
 /** How a removal ended. `stale`: the account changed; nothing was shown. */
 export type RemoveOutcome = 'removed' | 'back' | 'absent' | 'stale'
 
@@ -68,9 +72,12 @@ export function removeActiveGoneLabeler(did: string): Promise<RemoveOutcome> {
   if (running) return running
   const p = a.restored.removeGoneLabeler(did).then((r): RemoveOutcome => {
     if (active !== a || activeUserKey.peek() !== a.userKey) {
-      // Switched away and back: the new reader may have loaded before this
-      // write landed. Load it again (app README, "A gone labeler").
+      // Its account is not the active reader now. Its next reader may have
+      // loaded before this write landed: reload it once, now if it is
+      // restored, else when its restore finishes (app README, "A gone
+      // labeler").
       if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
+      else reloadAfterRestore.add(a.userKey)
       return 'stale'
     }
     a.checkedAt = Date.now()
@@ -173,6 +180,7 @@ export const blueskyDriver: BlueskyDriver = {
       if (activeUserKey.peek() === session.userKey) {
         active = { userKey: session.userKey, restored, reloading: null, rechecking: null, checkedAt: Date.now() }
         publishReader(session.userKey, restored)
+        if (reloadAfterRestore.delete(session.userKey)) void reloadActiveModeration()
       }
       return afterReload(restored.client, session.userKey)
     } catch (err) {
@@ -198,6 +206,7 @@ export function loadsAccountOn(pathname: string): boolean {
 /** Sets the driver. The app entry calls it once, before any client is made. */
 export function installBlueskyDriver(): void {
   setBlueskyDriver(blueskyDriver)
+  reloadAfterRestore.clear()
   // The reader belongs to one account.
   activeUserKey.subscribe((key) => {
     if (blueskyReader.peek() && blueskyReader.peek()!.userKey !== key) setBlueskyReader(null)

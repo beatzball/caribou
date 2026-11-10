@@ -645,18 +645,22 @@ first (`confirmDialog`, "Remove labeler?"). Only a yes sends the write,
 and one click sends it once. While it runs the button is busy.
 
 - **One account.** The busy and failed state belong to the account that
-  started the removal. An account switch clears them, and an answer for
-  the earlier account changes nothing on screen.
+  started the removal, by an operation token. Every owner change (A to B,
+  and B back to A) makes the earlier tokens stale, so an earlier answer or
+  error changes nothing on screen.
 - **Answers.** On `removed`, `absent` or `back` the glue sets the reader
   again, and the notice goes when the labeler is no longer gone. A live
   region that is always there says "Labeler removed." (`removed`,
-  `absent`) or "The labeler is back. Nothing was removed." (`back`).
-  Focus moves to the next Remove button, or to `main`. On an error the
+  `absent`) or "The labeler is back. Nothing was removed." (`back`). It
+  is cleared when a removal starts, so a second removal is announced too.
+  Focus moves to the next Remove button, or to `main`. `main` gets
+  `tabindex="-1"` for that only when it has none, and loses it on blur. On an error the
   notice stays and says "Could not remove the labeler. Try again." (plain
   text in the notice's status, no nested alert).
-- **Switch away and back.** If the reader switches away during a removal
-  and back before its answer lands, the answer is dropped, and the glue
-  loads the reader's moderation again, so the notice does not name a
+- **Switch away and back.** A removal's answer that lands while its
+  account is not the active reader is dropped. The glue then reloads that
+  account's moderation once: at once if its new reader is already
+  restored, else when its restore finishes. So the notice does not name a
   labeler that the write already took out.
 - The cover stays the whole time, until the new reader settles it. The
   server and the first client render show only the empty live region

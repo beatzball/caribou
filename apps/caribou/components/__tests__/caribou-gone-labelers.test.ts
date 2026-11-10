@@ -195,4 +195,75 @@ describe('<caribou-gone-labelers>', () => {
     await settle(el)
     expect(removeActiveGoneLabeler).toHaveBeenCalledTimes(2)
   })
+
+  it('A, then B, then A again: an earlier A answer touches nothing of the new A action', async () => {
+    const el = await mount()
+    blueskyGoneLabelers.value = { userKey: KEY, dids: [GONE] }
+    await el.updateComplete
+    confirmDialog.mockResolvedValue(true)
+    let failOld!: (e: unknown) => void
+    removeActiveGoneLabeler.mockReturnValueOnce(new Promise((_r, j) => { failOld = j }))
+    notices(el)[0]!.querySelector('caribou-button')!.click()
+    await settle(el)
+    activeUserKey.value = B as typeof activeUserKey.value
+    await settle(el)
+    activeUserKey.value = KEY as typeof activeUserKey.value
+    await settle(el)
+    // A new action on A, still pending.
+    removeActiveGoneLabeler.mockReturnValueOnce(new Promise(() => {}))
+    notices(el)[0]!.querySelector('caribou-button')!.click()
+    await settle(el)
+    expect(notices(el)[0]!.querySelector('caribou-button')!.hasAttribute('loading')).toBe(true)
+    // The old A action fails now.
+    failOld(new Error('offline'))
+    await settle(el)
+    expect(notices(el)[0]!.querySelector('.error')).toBeNull()
+    expect(notices(el)[0]!.querySelector('caribou-button')!.hasAttribute('loading')).toBe(true)
+  })
+
+  it('a second removal is announced too: the text clears when a removal starts', async () => {
+    const el = await mount()
+    blueskyGoneLabelers.value = { userKey: KEY, dids: [GONE, OTHER] }
+    await el.updateComplete
+    confirmDialog.mockResolvedValue(true)
+    removeActiveGoneLabeler.mockImplementationOnce(async () => {
+      blueskyGoneLabelers.value = { userKey: KEY, dids: [OTHER] }
+      return 'removed'
+    })
+    notices(el)[0]!.querySelector('caribou-button')!.click()
+    await settle(el)
+    expect(live(el).textContent).toBe('Labeler removed.')
+    let finish!: (v: string) => void
+    removeActiveGoneLabeler.mockReturnValueOnce(new Promise((r) => { finish = r }))
+    notices(el)[0]!.querySelector('caribou-button')!.click()
+    await settle(el)
+    expect(live(el).textContent).toBe('')
+    blueskyGoneLabelers.value = { userKey: KEY, dids: [] }
+    finish('removed')
+    await settle(el)
+    expect(live(el).textContent).toBe('Labeler removed.')
+  })
+
+  it('main loses the tabindex it got for focus when focus leaves it', async () => {
+    const main = document.createElement('main')
+    const other = document.createElement('button')
+    document.body.append(main, other)
+    const el = document.createElement('caribou-gone-labelers')
+    main.appendChild(el)
+    await el.updateComplete
+    blueskyGoneLabelers.value = { userKey: KEY, dids: [GONE] }
+    await el.updateComplete
+    confirmDialog.mockResolvedValue(true)
+    removeActiveGoneLabeler.mockImplementation(async () => {
+      blueskyGoneLabelers.value = { userKey: KEY, dids: [] }
+      return 'removed'
+    })
+    notices(el)[0]!.querySelector('caribou-button')!.click()
+    await settle(el)
+    expect(document.activeElement).toBe(main)
+    expect(main.getAttribute('tabindex')).toBe('-1')
+    other.focus()
+    expect(main.hasAttribute('tabindex')).toBe(false)
+  })
 })
+

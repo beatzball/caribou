@@ -40,6 +40,8 @@ export class CaribouGoneLabelers extends LitElement {
   @state() private busy: ReadonlySet<string> = new Set()
   @state() private failed: ReadonlySet<string> = new Set()
   @state() private announce = ''
+  // Moves on every owner change: an action is current only with its token.
+  private token = 0
   private stop?: () => void
 
   protected override firstUpdated() {
@@ -49,6 +51,7 @@ export class CaribouGoneLabelers extends LitElement {
       this.dids = gone && gone.userKey === key ? gone.dids : []
       if (key !== this.owner) {
         this.owner = key
+        this.token++
         this.busy = new Set()
         this.failed = new Set()
         this.announce = ''
@@ -64,9 +67,11 @@ export class CaribouGoneLabelers extends LitElement {
 
   private async removeLabeler(did: string) {
     if (this.busy.has(did)) return
-    const owner = this.owner
-    const mine = () => this.owner === owner && activeUserKey.peek() === owner
+    const token = this.token
+    const mine = () => this.token === token
     const index = this.dids.indexOf(did)
+    // Cleared, so the result is always a change and is announced.
+    this.announce = ''
     this.busy = new Set([...this.busy, did])
     this.failed = new Set([...this.failed].filter((d) => d !== did))
     let outcome: Awaited<ReturnType<typeof removeActiveGoneLabeler>> | null = null
@@ -98,7 +103,11 @@ export class CaribouGoneLabelers extends LitElement {
     const root = this.getRootNode() as Document | ShadowRoot
     const main = root.querySelector<HTMLElement>('main')
     if (!main) return
-    if (!main.hasAttribute('tabindex')) main.setAttribute('tabindex', '-1')
+    // Focusable only for this move: the tabindex goes when focus leaves.
+    if (!main.hasAttribute('tabindex')) {
+      main.setAttribute('tabindex', '-1')
+      main.addEventListener('blur', () => main.removeAttribute('tabindex'), { once: true })
+    }
     main.focus({ preventScroll: true })
   }
 

@@ -238,8 +238,8 @@ describe('removeGoneLabeler', () => {
   })
 })
 
-// Codex's two schedules on #248: an older moderation load must not publish
-// over a newer one (README, "Loads in order").
+// Codex's two round-1 schedules on #248: an older moderation load must not
+// publish over a newer one. Under rule Q the newer one runs after it.
 describe('loads in order', () => {
   const H = 'did:plc:secondgonelabeleraaaaaaa'
 
@@ -251,15 +251,14 @@ describe('loads in order', () => {
     hooks.afterPut = () => { held = holdNext(routes, 'app.bsky.actor.getPreferences') }
     const first = out.removeGoneLabeler(GONE)
     await vi.waitFor(() => expect(held?.arrived()).toBe(true))
-    // H's removal runs to the end.
-    const second = await out.removeGoneLabeler(H)
-    expect(second.outcome).toBe('removed')
-    expect(second.gone).toEqual([])
-    // G's old read (it still names H) lands now.
+    // H's removal is asked for; G's read (it still names H) lands now.
+    const secondP = out.removeGoneLabeler(H)
     held!.release()
     const late = await first
     expect(late.outcome).toBe('removed')
-    expect(late.gone).toEqual([])
+    const second = await secondP
+    expect(second.outcome).toBe('removed')
+    expect(second.gone).toEqual([])
     expect(out.gone).toEqual([])
     expect(out.prefs!.labelers.map((l) => l.did)).not.toContain(H)
     expect(opts.prefs).toEqual([ADULT, LABELERS([]), SAVED])
@@ -274,11 +273,12 @@ describe('loads in order', () => {
     // Another app subscribes to a live labeler; a Retry loads it.
     opts.prefs = [ADULT, LABELERS([LIVE]), SAVED]
     opts.live.add(LIVE)
-    const retry = await out.reloadModeration()
-    expect(Object.keys(retry.labelDefs!)).toContain(LIVE)
+    const retryP = out.reloadModeration()
     // The removal's old definitions answer (no LIVE) lands now.
     held!.release()
     const late = await removal
+    const retry = await retryP
+    expect(Object.keys(retry.labelDefs!)).toContain(LIVE)
     expect(Object.keys(out.labelDefs!)).toContain(LIVE)
     expect(out.prefs!.labelers.map((l) => l.did)).toContain(LIVE)
     expect(out.gone).toEqual([])
@@ -292,10 +292,113 @@ describe('loads in order', () => {
     const old = out.reloadModeration()
     await vi.waitFor(() => expect(held.arrived()).toBe(true))
     p.opts.prefs = [LABELERS([])]
-    const newer = await out.reloadModeration()
-    expect(newer.prefs!.labelers.map((l) => l.did)).not.toContain(LIVE)
+    const newerP = out.reloadModeration()
     held.release()
     await old
+    const newer = await newerP
+    expect(newer.prefs!.labelers.map((l) => l.did)).not.toContain(LIVE)
     expect(out.prefs!.labelers.map((l) => l.did)).not.toContain(LIVE)
   })
 })
+
+// Rule Q (README, "One at a time"): every load and check runs through one
+// serial queue. Codex's round-2 schedule, and Fable's round-2 notes 2 and 3.
+describe('one at a time', () => {
+  const H = 'did:plc:secondgonelabeleraaaaaaa'
+  const countOf = (calls: Calls[], method: string) => calls.filter((c) => c.method === method).length
+
+  it('a check asked for during a removal never makes a live labeler gone', async () => {
+    const { out, opts, routes, hooks } = await restore([ADULT, LABELERS([GONE, H]), SAVED])
+    expect(out.gone).toEqual([GONE, H])
+    // After G's put, another app subscribes to live L, and H comes back.
+    let held: ReturnType<typeof holdNext> | null = null
+    hooks.afterPut = () => {
+      opts.prefs = [ADULT, LABELERS([H, LIVE]), SAVED]
+      opts.live.add(LIVE)
+      opts.live.add(H)
+      held = holdNext(routes, 'app.bsky.actor.getPreferences')
+    }
+    // A definitions read that asks for an old list (no L) while the server
+    // prefs name L: an answer for prefs it did not read.
+    let stale = 0
+    const services = routes['app.bsky.labeler.getServices']!
+    routes['app.bsky.labeler.getServices'] = (url, init) => {
+      const asked = url.searchParams.getAll('dids')
+      const named = JSON.stringify(opts.prefs).includes(LIVE)
+      if (asked.length > 1 && named && !asked.includes(LIVE)) stale++
+      return services(url, init)
+    }
+    const removeG = out.removeGoneLabeler(GONE)
+    await vi.waitFor(() => expect(held?.arrived()).toBe(true))
+    // A background check, and H's removal, are asked for now.
+    const check = out.recheckLabelers()
+    const removeH = out.removeGoneLabeler(H)
+    held!.release()
+    await removeG
+    await check
+    const h = await removeH
+    expect(h.outcome).toBe('back')
+    expect(Object.keys(out.labelDefs!)).toEqual(expect.arrayContaining([H, LIVE]))
+    expect(out.gone).toEqual([])
+    // One more check: L is still not gone.
+    expect((await out.recheckLabelers()).gone).toEqual([])
+    expect(stale).toBe(0)
+  })
+
+  it('an older prefs read never calls configureLabelers last', async () => {
+    const p = pds({ prefs: [LABELERS([LIVE])], live: new Set([LIVE]) })
+    const out = await restoreClient({ restore: async () => p.session } as never, ALICE, { userKey, onExpired: () => {}, key: 'GL' })
+    const configure = vi.spyOn(out.agent, 'configureLabelers')
+    const held = holdNext(p.routes, 'app.bsky.actor.getPreferences')
+    const older = out.reloadModeration()
+    await vi.waitFor(() => expect(held.arrived()).toBe(true))
+    // Another app drops LIVE; a newer load is asked for.
+    p.opts.prefs = [LABELERS([])]
+    const newer = out.reloadModeration()
+    held.release()
+    await older
+    await newer
+    expect(configure.mock.calls.at(-1)![0]).toEqual([BSKY_LABELER_DID])
+  })
+
+  it('a Retry during a removal: the removal answers with the notice gone, and it stays gone', async () => {
+    const { out, routes } = await restore([ADULT, LABELERS([GONE]), SAVED])
+    const held = holdNext(routes, 'app.bsky.actor.putPreferences')
+    const removal = out.removeGoneLabeler(GONE)
+    await vi.waitFor(() => expect(held.arrived()).toBe(true))
+    const retry = out.reloadModeration()
+    held.release()
+    const r = await removal
+    expect(r.outcome).toBe('removed')
+    expect(r.gone).toEqual([])
+    expect((await retry).gone).toEqual([])
+  })
+
+  it('a check asked for while one waits joins it; one asked for while one runs is queued after', async () => {
+    const { out, routes, calls } = await restore([LABELERS([LIVE])], [LIVE])
+    const held = holdNext(routes, 'app.bsky.labeler.getServices')
+    const running = out.recheckLabelers()
+    await vi.waitFor(() => expect(held.arrived()).toBe(true))
+    const a = out.recheckLabelers()
+    const b = out.recheckLabelers()
+    expect(b).toBe(a)
+    held.release()
+    await Promise.all([running, a, b])
+    expect(countOf(calls, 'app.bsky.labeler.getServices')).toBe(2)
+  })
+
+  it('a removal whose labeler a load in front of it saw come back: no check, no write', async () => {
+    const { out, opts, routes, calls } = await restore([ADULT, LABELERS([GONE]), SAVED])
+    const held = holdNext(routes, 'app.bsky.actor.getPreferences')
+    const reload = out.reloadModeration()
+    await vi.waitFor(() => expect(held.arrived()).toBe(false))
+    opts.live.add(GONE)
+    const removal = out.removeGoneLabeler(GONE)
+    held.release()
+    await reload
+    const r = await removal
+    expect(r.outcome).toBe('back')
+    expect(writes(calls)).toHaveLength(0)
+  })
+})
+

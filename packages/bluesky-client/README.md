@@ -327,16 +327,22 @@ Retry does not help. Caribou does not remove it on its own.
   `removeGoneLabeler` return it.
 - **The cover stays** until the reader removes the labeler or it comes
   back. Nothing here changes the veil.
-- **Loads in order.** Every full moderation load (restore, Retry, the
-  reload after a removal) gets a sequence number. It builds prefs and
-  definitions locally, and publishes the pair only if no newer full load
-  started. A definitions check (`recheckLabelers`, and the one after a
-  `back`) publishes only if no full load started after it. So an older
-  answer never replaces a newer pair, and prefs and definitions always
-  come from the same load.
+- **One at a time (rule Q).** Each restored client runs every moderation
+  load and check through one serial queue: the restore's load, Retry
+  (`reloadModeration`), a removal (its "is it back" check, its write and
+  its reload, as one job), and every definitions check
+  (`recheckLabelers`: the 10-minute one, the foreground one). Nothing
+  overlaps, so no answer is published against prefs it did not read, and
+  no older prefs read calls `configureLabelers` last. A load or a check
+  that is asked for while one of the same kind waits in the queue (not
+  yet started) joins that one. One that is asked for while its kind runs
+  is queued after it, because the running one may have read old prefs.
 - **Removal** (`removeGoneLabeler(did)`, only after the reader confirms):
-  1. A DID not in `gone` now (Bluesky's labeler, a labeler that is not
-     gone, a DID not in the prefs): refused, no request.
+  1. A DID not in `gone` when asked (Bluesky's labeler, a labeler that is
+     not gone, a DID not in the prefs): refused, no request. When the job
+     starts, a DID no longer gone (a load in front of it saw it) is not
+     checked or written: the answer is `back` if the prefs still name it,
+     else `absent`.
   2. `getServices` for that DID once more. A view: the labeler is back.
      Nothing is written; the definitions are checked again
      (`recheckLabelers`), and the answer is `back`. A failed request
@@ -350,9 +356,9 @@ Retry does not help. Caribou does not remove it on its own.
      `putPreferences` has no swap check, so a write from another app
      between the read and the put can still be lost. The Bluesky app's
      own writes have the same window.
-  4. Then a full load (in order, as above), so `prefs`, `labelDefs` and
-     `gone` come from the server. The answer is `removed`. If a newer
-     load started meanwhile, that newer load's pair stands.
+  4. Then a full load, in the same job, so `prefs`, `labelDefs` and
+     `gone` come from the server. The answer is `removed`. A Retry asked
+     for during the removal runs after it.
 
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 

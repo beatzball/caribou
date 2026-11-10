@@ -382,11 +382,27 @@ export async function restoreClient(
   const labelerDidsOf = (p: ModerationPrefs | null) => [...new Set([BSKY_LABELER_DID, ...(p?.labelers ?? []).map((l) => l.did)])]
   const loadDefs = (dids: string[]) => agent.app.bsky.labeler.getServices({ dids, detailed: true })
     .then((r) => labelDefsFromServices(r.data.views as Parameters<typeof labelDefsFromServices>[0]), failed)
-  // Loads in order (README, "A gone labeler"). Each full load has a
-  // sequence number, builds its pair locally, and publishes it only if no
-  // newer full load started. A check publishes only if no full load
-  // started after it.
-  let loads = 0
+  // One at a time (README, "A gone labeler", rule Q): every load, check
+  // and removal is one job in this queue. A load or check asked for while
+  // one of its kind waits (not started) joins it.
+  let tail: Promise<unknown> = Promise.resolve()
+  const waiting = new Map<'load' | 'check', Promise<ModerationInputs>>()
+  function enqueue<T>(job: () => Promise<T>): Promise<T> {
+    const run = tail.then(job, job)
+    tail = run.catch(() => {})
+    return run
+  }
+  function queued(kind: 'load' | 'check', job: () => Promise<void>): Promise<ModerationInputs> {
+    const joined = waiting.get(kind)
+    if (joined) return joined
+    const run = enqueue(async () => {
+      waiting.delete(kind)
+      await job()
+      return inputs()
+    })
+    waiting.set(kind, run)
+    return run
+  }
   // Misses in a row, by labeler DID: two make it gone.
   const misses = new Map<string, number>()
   function countMisses() {
@@ -395,28 +411,23 @@ export async function restoreClient(
     for (const did of [...misses.keys()]) if (!missing.has(did)) misses.delete(did)
     for (const did of missing) misses.set(did, (misses.get(did) ?? 0) + 1)
   }
+  // Run only inside a queue job.
   async function loadModeration() {
-    const at = ++loads
-    const p = await agent.getPreferences().then((r) => r.moderationPrefs, failed)
-    if (at !== loads) return
-    const labelerDids = labelerDidsOf(p)
+    prefs = await agent.getPreferences().then((r) => r.moderationPrefs, failed)
+    const labelerDids = labelerDidsOf(prefs)
     agent.configureLabelers(labelerDids)
-    const d = await loadDefs(labelerDids)
-    if (at !== loads) return
-    prefs = p
-    labelDefs = d
+    labelDefs = await loadDefs(labelerDids)
     countMisses()
   }
   // Only a successful answer replaces the definitions: a labeler it has no
   // view for (taken down, gone) then has none, and the veil covers again.
+  // Run only inside a queue job.
   async function recheckLabelers() {
-    const at = loads
     const fresh = await loadDefs(labelerDidsOf(prefs))
-    if (!fresh || at !== loads) return
+    if (!fresh) return
     labelDefs = fresh
     countMisses()
   }
-  await loadModeration()
 
   const client = createBlueskyClient({
     userKey: opts.userKey,
@@ -439,17 +450,23 @@ export async function restoreClient(
     return { prefs, labelDefs, gone: out.gone }
   }
   const out: RestoredClient = {
-    client, agent, prefs, labelDefs, gone: goneNow(),
-    async reloadModeration() {
-      await loadModeration()
-      return inputs()
+    client, agent, prefs: null, labelDefs: null, gone: [],
+    reloadModeration: () => queued('load', loadModeration),
+    recheckLabelers: () => queued('check', recheckLabelers),
+    removeGoneLabeler(did) {
+      if (!out.gone.includes(did)) return Promise.reject(new Error(`Bluesky: ${did} is not a gone labeler`))
+      return enqueue(() => removeGone(did))
     },
-    async recheckLabelers() {
-      await recheckLabelers()
-      return inputs()
-    },
-    async removeGoneLabeler(did) {
-      if (!out.gone.includes(did)) throw new Error(`Bluesky: ${did} is not a gone labeler`)
+  }
+  await out.reloadModeration()
+  return out
+
+  // One job: the "is it back" check, the write and the reload.
+  async function removeGone(did: string): Promise<ModerationInputs & { outcome: 'removed' | 'back' | 'absent' }> {
+      // A load in front of this job saw it: no check, no write.
+      if (!goneNow().includes(did)) {
+        return { ...inputs(), outcome: prefs?.labelers.some((l) => l.did === did) ? 'back' : 'absent' }
+      }
       // A 401 ends the session (README: "401"); any failure throws.
       const ended = (err: unknown): never => {
         failed(err)
@@ -476,9 +493,7 @@ export async function restoreClient(
       }).catch(ended)
       await loadModeration()
       return { ...inputs(), outcome: found ? 'removed' : 'absent' }
-    },
   }
-  return out
 }
 
 const LABELERS_PREF = 'app.bsky.actor.defs#labelersPref'

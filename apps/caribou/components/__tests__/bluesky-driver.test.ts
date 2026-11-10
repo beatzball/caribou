@@ -255,6 +255,33 @@ describe('a gone labeler', () => {
     expect(reloadModeration).toHaveBeenCalledTimes(1)
   })
 
+  it('switch back while the restore is pending: that restore reloads once when it finishes', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    removeGoneLabeler.mockReturnValue(new Promise((r) => { finish = r }))
+    const a = removeActiveGoneLabeler(GONE)
+    activeUserKey.value = null
+    activeUserKey.value = KEY
+    // The new restore is still in flight when the answer lands.
+    const impl = restoreClient.getMockImplementation()!
+    let restored!: () => void
+    restoreClient.mockImplementationOnce((...args: unknown[]) =>
+      new Promise((r) => { restored = () => r(impl(...args)) }))
+    const restoring = blueskyDriver.restore(bsky(), hooks)
+    reloadModeration.mockResolvedValue({ prefs: null, labelDefs: {}, gone: [] })
+    finish({ prefs: null, labelDefs: {}, gone: [], outcome: 'removed' })
+    expect(await a).toBe('stale')
+    expect(reloadModeration).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(restored).toBeTypeOf('function'))
+    restored()
+    await restoring
+    expect(reloadModeration).toHaveBeenCalledTimes(1)
+    // Only once: a later restore does not reload again.
+    await blueskyDriver.restore(bsky(), hooks)
+    expect(reloadModeration).toHaveBeenCalledTimes(1)
+  })
+
   it('a failed removal throws and leaves the reader as it was', async () => {
     addUserSession(bsky())
     await blueskyDriver.restore(bsky(), hooks)
