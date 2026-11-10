@@ -127,7 +127,7 @@ export class HandlePage extends LitroPage {
     const data = this.serverData as HandlePageData | null
     // Opened by DID: show the handle form in the address bar (spec 8.4).
     if (data?.kind === 'ok' && data.account.bluesky) replaceDidRoute(window, data.handle, data.account)
-    if (rendersBluesky(window, activeClient.value)) {
+    if (rendersBluesky(activeClient.value)) {
       const tab = parseTab(new URLSearchParams(window.location.search).get('tab'))
       const key = activeUserKey.value
       if (data?.handle === 'me' && key) {

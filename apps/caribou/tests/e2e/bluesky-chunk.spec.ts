@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { installFixtureAuth, loopbackOrigin } from './_bluesky-auth.js'
 
 // The atproto libraries load only in their own lazy chunk (Bluesky spec 12.2,
 // the `bsky` group in vite.config.ts). Without that group, rolldown puts its
@@ -30,19 +31,41 @@ async function scriptsFetched(page: Page, path: string): Promise<{ url: string; 
   return Promise.all(scripts)
 }
 
-test('a Mastodon page does not request the atproto libraries', async ({ page }) => {
+test('a first visit and a Mastodon page do not request the atproto libraries', async ({ page }) => {
   const scripts = await scriptsFetched(page, '/')
   expect(scripts.length).toBeGreaterThan(0)
   expect(scripts.filter((s) => isAtproto(s.body)).map((s) => s.url)).toEqual([])
 })
 
-test('with the Bluesky flag on, the libraries arrive in the bsky chunk', async ({ page }) => {
+test('a Bluesky sign-in brings the libraries, in the bsky chunk', async ({ page, baseURL, browserName }) => {
+  // As in bluesky-signin.spec.ts: Playwright WebKit on macOS hangs storing
+  // the SDK's DPoP key in IndexedDB. CI runs WebKit on Linux.
+  test.skip(browserName === 'webkit' && process.platform === 'darwin', 'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
   // The control: proves the marker finds the libraries when they do load.
-  await page.addInitScript(() => localStorage.setItem('caribou.flag.bluesky', '1'))
-  const scripts = await scriptsFetched(page, '/')
-  const atproto = scripts.filter((s) => isAtproto(s.body)).map((s) => new URL(s.url).pathname)
+  // Nothing loads them until a Bluesky sign-in starts. The fixture
+  // authorization server keeps the sign-in off the network.
+  const origin = loopbackOrigin(baseURL)
+  await installFixtureAuth(page)
+  const scripts: Promise<{ url: string; body: string }>[] = []
+  page.on('response', (res) => {
+    if (res.request().resourceType() === 'script' || res.url().endsWith('.js')) {
+      scripts.push(res.text().then((body) => ({ url: res.url(), body }), () => ({ url: res.url(), body: '' })))
+    }
+  })
+  await page.goto(`${origin}/`)
+  // The panels are in the server HTML: wait for the router's mount swap, or
+  // the tab click lands on the mount it drops.
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  await page.getByRole('tab', { name: 'Bluesky' }).click()
+  await page.getByLabel('Bluesky handle').fill('alice.example.com')
+  await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForURL(`${origin}/home`)
+  await page.waitForLoadState('networkidle')
+  const fetched = await Promise.all(scripts)
+  // The landing and /home are two page loads, so the chunk may come twice.
+  const atproto = [...new Set(fetched.filter((s) => isAtproto(s.body)).map((s) => new URL(s.url).pathname))]
   expect(atproto).toEqual([expect.stringMatching(/\/bsky-[\w-]+\.js$/)])
   // The control for the second marker: the TID code is in the bsky chunk.
-  const commonWeb = scripts.filter((s) => s.body.includes(COMMON_WEB_MARKER)).map((s) => new URL(s.url).pathname)
+  const commonWeb = [...new Set(fetched.filter((s) => s.body.includes(COMMON_WEB_MARKER)).map((s) => new URL(s.url).pathname))]
   expect(commonWeb).toEqual([expect.stringMatching(/\/bsky-[\w-]+\.js$/)])
 })

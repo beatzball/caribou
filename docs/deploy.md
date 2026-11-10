@@ -236,7 +236,7 @@ runtime; changing one needs a restart, not a new image.
 
 | var | default | what it does |
 |---|---|---|
-| `BLUESKY_SSR` | unset (off) | `1` makes the server render Bluesky profiles and threads for signed-out readers (`apps/caribou/README.md`, "Bluesky SSR"). With it on, **every reader** gets the Bluesky page for a dotted `/@name` or a `/@did:…` route, whatever their browser's Bluesky flag says. Leave it unset until Bluesky goes live. |
+| `BLUESKY_SSR` | unset (on) | The kill switch. The server renders Bluesky profiles and threads for signed-out readers unless this is `0` (`apps/caribou/README.md`, "Bluesky SSR"). With it `0`, a dotted `/@name` or a `/@did:…` route renders as a Mastodon route on the server, and only a Bluesky account sees the Bluesky page, after the client loads. Set it to `0` only to stop Bluesky fetches in an incident. |
 | `BLUESKY_PUBLIC_APPVIEW` | `https://public.api.bsky.app` | The only host the server asks for Bluesky data. An http(s) origin. The server does not follow its redirects. |
 
 ## Repository secrets

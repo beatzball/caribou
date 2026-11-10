@@ -518,7 +518,13 @@ layout with no Latin letters uses the key's place (`event.code`).
 shortcut there and in `onKey` together. `n` belongs here too: it sends
 `caribou:compose`, which the compose dialog answers.
 
-**Bluesky is behind a flag.** `localStorage['caribou.flag.bluesky'] = '1'` turns it on for a developer.
+**Bluesky is on for everyone (#169).** The browser has no Bluesky flag. The
+landing page shows the Mastodon and Bluesky sign-in panels on the server and
+in the first client render, so the two match. Nothing loads the atproto
+libraries until a Bluesky account restores or a reader starts a Bluesky
+sign-in, so a Mastodon reader never downloads them.
+The server has a kill switch: `BLUESKY_SSR=0` stops it from rendering
+Bluesky routes (README, "Bluesky SSR"). Any other value, or none, leaves it on.
 `components/_bluesky.ts` is the only door to the atproto libraries (`loadBluesky()`, a dynamic `import()`); they build into the `bsky` chunk group in `vite.config.ts`, which a Mastodon page never requests (`packages/bluesky-client/README.md`).
 
 ### Bluesky views (#184)
@@ -537,7 +543,7 @@ Mastodon post, account or client renders as before.
 - Profile tabs are posts, replies and media (`getAuthorFeed` filters, in the
   client). The thread is `getPostThread`.
 - The profile and thread pages render on the server as today. After
-  hydration, with the flag on and a Bluesky account active, a Bluesky route
+  hydration, with a Bluesky account active, a Bluesky route
   (`/@did:…`, or `/@name` with a dot and no second `@`, spec 8.4) swaps in
   a client-rendered `<caribou-profile>` or `<caribou-thread>`. The thread's
   id is `at://<handle or did>/app.bsky.feed.post/<rkey>`. `/@me` looks the
@@ -844,13 +850,10 @@ Phase 3. The server paints a Bluesky profile and thread with no token
 (spec 8). `server/lib/bluesky-public.ts` is the one place that fetches
 them.
 
-**The server flag.** The Bluesky flag lives in the browser, so the server
-cannot read it. The server paints Bluesky routes only when the env var
-`BLUESKY_SSR=1` is set (`server/lib/bluesky-flag.ts`, read before the SDK
-loads). Without it a Bluesky route renders as it did in phase 2b, and
-nothing changes for any reader. With it, **every** reader gets the Bluesky
-page for a Bluesky route, whatever their browser flag says: the browser flag
-then only decides whether a Bluesky account can swap in its own render.
+**The kill switch.** The server paints Bluesky routes unless the env var
+`BLUESKY_SSR=0` is set (`server/lib/bluesky-flag.ts`, read before the SDK
+loads). Unset, or any other value, means on. With it off, a Bluesky route
+renders as it did in phase 2b: the client renders it for a Bluesky account.
 Deploy notes: `docs/deploy.md`, "App env vars for Bluesky".
 
 **What the server fetches.** Only `BLUESKY_PUBLIC_APPVIEW` (default

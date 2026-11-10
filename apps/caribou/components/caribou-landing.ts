@@ -2,11 +2,9 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import { activeUser, userName, type UserSession } from '@beatzball/caribou-state'
-import { blueskyEnabled } from './_bluesky.js'
 import { boxReset } from './_shared-styles.js'
 import { spaClick } from './_spa-link.js'
 import './caribou-error-banner.js'
-import './caribou-instance-picker.js'
 import './caribou-signin-panels.js'
 
 /**
@@ -55,10 +53,6 @@ export class CaribouLanding extends LitElement {
   // Then the page is the plain landing, as there is nothing to add to.
   @state() private signedOut = false
 
-  // The Bluesky flag is in the browser only, so the server and the first
-  // client render show the Mastodon form alone; the panels come after.
-  @state() private bluesky = false
-
   private _unsubscribe?: () => void
 
   override connectedCallback() {
@@ -76,7 +70,6 @@ export class CaribouLanding extends LitElement {
   }
 
   protected override firstUpdated() {
-    this.bluesky = blueskyEnabled(window)
     this.follow(activeUser.value)
   }
 
@@ -90,21 +83,19 @@ export class CaribouLanding extends LitElement {
       return html`
         <main>
           <h1><img src="/logo.png" alt="" width="48" height="48" />Caribou</h1>
-          <p>
-            ${this.bluesky ? 'A Mastodon and Bluesky client. Pick a network to sign in.' : 'A Mastodon client. Enter your instance to sign in.'}
-          </p>
+          <p>A Mastodon and Bluesky client. Pick a network to sign in.</p>
           <caribou-error-banner></caribou-error-banner>
-          ${this.bluesky ? html`<caribou-signin-panels></caribou-signin-panels>` : html`<caribou-instance-picker></caribou-instance-picker>`}
+          <caribou-signin-panels></caribou-signin-panels>
         </main>
       `
     }
     return html`
       <main>
         <h1><img src="/logo.png" alt="" width="48" height="48" />Add an account</h1>
-        <p>${this.bluesky ? 'Sign in to another account.' : 'Sign in to another Mastodon account. Enter its instance.'}</p>
+        <p>Sign in to another account.</p>
         <p class="who" title=${this.who || nothing}>${this.who || nothing}</p>
         <caribou-error-banner></caribou-error-banner>
-        ${this.bluesky ? html`<caribou-signin-panels add></caribou-signin-panels>` : html`<caribou-instance-picker add></caribou-instance-picker>`}
+        <caribou-signin-panels add></caribou-signin-panels>
         <p class="cancel"><a href="/home" @click=${spaClick}>Cancel</a></p>
       </main>
     `

@@ -4,7 +4,7 @@ import {
   users, activeUserKey, addUserSession, blueskyUserKey, setBlueskyDriver,
   type BlueskySession, type MastodonSession,
 } from '@beatzball/caribou-state'
-import { blueskyOAuthConfig, BLUESKY_FLAG_KEY } from '../_bluesky.js'
+import { blueskyOAuthConfig } from '../_bluesky.js'
 import * as session from '../_bluesky-session.js'
 import { resetLanding } from '../_switch-account.js'
 import '../caribou-signin-panels.js'
@@ -131,21 +131,6 @@ describe('caribou-signin-panels: the ARIA tabs pattern', () => {
     await el.updateComplete
     expect(parts(el).panels[1]!.hidden).toBe(false)
     expect(parts(el).panels[1]!.querySelector('caribou-bluesky-signin')).toBeTruthy()
-  })
-})
-
-describe('caribou-landing and the flag', () => {
-  it('flag off: the Mastodon form alone, as before', async () => {
-    const el = await mount<HTMLElement & { updateComplete: Promise<unknown> }>('caribou-landing')
-    expect(el.shadowRoot!.querySelector('caribou-signin-panels')).toBeNull()
-    expect(el.shadowRoot!.querySelector('caribou-instance-picker')).toBeTruthy()
-    expect(el.shadowRoot!.textContent).toContain('A Mastodon client.')
-  })
-
-  it('flag on: the two panels', async () => {
-    localStorage.setItem(BLUESKY_FLAG_KEY, '1')
-    const el = await mount<HTMLElement & { updateComplete: Promise<unknown> }>('caribou-landing')
-    expect(el.shadowRoot!.querySelector('caribou-signin-panels')).toBeTruthy()
   })
 })
 

@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type * as H3 from 'h3'
 import type * as HandlePage from '../@[handle].js'
 
-// README, "Bluesky SSR": without `BLUESKY_SSR` a Bluesky route renders as it
-// did before phase 3, and the SDK module never loads. A file of its own: the
-// mocked `bluesky-public.js` records its load in its factory, which runs once
+// README, "Bluesky SSR": with the kill switch `BLUESKY_SSR=0` a Bluesky
+// route renders as it did before phase 3, and the SDK module never loads. A
+// file of its own: the mocked `bluesky-public.js` records its load in its factory, which runs once
 // per module graph, so no earlier test may have loaded the page.
 
 const blueskyPublicLoaded = vi.hoisted(() => vi.fn())
@@ -22,9 +22,9 @@ vi.mock('h3', async () => {
   }
 })
 
-describe('/@[handle] with BLUESKY_SSR unset', () => {
+describe('/@[handle] with BLUESKY_SSR=0', () => {
   it('a dotted route takes the Mastodon path as before, and the SDK module never loads', async () => {
-    delete process.env.BLUESKY_SSR
+    process.env.BLUESKY_SSR = '0'
     vi.resetModules()
     const ri = await import('../../server/lib/resolve-instance.js')
     const mp = await import('../../server/lib/mastodon-public.js')
@@ -34,12 +34,13 @@ describe('/@[handle] with BLUESKY_SSR unset', () => {
     const event = { context: { params: { handle: 'alice.example.com' } } } as unknown as Parameters<typeof HandlePage.pageData.fetcher>[0]
     const { pageData } = await import('../@[handle].js')
     const result = await pageData.fetcher(event)
-    // No request of any kind: with the flag off, nothing asks the AppView.
+    // No request of any kind: with the switch off, nothing asks the AppView.
     expect(fetchSpy).not.toHaveBeenCalled()
     fetchSpy.mockRestore()
     expect(result).toMatchObject({ kind: 'error', handle: 'alice.example.com' })
     expect(vi.mocked(mp.fetchAccountByHandle)).toHaveBeenCalledWith('alice.example.com', { instance: 'mastodon.social' })
     // The flag is read before the import.
     expect(blueskyPublicLoaded).not.toHaveBeenCalled()
+    delete process.env.BLUESKY_SSR
   })
 })

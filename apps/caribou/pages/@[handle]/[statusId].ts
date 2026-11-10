@@ -122,7 +122,7 @@ export class HandleStatusPage extends LitroPage {
     const actor = blueskyActor(data?.handle || routeSegment(window.location.pathname))
     // A deferred page's data has no id: read the address.
     const statusId = data?.statusId || routePostId(window.location.pathname)
-    if (actor && statusId && rendersBluesky(window, activeClient.value)) {
+    if (actor && statusId && rendersBluesky(activeClient.value)) {
       this.blueskyUri = blueskyPostUri(actor, statusId)
       return
     }

@@ -16,6 +16,21 @@ test('landing page renders picker', async ({ page }) => {
   await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible()
 })
 
+// Bluesky is on for everyone (#169): a first visit, with nothing in
+// storage, gets the Bluesky sign-in. The server HTML already has the panels,
+// so the first client render matches it.
+test('a first-time visitor sees the Bluesky sign-in', async ({ page, request }) => {
+  const html = await (await request.get('/')).text()
+  expect(html).toContain('<caribou-signin-panels')
+  expect(html).not.toContain('A Mastodon client. Enter your instance')
+  await gotoSettled(page, '/')
+  expect(await page.evaluate(() => localStorage.length)).toBe(0)
+  await expect(page.getByText('A Mastodon and Bluesky client. Pick a network to sign in.')).toBeVisible()
+  await page.getByRole('tab', { name: 'Bluesky' }).click()
+  await expect(page.getByLabel('Bluesky handle')).toBeVisible()
+  await expect(page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' })).toBeVisible()
+})
+
 test('landing page shows error banner on ?error=denied and clears the param', async ({ page }) => {
   // Both mounts show the banner until the router's swap, so wait for one.
   await gotoSettled(page, '/?error=denied')

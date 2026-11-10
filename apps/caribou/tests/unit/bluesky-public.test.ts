@@ -44,9 +44,11 @@ function expectNone(v: unknown, secrets: readonly string[]) {
 }
 
 describe('config and syntax', () => {
-  it('reads the server flag and the AppView origin', () => {
-    expect(blueskySsrEnabled({})).toBe(false)
+  it('reads the kill switch and the AppView origin', () => {
+    // On by default (#169); only `0` turns it off.
+    expect(blueskySsrEnabled({})).toBe(true)
     expect(blueskySsrEnabled({ BLUESKY_SSR: '1' })).toBe(true)
+    expect(blueskySsrEnabled({ BLUESKY_SSR: '0' })).toBe(false)
     expect(publicAppView({})).toBe('https://public.api.bsky.app')
     expect(publicAppView({ BLUESKY_PUBLIC_APPVIEW: 'http://127.0.0.1:9/x/' })).toBe('http://127.0.0.1:9')
     expect(publicAppView({ BLUESKY_PUBLIC_APPVIEW: 'file:///etc/passwd' })).toBe('https://public.api.bsky.app')

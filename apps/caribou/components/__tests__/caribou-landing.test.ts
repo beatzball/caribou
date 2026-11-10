@@ -3,7 +3,7 @@ import { toUserKey } from '@beatzball/caribou-auth'
 import { activeUserKey, users, type UserSession } from '@beatzball/caribou-state'
 import '../caribou-landing.js'
 import { signedInAs, type CaribouLanding } from '../caribou-landing.js'
-import type { CaribouInstancePicker } from '../caribou-instance-picker.js'
+import type { CaribouSigninPanels } from '../caribou-signin-panels.js'
 
 async function mount(add = false): Promise<CaribouLanding> {
   const el = document.createElement('caribou-landing') as CaribouLanding
@@ -35,13 +35,32 @@ describe('caribou-landing', () => {
     const el = await mount()
     const main = el.shadowRoot!.querySelector('main')!
     expect(main.querySelector('h1')?.textContent).toBe('Caribou')
-    expect(main.querySelector('p')?.textContent?.trim()).toBe('A Mastodon client. Enter your instance to sign in.')
+    expect(main.querySelector('p')?.textContent?.trim()).toBe('A Mastodon and Bluesky client. Pick a network to sign in.')
   })
 
-  it('renders the error banner above the instance picker', async () => {
+  it('renders the error banner above the sign-in panels', async () => {
     const el = await mount()
     const tags = [...el.shadowRoot!.querySelectorAll('main > *')].map((c) => c.localName)
-    expect(tags).toEqual(['h1', 'p', 'caribou-error-banner', 'caribou-instance-picker'])
+    expect(tags).toEqual(['h1', 'p', 'caribou-error-banner', 'caribou-signin-panels'])
+  })
+
+  // Bluesky is on for everyone (#169): no flag is read in the browser, so
+  // the server render and the first client render both carry the panels.
+  it('the panels are in the first render, with empty storage', async () => {
+    localStorage.clear()
+    const el = document.createElement('caribou-landing') as CaribouLanding
+    let first: string[] = []
+    const hook = el as unknown as { firstUpdated(...args: unknown[]): void }
+    const origFirstUpdated = hook.firstUpdated
+    hook.firstUpdated = function (this: CaribouLanding, ...args: unknown[]) {
+      first = [...this.shadowRoot!.querySelectorAll('main > *')].map((c) => c.localName)
+      return origFirstUpdated.apply(this, args)
+    }
+    document.body.appendChild(el)
+    await el.updateComplete
+    await el.updateComplete
+    expect(first).toEqual(['h1', 'p', 'caribou-error-banner', 'caribou-signin-panels'])
+    expect([...el.shadowRoot!.querySelectorAll('main > *')].map((c) => c.localName)).toEqual(first)
   })
 
   it('without add, a signed-in reader still gets the plain landing', async () => {
@@ -49,18 +68,18 @@ describe('caribou-landing', () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('h1')?.textContent).toBe('Caribou')
     expect(el.shadowRoot!.querySelector('.who')).toBeNull()
-    expect(el.shadowRoot!.querySelector<CaribouInstancePicker>('caribou-instance-picker')!.add).toBe(false)
+    expect(el.shadowRoot!.querySelector<CaribouSigninPanels>('caribou-signin-panels')!.add).toBe(false)
   })
 
   describe('add', () => {
-    it('renders the add form: heading, who line, banner, picker in add mode, Cancel link', async () => {
+    it('renders the add form: heading, who line, banner, panels in add mode, Cancel link', async () => {
       seed(session('bob', 'two.example'))
       const el = await mount(true)
       const main = el.shadowRoot!.querySelector('main')!
       expect(main.querySelector('h1')?.textContent).toBe('Add an account')
       const tags = [...main.children].map((c) => c.localName + (c.className ? `.${c.className}` : ''))
-      expect(tags).toEqual(['h1', 'p', 'p.who', 'caribou-error-banner', 'caribou-instance-picker', 'p.cancel'])
-      expect((main.querySelector('caribou-instance-picker') as CaribouInstancePicker).add).toBe(true)
+      expect(tags).toEqual(['h1', 'p', 'p.who', 'caribou-error-banner', 'caribou-signin-panels', 'p.cancel'])
+      expect((main.querySelector('caribou-signin-panels') as CaribouSigninPanels).add).toBe(true)
       const cancel = main.querySelector<HTMLAnchorElement>('.cancel a')!
       expect(cancel.getAttribute('href')).toBe('/home')
       expect(cancel.textContent).toBe('Cancel')
@@ -107,7 +126,7 @@ describe('caribou-landing', () => {
       expect(el.shadowRoot!.querySelector('h1')!.textContent).toBe('Caribou')
       expect(el.shadowRoot!.querySelector('.who')).toBeNull()
       expect(el.shadowRoot!.querySelector('.cancel')).toBeNull()
-      expect(el.shadowRoot!.querySelector<CaribouInstancePicker>('caribou-instance-picker')!.add).toBe(false)
+      expect(el.shadowRoot!.querySelector<CaribouSigninPanels>('caribou-signin-panels')!.add).toBe(false)
     })
 
     it('the last account signs out elsewhere: the add form becomes the plain landing', async () => {
