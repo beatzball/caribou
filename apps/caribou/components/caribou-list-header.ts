@@ -9,10 +9,26 @@ import {
   setListMember,
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
-import { profilePath } from './_profile-path.js'
+import { accountPath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import { editListFlow, toastRemoved } from './_list-flows.js'
+import { uiOf } from './_bluesky-moderation.js'
 import './caribou-button.js'
+
+/**
+ * What a member row may show (app README, "Bluesky lists"). A Mastodon
+ * account shows all. A Bluesky one shows its avatar only when `avatar`
+ * does not blur, and its name only when `profileList` neither filters nor
+ * blurs; with no decision, neither (fail closed).
+ */
+export function memberRowView(a: Account): { avatar: boolean; name: boolean } {
+  if (!a.bluesky) return { avatar: true, name: true }
+  const mod = a.bluesky.moderation
+  const list = uiOf(mod, 'profileList')
+  const avatar = uiOf(mod, 'avatar')
+  const name = !!list && !list.filter && !list.blur
+  return { avatar: name && !!avatar && !avatar.blur, name }
+}
 
 type Members = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; items: Account[] }
 
@@ -185,17 +201,22 @@ export class CaribouListHeader extends LitElement {
       body = html`<div role="alert">${m.message}</div>
         <caribou-button variant="secondary" @click=${this.onRetry}>Retry</caribou-button>`
     } else if (m.items.length === 0) {
-      body = html`<p class="notice">No one is in this list yet. Open a profile of someone you follow and choose Add to lists.</p>`
+      body = activeClient.peek()?.capabilities.network === 'bluesky'
+        ? html`<p class="notice">No one is in this list yet. Open a profile and choose Add to lists.</p>`
+        : html`<p class="notice">No one is in this list yet. Open a profile of someone you follow and choose Add to lists.</p>`
     } else {
-      body = html`<ul>${repeat(m.items, (a) => a.id, (a) => html`<li data-account-id=${a.id}>
-        ${a.avatarStatic || a.avatar
+      body = html`<ul>${repeat(m.items, (a) => a.id, (a) => {
+        const show = memberRowView(a)
+        return html`<li data-account-id=${a.id}>
+        ${show.avatar && (a.avatarStatic || a.avatar)
           ? html`<img src=${a.avatarStatic || a.avatar} alt="" width="40" height="40" loading="lazy" decoding="async" />`
           : html`<span class="no-avatar" aria-hidden="true"></span>`}
-        <a class="who" href=${profilePath(a.acct, this.server, a.url)} @click=${spaClick}>
-          <strong>${a.displayName || a.username}</strong><span>@${a.acct}</span></a>
+        <a class="who" href=${accountPath(a, this.server)} @click=${spaClick}>
+          <strong>${show.name ? a.displayName || a.username : 'Content warning'}</strong><span>@${a.acct}</span></a>
         <caribou-button class="remove" variant="secondary"
           @click=${(e: Event) => { void this.onRemove(a, e) }}>Remove<span class="vh"> @${a.acct}</span></caribou-button>
-      </li>`)}</ul>`
+      </li>`
+      })}</ul>`
     }
     return html`<section id="members" aria-labelledby="members-h"><h2 id="members-h">Members</h2>${body}</section>`
   }

@@ -11,6 +11,7 @@ import { spaClick } from './_spa-link.js'
 import { listPath } from './_list-path.js'
 import { confirmDialog } from './caribou-confirm-dialog.js'
 import { newListFlow, editListFlow } from './_list-flows.js'
+import { BLUESKY_LIST_NOTE } from './caribou-list-dialog.js'
 import './caribou-button.js'
 
 
@@ -138,7 +139,9 @@ export class CaribouLists extends LitElement {
     const lists = this.lists
     if (!lists) return html`<p class="notice">Loading your lists…</p>`
     if (lists.length === 0) {
-      return html`<p class="notice">No lists yet. A list is a timeline of a few accounts you follow.</p>`
+      return activeClient.peek()?.capabilities.network === 'bluesky'
+        ? html`<p class="notice">No lists yet. A list is a timeline of a few accounts. ${BLUESKY_LIST_NOTE}</p>`
+        : html`<p class="notice">No lists yet. A list is a timeline of a few accounts you follow.</p>`
     }
     return html`<ul>
       ${repeat(lists, (l) => l.id, (l) => html`<li data-list-id=${l.id}>

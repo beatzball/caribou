@@ -12,4 +12,4 @@ export { isNoUnauthenticated, isProvenVisible } from './no-unauthenticated.js'
 // The capabilities only: the app's session driver needs them at once,
 // before the lazy chunk loads.
 export { BLUESKY_CAPABILITIES } from './client.js'
-export { BlueskyBlobNotFound, BlueskyDeleteUnknown } from './errors.js'
+export { BlueskyBlobNotFound, BlueskyDeleteUnknown, BlueskyWriteUnknown } from './errors.js'

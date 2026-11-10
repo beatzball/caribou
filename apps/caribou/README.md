@@ -556,7 +556,8 @@ Mastodon post, account or client renders as before.
   account up by its DID. Server rendering is in "Bluesky SSR" below.
 
 **Nav.** With a Bluesky account active the rail hides Local and Public (by
-`capabilities`), and Search and Lists until phase 5 (by network).
+`capabilities`), and Search until phase 5 (by network). Lists show for
+both networks (#195).
 
 **A list that is empty but not ended.** A list ends only on a null cursor
 (`packages/state` README). A page can be empty with more behind it (five
@@ -633,6 +634,36 @@ prefs and definitions again (one load at a time), sets the reader, and the
 active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
+
+### Bluesky lists (#195)
+
+`/lists`, `/lists/<id>`, the list header and the profile's "Add to lists"
+are the Mastodon screens, run with the Bluesky client (bluesky-client
+README, "Lists"; state README, "Lists"). Client only: the lists are the
+reader's, read with their session. A Mastodon account sees no change.
+
+- **The public note.** With a Bluesky account active, the New list and
+  Edit list dialogs say: "Bluesky lists are public. Anyone can see the
+  list's name and who is in it." The text is tied to the title field
+  (`aria-describedby`). `/lists` says it too when there are no lists yet.
+- **Fields.** Bluesky has no replies policy and no "Hide these posts from
+  Home": the dialog shows the title only. The title takes at most 64
+  UTF-8 bytes (the lexicon); a longer one shows "This title is too long
+  for Bluesky." and nothing is sent.
+- **Members need not be followed.** The list picker does not say "Only
+  accounts you follow can be added to a list." for a Bluesky account, and
+  the empty Members panel says "Open a profile and choose Add to lists."
+- **Member rows are moderated.** A Bluesky member row shows the avatar
+  only when its `avatar` context does not blur, and the display name only
+  when its `profileList` context neither filters nor blurs; otherwise the
+  row shows the handle and "Content warning". A member with no decision
+  (one the AppView did not return) is covered the same way (fail closed).
+  The handle and Remove always show, so any member can be removed.
+- **The list feed** is `<caribou-timeline kind="list">`: the cards apply
+  moderation and the reader veil as on Home.
+- **Writes** follow the state rules: shown at once, rolled back with a
+  toast, never sent for another account. An unknown outcome reads the
+  lists again (state README).
 
 ### Bluesky compose (#189)
 

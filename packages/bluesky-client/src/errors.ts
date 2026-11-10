@@ -79,3 +79,15 @@ export class BlueskyDeleteUnknown extends CaribouError {
     this.name = 'BlueskyDeleteUnknown'
   }
 }
+
+/**
+ * A list write whose outcome is not known (README, "Lists"): the write got
+ * no clear answer, and the read that decides it failed too. The change may
+ * be saved or not; a caller must not say either.
+ */
+export class BlueskyWriteUnknown extends CaribouError {
+  constructor(message: string) {
+    super('unknown', message)
+    this.name = 'BlueskyWriteUnknown'
+  }
+}

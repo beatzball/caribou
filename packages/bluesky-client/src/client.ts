@@ -8,6 +8,7 @@ import {
   type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
+import { createLists } from './lists.js'
 import { answerCoverage, commonLabelers } from './content-labelers.js'
 import { BlueskyBlobNotFound, BlueskyDeleteUnknown, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
@@ -45,13 +46,15 @@ export type BlueskyAgent = Pick<Agent,
   & Partial<Pick<Agent, 'labelers' | 'appLabelers'>> & {
   com: {
     atproto: {
-      repo: Pick<Agent['com']['atproto']['repo'], 'createRecord' | 'getRecord' | 'uploadBlob' | 'deleteRecord'>
+      repo: Pick<Agent['com']['atproto']['repo'],
+        'createRecord' | 'getRecord' | 'uploadBlob' | 'deleteRecord' | 'listRecords' | 'putRecord' | 'applyWrites'>
       sync: Pick<Agent['com']['atproto']['sync'], 'getBlob'>
     }
   }
   app: {
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'getBookmarks'>
+      feed: Pick<Agent['app']['bsky']['feed'], 'getListFeed'>
       graph: Pick<Agent['app']['bsky']['graph'], 'getMutes' | 'getBlocks'>
     }
   }
@@ -314,14 +317,18 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return Object.assign(entries(out, common(covered)), { nextCursor: out.length > 0 ? cursor ?? null : null })
   }
 
-  async function timeline(params: { sinceId?: string; cursor?: string; limit?: number }): Promise<TimelinePage> {
-    const fetchPage = (cursor: string | undefined, limit: number | undefined) =>
-      answer(() => agent.getTimeline({ ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }))
+  // Home and a list feed: the same paging and catch-up.
+  async function timeline(params: { sinceId?: string; cursor?: string; limit?: number }, list?: string): Promise<TimelinePage> {
+    const fetchPage = (cursor: string | undefined, limit: number | undefined) => {
+      const q = { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) }
+      return answer(() => (list ? agent.app.bsky.feed.getListFeed({ list, ...q }) : agent.getTimeline(q)))
+    }
+    const key = list ? `list:${list}` : 'home'
     if (params.sinceId) {
       const sinceId = params.sinceId
-      return run(`home:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId))
+      return run(`${key}:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId))
     }
-    return run(`home:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
+    return run(`${key}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
       const { data, coverage } = await fetchPage(params.cursor, params.limit)
       return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
     })
@@ -484,6 +491,12 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     }
   }
 
+  // The reader's curate lists (#195; README, "Lists").
+  const { listUri, ...listMethods } = createLists({
+    agent, run, write, answer, nextRkey: opts.compose?.nextRkey,
+    account: (view, coverage) => account(view, coverage),
+  })
+
   const author = { posts: 'posts_no_replies', replies: 'posts_with_replies', media: 'posts_with_media' } as const
 
   return {
@@ -497,7 +510,8 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (kind === 'local' || kind === 'public') {
         throw new CaribouError('not_found', `Bluesky has no ${kind} timeline`)
       }
-      return notYet(`the ${kind.type} timeline`, kind.type === 'hashtag' ? '#193' : '#195')()
+      if (kind.type === 'list') return timeline(params, listUri(kind.id))
+      return notYet('the hashtag timeline', '#193')()
     },
 
     async fetchStatus(statusId) {
@@ -586,15 +600,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     followTag: notYet('hashtags', '#193'),
     unfollowTag: notYet('hashtags', '#193'),
 
-    fetchLists: notYet('lists', '#195'),
-    fetchList: notYet('lists', '#195'),
-    createList: notYet('lists', '#195'),
-    updateList: notYet('lists', '#195'),
-    deleteList: notYet('lists', '#195'),
-    fetchListAccounts: notYet('lists', '#195'),
-    addListAccounts: notYet('lists', '#195'),
-    removeListAccounts: notYet('lists', '#195'),
-    fetchAccountLists: notYet('lists', '#195'),
+    ...listMethods,
 
     // Compose. Bluesky has its own methods below; the Mastodon-shaped ones
     // are not used for Bluesky (README, "Compose").

@@ -462,3 +462,68 @@ it('a read that wakes as a new write starts waits for that one too (fable 1)', a
   await r
   expect(userLists()?.map((l) => l.id)).toEqual([])
 })
+
+// Bluesky (#195): a write whose outcome is unknown is not shown as done or
+// as not done. The change goes back, the toast says so, and the lists are
+// read again (README, "Lists").
+describe('a write whose outcome is unknown', () => {
+  const unknown = () => Promise.reject(Object.assign(new CaribouError('unknown', 'in doubt'), { name: 'BlueskyWriteUnknown' }))
+
+  it('create: says so and reads the lists again, which bring the list', async () => {
+    const fetchLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends')])
+      .mockResolvedValueOnce([list('1', 'Friends'), list('9', 'Cats')])
+    const client = fakeClient({ createList: vi.fn(unknown), fetchLists })
+    await loadLists({ clientSource: () => client })
+    expect(await createList({ title: 'Cats' }, { clientSource: () => client })).toBeNull()
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether the list "Cats" was created. Reload to check.'])
+    await vi.waitFor(() => expect(userLists()?.map((l) => l.title)).toEqual(['Friends', 'Cats']))
+  })
+
+  it('rename: the old title comes back, then the read brings what the server has', async () => {
+    const fetchLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends')])
+      .mockResolvedValueOnce([list('1', 'Close friends')])
+    const client = fakeClient({ updateList: vi.fn(unknown), fetchLists })
+    await loadLists({ clientSource: () => client })
+    expect(await updateList('1', { title: 'Close friends' }, { clientSource: () => client })).toBe(false)
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether the list "Close friends" was saved. Reload to check.'])
+    await vi.waitFor(() => expect(listById('1')?.title).toBe('Close friends'))
+  })
+
+  it('delete: says so and reads the lists again', async () => {
+    const fetchLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends'), list('2', 'News')])
+      .mockResolvedValueOnce([list('2', 'News')])
+    const client = fakeClient({ deleteList: vi.fn(unknown), fetchLists })
+    await loadLists({ clientSource: () => client })
+    expect(await deleteList('1', { clientSource: () => client })).toBe(false)
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether the list "Friends" was deleted. Reload to check.'])
+    await vi.waitFor(() => expect(userLists()?.map((l) => l.id)).toEqual(['2']))
+  })
+
+  it('member: says so and reads the members and the account lists again', async () => {
+    const fetchListAccounts = vi.fn()
+      .mockResolvedValueOnce([account('7')])
+      .mockResolvedValueOnce([account('7'), account('8')])
+    const fetchAccountLists = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([list('1', 'Friends')])
+    const client = fakeClient({ addListAccounts: vi.fn(unknown), fetchListAccounts, fetchAccountLists })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('8', { clientSource: () => client })
+    expect(await setListMember('1', account('8'), true, { clientSource: () => client })).toBe(false)
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether @user8 was added to the list "Friends". Reload to check.'])
+    await vi.waitFor(() => expect(listMembers('1')?.map((a) => a.id)).toEqual(['7', '8']))
+    await vi.waitFor(() => expect(accountListIds('8')).toEqual(['1']))
+  })
+
+  it('a plain failure still says "Couldn\'t" and reads nothing again', async () => {
+    const client = fakeClient({ createList: vi.fn(fail) })
+    await loadLists({ clientSource: () => client })
+    await createList({ title: 'Cats' }, { clientSource: () => client })
+    expect(toasts.map((t) => t.message)).toEqual(['Couldn\'t create the list "Cats".'])
+    expect(client.fetchLists).toHaveBeenCalledTimes(1)
+  })
+})

@@ -62,6 +62,18 @@ function putLists(userKey: UserKey, fn: (lists: List[]) => List[]): void {
 
 const named = (list: List | undefined) => (list ? `the list "${list.title}"` : 'the list')
 
+// A Bluesky write whose outcome is not known (bluesky-client README,
+// "Lists"): neither done nor not done. Read by name, so this package needs
+// no import of the Bluesky client.
+const outcomeUnknown = (err: unknown) => (err as { name?: unknown } | null)?.name === 'BlueskyWriteUnknown'
+const unknownToast = (what: string) => `Could not tell whether ${what}. Reload to check.`
+
+// After an unknown outcome: read again, so the screen shows what the server
+// has. Best effort; a failed read leaves the cache as the rollback left it.
+function readAgain(...reads: (() => Promise<void>)[]): void {
+  for (const r of reads) void r().catch(() => undefined)
+}
+
 // --- Reads and writes that overlap ---------------------------------------
 //
 // Every write marks the keys it changes as busy from the moment it changes
@@ -198,6 +210,7 @@ export async function createList(input: ListInput, opts: ListsOpts = {}): Promis
   const client = (opts.clientSource ?? defaultSource)()
   if (!client) return null
   const generation = ownerGeneration()
+  let unknownAfter: (() => void) | null = null
   begin([client.userKey])
   try {
     const made = await client.createList(input)
@@ -205,11 +218,16 @@ export async function createList(input: ListInput, opts: ListsOpts = {}): Promis
     const lists = listsCache.value.get(client.userKey)
     if (lists && !lists.some((l) => l.id === made.id)) setIn(listsCache, client.userKey, [...lists, made])
     return made
-  } catch {
-    if (generation === ownerGeneration()) toast(`Couldn't create the list "${input.title}".`)
+  } catch (err) {
+    if (generation !== ownerGeneration()) return null
+    if (outcomeUnknown(err)) {
+      toast(unknownToast(`the list "${input.title}" was created`))
+      unknownAfter = () => readAgain(() => loadLists({ clientSource: () => client }))
+    } else toast(`Couldn't create the list "${input.title}".`)
     return null
   } finally {
     end([client.userKey])
+    unknownAfter?.()
   }
 }
 
@@ -251,11 +269,15 @@ export async function updateList(id: string, input: ListInput, opts: ListsOpts =
   begin([userKey])
   return enqueue(listKey(userKey, `list ${id}`), async () => {
     let ok = false
+    let unknown = false
     try {
       w.confirmed = await client.updateList(id, input)
       ok = true
-    } catch {
-      if (generation === ownerGeneration()) toast(`Couldn't save the list "${input.title}".`)
+    } catch (err) {
+      unknown = outcomeUnknown(err)
+      if (generation === ownerGeneration()) {
+        toast(unknown ? unknownToast(`the list "${input.title}" was saved`) : `Couldn't save the list "${input.title}".`)
+      }
     }
     // Keyed by account, so the old account's copy is right even after a
     // switch; only the toast is for the account that is still active.
@@ -263,6 +285,7 @@ export async function updateList(id: string, input: ListInput, opts: ListsOpts =
     const settled = w.confirmed
     if (last && settled) putLists(userKey, (lists) => lists.map((l) => (l.id === id ? settled : l)))
     end([userKey])
+    if (unknown && generation === ownerGeneration()) readAgain(() => loadLists({ clientSource: () => client }))
     return ok
   })
 }
@@ -281,6 +304,7 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
   begin([userKey])
   return enqueue(listKey(userKey, `list ${id}`), async () => {
     let ok = false
+    let unknown = false
     try {
       await client.deleteList(id)
       ok = true
@@ -290,8 +314,11 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
       for (const [k, ids] of next) if (k.startsWith(prefix) && ids.includes(id)) next.set(k, ids.filter((x) => x !== id))
       accountListsCache.value = next
       setIn(listMembersCache, listKey(userKey, id), undefined)
-    } catch {
-      if (generation === ownerGeneration()) toast(`Couldn't delete ${named(w.confirmed)}.`)
+    } catch (err) {
+      unknown = outcomeUnknown(err)
+      if (generation === ownerGeneration()) {
+        toast(unknown ? unknownToast(`${named(w.confirmed)} was deleted`) : `Couldn't delete ${named(w.confirmed)}.`)
+      }
     }
     doneWith(userKey, id, w)
     const before = w.confirmed
@@ -300,6 +327,7 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
         : [...ls.slice(0, Math.max(0, at)), before, ...ls.slice(Math.max(0, at))]))
     }
     end([userKey])
+    if (unknown && generation === ownerGeneration()) readAgain(() => loadLists({ clientSource: () => client }))
     return ok
   })
 }
@@ -358,15 +386,21 @@ export async function setListMember(
   begin(keys)
   return enqueue(key, async () => {
     let ok = false
+    let unknown = false
     try {
       if (member) await client.addListAccounts(listId, [account.id])
       else await client.removeListAccounts(listId, [account.id])
       writes.confirmed = member
       ok = true
-    } catch {
+    } catch (err) {
+      unknown = outcomeUnknown(err)
       if (generation === ownerGeneration()) {
         const title = named(listById(listId, userKey))
-        toast(member ? `Couldn't add @${account.acct} to ${title}.` : `Couldn't remove @${account.acct} from ${title}.`)
+        if (unknown) {
+          toast(unknownToast(member ? `@${account.acct} was added to ${title}` : `@${account.acct} was removed from ${title}`))
+        } else {
+          toast(member ? `Couldn't add @${account.acct} to ${title}.` : `Couldn't remove @${account.acct} from ${title}.`)
+        }
       }
     }
     writes.count -= 1
@@ -377,6 +411,13 @@ export async function setListMember(
       if (writes.confirmed !== member) applyMember(userKey, listId, account, writes.confirmed, writes.at)
     }
     end(keys)
+    if (unknown && generation === ownerGeneration()) {
+      const source = { clientSource: () => client }
+      readAgain(
+        ...(listMembersCache.value.has(listKey(userKey, listId)) ? [() => loadListMembers(listId, source)] : []),
+        ...(accountListsCache.value.has(listKey(userKey, account.id)) ? [() => loadAccountLists(account.id, source)] : []),
+      )
+    }
     return ok
   })
 }

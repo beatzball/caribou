@@ -7,7 +7,8 @@ import { blueskyClients } from './_bluesky-clients.js'
 import { blueskyClient, fakeAgent, signInBluesky } from './_bluesky-helpers.js'
 
 // With a Bluesky account active the rail hides Local and Public (the
-// network has neither) and Search and Lists until phase 5 (#184; spec 2.1, 11).
+// network has neither) and Search until phase 5 (#184; spec 2.1, 11). Lists
+// show (#195).
 
 vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
   const real = await importOriginal<typeof ClientModule>()
@@ -41,11 +42,11 @@ beforeEach(() => {
 afterEach(() => { document.body.replaceChildren() })
 
 describe('<caribou-nav-rail> with a Bluesky account', () => {
-  it('shows Home, Notifications, Bookmarks, Settings and Profile; hides Local, Public, Search, Lists', async () => {
+  it('shows Home, Notifications, Bookmarks, Lists, Settings and Profile; hides Local, Public, Search', async () => {
     signInBluesky(blueskyClient(fakeAgent()))
     const el = await mount()
     const shown = hrefs(el)
-    for (const href of ['/home', '/notifications', '/bookmarks', '/settings', '/@me']) expect(shown).toContain(href)
-    for (const href of ['/local', '/public', '/search', '/lists']) expect(shown).not.toContain(href)
+    for (const href of ['/home', '/notifications', '/bookmarks', '/lists', '/settings', '/@me']) expect(shown).toContain(href)
+    for (const href of ['/local', '/public', '/search']) expect(shown).not.toContain(href)
   })
 })

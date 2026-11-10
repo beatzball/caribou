@@ -1,0 +1,63 @@
+{
+  "lists": {
+    "records": [
+      {
+        "uri": "at://did:plc:reader/app.bsky.graph.list/3lcurateaaaa2",
+        "cid": "bafyreicuratelist",
+        "value": {
+          "$type": "app.bsky.graph.list",
+          "name": "Friends",
+          "purpose": "app.bsky.graph.defs#curatelist",
+          "description": "People I know",
+          "createdAt": "2024-05-01T10:00:00.000Z"
+        }
+      },
+      {
+        "uri": "at://did:plc:reader/app.bsky.graph.list/3lmodlistbbb2",
+        "cid": "bafyreimodlist",
+        "value": {
+          "$type": "app.bsky.graph.list",
+          "name": "Spam accounts",
+          "purpose": "app.bsky.graph.defs#modlist",
+          "createdAt": "2024-04-01T10:00:00.000Z"
+        }
+      },
+      {
+        "uri": "at://did:plc:reader/app.bsky.graph.list/3lstarterccc2",
+        "cid": "bafyreistarter",
+        "value": {
+          "$type": "app.bsky.graph.list",
+          "name": "Starter pack list",
+          "purpose": "app.bsky.graph.defs#referencelist",
+          "createdAt": "2024-03-01T10:00:00.000Z"
+        }
+      }
+    ],
+    "cursor": "3lstarterccc2"
+  },
+  "items": {
+    "records": [
+      {
+        "uri": "at://did:plc:reader/app.bsky.graph.listitem/3litemalice22",
+        "cid": "bafyreiitemalice",
+        "value": {
+          "$type": "app.bsky.graph.listitem",
+          "subject": "did:plc:alice",
+          "list": "at://did:plc:reader/app.bsky.graph.list/3lcurateaaaa2",
+          "createdAt": "2024-05-02T10:00:00.000Z"
+        }
+      },
+      {
+        "uri": "at://did:plc:reader/app.bsky.graph.listitem/3litemspam222",
+        "cid": "bafyreiitemspam",
+        "value": {
+          "$type": "app.bsky.graph.listitem",
+          "subject": "did:plc:spammer",
+          "list": "at://did:plc:reader/app.bsky.graph.list/3lmodlistbbb2",
+          "createdAt": "2024-04-02T10:00:00.000Z"
+        }
+      }
+    ],
+    "cursor": "3litemspam222"
+  }
+}
