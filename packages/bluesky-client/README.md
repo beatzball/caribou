@@ -964,15 +964,27 @@ feed (`getListFeed`) come from the AppView.
   list stays. The client reads the list record: gone → done; still there →
   `BlueskyListPartlyDeleted` (a `CaribouError('unknown')`, root export,
   with `userMessage` "Some members were removed, but the list was not
-  deleted. Delete it again to finish."); the read fails →
+  deleted. Delete it again to finish." when an earlier call answered, or
+  "Some members may have been removed, …" when only the first call was in
+  doubt); the read fails →
   `BlueskyWriteUnknown`. A single call is atomic: its answered refusal, or
   a lost answer with the list still there, is the plain error.
+- **Sweep after delete (L5).** Another tab or app can add a member while
+  a delete runs. So after the list record is gone, the client scans the
+  items once more and deletes every item that still names the deleted
+  list. One sweep, no loop; L1 applies (a complete scan only). When the
+  sweep fails or is cut, the list is still gone, and the call throws
+  `BlueskyListPartlyDeleted` with `listGone: true` and `userMessage` "The
+  list was deleted, but some of its members may remain on Bluesky." An add
+  that lands after the sweep is not caught.
 - **Accepted limit: an item moved between the scan and the delete (L3).**
   The rkeys come from the scan; `applyWrites` deletes what is at them when
   it runs. Bluesky apps create and delete list items; they do not update
   them. So an item that another app changes to name another list between
   the scan and the delete is not protected. Caribou does not handle it.
-  An item added after the scan survives the delete of its list.
+  `swapCommit` would guard it, but would also fail the delete on any
+  unrelated write to the repo (a like), so it is not used. An item added
+  after the scan is handled by the sweep (L5).
 - **A duplicate add heals on remove.** `addListAccounts` does not check
   for an item already there: the picker's box comes from the last read,
   and a stale read can add the same DID twice. Remove deletes every item

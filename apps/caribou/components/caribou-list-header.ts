@@ -114,8 +114,15 @@ export class CaribouListHeader extends LitElement {
         this.membersOwner = key
         this.members = { status: 'loading' }
       }
-      if (items) this.members = { status: 'ready', items }
       const client = activeClient.value
+      if (items) this.members = { status: 'ready', items }
+      else if (this.members.status === 'ready') {
+        // The cache was dropped (a re-read failed after a write that may
+        // have changed it): the shown rows are not known to be current.
+        this.members = { status: 'loading' }
+        this.membersFor = null
+        if (this.open && client) void this.loadMembers(client)
+      }
       this.network = client?.capabilities.network ?? null
       this.settled = this.settledMembers(items, key, client)
       if (client && client !== this.loadedFor) {

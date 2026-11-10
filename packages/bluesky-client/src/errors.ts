@@ -93,14 +93,18 @@ export class BlueskyWriteUnknown extends CaribouError {
 }
 
 /**
- * A list delete that removed some of its items but not the list record
- * (README, "Lists", L2). The list is still there, with fewer members.
- * Delete it again to finish.
+ * A list delete that was only partly done (README, "Lists", L2 and L5).
+ * `listGone` false: some items may be gone, but the list is still there;
+ * delete it again to finish. `listGone` true: the list is gone, but the
+ * sweep after it failed, so some of its items may remain.
  */
 export class BlueskyListPartlyDeleted extends CaribouError {
-  readonly userMessage = 'Some members were removed, but the list was not deleted. Delete it again to finish.'
-  constructor(message: string) {
+  readonly userMessage: string
+  readonly listGone: boolean
+  constructor(message: string, opts: { listGone: boolean; userMessage: string }) {
     super('unknown', message)
     this.name = 'BlueskyListPartlyDeleted'
+    this.listGone = opts.listGone
+    this.userMessage = opts.userMessage
   }
 }

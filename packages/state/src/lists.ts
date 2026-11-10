@@ -69,6 +69,8 @@ const outcomeUnknown = (err: unknown) => (err as { name?: unknown } | null)?.nam
 const unknownToast = (what: string) => `Could not tell whether ${what}. Reload to check.`
 // A Bluesky delete that removed some members but not the list (L2).
 const partlyDeleted = (err: unknown) => (err as { name?: unknown } | null)?.name === 'BlueskyListPartlyDeleted'
+// L5: the list is gone, but the sweep after it failed.
+const listGone = (err: unknown) => partlyDeleted(err) && (err as { listGone?: unknown }).listGone === true
 // The client's words for the reader, when a failure has them.
 function userMessage(err: unknown): string | null {
   const m = (err as { userMessage?: unknown } | null)?.userMessage
@@ -79,6 +81,22 @@ function userMessage(err: unknown): string | null {
 // has. Best effort; a failed read leaves the cache as the rollback left it.
 function readAgain(...reads: (() => Promise<void>)[]): void {
   for (const r of reads) void r().catch(() => undefined)
+}
+
+// Reads the members and memberships again after a write that may have
+// changed them. A failed read drops that cache entry: the old rows and
+// boxes are never shown as current, and the screen loads them again.
+function membersAgain(userKey: UserKey, listId: string, source: ListsOpts): void {
+  const key = listKey(userKey, listId)
+  if (!listMembersCache.value.has(key)) return
+  void loadListMembers(listId, source).catch(() => { setIn(listMembersCache, key, undefined) })
+}
+function membershipsAgain(userKey: UserKey, accountIds: readonly string[], source: ListsOpts): void {
+  for (const a of accountIds) {
+    const key = listKey(userKey, a)
+    if (!accountListsCache.value.has(key)) continue
+    void loadAccountLists(a, source).catch(() => { setIn(accountListsCache, key, undefined) })
+  }
 }
 
 // --- Reads and writes that overlap ---------------------------------------
@@ -314,19 +332,27 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
     let ok = false
     let unknown = false
     let reconcile = false
-    try {
-      await client.deleteList(id)
-      ok = true
-      // The list is gone for every account it held.
+    // The list is gone for every account it held.
+    const forget = () => {
       const prefix = `${userKey} `
       const next = new Map(accountListsCache.value)
       for (const [k, ids] of next) if (k.startsWith(prefix) && ids.includes(id)) next.set(k, ids.filter((x) => x !== id))
       accountListsCache.value = next
       setIn(listMembersCache, listKey(userKey, id), undefined)
+    }
+    try {
+      await client.deleteList(id)
+      ok = true
+      forget()
     } catch (err) {
       unknown = outcomeUnknown(err)
       // Either way the server may hold less than the cache: read it again.
       reconcile = unknown || partlyDeleted(err)
+      // L5: the list is gone; only stray items may remain.
+      if (listGone(err)) {
+        ok = true
+        forget()
+      }
       if (generation === ownerGeneration()) {
         toast(unknown ? unknownToast(`${named(w.confirmed)} was deleted`)
           : userMessage(err) ?? `Couldn't delete ${named(w.confirmed)}.`)
@@ -344,11 +370,9 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
       const prefix = `${userKey} `
       const accountIds = [...accountListsCache.value.keys()]
         .filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length))
-      readAgain(
-        () => loadLists(source),
-        ...(listMembersCache.value.has(listKey(userKey, id)) ? [() => loadListMembers(id, source)] : []),
-        ...accountIds.map((a) => () => loadAccountLists(a, source)),
-      )
+      readAgain(() => loadLists(source))
+      membersAgain(userKey, id, source)
+      membershipsAgain(userKey, accountIds, source)
     }
     return ok
   })
@@ -436,10 +460,8 @@ export async function setListMember(
     end(keys)
     if (unknown && generation === ownerGeneration()) {
       const source = { clientSource: () => client }
-      readAgain(
-        ...(listMembersCache.value.has(listKey(userKey, listId)) ? [() => loadListMembers(listId, source)] : []),
-        ...(accountListsCache.value.has(listKey(userKey, account.id)) ? [() => loadAccountLists(account.id, source)] : []),
-      )
+      membersAgain(userKey, listId, source)
+      membershipsAgain(userKey, [account.id], source)
     }
     return ok
   })

@@ -342,3 +342,22 @@ describe('review fix 1', () => {
     expect(asked.message).toBe('The list goes for good.')
   })
 })
+
+describe('review fix 2', () => {
+  it('a dropped members cache makes an open panel load again, never keep the old rows as current', async () => {
+    signInBlueskyLists()
+    store.put(ITEM, '3litembobaaa2', { subject: BOB, list: `at://${READER_DID}/${LIST}/${FRIENDS}`, createdAt: 'x' })
+    const el = await mount<CaribouListHeader>('caribou-list-header', (h) => { h.list = FRIENDS })
+    $(el, 'button.members')!.click()
+    await settle(el)
+    expect($(el, `li[data-account-id="${BOB}"]`)).not.toBeNull()
+    // The server lost Bob meanwhile; a failed re-read dropped the cache.
+    store.coll(ITEM).clear()
+    const next = new Map(listMembersCache.value)
+    next.delete(`${READER_KEY} ${FRIENDS}`)
+    listMembersCache.value = next
+    await settle(el)
+    expect($(el, `li[data-account-id="${BOB}"]`)).toBeNull()
+    expect($(el, '#members .notice')!.textContent).toContain('No one is in this list yet.')
+  })
+})

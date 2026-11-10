@@ -542,3 +542,72 @@ describe('review fix 1', () => {
     expect(pds.coll(ITEM).has('3litemspam222')).toBe(true)
   })
 })
+
+describe('review fix 2', () => {
+  const ITEM_OF = (pds: ReturnType<typeof fakePds>) => [...pds.coll(ITEM).values()].filter((r) => r.value.list === FRIENDS_URI)
+
+  it('L5: an item added before the list record is deleted leaves no orphan', async () => {
+    const { client, pds } = setup()
+    const real = pds.api.applyWrites.getMockImplementation()!
+    pds.api.applyWrites.mockImplementationOnce(async (q) => {
+      // Another tab adds a member after the scan, before the delete.
+      pds.put(ITEM, '3liteminlate2', { subject: 'did:plc:late', list: FRIENDS_URI, createdAt: 'x' })
+      return real(q)
+    })
+    await client.deleteList(FRIENDS)
+    expect(pds.coll(LIST).has(FRIENDS)).toBe(false)
+    expect(ITEM_OF(pds)).toEqual([])
+    expect(pds.coll(ITEM).has('3litemspam222')).toBe(true)
+  })
+
+  it('L5: an item added between batches leaves no orphan', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Big', purpose: CURATE, createdAt: 'x' })
+    for (let i = 0; i < 250; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: FRIENDS_URI, createdAt: 'x' })
+    const real = pds.api.applyWrites.getMockImplementation()!
+    pds.api.applyWrites.mockImplementationOnce(real).mockImplementationOnce(async (q) => {
+      pds.put(ITEM, tid(9999), { subject: 'did:plc:late', list: FRIENDS_URI, createdAt: 'x' })
+      return real(q)
+    })
+    await client.deleteList(FRIENDS)
+    expect(ITEM_OF(pds)).toEqual([])
+  })
+
+  for (const [name, fail] of [
+    ['fails', () => xrpcError(503, 'Unavailable')],
+    ['is cut', null],
+  ] as const) {
+    it(`L5: when the sweep ${name}, the list is gone and the error says members may remain`, async () => {
+      const { client, pds } = setup()
+      const real = pds.api.applyWrites.getMockImplementation()!
+      pds.api.applyWrites.mockImplementationOnce(async (q) => {
+        pds.put(ITEM, '3liteminlate2', { subject: 'did:plc:late', list: FRIENDS_URI, createdAt: 'x' })
+        if (!fail) for (let i = 0; i < 5001; i++) pds.put(ITEM, tid(i), { subject: `did:plc:o${i}`, list: `at://${ME}/${LIST}/3lotherlist22`, createdAt: 'x' })
+        return real(q)
+      })
+      if (fail) {
+        const listRecords = pds.api.listRecords.getMockImplementation()!
+        let n = 0
+        pds.api.listRecords.mockImplementation(async (q) => {
+          if (q.collection === ITEM && ++n > 1) throw fail()
+          return listRecords(q)
+        })
+      }
+      const err = await client.deleteList(FRIENDS).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(BlueskyListPartlyDeleted)
+      expect(err).toMatchObject({ listGone: true, userMessage: 'The list was deleted, but some of its members may remain on Bluesky.' })
+      expect(pds.coll(LIST).has(FRIENDS)).toBe(false)
+    })
+  }
+
+  it('Fable 1: a first batch in doubt says members "may have been" removed', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Two hundred', purpose: CURATE, createdAt: 'x' })
+    for (let i = 0; i < 200; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: FRIENDS_URI, createdAt: 'x' })
+    pds.api.applyWrites.mockRejectedValueOnce(xrpcError(502, 'BadGateway'))
+    await expect(client.deleteList(FRIENDS)).rejects.toMatchObject({
+      listGone: false,
+      userMessage: 'Some members may have been removed, but the list was not deleted. Delete it again to finish.',
+    })
+  })
+})

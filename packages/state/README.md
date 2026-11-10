@@ -839,7 +839,12 @@ One set of functions for both networks. The client does the network part
   deleted. Delete it again to finish.", and the lists, that list's members
   (when shown) and every known "lists that hold this account" are read
   again, so the Members panel and the picker's boxes show what is left. An
-  unknown delete reads all three again too.
+  unknown delete reads all three again too. When the list is gone but the
+  sweep after it failed (`listGone: true`), the list stays gone and the
+  toast says some members may remain. **A failed re-read drops the cache
+  it was for** (the members, a "lists that hold this account" entry): the
+  old rows and boxes are never shown as current, and the screen loads
+  them again or shows its Retry.
 - **One click is one write.** The screens send a write per change of a
   box or per button press; the client's kept rkey makes a repeated intent
   after a lost answer reuse its record, not make a second one.

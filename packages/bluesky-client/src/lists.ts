@@ -301,33 +301,51 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
     deleteList: (id) => write(async () => {
       const uri = listUri(id)
       await curateRecord(id)
-      const own = (await items((it) => it.list === uri, cutChange)).map((it) => it.rkey)
+      const ofList = (it: ItemRecord) => it.list === uri
+      const own = (await items(ofList, cutChange)).map((it) => it.rkey)
       // The list last: a failure part way leaves the list, not stray items.
       const targets = [...own.map((rkey) => ({ collection: ITEM, rkey })), { collection: LIST, rkey: id }]
       const batches = chunks(targets, MAX_WRITES)
       const repo = did()
-      // Whether some batch may have applied: one answered, or one in doubt.
-      let maybeApplied = false
+      // L5: the list is gone. Items added since the scan (another tab, another
+      // app) would be left behind, so scan once more and delete them. One
+      // sweep, complete scans only (L1).
+      const sweep = async (): Promise<void> => {
+        try {
+          const left = (await items(ofList, cutChange)).map((it) => ({ collection: ITEM, rkey: it.rkey }))
+          if (left.length > 0) await deleteAll(left)
+        } catch (err) {
+          throw new BlueskyListPartlyDeleted(`Bluesky: the list was deleted, but the sweep failed: ${(err as Error).message}`, {
+            listGone: true, userMessage: 'The list was deleted, but some of its members may remain on Bluesky.',
+          })
+        }
+      }
+      // Whether an earlier batch answered OK, so some items are surely gone.
+      let applied = false
       for (const batch of batches) {
         try {
           await agent.com.atproto.repo.applyWrites({
             repo, writes: batch.map((t) => ({ $type: DELETE, collection: t.collection, rkey: t.rkey })),
           })
-          maybeApplied = true
+          applied = true
         } catch (err) {
-          if (answeredRefusal(err) && !maybeApplied) throw err
+          if (answeredRefusal(err) && !applied) throw err
           let gone: boolean
           try {
             gone = (await getRecord(LIST, id)) === null
           } catch {
             throw new BlueskyWriteUnknown(`Could not tell whether the list was deleted: ${(err as Error).message}`)
           }
-          if (gone) return
+          if (gone) return sweep()
           // One call is atomic: the list is there, so nothing happened.
           if (batches.length === 1) throw err
-          throw new BlueskyListPartlyDeleted(`Bluesky: the list was partly deleted: ${(err as Error).message}`)
+          throw new BlueskyListPartlyDeleted(`Bluesky: the list was partly deleted: ${(err as Error).message}`, {
+            listGone: false,
+            userMessage: `Some members ${applied ? 'were' : 'may have been'} removed, but the list was not deleted. Delete it again to finish.`,
+          })
         }
       }
+      await sweep()
     }),
 
     fetchListAccounts: (id) => run(`list-accounts:${id}`, async () => {

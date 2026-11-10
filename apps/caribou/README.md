@@ -675,7 +675,6 @@ reader's, read with their session. A Mastodon account sees no change.
   toast, never sent for another account. An unknown outcome reads the
   lists again (state README).
 
-
 **A gone labeler (#238).** A labeler in the reader's prefs that
 `getServices` has no view for keeps every Bluesky card covered (bluesky
 README, "A gone labeler"). After two misses in a row (the first load plus
