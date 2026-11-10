@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '../caribou-signin-panels.js'
+import * as session from '../_bluesky-session.js'
 import { resetSigninDraft, type CaribouSigninPanels } from '../caribou-signin-panels.js'
 
 // The router's swap on a full page load (#169): the server's page stays live
@@ -38,6 +39,7 @@ beforeEach(() => resetSigninDraft())
 afterEach(() => {
   document.body.replaceChildren()
   resetSigninDraft()
+  vi.restoreAllMocks()
 })
 
 describe('caribou-signin-panels across the router swap', () => {
@@ -112,5 +114,54 @@ describe('caribou-signin-panels across the router swap', () => {
     outlet.focus()
     const bsky = client.shadowRoot!.querySelector('caribou-bluesky-signin')!
     await vi.waitFor(() => expect(bsky.shadowRoot!.activeElement).toBe(field(client, 'handle')))
+  })
+  it('focus is restored once: a later visit does not take it from the outlet', async () => {
+    const outlet = document.createElement('litro-outlet')
+    outlet.tabIndex = -1
+    document.body.appendChild(outlet)
+    const server = create(outlet)
+    await settle(server)
+    field(server, 'server').focus()
+    const show = async () => {
+      const page = document.createElement('div')
+      page.setAttribute('hidden', '')
+      outlet.appendChild(page)
+      const el = create(page)
+      await settle(el)
+      for (const c of [...outlet.children]) if (c !== page) c.remove()
+      page.removeAttribute('hidden')
+      outlet.focus()
+      return el
+    }
+    const first = await show()
+    const picker = first.shadowRoot!.querySelector('caribou-instance-picker')!
+    await vi.waitFor(() => expect(picker.shadowRoot!.activeElement).toBe(field(first, 'server')))
+    // An SPA visit back to the landing: the router focuses the outlet.
+    await show()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(document.activeElement).toBe(outlet)
+  })
+
+  it('a Bluesky sign-in started before the swap shows on the new page, and is not started twice', async () => {
+    let answer!: (message: string) => void
+    const start = vi.spyOn(session, 'startBlueskySignIn').mockReturnValue(new Promise<string>((r) => { answer = r }))
+    const server = create()
+    await settle(server)
+    server.shadowRoot!.querySelector<HTMLElement>('#tab-bluesky')!.click()
+    type(server, 'handle', 'nope')
+    const form = server.shadowRoot!.querySelector('caribou-bluesky-signin')!.shadowRoot!.querySelector('form')!
+    form.dispatchEvent(new SubmitEvent('submit', { cancelable: true }))
+
+    const client = create()
+    await settle(client)
+    server.remove()
+    const bsky = client.shadowRoot!.querySelector('caribou-bluesky-signin')!
+    await vi.waitFor(() => expect(bsky.shadowRoot!.textContent).toContain('Connecting…'))
+    bsky.shadowRoot!.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { cancelable: true }))
+    expect(start).toHaveBeenCalledTimes(1)
+
+    answer('No account with that handle.')
+    await vi.waitFor(() => expect(bsky.shadowRoot!.querySelector('[role="alert"]')?.textContent).toContain('No account'))
+    expect(bsky.shadowRoot!.textContent).toContain('Sign in')
   })
 })

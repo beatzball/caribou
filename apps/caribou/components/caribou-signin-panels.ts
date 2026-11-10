@@ -146,6 +146,9 @@ export class CaribouSigninPanels extends LitElement {
     if (!at) return
     const target = at.startsWith('tab-') ? this.renderRoot.querySelector<HTMLElement>(`#${at}`) : this.input(at)
     target?.focus()
+    // Once: a later visit to the page starts at the outlet, as the router
+    // means it to. After the focus, whose `focusin` writes the draft again.
+    draft.focus = null
   }
 
   private others(): CaribouSigninPanels[] {

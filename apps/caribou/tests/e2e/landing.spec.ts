@@ -54,10 +54,12 @@ test('a tab and a handle chosen before the router swap are kept', async ({ page 
   // The client page is in the outlet, hidden: the server's page has hydrated.
   await expect(page.locator('litro-outlet > *')).toHaveCount(2)
   await expect(page.locator('litro-outlet[data-litro-settled]')).toHaveCount(0)
+  // Only actions with no "stable" check: Playwright waits for animation
+  // frames to call an element stable, and they are held (WebKit then
+  // times out a `click()`). A click event, a focus and key presses need none.
   const serverPage = page.locator('litro-outlet > :first-child')
-  await serverPage.getByRole('tab', { name: 'Bluesky' }).click()
-  // A reader clicks the field and types; `fill` sends no focus event.
-  await serverPage.getByLabel('Bluesky handle').click()
+  await serverPage.getByRole('tab', { name: 'Bluesky' }).dispatchEvent('click')
+  await serverPage.getByLabel('Bluesky handle').focus()
   await page.keyboard.type('alice.example.com')
   await page.evaluate(() => (window as unknown as { __release(): void }).__release())
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
