@@ -304,14 +304,17 @@ export class CaribouSearch extends LitElement {
   }
 
   // When the last page removes the focused More button, focus goes to the
-  // first new result, or to the list when the page added none (as the
-  // timeline does for its Retry).
+  // first new result; else the list (the page added none); else the "No …
+  // found" notice (every row was filtered, so the list went too); else the
+  // results area. Never to the body.
   private async keepFocus(button: Element, kind: MoreKind, before: number): Promise<void> {
     await this.updateComplete
     if (button.isConnected) return
     const list = this.renderRoot.querySelector<HTMLElement>(kind === 'accounts' ? 'ul.accounts' : 'ul.statuses')
-    if (!list) return
-    const target = (list.children[before] as HTMLElement | undefined) ?? list
+    const target = (list?.children[before] as HTMLElement | undefined) ?? list
+      ?? this.renderRoot.querySelector<HTMLElement>('.results .empty')
+      ?? this.renderRoot.querySelector<HTMLElement>('.results')
+    if (!target) return
     if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1')
     target.focus()
   }
@@ -502,7 +505,7 @@ export class CaribouSearch extends LitElement {
 
   private viewBluesky(r: Extract<Results, { kind: 'ok' }>, tab: SearchType): View {
     const empty = (what: string): View => ({
-      note: null, body: html`<p class="notice" role="status">No ${what} found for “${r.q}”.</p>`,
+      note: null, body: html`<p class="notice empty" role="status">No ${what} found for “${r.q}”.</p>`,
     })
     if (tab === 'hashtags') {
       const name = parseTagParam(encodeURIComponent(r.q))

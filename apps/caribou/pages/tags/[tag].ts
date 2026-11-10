@@ -1,4 +1,4 @@
-import { html, css } from 'lit'
+import { html, css, type PropertyValues } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import { activeClient, activeUserKey } from '@beatzball/caribou-state'
@@ -94,6 +94,11 @@ export class TagPage extends LitroPage {
   // True after mount while a Bluesky account is active: the page then shows
   // the Bluesky tag page in place of the Mastodon one.
   @state() private bluesky = false
+  // True once this page rewrote its address to `?net=bsky`. From then on it
+  // is the Bluesky page, whatever account is active, so the address and the
+  // body agree (#251). New page data starts over.
+  @state() private routed = false
+  private network: string | null = null
 
   // A Bluesky reader on the Mastodon tag page gets the Bluesky one (README,
   // "Bluesky search and hashtag page"). The Mastodon timeline is shown only
@@ -103,13 +108,26 @@ export class TagPage extends LitroPage {
   protected override firstUpdated() {
     this.disposeSession = effect(() => {
       const network = activeClient.value?.capabilities.network ?? null
+      this.network = network
       this.signedIn = activeUserKey.value !== null && network !== 'bluesky'
       this.bluesky = network === 'bluesky'
-      const data = this.serverData as TagPageData | null
-      if (!this.isConnected || !data || data.kind === 'not-found' || data.kind === 'bluesky' || !atTagPath(data.tag)) return
-      const to = blueskyTagRedirect(location.pathname, location.search, network)
-      if (to) history.replaceState(history.state, '', to)
+      this.routeToBluesky()
     })
+  }
+
+  protected override willUpdate(changed: PropertyValues<this>) {
+    // New page data (the router can reuse this element): decide again.
+    if (this.hasUpdated && changed.has('serverData' as keyof TagPage)) this.routed = false
+  }
+
+  // Rewrites `/tags/<tag>` to `/tags/<tag>?net=bsky` for a Bluesky reader.
+  private routeToBluesky() {
+    const data = this.serverData as TagPageData | null
+    if (!this.isConnected || !data || data.kind === 'not-found' || data.kind === 'bluesky' || !atTagPath(data.tag)) return
+    const to = blueskyTagRedirect(location.pathname, location.search, this.network)
+    if (!to) return
+    history.replaceState(history.state, '', to)
+    this.routed = true
   }
 
   // A revisit paints from the last copy at once, and the fresh page data
@@ -128,7 +146,8 @@ export class TagPage extends LitroPage {
   //
   // Only the page at the address sets it. A page the reader has left can
   // still render: `enterWithCache` hands it fresh data after it is gone.
-  protected override updated() {
+  protected override updated(changed: PropertyValues<this>) {
+    if (changed.has('serverData' as keyof TagPage) && this.disposeSession) this.routeToBluesky()
     const data = this.serverData as TagPageData | null
     if (data?.tag && this.isConnected && atTagPath(data.tag)) document.title = titleFor(data.tag)
   }
@@ -152,7 +171,7 @@ export class TagPage extends LitroPage {
         </caribou-app-shell>
       `
     }
-    if (data.kind === 'bluesky' || (this.bluesky && data.tag)) {
+    if (data.kind === 'bluesky' || this.routed || (this.bluesky && data.tag)) {
       return html`
         <caribou-app-shell instance=${inst}>
           <caribou-bluesky-tag tag=${data.tag}></caribou-bluesky-tag>

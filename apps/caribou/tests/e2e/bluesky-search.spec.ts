@@ -75,6 +75,8 @@ async function signIn(page: Page, origin: string) {
 test.describe('Bluesky hashtag page, signed out', () => {
   test('asks the reader to sign in and links to bsky.app', async ({ page }) => {
     await page.goto('/tags/cats?net=bsky')
+    // A full load mounts the page twice; wait for the router's swap.
+    await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
     const body = page.locator('caribou-bluesky-tag')
     await expect(body.locator('caribou-tag-header h1')).toHaveText('#cats')
     await expect(body.locator('.notice')).toContainText('Sign in with Bluesky to see posts with this tag.')

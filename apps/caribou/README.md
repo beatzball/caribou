@@ -1019,8 +1019,9 @@ the address rules and the "newest search wins" rule are the ones in
   added again). No cursor, or an empty page: no button. A failed page keeps
   the list and says "Could not load more." with Retry. Each kind pages from
   its own cursor. The button stays focused while it is busy; when the last
-  page removes it, focus moves to the first new result, or to the list when
-  the page added none. A new query, a new
+  page removes it, focus moves to the first new result; else to the list
+  (the page added none); else to the "No … found" notice (every row was
+  filtered, so the list went too). Never to the body. A new query, a new
   account or a late answer for an older search drops the page.
 - **Empty.** "No people found for “q”." and "No posts found for “q”.", as
   on Mastodon.
@@ -1066,7 +1067,10 @@ the address rules and the "newest search wins" rule are the ones in
 - `/tags/<tag>` without `net=bsky` is the Mastodon page. Its timeline shows
   only with a Mastodon account active. After mount, with a Bluesky account
   active, the page replaces the address with `/tags/<tag>?net=bsky`
-  (`blueskyTagRedirect`; an older Mastodon page's `max_id` is dropped).
+  (`blueskyTagRedirect`; an older Mastodon page's `max_id` is dropped) and
+  shows the Bluesky body. Once rewritten, the page stays the Bluesky page
+  whatever account is active, so the address and the body agree. New page
+  data on the same element checks again.
 
 **Tag links in Bluesky posts.** The facet renderer links a tag to
 `/tags/<tag>?net=bsky` (`packages/bluesky-client` README, facets). A plain

@@ -328,4 +328,40 @@ describe('<caribou-search> with a Bluesky account', () => {
     expect(text(el)).not.toContain('Could not load more.')
     expect(more(el)!.textContent).toContain('More people')
   })
+
+  // #251 round 2 (Codex 1): the last page can remove the list itself (every
+  // person on it was filtered). Focus then goes to the "No people found"
+  // notice, never to the body.
+  it('focuses the empty notice when the last page removes an empty list', async () => {
+    search.mockResolvedValueOnce(answer({ accounts: [person('hidden', decision({ profileList: { filter: true } }))] }, { accountsCursor: 'A2', statusesCursor: null }))
+    const el = await mount('cats')
+    expect(rows(el)).toHaveLength(0)
+    search.mockResolvedValueOnce(answer())
+    more(el)!.focus()
+    expect(el.shadowRoot!.activeElement).toBe(more(el))
+    more(el)!.click()
+    await settle(el)
+    const focused = el.shadowRoot!.activeElement as HTMLElement | null
+    expect(focused).not.toBeNull()
+    expect(focused!.isConnected).toBe(true)
+    expect(focused!.textContent).toContain('No people found for “cats”.')
+  })
+
+  it('drops a late failed More page after a new account', async () => {
+    search.mockResolvedValueOnce(answer({ accounts: [person('carol')] }, { accountsCursor: 'A2', statusesCursor: null }))
+    const el = await mount('cats')
+    let fail!: (e: unknown) => void
+    search.mockImplementationOnce(() => new Promise<Search>((_, reject) => { fail = reject }))
+    more(el)!.click()
+    await settle(el)
+    search.mockResolvedValue(answer({ accounts: [person('zed')] }, { accountsCursor: 'Z2', statusesCursor: null }))
+    users.value = new Map()
+    activeUserKey.value = null
+    signIn()
+    await settle(el)
+    fail(new CaribouError('server_error', 'boom'))
+    await settle(el)
+    expect(text(el)).not.toContain('Could not load more.')
+    expect(more(el)!.textContent).toContain('More people')
+  })
 })
