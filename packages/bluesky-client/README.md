@@ -1132,9 +1132,10 @@ when there is media".
   (which needs a title) still shows. A Tenor GIF is an external embed.
 - **Video:** a card of type `video`. `image` = `thumbnail`, `url` = the
   post on bsky.app, `title` = `alt` or "Video", description "Play on
-  bsky.app". The status card puts a play mark on its image (Bluesky posts
-  only). No `<video>` element: `playlist` is HLS (`.m3u8`), which only
-  Safari plays (spec 7.3, phase 6).
+  bsky.app". `embedUrl` = `playlist` when it is an http(s) URL, else `''`.
+  `playlist` is HLS (`.m3u8`, spec 7.3); the app plays it in
+  `<caribou-bluesky-video>` (app README, "Bluesky video"). A card with an
+  empty `embedUrl` keeps the play mark that links to bsky.app.
 - **Records** (`app.bsky.embed.record#view`, by `record.$type`):
 
   | `record.$type` | result |

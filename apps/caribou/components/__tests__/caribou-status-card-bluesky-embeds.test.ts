@@ -104,8 +104,16 @@ describe('<caribou-status-card> Bluesky record next to media', () => {
     ])
   })
 
-  it('shows a feed with a video: the video card with a play mark, and the feed card', async () => {
+  it('shows a feed with a video: the player, and the feed card', async () => {
     const el = await statusCard(blueskyPost({ $type: 'app.bsky.embed.recordWithMedia#view', record: feed, media: video }))
+    expect(el.shadowRoot!.querySelector('caribou-bluesky-video')).not.toBeNull()
+    expect(await shownCards(el)).toEqual([FEED])
+  })
+
+  it('video rule 11: a video with no playlist keeps the play mark that links to bsky.app', async () => {
+    const { playlist: _p, ...noPlaylist } = video
+    const el = await statusCard(blueskyPost({ $type: 'app.bsky.embed.recordWithMedia#view', record: feed, media: noPlaylist }))
+    expect(el.shadowRoot!.querySelector('caribou-bluesky-video')).toBeNull()
     expect(await shownCards(el)).toEqual([
       { title: 'Video', href: 'https://bsky.app/profile/did:plc:alice/post/3kpost', play: true },
       FEED,
@@ -138,6 +146,12 @@ describe('<caribou-status-card> Mastodon cards are unchanged', () => {
 
   it('shows a video card with no play mark', async () => {
     const el = await statusCard(post({ card: card({ type: 'video' }) }))
+    expect(await shownCards(el)).toEqual([{ title: 'A story', href: 'https://news.example/story', play: false }])
+  })
+
+  it('video rule 11: a Mastodon video card with an embedUrl is never the player', async () => {
+    const el = await statusCard(post({ card: card({ type: 'video', embedUrl: 'https://video.example/v.m3u8' }) }))
+    expect(el.shadowRoot!.querySelector('caribou-bluesky-video')).toBeNull()
     expect(await shownCards(el)).toEqual([{ title: 'A story', href: 'https://news.example/story', play: false }])
   })
 })

@@ -578,7 +578,7 @@ post of a thread and `contentList` everywhere else.
 | `contentList.filter` | The card is hidden, like a filter's `hide`. Never on the focused post. |
 | surface `blur` | The post is covered: "Content warning: <reason names>". A Show button unless `noOverride`. |
 | a fail-closed reason (labeler unavailable, unknown label, moderation failed) | The cover also offers Retry: it fires `caribou:bluesky-moderation-retry` (the session glue reloads definitions) and refetches the post through the active Bluesky client. |
-| `contentMedia.blur` | `caribou-status-media` gets `sensitive`; `contentMedia.noOverride` sets its `no-override`. The link card, the video card and `bluesky.recordCard` lose their image, and one line says "Media hidden by a content label", with Show unless `noOverride`. |
+| `contentMedia.blur` | `caribou-status-media` gets `sensitive`; `contentMedia.noOverride` sets its `no-override`. The link card, the video card and `bluesky.recordCard` lose their image (the video does not play, "Bluesky video"), and one line says "Media hidden by a content label", with Show unless `noOverride`. |
 | `avatar.blur` (the post's result) | The author's avatar is blurred. |
 | a quoted post | The same rules with its own `bluesky.moderation`, inside the quote card: filter and blur cover the quote with its reasons; Show unless `noOverride`; the avatar blurs. |
 | profile header | `avatar` and `banner` from the account's `bluesky.moderation`. A Bluesky account with no result yet is blurred (fail closed). |
@@ -634,6 +634,53 @@ prefs and definitions again (one load at a time), sets the reader, and the
 active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
+
+### Bluesky video (#198)
+
+A Bluesky video (`app.bsky.embed.video`) plays in the card, in
+`<caribou-bluesky-video>` (`components/caribou-bluesky-video.ts`). The
+stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
+
+1. **The thumbnail stays until the reader presses play.** Nothing plays by
+   itself, and nothing loads before the press: no playlist, no `hls.js`.
+   So reduced motion is kept: there is no motion the reader did not ask for.
+2. **The thumbnail is a link to the post on bsky.app.** The server renders
+   it, and the first client render equals it (the hydration rule). Without
+   JavaScript, or with a modifier click, the link opens bsky.app. A plain
+   click plays the video in place.
+3. **Safari plays the playlist natively.** A browser that answers
+   `canPlayType('application/vnd.apple.mpegurl')` gets it as the `src`.
+4. **Other browsers use `hls.js`, loaded on the first press only.** It is a
+   dynamic `import()`, in its own chunk, never in the main bundle. A browser
+   with neither (no Media Source Extensions) gets the error of rule 6.
+5. **The embed's size holds the box.** The box uses the embed's
+   `aspectRatio` (16:9 without one), before and after the press, so the
+   page does not jump. A very tall video is capped like an image.
+6. **A stream that fails says so.** A fatal `hls.js` error, a `<video>`
+   error or a failed load of `hls.js` shows "This video could not play."
+   with a link "Watch on bsky.app". The thumbnail stays under it.
+7. **The alt text is shown and read.** It is the video's accessible name
+   (`Play video: <alt>`, then the `<video>` label), and an ALT badge shows it,
+   as on images. With no alt text the name is "Play video".
+8. **Leaving the DOM stops it.** When the card leaves the DOM, the `hls.js`
+   instance is destroyed and the `<video>` source is removed. Back in the
+   DOM, the thumbnail shows again.
+9. **Moderation covers it.** A media label that hides media (`contentMedia`
+   blur) shows the plain video card with no image, as before; the player
+   renders only when the media is shown. The reader veil and every other
+   cover hide the whole post, player included. Leaving that state is rule 8.
+10. **A quote with video (`recordWithMedia`) plays the same way.** The video
+    is the outer post's media; the quote card shows under it.
+11. **Mastodon does not change.** Only a Bluesky post's video card with a
+    playlist becomes the player. A video card with no playlist keeps the
+    play mark that links to bsky.app.
+
+**CSP.** The pages send no Content-Security-Policy, so nothing changed.
+A CSP added later must allow `media-src https://video.bsky.app blob:` (the
+`hls.js` player gives the `<video>` a `blob:` source) and `worker-src blob:`
+(`hls.js` starts its worker from a `blob:` URL), and
+`connect-src https://video.bsky.app` for the playlist and its segments.
+The sign-in complete page's CSP is not touched: it shows no video.
 
 ### Bluesky lists (#195)
 

@@ -9,7 +9,7 @@ import {
   activeUserKey, addUserSession, statusCache, users,
 } from '@beatzball/caribou-state'
 import {
-  externalView, feedGeneratorView,
+  externalView, feedGeneratorView, videoView,
 } from '../../../../packages/bluesky-client/src/__fixtures__/embeds.js'
 import '../caribou-status-card.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
@@ -179,6 +179,67 @@ describe('contentMedia covers the cards and their images', () => {
     const el = await mount(await mappedPost(withEmbed(feedGeneratorView, [])))
     expect(linkCards(el)[0]!.card!.image).toBe(feedGeneratorView.record.avatar)
     expect($(el, '.media-label')).toBeNull()
+  })
+})
+
+// README, "Bluesky video", rule 9: the player renders only when the media
+// is shown. Under a media cover the card is the plain video card, no image.
+describe('a video under moderation', () => {
+  const withEmbed = (embed: object, labels: ReturnType<typeof label>[]) => {
+    const view = post({ labels })
+    ;(view as { embed: unknown }).embed = embed
+    return view
+  }
+  const player = (el: Element) => $(el, 'caribou-bluesky-video')
+
+  it('rule 9: a clean post plays the video', async () => {
+    signIn()
+    const el = await mount(await mappedPost(withEmbed(videoView, [])))
+    expect(player(el)).not.toBeNull()
+    expect(linkCards(el)).toHaveLength(0)
+  })
+
+  it('rule 9: a media label hides the player, with Show; Show brings it', async () => {
+    signIn(WARN)
+    const el = await mount(await mappedPost(withEmbed(videoView, [label('graphic-media', BSKY_LABELER)]), WARN))
+    expect(player(el)).toBeNull()
+    expect(linkCards(el)[0]!.card!.image).toBeNull()
+    expect($(el, '.media-label')!.textContent).toContain('Media hidden by a content label')
+    $(el, 'button.media-toggle')!.click()
+    await settle(el)
+    expect(player(el)).not.toBeNull()
+    // Hide again: the player leaves the DOM (rule 8 stops it).
+    $(el, 'button.media-toggle')!.click()
+    await settle(el)
+    expect(player(el)).toBeNull()
+  })
+
+  it('rule 9: a no-override label never shows the player', async () => {
+    signIn()
+    const el = await mount(await mappedPost(withEmbed(videoView, [label('porn', BSKY_LABELER)])), 'focused')
+    expect(player(el)).toBeNull()
+    expect($(el, 'button.media-toggle')).toBeNull()
+  })
+
+  it('rule 9: the reader veil covers the player', async () => {
+    agent = fakeAgent()
+    signInBluesky(blueskyClient(agent), null)
+    const el = await mount(await mappedPost(withEmbed(videoView, [])))
+    expect($(el, 'article.labeled')).not.toBeNull()
+    expect(player(el)).toBeNull()
+    setBlueskyReader(readerOf())
+    await settle(el)
+    expect(player(el)).not.toBeNull()
+  })
+
+  it('rule 10: a quote with a video plays the video and shows the quote', async () => {
+    signIn()
+    // A clean quote (the fixture's `recordView` quotes a muted author).
+    const view = quoting({})
+    ;(view as { embed: unknown }).embed = { $type: 'app.bsky.embed.recordWithMedia#view', record: view.embed, media: videoView }
+    const el = await mount(await mappedPost(view))
+    expect(player(el)).not.toBeNull()
+    expect($(el, 'caribou-status-quote')).not.toBeNull()
   })
 })
 

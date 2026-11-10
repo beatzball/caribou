@@ -138,8 +138,15 @@ describe('mapEmbed', () => {
       height: 1920,
       providerName: 'bsky.app',
       authors: [],
-      embedUrl: '',
+      embedUrl: fx.videoView.playlist,
     })
+  })
+
+  it('video rule: keeps an http(s) playlist in embedUrl and drops any other', () => {
+    expect(map({ ...fx.videoView, playlist: 'javascript:alert(1)' }).card?.embedUrl).toBe('')
+    const { playlist: _p, ...noPlaylist } = fx.videoView
+    expect(map(noPlaylist).card?.embedUrl).toBe('')
+    expect(map(fx.recordWithVideoView).card?.embedUrl).toBe(fx.videoView.playlist)
   })
 
   it('titles a video with no alt text "Video" and drops a bad thumbnail', () => {
