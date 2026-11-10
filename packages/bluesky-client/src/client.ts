@@ -4,8 +4,8 @@ import {
   CaribouError, createDedup,
   type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet,
   type BlueskyModerationResult, type BlueskyOwnPost, type BlueskyPostRecord,
-  type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type SavedFeed, type Status,
-  type TimelineKind, type TimelinePage,
+  type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type SavedFeed, type Search,
+  type SearchInput, type Status, type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
 import { answerCoverage, commonLabelers } from './content-labelers.js'
@@ -55,7 +55,9 @@ export type BlueskyAgent = Pick<Agent,
     bsky: {
       bookmark: Pick<Agent['app']['bsky']['bookmark'], 'getBookmarks'>
       graph: Pick<Agent['app']['bsky']['graph'], 'getMutes' | 'getBlocks'>
-      feed?: Pick<Agent['app']['bsky']['feed'], 'getFeed' | 'getFeedGenerators'>
+      // Search (#192, #193) and feeds (#194). Optional so a fake agent without them still types.
+      actor?: Pick<Agent['app']['bsky']['actor'], 'searchActors'>
+      feed?: Pick<Agent['app']['bsky']['feed'], 'searchPosts' | 'getFeed' | 'getFeedGenerators'>
     }
   }
 } & BlueskyActionsAgent
@@ -181,6 +183,23 @@ function ownPostRkey(uri: string, reader: string): string {
 
 function notBluesky(method: string, instead: string): () => Promise<never> {
   return () => Promise.reject(new CaribouError('not_found', `Bluesky: ${method} is Mastodon's; use ${instead}`))
+}
+
+/** The message a search read's error carries (README, "Search"). */
+const RATE_LIMITED_MESSAGE = 'Bluesky is getting too many requests. Wait a minute, then try again.'
+const UNREACHABLE_MESSAGE = 'Could not reach Bluesky.'
+
+function searchError(err: CaribouError): CaribouError {
+  const opts = { ...(err.status !== undefined ? { status: err.status } : {}), ...(err.retryAfter !== undefined ? { retryAfter: err.retryAfter } : {}) }
+  if (err.code === 'rate_limited') return new CaribouError('rate_limited', RATE_LIMITED_MESSAGE, opts)
+  if (err.code === 'unreachable') return new CaribouError('unreachable', UNREACHABLE_MESSAGE, opts)
+  return err
+}
+
+const NO_SEARCH_CURSORS = { accountsCursor: null, statusesCursor: null }
+
+function noTagFollow(): Promise<never> {
+  return Promise.reject(new CaribouError('not_found', 'Bluesky cannot follow a tag'))
 }
 
 // A feed generator's AT URI: `at://<did>/app.bsky.feed.generator/<rkey>`.
@@ -579,6 +598,75 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
   const author = { posts: 'posts_no_replies', replies: 'posts_with_replies', media: 'posts_with_media' } as const
 
+  // --- search (README, "Search") ---
+
+  // A search read: its errors carry a message a screen can show.
+  async function searchRun<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    try {
+      return await run(key, fn)
+    } catch (err) {
+      throw err instanceof CaribouError ? searchError(err) : err
+    }
+  }
+
+  function searchApi() {
+    const { actor, feed } = agent.app.bsky
+    if (!actor || !feed) throw new CaribouError('not_found', 'Bluesky: this session cannot search')
+    return { actor, feed }
+  }
+
+  // An empty page ends its kind, even with a cursor.
+  const nextOf = (raw: readonly unknown[], cursor: string | undefined): string | null =>
+    raw.length > 0 ? cursor ?? null : null
+
+  async function search(params: SearchInput): Promise<Search> {
+    const q = params.q.trim()
+    const empty: Search = { accounts: [], statuses: [], hashtags: [], bluesky: { ...NO_SEARCH_CURSORS } }
+    if (!q || params.type === 'hashtags') return empty
+    const wantAccounts = params.type !== 'statuses'
+    const wantStatuses = params.type !== 'accounts'
+    // A cursor names a page of one kind.
+    const cursor = params.type && params.cursor ? { cursor: params.cursor } : {}
+    const limit = params.limit ? { limit: params.limit } : {}
+    return searchRun(`search:${params.type ?? ''}:${q}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
+      const api = searchApi()
+      const [people, found] = await Promise.all([
+        wantAccounts ? answer(() => api.actor.searchActors({ q, ...cursor, ...limit })) : null,
+        wantStatuses ? answer(() => api.feed.searchPosts({ q, ...cursor, ...limit })) : null,
+      ])
+      return {
+        accounts: people ? people.data.actors.map((v) => account(v, people.coverage)) : [],
+        statuses: found ? posts(found.data.posts, found.coverage) : [],
+        hashtags: [],
+        bluesky: {
+          accountsCursor: people ? nextOf(people.data.actors, people.data.cursor) : null,
+          statusesCursor: found ? nextOf(found.data.posts, found.data.cursor) : null,
+        },
+      }
+    })
+  }
+
+  // The hashtag timeline: the newest posts with the tag, as bsky.app's
+  // hashtag page asks for them.
+  async function hashtag(tag: string, params: { sinceId?: string; cursor?: string; limit?: number }): Promise<TimelinePage> {
+    const q = `#${tag}`
+    const fetchPage = async (cursor: string | undefined, limit: number | undefined) => {
+      const { data, coverage } = await answer(() => searchApi().feed.searchPosts({
+        q, sort: 'latest', ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}),
+      }))
+      // A search answers posts, not feed entries: each post is its own entry.
+      return { data: { feed: data.posts.map((post): AppBskyFeedDefs.FeedViewPost => ({ post })), ...(data.cursor ? { cursor: data.cursor } : {}) }, coverage }
+    }
+    if (params.sinceId) {
+      const sinceId = params.sinceId
+      return searchRun(`hashtag:${q}:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId))
+    }
+    return searchRun(`hashtag:${q}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
+      const { data, coverage } = await fetchPage(params.cursor, params.limit)
+      return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
+    })
+  }
+
   return {
     userKey,
     capabilities: BLUESKY_CAPABILITIES,
@@ -591,7 +679,8 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (kind === 'local' || kind === 'public') {
         throw new CaribouError('not_found', `Bluesky has no ${kind} timeline`)
       }
-      return notYet(`the ${kind.type} timeline`, kind.type === 'hashtag' ? '#193' : '#195')()
+      if (kind.type === 'hashtag') return hashtag(kind.tag, params)
+      return notYet(`the ${kind.type} timeline`, '#195')()
     },
 
     async fetchStatus(statusId) {
@@ -676,9 +765,11 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     // Like, repost, bookmark, follow, mute, block (#188; README, "Actions").
     ...createActions(agent, write, opts.compose?.nextRkey),
 
-    fetchTag: notYet('hashtags', '#193'),
-    followTag: notYet('hashtags', '#193'),
-    unfollowTag: notYet('hashtags', '#193'),
+    // Bluesky has no tag follow (spec 9). The tag page hides Follow by
+    // `capabilities.followTags`.
+    fetchTag: noTagFollow,
+    followTag: noTagFollow,
+    unfollowTag: noTagFollow,
 
     fetchLists: notYet('lists', '#195'),
     fetchList: notYet('lists', '#195'),
@@ -794,6 +885,6 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       }
     },
 
-    search: notYet('search', '#192'),
+    search,
   }
 }

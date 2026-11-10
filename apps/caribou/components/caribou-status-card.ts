@@ -29,7 +29,7 @@ import { POLL_EDIT_REFUSED, redraftOf } from './_redraft.js'
 import { showStatusHistory } from './caribou-status-history.js'
 import { spaClick } from './_spa-link.js'
 import { tagPath } from './_tag-path.js'
-import { hashtagOf, sameUrl } from './_post-links.js'
+import { blueskyTagPathOf, hashtagOf, sameUrl } from './_post-links.js'
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
@@ -1222,6 +1222,13 @@ export class CaribouStatusCard extends LitElement {
       e.preventDefault()
       const href = tagPath(tag)
       void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
+      return
+    }
+    // A tag in a Bluesky post opens the Bluesky hashtag page (#193).
+    const blueskyTag = blueskyTagPathOf(a, display)
+    if (blueskyTag) {
+      e.preventDefault()
+      void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(blueskyTag))
       return
     }
     if (!a.matches('.mention') || a.matches('.hashtag')) return

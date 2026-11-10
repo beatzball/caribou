@@ -687,6 +687,11 @@ export interface Search {
   accounts: Account[]
   statuses: Status[]
   hashtags: Tag[]
+  /**
+   * Bluesky only: where the next page of each kind starts, or null when
+   * that kind ends (`packages/bluesky-client` README, "Search").
+   */
+  bluesky?: { accountsCursor: string | null; statusesCursor: string | null }
 }
 
 // --------------------------------------------------------------- instance

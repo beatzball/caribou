@@ -1,7 +1,7 @@
-import { html, css } from 'lit'
+import { html, css, type PropertyValues } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import { activeUserKey } from '@beatzball/caribou-state'
+import { activeClient, activeUserKey } from '@beatzball/caribou-state'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
 import { getQuery, getRouterParams } from 'h3'
@@ -16,13 +16,16 @@ import '../../components/caribou-timeline.js'
 import type { TimelineInitial } from '../../components/caribou-timeline.js'
 import '../../components/caribou-tag-header.js'
 import '../../components/caribou-auth-required.js'
+import '../../components/caribou-bluesky-tag.js'
 import { enterWithCache } from '../../components/_page-cache.js'
-import { parseTagParam, tagPath } from '../../components/_tag-path.js'
+import { blueskyTagRedirect, parseTagParam, tagPath } from '../../components/_tag-path.js'
 
 // `tag` is the name as the path gave it, decoded; case is kept for the
 // heading, and the server ignores it. `not-found` is a name no hashtag can
-// have, so no request goes out for it.
-export type TagPageData = (TimelinePageData | { kind: 'not-found' }) & {
+// have, so no request goes out for it. `bluesky` is `?net=bsky`: post
+// search needs a token, so the server fetches nothing and the client
+// decides (`<caribou-bluesky-tag>`; README, "Bluesky search and hashtag page").
+export type TagPageData = (TimelinePageData | { kind: 'not-found' } | { kind: 'bluesky' }) & {
   shell: ShellInfo
   tag: string
   /** The document title; Litro moves it into `<title>` and out of the data. */
@@ -57,8 +60,9 @@ export const pageData = definePageData<TagPageData>(async (event) => {
   }
   // Litro writes `seoTitle` into the page as it is, so it is escaped here.
   const seoTitle = escapeHtml(titleFor(tag))
-  if (!resolution.instance) return { kind: 'auth-required', shell, tag, seoTitle }
   const query = getQuery(event)
+  if (query.net === 'bsky') return { kind: 'bluesky', shell, tag, seoTitle }
+  if (!resolution.instance) return { kind: 'auth-required', shell, tag, seoTitle }
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
     const fetched = await fetchTagTimeline({ instance: resolution.instance, tag, maxId })
@@ -87,8 +91,43 @@ export class TagPage extends LitroPage {
   @state() private signedIn = false
   private disposeSession: (() => void) | null = null
 
+  // True after mount while a Bluesky account is active: the page then shows
+  // the Bluesky tag page in place of the Mastodon one.
+  @state() private bluesky = false
+  // True once this page rewrote its address to `?net=bsky`. From then on it
+  // is the Bluesky page, whatever account is active, so the address and the
+  // body agree (#251). New page data starts over.
+  @state() private routed = false
+  private network: string | null = null
+
+  // A Bluesky reader on the Mastodon tag page gets the Bluesky one (README,
+  // "Bluesky search and hashtag page"). The Mastodon timeline is shown only
+  // with a Mastodon account active. The page renders the Bluesky body
+  // itself and only rewrites the address (`blueskyTagRedirect`): a route
+  // change during a full load's mount swap would be missed by the router.
   protected override firstUpdated() {
-    this.disposeSession = effect(() => { this.signedIn = activeUserKey.value !== null })
+    this.disposeSession = effect(() => {
+      const network = activeClient.value?.capabilities.network ?? null
+      this.network = network
+      this.signedIn = activeUserKey.value !== null && network !== 'bluesky'
+      this.bluesky = network === 'bluesky'
+      this.routeToBluesky()
+    })
+  }
+
+  protected override willUpdate(changed: PropertyValues<this>) {
+    // New page data (the router can reuse this element): decide again.
+    if (this.hasUpdated && changed.has('serverData' as keyof TagPage)) this.routed = false
+  }
+
+  // Rewrites `/tags/<tag>` to `/tags/<tag>?net=bsky` for a Bluesky reader.
+  private routeToBluesky() {
+    const data = this.serverData as TagPageData | null
+    if (!this.isConnected || !data || data.kind === 'not-found' || data.kind === 'bluesky' || !atTagPath(data.tag)) return
+    const to = blueskyTagRedirect(location.pathname, location.search, this.network)
+    if (!to) return
+    history.replaceState(history.state, '', to)
+    this.routed = true
   }
 
   // A revisit paints from the last copy at once, and the fresh page data
@@ -107,7 +146,8 @@ export class TagPage extends LitroPage {
   //
   // Only the page at the address sets it. A page the reader has left can
   // still render: `enterWithCache` hands it fresh data after it is gone.
-  protected override updated() {
+  protected override updated(changed: PropertyValues<this>) {
+    if (changed.has('serverData' as keyof TagPage) && this.disposeSession) this.routeToBluesky()
     const data = this.serverData as TagPageData | null
     if (data?.tag && this.isConnected && atTagPath(data.tag)) document.title = titleFor(data.tag)
   }
@@ -128,6 +168,13 @@ export class TagPage extends LitroPage {
       return html`
         <caribou-app-shell instance=${inst}>
           <article>#${data.tag} is not a hashtag.</article>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'bluesky' || this.routed || (this.bluesky && data.tag)) {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <caribou-bluesky-tag tag=${data.tag}></caribou-bluesky-tag>
         </caribou-app-shell>
       `
     }

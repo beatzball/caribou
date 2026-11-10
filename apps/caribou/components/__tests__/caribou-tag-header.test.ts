@@ -63,6 +63,19 @@ describe('<caribou-tag-header>', () => {
     expect(button(el)).toBeNull()
   })
 
+  // Bluesky cannot follow a tag (#193): no button, and no tag read.
+  it('shows no Follow and reads nothing when the network cannot follow tags', async () => {
+    const client = signIn()
+    const caps = { ...client.capabilities, followTags: false }
+    vi.spyOn(client, 'capabilities', 'get').mockReturnValue(caps)
+    const fetchTag = vi.spyOn(client, 'fetchTag').mockResolvedValue(tag('Caturday', false))
+    const el = await mount()
+    await flush()
+    await el.updateComplete
+    expect(button(el)).toBeNull()
+    expect(fetchTag).not.toHaveBeenCalled()
+  })
+
   it('follows the tag at once, then unfollows it', async () => {
     const client = signIn()
     const fetchTag = vi.spyOn(client, 'fetchTag').mockResolvedValue(tag('Caturday', false))
