@@ -15,7 +15,7 @@ import {
   type BlueskyDriver,
 } from '@beatzball/caribou-state'
 import { BLUESKY_CALLBACK_PATH, blueskyOAuthConfig, loadBluesky, type BlueskyBrowser } from './_bluesky.js'
-import { BLUESKY_RETRY_EVENT, blueskyReader, setBlueskyReader } from './_bluesky-moderation.js'
+import { BLUESKY_RETRY_EVENT, blueskyGoneLabelers, blueskyReader, setBlueskyReader } from './_bluesky-moderation.js'
 
 // The active Bluesky reader's moderation inputs (prefs and label
 // definitions) go to the one reader signal in `_bluesky-moderation.ts`,
@@ -29,9 +29,11 @@ type Restored = Awaited<ReturnType<BlueskyBrowser['restoreClient']>>
 // (`BLUESKY_RETRY_EVENT`): its definitions load again, and the client's
 // calls wait for that, so the card's refetch is judged with the new ones.
 // `checkedAt`: when its definitions were last loaded or checked.
+// `removing`: the gone-labeler removals in flight, by DID (one each).
 let active: {
   userKey: string; restored: Restored; reloading: Promise<void> | null
   rechecking: Promise<void> | null; checkedAt: number
+  removing?: Map<string, Promise<RemoveOutcome>>
 } | null = null
 
 /**
@@ -43,8 +45,35 @@ export const LABELER_RECHECK_MS = 10 * 60_000
 /** A return to the foreground checks again, unless a check ran this recently. */
 export const FOREGROUND_RECHECK_MIN_MS = 60_000
 
-function publishReader(userKey: string, r: { prefs: Restored['prefs']; labelDefs: Restored['labelDefs'] }): void {
+function publishReader(userKey: string, r: { prefs: Restored['prefs']; labelDefs: Restored['labelDefs']; gone: readonly string[] }): void {
   setBlueskyReader({ userKey: userKey as `${string}@${string}`, prefs: r.prefs, labelDefs: r.labelDefs })
+  blueskyGoneLabelers.value = { userKey, dids: r.gone ?? [] }
+}
+
+/** How a removal ended. `stale`: the account changed; nothing was shown. */
+export type RemoveOutcome = 'removed' | 'back' | 'absent' | 'stale'
+
+/**
+ * Removes a gone labeler from the active reader's prefs (#238; bluesky
+ * README, "A gone labeler"). The caller has asked the reader first. One
+ * removal per DID at a time: a second call gets the first one's promise.
+ * The answer is shown only while its account is still active. Throws on a
+ * failed check or write; the reader then stays as it was.
+ */
+export function removeActiveGoneLabeler(did: string): Promise<RemoveOutcome> {
+  const a = active
+  if (!a || activeUserKey.peek() !== a.userKey) return Promise.resolve('stale')
+  a.removing ??= new Map()
+  const running = a.removing.get(did)
+  if (running) return running
+  const p = a.restored.removeGoneLabeler(did).then((r): RemoveOutcome => {
+    if (active !== a || activeUserKey.peek() !== a.userKey) return 'stale'
+    a.checkedAt = Date.now()
+    publishReader(a.userKey, r)
+    return r.outcome
+  }).finally(() => { a.removing?.delete(did) })
+  a.removing.set(did, p)
+  return p
 }
 
 /** Loads the active reader's moderation inputs again. One at a time. */
@@ -167,6 +196,7 @@ export function installBlueskyDriver(): void {
   // The reader belongs to one account.
   activeUserKey.subscribe((key) => {
     if (blueskyReader.peek() && blueskyReader.peek()!.userKey !== key) setBlueskyReader(null)
+    if (blueskyGoneLabelers.peek() && blueskyGoneLabelers.peek()!.userKey !== key) blueskyGoneLabelers.value = null
     if (active && active.userKey !== key) active = null
   })
   // A cover's Retry (#184): load the definitions again.

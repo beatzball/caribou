@@ -634,6 +634,21 @@ active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
 
+**A gone labeler (#238).** A labeler in the reader's prefs that
+`getServices` has no view for keeps every Bluesky card covered (bluesky
+README, "A gone labeler"). `<caribou-gone-labelers>`, in the app shell,
+then shows one notice per gone labeler: "A labeler in your Bluesky
+moderation settings is gone: <DID>. Bluesky posts stay covered until you
+remove it." with a "Remove" button. The button asks first
+(`confirmDialog`, "Remove labeler?"). Only a yes sends the write, and one
+click sends it once. While it runs the button is busy. When the answer
+lands for another account than the one it was sent for, nothing changes
+on screen. On `removed` or `back` the glue sets the reader again, and the
+notice goes when the labeler is no longer gone. On an error the notice
+stays and says "Could not remove the labeler. Try again." The cover stays
+the whole time, until the new reader settles it. The server and the first
+client render show nothing (the reader signal is empty then).
+
 ### Bluesky compose (#189)
 
 `<caribou-compose-dialog>` with a Bluesky account active. Every rule here

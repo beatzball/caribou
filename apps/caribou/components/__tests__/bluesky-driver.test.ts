@@ -9,6 +9,7 @@ const DID = 'did:plc:aliceaaaaaaaaaaaaaaaaaaa'
 const KEY = `${DID}@bsky` as const
 const reloadModeration = vi.fn()
 const recheckLabelers = vi.fn()
+const removeGoneLabeler = vi.fn()
 const fetchStatus = vi.fn(async (id: string) => ({ id }))
 const restoreClient = vi.fn()
 
@@ -22,8 +23,8 @@ vi.mock('../_bluesky.js', async (importOriginal) => ({
   })),
 }))
 
-const { blueskyDriver, installBlueskyDriver, LABELER_RECHECK_MS, FOREGROUND_RECHECK_MIN_MS } = await import('../_bluesky-session.js')
-const { blueskyReader, BLUESKY_RETRY_EVENT } = await import('../_bluesky-moderation.js')
+const { blueskyDriver, installBlueskyDriver, removeActiveGoneLabeler, LABELER_RECHECK_MS, FOREGROUND_RECHECK_MIN_MS } = await import('../_bluesky-session.js')
+const { blueskyGoneLabelers, blueskyReader, BLUESKY_RETRY_EVENT } = await import('../_bluesky-moderation.js')
 
 function bsky(): BlueskySession {
   return { network: 'bluesky', userKey: KEY, did: DID, handle: 'alice.example.com', pds: 'https://pds.example.test', generation: 'G1', account: null, createdAt: 1 }
@@ -36,6 +37,8 @@ beforeEach(() => {
   activeUserKey.value = null
   localStorage.clear()
   blueskyReader.value = null
+  blueskyGoneLabelers.value = null
+  removeGoneLabeler.mockReset()
   reloadModeration.mockReset()
   recheckLabelers.mockReset()
   recheckLabelers.mockResolvedValue({ prefs: null, labelDefs: {} })
@@ -43,7 +46,7 @@ beforeEach(() => {
   restoreClient.mockReset()
   restoreClient.mockImplementation(async () => ({
     client: { userKey: KEY, capabilities: { network: 'bluesky' }, timelineOrder: () => null, fetchStatus },
-    prefs: null, labelDefs: null, reloadModeration, recheckLabelers,
+    prefs: null, labelDefs: null, gone: [], reloadModeration, recheckLabelers, removeGoneLabeler,
   }))
   installBlueskyDriver()
 })
@@ -189,5 +192,68 @@ describe('the labeler definitions are checked again', () => {
     await vi.advanceTimersByTimeAsync(LABELER_RECHECK_MS)
     expect(recheckLabelers).toHaveBeenCalledTimes(1)
     expect(blueskyReader.value).toEqual({ userKey: KEY, prefs: null, labelDefs: null })
+  })
+})
+
+// A gone labeler (#238; app README, "A gone labeler").
+describe('a gone labeler', () => {
+  const GONE = 'did:plc:gonelabeleraaaaaaaaaaaaa'
+
+  it('a restore names the gone labelers for the active account; a switch away clears them', async () => {
+    restoreClient.mockImplementation(async () => ({
+      client: { userKey: KEY, capabilities: { network: 'bluesky' }, timelineOrder: () => null, fetchStatus },
+      prefs: null, labelDefs: {}, gone: [GONE], reloadModeration, recheckLabelers, removeGoneLabeler,
+    }))
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    expect(blueskyGoneLabelers.value).toEqual({ userKey: KEY, dids: [GONE] })
+    activeUserKey.value = null
+    expect(blueskyGoneLabelers.value).toBeNull()
+  })
+
+  it('a removal runs once per DID and sets the reader from its answer', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    removeGoneLabeler.mockReturnValue(new Promise((r) => { finish = r }))
+    const a = removeActiveGoneLabeler(GONE)
+    const b = removeActiveGoneLabeler(GONE)
+    expect(b).toBe(a)
+    expect(removeGoneLabeler).toHaveBeenCalledTimes(1)
+    expect(removeGoneLabeler).toHaveBeenCalledWith(GONE)
+    finish({ prefs: { labelers: [] }, labelDefs: { x: [] }, gone: [], outcome: 'removed' })
+    expect(await a).toBe('removed')
+    expect(blueskyReader.value).toEqual({ userKey: KEY, prefs: { labelers: [] }, labelDefs: { x: [] } })
+    expect(blueskyGoneLabelers.value).toEqual({ userKey: KEY, dids: [] })
+  })
+
+  it('an answer that lands after a switch to another account changes nothing on screen', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    removeGoneLabeler.mockReturnValue(new Promise((r) => { finish = r }))
+    const a = removeActiveGoneLabeler(GONE)
+    activeUserKey.value = 'bob@example.social' as typeof activeUserKey.value
+    finish({ prefs: null, labelDefs: {}, gone: [], outcome: 'removed' })
+    expect(await a).toBe('stale')
+    expect(blueskyReader.value).toBeNull()
+    expect(blueskyGoneLabelers.value).toBeNull()
+  })
+
+  it('a failed removal throws and leaves the reader as it was', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    const before = blueskyReader.value
+    removeGoneLabeler.mockRejectedValue(new Error('offline'))
+    await expect(removeActiveGoneLabeler(GONE)).rejects.toThrow('offline')
+    expect(blueskyReader.value).toBe(before)
+    // The next try runs again.
+    removeGoneLabeler.mockResolvedValue({ prefs: null, labelDefs: {}, gone: [], outcome: 'absent' })
+    expect(await removeActiveGoneLabeler(GONE)).toBe('absent')
+  })
+
+  it('with no Bluesky account active, nothing is sent', async () => {
+    expect(await removeActiveGoneLabeler(GONE)).toBe('stale')
+    expect(removeGoneLabeler).not.toHaveBeenCalled()
   })
 })

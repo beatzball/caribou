@@ -305,6 +305,41 @@ Tracked in #240. The owner accepted it on 2026-11-09.
   gap: a labeler taken down after its definitions loaded …". If the window
   is closed, change it to expect the cover at once.
 
+#### A gone labeler (#238)
+
+A labeler in the reader's prefs can be gone: deleted, taken down, or not a
+labeler. `getServices` then answers with no view for it. It has no
+definitions, so veil rule 1 covers every Bluesky post and profile, and
+Retry does not help. Caribou does not remove it on its own.
+
+- **Which labelers are gone** (`goneLabelers(prefs, labelDefs)`, in
+  `./moderation`): each DID in `prefs.labelers` with no entry in
+  `labelDefs`, in prefs order, once each. Bluesky's own labeler is never
+  listed: a reader cannot unsubscribe from it. Prefs or definitions not
+  loaded (`null`): none. A failed `getServices` is not "gone".
+  `restoreClient` gives the list as `gone`, and `reloadModeration`,
+  `recheckLabelers` and `removeGoneLabeler` return it.
+- **The cover stays** until the reader removes the labeler or it comes
+  back. Nothing here changes the veil.
+- **Removal** (`removeGoneLabeler(did)`, only after the reader confirms):
+  1. A DID not in `gone` now (Bluesky's labeler, a labeler that is not
+     gone, a DID not in the prefs): refused, no request.
+  2. `getServices` for that DID once more. A view: the labeler is back.
+     Nothing is written; the definitions are checked again
+     (`recheckLabelers`), and the answer is `back`. A failed request
+     throws, and nothing is written. A 401 here or in the write also ends
+     the session ("401").
+  3. The write is the SDK's `updatePreferences`: it reads the prefs again,
+     under the agent's prefs lock, and puts back what the edit returns.
+     The edit takes out only that DID from each `labelersPref`. Every other
+     pref, and its order, stays as read. If the fresh read does not have
+     the DID (another app removed it), nothing is written (`absent`).
+     `putPreferences` has no swap check, so a write from another app
+     between the read and the put can still be lost. The Bluesky app's
+     own writes have the same window.
+  4. Then a full `reloadModeration`, so `prefs`, `labelDefs` and `gone`
+     come from the server. The answer is `removed`.
+
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
 
 A signed-out profile page or thread from the public AppView, with no

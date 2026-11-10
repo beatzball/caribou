@@ -11,7 +11,7 @@ import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { createBlueskyClient, type BlueskyAgent } from './client.js'
 import { detectFacets, nextRkey } from './compose.js'
 import { normalizeXrpcError } from './errors.js'
-import { labelDefsFromServices, readerModerationSource, type LabelDefs } from './moderation.js'
+import { goneLabelers, labelDefsFromServices, readerModerationSource, type LabelDefs } from './moderation.js'
 
 export const BLUESKY_SCOPE = 'atproto transition:generic'
 
@@ -293,14 +293,32 @@ export interface RestoredClient {
    * decisions of this client use the new ones; `prefs` and `labelDefs`
    * above follow too.
    */
-  reloadModeration(): Promise<{ prefs: ModerationPrefs | null; labelDefs: LabelDefs | null }>
+  reloadModeration(): Promise<ModerationInputs>
   /**
    * Checks the definitions again, for the labelers the prefs name now
    * (README, "Labeler coverage"). A labeler `getServices` no longer answers
    * for loses its definitions at once, so the veil covers again. A failed
    * check changes nothing; a 401 ends the session.
    */
-  recheckLabelers(): Promise<{ prefs: ModerationPrefs | null; labelDefs: LabelDefs | null }>
+  recheckLabelers(): Promise<ModerationInputs>
+  /**
+   * The labelers in the prefs with no definitions now (`goneLabelers`,
+   * README "A gone labeler"). Follows the loads and checks above.
+   */
+  gone: string[]
+  /**
+   * Removes one gone labeler from the reader's prefs (README, "A gone
+   * labeler"). Call it only after the reader confirmed. Throws, writing
+   * nothing, for a DID not in `gone` or when the last check fails.
+   */
+  removeGoneLabeler(did: string): Promise<ModerationInputs & { outcome: 'removed' | 'back' | 'absent' }>
+}
+
+/** What a moderation load or check leaves: the inputs and the gone labelers. */
+export interface ModerationInputs {
+  prefs: ModerationPrefs | null
+  labelDefs: LabelDefs | null
+  gone: string[]
 }
 
 export interface RestoreOptions {
@@ -395,21 +413,70 @@ export async function restoreClient(
     compose: { nextRkey, detectFacets: (text) => detectFacets(agent, text) },
     ...(opts.onMapError ? { onMapError: opts.onMapError } : {}),
   })
+  const inputs = (): ModerationInputs => {
+    out.prefs = prefs
+    out.labelDefs = labelDefs
+    out.gone = goneLabelers(prefs, labelDefs)
+    return { prefs, labelDefs, gone: out.gone }
+  }
   const out: RestoredClient = {
-    client, agent, prefs, labelDefs,
+    client, agent, prefs, labelDefs, gone: goneLabelers(prefs, labelDefs),
     async reloadModeration() {
       await loadModeration()
-      out.prefs = prefs
-      out.labelDefs = labelDefs
-      return { prefs, labelDefs }
+      return inputs()
     },
     async recheckLabelers() {
       await recheckLabelers()
-      out.labelDefs = labelDefs
-      return { prefs, labelDefs }
+      return inputs()
+    },
+    async removeGoneLabeler(did) {
+      if (!out.gone.includes(did)) throw new Error(`Bluesky: ${did} is not a gone labeler`)
+      // A 401 ends the session (README: "401"); any failure throws.
+      const ended = (err: unknown): never => {
+        failed(err)
+        throw err
+      }
+      // Once more: a labeler that came back is kept. A failed check throws.
+      const check = await agent.app.bsky.labeler.getServices({ dids: [did], detailed: true }).catch(ended)
+      if (check.data.views.some((v) => (v as { creator?: { did?: string } }).creator?.did === did)) {
+        await recheckLabelers()
+        return { ...inputs(), outcome: 'back' }
+      }
+      // A fresh read under the agent's prefs lock; only this DID changes.
+      let found = false
+      await prefsWriter(agent)((all) => {
+        const next = all.map((pref) => {
+          if (pref.$type !== LABELERS_PREF || !Array.isArray(pref.labelers)) return pref
+          const before = pref.labelers as { did?: unknown }[]
+          const labelers = before.filter((l) => l?.did !== did)
+          if (labelers.length === before.length) return pref
+          found = true
+          return { ...pref, labelers }
+        })
+        return found ? next : false
+      }).catch(ended)
+      await loadModeration()
+      return { ...inputs(), outcome: found ? 'removed' : 'absent' }
     },
   }
   return out
+}
+
+const LABELERS_PREF = 'app.bsky.actor.defs#labelersPref'
+
+type Pref = { $type?: string; labelers?: unknown } & Record<string, unknown>
+type PrefsEdit = (all: Pref[]) => Pref[] | false
+
+/**
+ * The SDK's one prefs write (`updatePreferences`): it reads the prefs again
+ * under the agent's prefs lock and puts back what `edit` returns; `false`
+ * writes nothing. Protected in the SDK's types, so it is checked: an SDK
+ * upgrade that moves it fails the tests instead of writing some other way.
+ */
+function prefsWriter(agent: Agent): (edit: PrefsEdit) => Promise<unknown> {
+  const fn = (agent as unknown as { updatePreferences?: (edit: PrefsEdit) => Promise<unknown> }).updatePreferences
+  if (typeof fn !== 'function') throw new Error('Bluesky SDK: no prefs write')
+  return fn.bind(agent)
 }
 
 // The SDK internals sign-out needs (README: "Sign-out"). Protected in the
