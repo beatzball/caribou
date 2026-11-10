@@ -433,11 +433,14 @@ export async function restoreClient(
     for (const did of missing) misses.set(did, (misses.get(did) ?? 0) + 1)
   }
   // Run only inside a queue job.
+  // Both are built here and set together (README, "One pair").
   async function loadModeration() {
-    prefs = await agent.getPreferences().then((r) => r.moderationPrefs, failed)
-    const labelerDids = labelerDidsOf(prefs)
+    const nextPrefs = await agent.getPreferences().then((r) => r.moderationPrefs, failed)
+    const labelerDids = labelerDidsOf(nextPrefs)
     agent.configureLabelers(labelerDids)
-    labelDefs = await loadDefs(labelerDids)
+    const nextDefs = await loadDefs(labelerDids)
+    prefs = nextPrefs
+    labelDefs = nextDefs
     countMisses()
   }
   // Only a successful answer replaces the definitions: a labeler it has no
