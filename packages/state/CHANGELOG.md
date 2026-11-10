@@ -1,5 +1,20 @@
 # @beatzball/caribou-state
 
+## 0.4.11
+
+### Patch Changes
+
+- [#257](https://github.com/beatzball/caribou/pull/257) [`049c6c3`](https://github.com/beatzball/caribou/commit/049c6c355c1edd3c618454b769971b6377b23265) Thanks [@beatzball](https://github.com/beatzball)! - New `actAsAccounts`, `actAsClient`, `readAsAccount` and `actAs`: act on a Bluesky post as another signed-in Bluesky account. The write goes through that account's own client. It never changes the active account's cached post. An expired account sends nothing, and an answer that lands after expiry counts as expired. A write the server acked is kept for that account and sign-in through the AppView's read lag, so a reread does not hide it and a click never makes a second record. `deferredBlueskyClient` takes `{ splash: false }`, so another account's restore does not show the splash.
+
+- [#258](https://github.com/beatzball/caribou/pull/258) [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky drafts keep reply and quote limits (`bluesky.gates`). A send freezes them with the record and passes them to `blueskyCreatePost`. A reply never sends limits. With no limit, the send and its draft input are as before.
+
+- [#259](https://github.com/beatzball/caribou/pull/259) [`9cc3cf2`](https://github.com/beatzball/caribou/commit/9cc3cf27e605dbec45895375ea07db7af192b780) Thanks [@beatzball](https://github.com/beatzball)! - A Bluesky draft keeps a link card. The record sends it as `app.bsky.embed.external` when there are no images and no quote, and `prepareCardThumb` uploads its image once before Post.
+
+- [#260](https://github.com/beatzball/caribou/pull/260) [`cf311f6`](https://github.com/beatzball/caribou/commit/cf311f6822e5ad00a5cb2151059f37e6daf696e4) Thanks [@beatzball](https://github.com/beatzball)! - Document that the app calls `clearKeptAlive` after a Bluesky muted-words save.
+
+- Updated dependencies [[`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae)]:
+  - @beatzball/caribou-mastodon-client@0.4.9
+
 ## 0.4.10
 
 ### Patch Changes

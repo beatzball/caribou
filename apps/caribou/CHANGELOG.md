@@ -1,5 +1,24 @@
 # caribou-app
 
+## 0.11.2
+
+### Patch Changes
+
+- [#257](https://github.com/beatzball/caribou/pull/257) [`049c6c3`](https://github.com/beatzball/caribou/commit/049c6c355c1edd3c618454b769971b6377b23265) Thanks [@beatzball](https://github.com/beatzball)! - A Bluesky post's More menu has "Act as another account…" when another Bluesky account is signed in. The dialog lists only Bluesky accounts. It shows that account's own Favourite, Boost and Bookmark and writes as that account. The card keeps the active account's view. An expired account says it is signed out and writes nothing. Mastodon posts show no picker yet (#131).
+
+- [#258](https://github.com/beatzball/caribou/pull/258) [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky compose: a new post or a quote can limit who replies (everyone, nobody, people you mention, people you follow, your followers, one of your lists) and turn quotes off. The composer says the limit in plain words. A reply has no such control.
+
+- [#259](https://github.com/beatzball/caribou/pull/259) [`9cc3cf2`](https://github.com/beatzball/caribou/commit/9cc3cf27e605dbec45895375ea07db7af192b780) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky compose shows a link card for the first link in the text, with a Remove button. The card is fetched once after typing pauses, and Post sends it as an external embed with its image.
+
+- [#260](https://github.com/beatzball/caribou/pull/260) [`cf311f6`](https://github.com/beatzball/caribou/commit/cf311f6822e5ad00a5cb2151059f37e6daf696e4) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky muted words on the filters screen. With a Bluesky account, /settings/moderation lists the muted words and adds or removes them: the word, text and tags or tags only, how long, and everyone or only people you do not follow. An expired word stays in the list. After a save, the words apply with no page reload. The Mastodon filters screen is as before.
+
+- [#256](https://github.com/beatzball/caribou/pull/256) [`0b8d690`](https://github.com/beatzball/caribou/commit/0b8d690c6ace2f4cd290937f66962ffc417723f2) Thanks [@beatzball](https://github.com/beatzball)! - Play Bluesky videos in the post card. The thumbnail stays until you press play. Safari plays the stream natively; other browsers load hls.js on the first press only. A stream that fails says so and links to bsky.app.
+
+- Updated dependencies [[`049c6c3`](https://github.com/beatzball/caribou/commit/049c6c355c1edd3c618454b769971b6377b23265), [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae), [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae), [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae), [`9cc3cf2`](https://github.com/beatzball/caribou/commit/9cc3cf27e605dbec45895375ea07db7af192b780), [`9cc3cf2`](https://github.com/beatzball/caribou/commit/9cc3cf27e605dbec45895375ea07db7af192b780), [`cf311f6`](https://github.com/beatzball/caribou/commit/cf311f6822e5ad00a5cb2151059f37e6daf696e4), [`cf311f6`](https://github.com/beatzball/caribou/commit/cf311f6822e5ad00a5cb2151059f37e6daf696e4), [`0b8d690`](https://github.com/beatzball/caribou/commit/0b8d690c6ace2f4cd290937f66962ffc417723f2)]:
+  - @beatzball/caribou-state@0.4.11
+  - @beatzball/caribou-bluesky-client@0.1.6
+  - @beatzball/caribou-mastodon-client@0.4.9
+
 ## 0.11.1
 
 ### Patch Changes
