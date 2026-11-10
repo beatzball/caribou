@@ -257,6 +257,33 @@ describe('a gone labeler', () => {
     expect(reloadModeration).toHaveBeenCalledTimes(1)
   })
 
+  it('switch back while a reload runs: the recovery is queued after it, and its answer is the last one shown (#253)', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    removeGoneLabeler.mockReturnValue(new Promise((r) => { finish = r }))
+    const a = removeActiveGoneLabeler(GONE)
+    activeUserKey.value = null
+    activeUserKey.value = KEY
+    await blueskyDriver.restore(bsky(), hooks)
+    // A Retry starts a reload; it read the prefs before the write landed.
+    let oldLoad!: (v: unknown) => void
+    reloadModeration.mockReturnValueOnce(new Promise((r) => { oldLoad = r }))
+    window.dispatchEvent(new CustomEvent(BLUESKY_RETRY_EVENT, { detail: { id: 'x' } }))
+    expect(reloadModeration).toHaveBeenCalledTimes(1)
+    const fresh = { prefs: { labelers: [] }, labelDefs: { f: [] }, gone: [] }
+    reloadModeration.mockResolvedValue(fresh)
+    finish({ prefs: null, labelDefs: {}, gone: [], outcome: 'removed' })
+    expect(await a).toBe('stale')
+    // Not started yet: the running reload has not ended.
+    expect(reloadModeration).toHaveBeenCalledTimes(1)
+    oldLoad({ prefs: { labelers: [{ did: GONE }] }, labelDefs: {}, gone: [GONE] })
+    await vi.waitFor(() => expect(reloadModeration).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(blueskyReader.value).toEqual({ userKey: KEY, prefs: fresh.prefs, labelDefs: fresh.labelDefs }))
+    expect(blueskyGoneLabelers.value).toEqual({ userKey: KEY, dids: [] })
+    expect(reloadModeration).toHaveBeenCalledTimes(2)
+  })
+
   it('switch back while the restore is pending: that restore reloads once when it finishes', async () => {
     addUserSession(bsky())
     await blueskyDriver.restore(bsky(), hooks)

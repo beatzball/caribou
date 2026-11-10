@@ -340,6 +340,10 @@ Retry does not help. Caribou does not remove it on its own.
   that is asked for while one of the same kind waits in the queue (not
   yet started) joins that one. One that is asked for while its kind runs
   is queued after it, because the running one may have read old prefs.
+- **One pair (#253).** A load reads the prefs, then the definitions for
+  the labelers they name. Both are kept aside until both are in, then
+  set together. So a decision made while a load runs uses the old pair
+  or the new pair, never new prefs with old definitions.
 - **Removal** (`removeGoneLabeler(did)`, only after the reader confirms):
   1. A DID not in `gone` when asked (Bluesky's labeler, a labeler that is
      not gone, a DID not in the prefs): refused, no request. When the job
