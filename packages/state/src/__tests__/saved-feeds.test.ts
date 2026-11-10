@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError, type CaribouClient, type SavedFeed } from '@beatzball/caribou-mastodon-client'
-import { loadSavedFeeds, savedFeedsCache, savedFeedsFor, _resetSavedFeedsForTests } from '../saved-feeds.js'
+import { SAVED_FEEDS_FRESH_MS, loadSavedFeeds, savedFeedsCache, savedFeedsFor, _resetSavedFeedsForTests } from '../saved-feeds.js'
 
 const ME = 'did:plc:alice@bsky' as UserKey
 const OTHER = 'did:plc:bob@bsky' as UserKey
@@ -15,7 +15,10 @@ function client(fn: () => Promise<SavedFeed[]>, userKey: UserKey = ME, network =
   return { userKey, capabilities: { network }, blueskySavedFeeds: vi.fn(fn) } as unknown as CaribouClient
 }
 
-afterEach(() => _resetSavedFeedsForTests())
+afterEach(() => {
+  _resetSavedFeedsForTests()
+  vi.useRealTimers()
+})
 
 describe('loadSavedFeeds', () => {
   it('stores the answer under the account that read it', async () => {
@@ -47,10 +50,51 @@ describe('loadSavedFeeds', () => {
     expect(savedFeedsFor(OTHER)).toEqual([feed('z')])
   })
 
-  it('keeps what it had and throws when a load fails', async () => {
+  it('keeps what it had and throws when a forced load fails', async () => {
     await loadSavedFeeds({ clientSource: () => client(async () => [feed('a')]) })
     const failing = client(async () => { throw new CaribouError('server_error', 'down') })
-    await expect(loadSavedFeeds({ clientSource: () => failing })).rejects.toMatchObject({ code: 'server_error' })
+    await expect(loadSavedFeeds({ clientSource: () => failing, force: true })).rejects.toMatchObject({ code: 'server_error' })
+    expect(savedFeedsFor(ME)).toEqual([feed('a')])
+  })
+
+  it('trusts a fresh copy: no request', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const c = client(async () => [feed('a')])
+    await loadSavedFeeds({ clientSource: () => c })
+    vi.setSystemTime(Date.now() + SAVED_FEEDS_FRESH_MS - 1)
+    expect(await loadSavedFeeds({ clientSource: () => c })).toEqual([feed('a')])
+    expect(c.blueskySavedFeeds).toHaveBeenCalledTimes(1)
+  })
+
+  it('answers an old copy at once and refreshes it in the background', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    let answer = [feed('a')]
+    let resolve!: () => void
+    const c = client(async () => {
+      if (answer.length > 1) await new Promise<void>((r) => { resolve = r })
+      return answer
+    })
+    await loadSavedFeeds({ clientSource: () => c })
+    vi.setSystemTime(Date.now() + SAVED_FEEDS_FRESH_MS + 1)
+    answer = [feed('a'), feed('b')]
+    expect(await loadSavedFeeds({ clientSource: () => c })).toEqual([feed('a')])
+    expect(c.blueskySavedFeeds).toHaveBeenCalledTimes(2)
+    resolve()
+    await vi.waitFor(() => expect(savedFeedsFor(ME)).toEqual([feed('a'), feed('b')]))
+  })
+
+  it('keeps an old copy when its background refresh fails, and does not throw', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    let fail = false
+    const c = client(async () => {
+      if (fail) throw new CaribouError('server_error', 'down')
+      return [feed('a')]
+    })
+    await loadSavedFeeds({ clientSource: () => c })
+    vi.setSystemTime(Date.now() + SAVED_FEEDS_FRESH_MS + 1)
+    fail = true
+    expect(await loadSavedFeeds({ clientSource: () => c })).toEqual([feed('a')])
+    await new Promise((r) => setTimeout(r, 0))
     expect(savedFeedsFor(ME)).toEqual([feed('a')])
   })
 

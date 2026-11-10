@@ -135,6 +135,8 @@ function blobMissing(err: unknown): BlueskyBlobNotFound | null {
 export const CATCH_UP_PAGE_SIZE = 50
 /** Pages a catch-up reads before it calls the answer a gap (spec 6.3, seam 7). */
 export const CATCH_UP_MAX_PAGES = 3
+/** Pages a custom feed's catch-up reads (README, "Feeds"). */
+export const FEED_CATCH_UP_MAX_PAGES = 1
 /** Pages of only unavailable bookmarks the client reads past before it stops. */
 export const BOOKMARK_SKIP_PAGES = 5
 /** The AppView's limit for `getPosts` and `getProfiles`. */
@@ -183,6 +185,12 @@ function notBluesky(method: string, instead: string): () => Promise<never> {
 
 // A feed generator's AT URI: `at://<did>/app.bsky.feed.generator/<rkey>`.
 const FEED_URI = /^at:\/\/(did:[a-z0-9]+:[^/]+)\/app\.bsky\.feed\.generator\/([^/]+)$/i
+
+/**
+ * The most saved feeds the client resolves (README, "Feeds"): the prefs
+ * have no limit, and each 25 cost a request.
+ */
+export const SAVED_FEEDS_MAX = 200
 
 /** The messages a feed's tab shows (README, "Feeds"). */
 export const FEED_GONE = 'This feed is gone. Its owner may have deleted it.'
@@ -310,11 +318,12 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   async function catchUp(
     fetchPage: (cursor: string | undefined) => Promise<{ data: { feed: AppBskyFeedDefs.FeedViewPost[]; cursor?: string }; coverage: BlueskyCoverage }>,
     sinceId: string,
+    maxPages = CATCH_UP_MAX_PAGES,
   ): Promise<TimelinePage> {
     const out: AppBskyFeedDefs.FeedViewPost[] = []
     const covered: BlueskyCoverage[] = []
     let cursor: string | undefined
-    for (let i = 0; i < CATCH_UP_MAX_PAGES; i++) {
+    for (let i = 0; i < maxPages; i++) {
       const { data, coverage } = await fetchPage(cursor)
       covered.push(coverage)
       const at = data.feed.findIndex((e) => feedEntryId(e) === sinceId)
@@ -353,7 +362,9 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     try {
       if (params.sinceId) {
         const sinceId = params.sinceId
-        return await run(`feed:${uri}:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId))
+        // One page: a custom feed may reorder, so the known top is rarely
+        // further down, and more pages would only cost requests.
+        return await run(`feed:${uri}:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId, FEED_CATCH_UP_MAX_PAGES))
       }
       return await run(`feed:${uri}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
         const { data, coverage } = await fetchPage(params.cursor, params.limit)
@@ -381,10 +392,13 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
         else if (it.type === 'feed' && FEED_URI.test(it.value)) kept.push({ id: it.id, kind: 'feed', uri: it.value, pinned: !!it.pinned })
         else continue
         seen.add(it.value)
+        if (kept.length >= SAVED_FEEDS_MAX) break
       }
       const uris = kept.filter((f) => f.kind === 'feed').map((f) => f.uri)
       const ns = uris.length > 0 ? need(agent.app.bsky.feed, 'app.bsky.feed') : null
-      const answers = ns ? await Promise.all(chunks(uris, BATCH).map((feeds) => ns.getFeedGenerators({ feeds }))) : []
+      // One request at a time: a long list must not burst at the AppView.
+      const answers: Awaited<ReturnType<NonNullable<BlueskyAgent['app']['bsky']['feed']>['getFeedGenerators']>>[] = []
+      for (const feeds of ns ? chunks(uris, BATCH) : []) answers.push(await ns!.getFeedGenerators({ feeds }))
       const views = new Map(answers.flatMap((a) => a.data.feeds).map((v) => [v.uri, v]))
       return kept.map((f): SavedFeed => {
         if (f.kind === 'timeline') {

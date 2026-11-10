@@ -38,7 +38,9 @@ export function filterVerdict(
 /** The filter context of a timeline; null for one that is never filtered. */
 export function timelineFilterContext(kind: string): FilterContext | null {
   // Mastodon files list timelines under its home context ("Home and lists").
-  if (kind === 'home' || kind === 'list') return 'home'
+  // A Bluesky feed is a tab of Home (#194): its cards hide a muted or
+  // blocked author as Following does.
+  if (kind === 'home' || kind === 'list' || kind === 'feed') return 'home'
   // Mastodon files hashtag timelines under its public context.
   if (kind === 'local' || kind === 'public' || kind === 'hashtag') return 'public'
   return null

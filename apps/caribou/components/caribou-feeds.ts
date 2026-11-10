@@ -67,24 +67,39 @@ export class CaribouFeeds extends LitElement {
     super.disconnectedCallback()
   }
 
-  private async load(client: CaribouClient): Promise<void> {
-    this.error = null
+  // Whether the read worked. The error stays until the answer: a Retry
+  // keeps its button (busy) in place, so focus is not lost meanwhile.
+  private async load(client: CaribouClient, force = false): Promise<boolean> {
     try {
-      await loadSavedFeeds({ clientSource: () => client })
+      await loadSavedFeeds({ clientSource: () => client, force })
+      if (this.loadedFor === client) this.error = null
+      return true
     } catch (err) {
       if (this.loadedFor === client) this.error = (err as Error).message || 'Could not load your feeds.'
+      return false
     }
   }
 
-  private onRetry = async () => {
+  private onRetry = async (e: Event) => {
     const client = activeClient.peek()
     if (!client || this.retrying) return
+    const button = e.currentTarget as HTMLElement
+    const hadFocus = this.shadowRoot?.activeElement === button
     this.retrying = true
+    let ok = false
     try {
-      await this.load(client)
+      ok = await this.load(client, true)
     } finally {
       this.retrying = false
     }
+    await this.updateComplete
+    // Failed again: the same button is still there, and still focused. It
+    // worked: the button is gone, and focus goes to the list.
+    if (!ok || !hadFocus || button.isConnected) return
+    const list = this.renderRoot.querySelector<HTMLElement>('ul') ?? this.renderRoot.querySelector<HTMLElement>('.notice')
+    if (!list) return
+    if (!list.hasAttribute('tabindex')) list.setAttribute('tabindex', '-1')
+    list.focus()
   }
 
   private renderFeed(f: SavedFeed) {
@@ -107,8 +122,8 @@ export class CaribouFeeds extends LitElement {
   }
 
   private renderBody() {
-    if (this.error) {
-      return html`<div class="failed"><div role="alert">${this.retrying ? '' : this.error}</div>
+    if (this.error !== null || this.retrying) {
+      return html`<div class="failed"><div role="alert">${this.retrying ? '' : this.error ?? ''}</div>
         <caribou-button variant="secondary" ?loading=${this.retrying} @click=${this.onRetry}>Retry</caribou-button></div>`
     }
     const feeds = this.feeds

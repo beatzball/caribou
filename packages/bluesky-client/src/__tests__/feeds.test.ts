@@ -1,6 +1,6 @@
 import type { AppBskyFeedDefs } from '@atproto/api'
 import { describe, expect, it, vi } from 'vitest'
-import { CATCH_UP_PAGE_SIZE, createBlueskyClient, type BlueskyAgent } from '../client.js'
+import { CATCH_UP_PAGE_SIZE, SAVED_FEEDS_MAX, createBlueskyClient, type BlueskyAgent } from '../client.js'
 import { fixture, moderationFor, READER } from './_helpers.js'
 
 vi.mock('../facets.js', () => ({ renderFacets: vi.fn((text: string) => `<p>${text}</p>`) }))
@@ -109,6 +109,37 @@ describe('blueskySavedFeeds', () => {
     expect(agent.app.bsky.feed.getFeedGenerators).not.toHaveBeenCalled()
   })
 
+  it('asks for names one request at a time', async () => {
+    const { agent, client } = setup()
+    const uris = Array.from({ length: 100 }, (_, i) => `at://did:plc:alice/app.bsky.feed.generator/f${i}`)
+    agent.getPreferences.mockResolvedValue({ savedFeeds: uris.map((u, i) => item(String(i), 'feed', u)) })
+    let inFlight = 0
+    let most = 0
+    agent.app.bsky.feed.getFeedGenerators.mockImplementation(async ({ feeds }: { feeds: string[] }) => {
+      inFlight++
+      most = Math.max(most, inFlight)
+      await new Promise((r) => setTimeout(r, 1))
+      inFlight--
+      return { data: { feeds: feeds.map((u) => generator(u, u.split('/').pop()!)) } }
+    })
+    expect(await client.blueskySavedFeeds!()).toHaveLength(100)
+    expect(agent.app.bsky.feed.getFeedGenerators).toHaveBeenCalledTimes(4)
+    expect(most).toBe(1)
+  })
+
+  it(`resolves at most ${SAVED_FEEDS_MAX} saved feeds, the first ones in the reader's order`, async () => {
+    const { agent, client } = setup()
+    const uris = Array.from({ length: 2501 }, (_, i) => `at://did:plc:alice/app.bsky.feed.generator/f${i}`)
+    agent.getPreferences.mockResolvedValue({ savedFeeds: [item('t', 'timeline', 'following'), ...uris.map((u, i) => item(String(i), 'feed', u))] })
+    agent.app.bsky.feed.getFeedGenerators.mockImplementation(async ({ feeds }: { feeds: string[] }) =>
+      ({ data: { feeds: feeds.map((u) => generator(u, u.split('/').pop()!)) } }))
+    const feeds = await client.blueskySavedFeeds!()
+    expect(feeds).toHaveLength(SAVED_FEEDS_MAX)
+    expect(feeds[0]!.kind).toBe('timeline')
+    expect(feeds.at(-1)!.uri).toBe(uris[SAVED_FEEDS_MAX - 2])
+    expect(agent.app.bsky.feed.getFeedGenerators).toHaveBeenCalledTimes(Math.ceil((SAVED_FEEDS_MAX - 1) / 25))
+  })
+
   it('fails when the prefs or the names fail; a 401 ends the session', async () => {
     const { agent, client, onUnauthorized } = setup()
     agent.getPreferences.mockRejectedValue(xrpcError(502, 'Bad'))
@@ -166,6 +197,16 @@ describe('fetchTimeline feed', () => {
     expect(agent.app.bsky.feed.getFeed).toHaveBeenCalledWith({ feed: CATS, limit: CATCH_UP_PAGE_SIZE })
     expect(res.map((s) => s.id.split('/').pop())).toEqual(['p9', 'p8'])
     expect(res.nextCursor).toBeNull()
+  })
+
+  it('reads one page only for a catch-up: a feed may reorder, so a miss is a gap at once', async () => {
+    const { agent, client } = setup()
+    agent.app.bsky.feed.getFeed.mockImplementation(async ({ cursor }: { cursor?: string }) =>
+      ({ data: { feed: [entry(`${cursor ?? 'a'}1`), entry(`${cursor ?? 'a'}2`)], cursor: `${cursor ?? ''}n` } }))
+    const res = await client.fetchTimeline({ type: 'feed', uri: CATS }, { sinceId: 'at://did:plc:bob/app.bsky.feed.post/pgone' })
+    expect(agent.app.bsky.feed.getFeed).toHaveBeenCalledTimes(1)
+    expect(res).toHaveLength(2)
+    expect(res.nextCursor).toBe('n')
   })
 
   it('says a gone feed is gone', async () => {

@@ -646,12 +646,16 @@ and the rules for reading it are in the `packages/bluesky-client` README,
 Following is first, always, at `/home`. Then each pinned feed, in the
 reader's order, at `/home?feed=<feed URI>`. If the address names a feed that
 is not pinned, it gets one more tab at the end. While the reader's feeds
-load, or if they fail to load, the row is Following alone; a row of only
+load, or if they fail to load, the row is Following alone. The list is
+kept per account; a copy under 5 minutes old is used with no request, so a
+tab click does not read the prefs again (`packages/state` README); a row of only
 Following is not shown. With a Mastodon account active, or none, Home is as
 before and ignores `?feed=`.
 
 **A feed's tab.** `<caribou-timeline kind="feed" feed="<uri>">`. Its posts
-go through the same card and moderation as Following. It does not poll
+go through the same card and moderation as Following, and it has Home's
+filter context: a card hides when its author is muted or blocked, at once,
+as on Following. It does not poll
 every 30 s (only Following does), and it is kept like the other timelines
 (`feed:<uri>`), so going back to it shows its posts at once. The tab does
 not wait for the saved list: it asks for the feed's posts at once. When the
@@ -659,8 +663,8 @@ saved list says the feed is gone, the tab shows "This feed is gone. Its
 owner may have deleted it." in place of the timeline; once the list is
 known, no request goes out for a gone feed's posts. A feed that fails shows
 its error with Retry (`getFeed`'s `UnknownFeed` says the feed is gone),
-never an empty page. An address whose `?feed=` is not a feed URI says so,
-with a link to Following.
+never an empty page. An address whose `?feed=` is not a feed URI says so
+(`role="status"`), with a link to Following.
 
 **Scroll.** Each tab is its own address. So, as on Home today, Back and
 Forward bring the reader back to where they were on that tab, and a tab
@@ -669,7 +673,9 @@ click starts at the top.
 **Feeds page.** `/feeds` lists the reader's saved feeds in their order:
 Following, then each feed with its avatar, name, creator and description.
 Pinned feeds say "Pinned". Each links to its Home tab. A gone feed says
-"Not available" and has no link. Signed out, the page asks the reader to
+"Not available" and has no link. A failed load shows its error with Retry.
+Retry reads again (`force`); its button stays, busy, until the answer. A
+failure keeps focus on it; success moves focus to the list. Signed out, the page asks the reader to
 sign in. With a Mastodon account active it says that feeds are a Bluesky
 feature.
 

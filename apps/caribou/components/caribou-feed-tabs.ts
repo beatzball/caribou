@@ -3,14 +3,12 @@ import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import type { CaribouClient, SavedFeed } from '@beatzball/caribou-mastodon-client'
 import { activeClient, loadSavedFeeds, savedFeedsFor } from '@beatzball/caribou-state'
+import { FEED_GONE } from '@beatzball/caribou-bluesky-client'
 import { spaClick } from './_spa-link.js'
 import { feedPath, feedRkey, isFeedUri } from './_feed-path.js'
 import { settleSplash } from './_splash.js'
 import './caribou-tabs.js'
 import './caribou-timeline.js'
-
-/** What a feed's tab says when the AppView has said the feed is gone. */
-export const FEED_GONE_TEXT = 'This feed is gone. Its owner may have deleted it.'
 
 interface Tab { uri: string; name: string }
 
@@ -82,10 +80,10 @@ export class CaribouFeedTabs extends LitElement {
   private renderBody() {
     if (!this.feed) return html`<caribou-timeline kind="home"></caribou-timeline>`
     if (!isFeedUri(this.feed)) {
-      return html`<p class="notice">This address does not name a feed.
+      return html`<p class="notice" role="status">This address does not name a feed.
         <a href="/home" @click=${spaClick}>Go to Following</a>.</p>`
     }
-    if (!this.showsTimeline) return html`<p class="notice" role="status">${FEED_GONE_TEXT}</p>`
+    if (!this.showsTimeline) return html`<p class="notice" role="status">${FEED_GONE}</p>`
     return html`<caribou-timeline kind="feed" feed=${this.feed}></caribou-timeline>`
   }
 

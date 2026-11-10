@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
+import type { Relationship } from '@beatzball/caribou-mastodon-client'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
-  _resetSavedFeedsForTests, activeUserKey, addUserSession, clearKeptAlive, loadSavedFeeds, statusCache, users,
+  _resetSavedFeedsForTests, activeUserKey, addUserSession, clearKeptAlive, loadSavedFeeds, relationshipCache, relationshipKey, statusCache, users,
 } from '@beatzball/caribou-state'
 import '../caribou-feed-tabs.js'
 import '../caribou-feeds.js'
@@ -130,6 +131,7 @@ beforeEach(() => {
   clearKeptAlive()
   _resetSavedFeedsForTests()
   statusCache.value = new Map()
+  relationshipCache.value = new Map()
   users.value = new Map()
   activeUserKey.value = null
   blueskyClients.clear()
@@ -186,6 +188,22 @@ describe('<caribou-feed-tabs>', () => {
     expect(ids(tl)).toEqual([uri('cats')])
   })
 
+  it('hides a feed\'s cards when their author is muted or blocked after they rendered, as Following does', async () => {
+    signIn({ getFeed: vi.fn(async () => ({ data: { feed: [entry(1), entry(2)] } })) })
+    const el = await mountTabs(CATS)
+    const tl = timelineOf(el)!
+    const cards = () => [...tl.shadowRoot!.querySelectorAll<CaribouStatusCard>('caribou-status-card')]
+    expect(cards()).toHaveLength(2)
+    expect(cards().every((c) => !c.hidden)).toBe(true)
+    const authorId = cards()[0]!.status!.account.id
+    relationshipCache.value = new Map([[relationshipKey(activeUserKey.value!, authorId), { id: authorId, muting: true } as Relationship]])
+    await settle(el)
+    expect(cards().every((c) => c.hidden)).toBe(true)
+    relationshipCache.value = new Map([[relationshipKey(activeUserKey.value!, authorId), { id: authorId, blocking: true } as Relationship]])
+    await settle(el)
+    expect(cards().every((c) => c.hidden)).toBe(true)
+  })
+
   it('adds a tab at the end for a feed the address names that is not pinned', async () => {
     signIn()
     const el = await mountTabs(OTHER)
@@ -227,24 +245,66 @@ describe('<caribou-feed-tabs>', () => {
     expect(timelineOf(el)!.kind).toBe('home')
   })
 
-  it('swaps a gone feed\'s timeline for the message when the list arrives', async () => {
-    signIn()
+  it('swaps a gone feed\'s timeline for the message when the list arrives, after one getFeed', async () => {
+    let release!: () => void
+    const held = new Promise<void>((r) => { release = r })
+    signIn({
+      getPreferences: vi.fn(async () => { await held; return { savedFeeds: PREFS } }),
+      getFeed: vi.fn(async () => { throw Object.assign(new Error('Unknown feed'), { status: 400, error: 'UnknownFeed' }) }),
+    })
     const el = await mountTabs(GONE)
+    // First: the list is not known yet, so the tab asks for the feed.
+    expect(timelineOf(el)).not.toBeNull()
+    expect(agent.app.bsky.feed.getFeed).toHaveBeenCalledTimes(1)
+    release()
+    await settle(el)
     expect(timelineOf(el)).toBeNull()
     expect(el.shadowRoot!.querySelector('.notice')!.textContent).toContain('This feed is gone.')
+    expect(agent.app.bsky.feed.getFeed).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps each tab\'s posts its own when an answer for the tab left behind lands late', async () => {
+    let releaseCats!: () => void
+    const catsHeld = new Promise<void>((r) => { releaseCats = r })
+    signIn({ getFeed: vi.fn(async ({ feed }: { feed: string }) => {
+      if (feed === CATS) await catsHeld
+      return { data: { feed: [entry(feed.split('/').pop()!)] } }
+    }) })
+    const cats = await mountTabs(CATS)
+    expect(ids(timelineOf(cats)!)).toEqual([])
+    // A tab click is a new page: the old tab goes, the new one mounts.
+    cats.remove()
+    const dogs = await mountTabs(DOGS)
+    expect(ids(timelineOf(dogs)!)).toEqual([uri('dogs')])
+    releaseCats()
+    await settle(dogs)
+    expect(ids(timelineOf(dogs)!)).toEqual([uri('dogs')])
+    // Back to Cats: its own post, kept from the late answer.
+    dogs.remove()
+    const back = await mountTabs(CATS)
+    expect(ids(timelineOf(back)!)).toEqual([uri('cats')])
   })
 
   it('says so for an address that names no feed', async () => {
     signIn()
     const el = await mountTabs('https://example.com/not-a-feed')
     expect(timelineOf(el)).toBeNull()
-    expect(el.shadowRoot!.querySelector('.notice')!.textContent).toContain('This address does not name a feed.')
+    const notice = el.shadowRoot!.querySelector('.notice')!
+    expect(notice.textContent).toContain('This address does not name a feed.')
+    expect(notice.getAttribute('role')).toBe('status')
   })
 
   it('a feed is not polled every 30 s; Following is', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     try {
       signIn()
+      const following = await mountTabs()
+      const homeBefore = agent.getTimeline.mock.calls.length
+      vi.advanceTimersByTime(65_000)
+      await settle(following)
+      expect(agent.getTimeline.mock.calls.length).toBeGreaterThan(homeBefore)
+      following.remove()
+
       await mountTabs(CATS)
       const before = agent.app.bsky.feed.getFeed.mock.calls.length
       vi.advanceTimersByTime(65_000)
@@ -266,6 +326,12 @@ describe('<caribou-feeds>', () => {
     }
     return el
   }
+  async function flushFeeds(el: CaribouFeeds) {
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 0))
+      while (!(await el.updateComplete)) { /* settle */ }
+    }
+  }
   const rows = (el: CaribouFeeds) => [...el.shadowRoot!.querySelectorAll('li')].map((li) => ({
     name: li.querySelector('.name')!.textContent!.trim(),
     href: li.querySelector('a.name')?.getAttribute('href') ?? null,
@@ -285,6 +351,46 @@ describe('<caribou-feeds>', () => {
     ])
     expect(el.shadowRoot!.textContent).toContain('by @alice.example.com')
     expect(el.shadowRoot!.textContent).toContain('CATS only')
+  })
+
+  it('Retry keeps its button, busy, until the answer; a failure keeps focus on it; success moves focus to the list', async () => {
+    let gate: { resolve: () => void; fail: boolean } | null = null
+    let calls = 0
+    signIn({ getPreferences: vi.fn(async () => {
+      calls++
+      if (calls === 1) throw Object.assign(new Error('down'), { status: 502 })
+      const g = { resolve: () => {}, fail: calls === 2 }
+      await new Promise<void>((r) => { g.resolve = r; gate = g })
+      if (g.fail) throw Object.assign(new Error('still down'), { status: 502 })
+      return { savedFeeds: PREFS }
+    }) })
+    const el = await mountFeeds()
+    const button = el.shadowRoot!.querySelector<HTMLElement>('caribou-button')!
+    button.focus()
+    expect(el.shadowRoot!.activeElement).toBe(button)
+
+    // A Retry that fails again.
+    button.click()
+    await flushFeeds(el)
+    expect(button.isConnected).toBe(true)
+    expect((button as HTMLElement & { loading: boolean }).loading).toBe(true)
+    expect(el.shadowRoot!.activeElement).toBe(button)
+    gate!.resolve()
+    await flushFeeds(el)
+    expect(el.shadowRoot!.querySelector('caribou-button')).toBe(button)
+    expect((button as HTMLElement & { loading: boolean }).loading).toBe(false)
+    expect(el.shadowRoot!.activeElement).toBe(button)
+    expect(el.shadowRoot!.querySelector('[role="alert"]')!.textContent).toBe('still down')
+
+    // A Retry that works: the button goes, focus goes to the list.
+    button.click()
+    await flushFeeds(el)
+    expect(button.isConnected).toBe(true)
+    gate!.resolve()
+    await flushFeeds(el)
+    expect(button.isConnected).toBe(false)
+    expect(rows(el)).toHaveLength(5)
+    expect(el.shadowRoot!.activeElement).toBe(el.shadowRoot!.querySelector('ul'))
   })
 
   it('shows a failed load with Retry, and Retry loads again', async () => {
