@@ -33,6 +33,28 @@ export class CaribouBlueskySignin extends LitElement {
   @state() private submitting = false
   @state() private error: string | null = null
 
+  override connectedCallback() {
+    super.connectedCallback()
+    window.addEventListener('pageshow', this.onPageshow)
+  }
+
+  override disconnectedCallback() {
+    window.removeEventListener('pageshow', this.onPageshow)
+    super.disconnectedCallback()
+  }
+
+  /**
+   * Back from the authorization server can restore this page from the
+   * browser's page cache, with the sign-in still "in flight". It never
+   * answers: that page is gone. Forget it, so the form can be sent again
+   * (#246).
+   */
+  private onPageshow = (e: Event) => {
+    if (!(e as PageTransitionEvent).persisted) return
+    pending = null
+    this.submitting = false
+  }
+
   private async onSubmit(e: SubmitEvent) {
     e.preventDefault()
     if (this.submitting || pending) return

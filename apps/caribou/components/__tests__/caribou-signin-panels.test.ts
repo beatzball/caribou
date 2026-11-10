@@ -142,6 +142,62 @@ describe('caribou-signin-panels across the router swap', () => {
     expect(document.activeElement).toBe(outlet)
   })
 
+  it('a later focus in a field does not arm the restore again (Cancel, /home, Back)', async () => {
+    const outlet = document.createElement('litro-outlet')
+    outlet.tabIndex = -1
+    document.body.appendChild(outlet)
+    const server = create(outlet)
+    await settle(server)
+    field(server, 'server').focus()
+    const show = async () => {
+      const page = document.createElement('div')
+      page.setAttribute('hidden', '')
+      outlet.appendChild(page)
+      const el = create(page)
+      await settle(el)
+      for (const c of [...outlet.children]) if (c !== page) c.remove()
+      page.removeAttribute('hidden')
+      outlet.focus()
+      return el
+    }
+    const first = await show()
+    const picker = first.shadowRoot!.querySelector('caribou-instance-picker')!
+    await vi.waitFor(() => expect(picker.shadowRoot!.activeElement).toBe(field(first, 'server')))
+    // The reader leaves the field and comes back to it, then goes away.
+    outlet.focus()
+    field(first, 'server').focus()
+    outlet.replaceChildren()
+    // Back: the router shows the landing again and focuses the outlet.
+    await show()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(document.activeElement).toBe(outlet)
+  })
+
+  it('Back from the authorization server (page cache) gives a form that can be sent again', async () => {
+    const start = vi.spyOn(session, 'startBlueskySignIn').mockReturnValue(new Promise<string>(() => {}))
+    const el = create()
+    await settle(el)
+    el.shadowRoot!.querySelector<HTMLElement>('#tab-bluesky')!.click()
+    type(el, 'handle', 'alice.example.com')
+    const bsky = el.shadowRoot!.querySelector('caribou-bluesky-signin')!
+    const submit = () => bsky.shadowRoot!.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { cancelable: true }))
+    submit()
+    await vi.waitFor(() => expect(bsky.shadowRoot!.textContent).toContain('Connecting…'))
+
+    // A page shown fresh changes nothing.
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }))
+    await settle(el)
+    expect(bsky.shadowRoot!.textContent).toContain('Connecting…')
+
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+    await vi.waitFor(() => expect(bsky.shadowRoot!.textContent).toContain('Sign in'))
+    expect(bsky.shadowRoot!.textContent).not.toContain('Connecting…')
+    submit()
+    expect(start).toHaveBeenCalledTimes(2)
+    // That second start never answers either: forget it before the next test.
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+  })
+
   it('a Bluesky sign-in started before the swap shows on the new page, and is not started twice', async () => {
     let answer!: (message: string) => void
     const start = vi.spyOn(session, 'startBlueskySignIn').mockReturnValue(new Promise<string>((r) => { answer = r }))
