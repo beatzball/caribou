@@ -198,6 +198,35 @@ describe('caribou-signin-panels across the router swap', () => {
     window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
   })
 
+  it('a sign-in forgotten by a page-cache Back does not touch the form when it answers late', async () => {
+    let answerOld!: (message: string) => void
+    const start = vi.spyOn(session, 'startBlueskySignIn')
+      .mockReturnValueOnce(new Promise<string>((r) => { answerOld = r }))
+      .mockReturnValueOnce(new Promise<string>(() => {}))
+    const el = create()
+    await settle(el)
+    el.shadowRoot!.querySelector<HTMLElement>('#tab-bluesky')!.click()
+    type(el, 'handle', 'alice.example.com')
+    const bsky = el.shadowRoot!.querySelector('caribou-bluesky-signin')!
+    const submit = () => bsky.shadowRoot!.querySelector('form')!.dispatchEvent(new SubmitEvent('submit', { cancelable: true }))
+    submit()
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+    await vi.waitFor(() => expect(bsky.shadowRoot!.textContent).toContain('Sign in'))
+    submit()
+    expect(start).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(bsky.shadowRoot!.textContent).toContain('Connecting…'))
+
+    answerOld('No account with that handle.')
+    await new Promise((r) => setTimeout(r, 20))
+    await settle(el)
+    expect(bsky.shadowRoot!.textContent).toContain('Connecting…')
+    expect(bsky.shadowRoot!.querySelector('[role="alert"]')).toBeNull()
+    // Still one sign-in at a time.
+    submit()
+    expect(start).toHaveBeenCalledTimes(2)
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+  })
+
   it('a Bluesky sign-in started before the swap shows on the new page, and is not started twice', async () => {
     let answer!: (message: string) => void
     const start = vi.spyOn(session, 'startBlueskySignIn').mockReturnValue(new Promise<string>((r) => { answer = r }))

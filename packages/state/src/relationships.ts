@@ -432,6 +432,9 @@ export function setBlock(account: AccountHandle, on: boolean, opts: Relationship
   const client = (opts.clientSource ?? defaultSource)()
   if (!on && fromList(client, account, 'blockingByList')) return Promise.resolve(false)
   const bluesky = client?.capabilities?.network === 'bluesky'
+  // Taken before the write starts: an account change while it is out stops
+  // the reads after it (#242).
+  const generation = ownerGeneration()
   return on
     ? writeFlags(client, account, 'blocking', true,
         bluesky ? { blocking: true } : { blocking: true, following: false, requested: false },
@@ -441,13 +444,24 @@ export function setBlock(account: AccountHandle, on: boolean, opts: Relationship
         (c, ref) => c.unblock(ref), `Couldn't unblock @${account.acct}.`).then((ok) => {
         // A Bluesky read made while blocked does not show the follow (R2-1),
         // so it is unknown: read it again now the block is gone.
-        if (ok && bluesky && client) void readFollowAfterUnblock(client, account.id, opts.signal)
+        if (ok && bluesky && client) void readFollowAfterUnblock(client, account.id, generation, opts.signal)
         return ok
       })
 }
 
-/** After an Unblock, when to read the follow again: inside the 60 s lag window. */
-const UNBLOCK_REREADS_MS: readonly number[] = [5_000, 20_000, 60_000]
+/**
+ * After an Unblock, when to read the follow again (ms after the ack): 5 s,
+ * 20 s, and 5 s before the lag window ends. Every read lands inside the
+ * window, where a read that still shows the block cannot undo the Unblock.
+ */
+const UNBLOCK_REREAD_MARGIN_MS = 5_000
+function unblockRereads(lagMs: number): number[] {
+  const out: number[] = []
+  for (const at of [5_000, 20_000, lagMs - UNBLOCK_REREAD_MARGIN_MS]) {
+    if (at > 0 && at < lagMs && at > (out.at(-1) ?? 0)) out.push(at)
+  }
+  return out
+}
 
 /** Waits `ms`, or less when `signal` aborts. */
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -465,18 +479,23 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 
 // The first read after an Unblock can still see the block, since the AppView
 // lags, and then the follow stays unknown (R2-1). With a page `signal`, read
-// again at 5 s, 20 s and 60 s while the follow is unknown and no block is
-// known. Stop when the page goes or the active account changes (#242).
-async function readFollowAfterUnblock(client: CaribouClient, accountId: string, signal: AbortSignal | undefined): Promise<void> {
-  const generation = ownerGeneration()
+// again on the `unblockRereads` schedule while the follow is unknown and no
+// block is known. No read at all once the page goes or the active account
+// changes after `generation` (taken before the write), A → B → A included
+// (#242).
+async function readFollowAfterUnblock(
+  client: CaribouClient, accountId: string, generation: number, signal: AbortSignal | undefined,
+): Promise<void> {
+  const gone = () => !!signal?.aborted || ownerGeneration() !== generation
+  if (gone()) return
   const key = relationshipKey(client.userKey, accountId)
   const opts = { clientSource: () => client }
   const start = Date.now()
   await loadRelationship(accountId, opts)
   if (!signal) return
-  for (const at of UNBLOCK_REREADS_MS) {
+  for (const at of unblockRereads(client.capabilities?.readLagMs ?? 0)) {
     await wait(Math.max(0, start + at - Date.now()), signal)
-    if (signal.aborted || ownerGeneration() !== generation) return
+    if (gone()) return
     const rel = relationshipCache.value.get(key)
     if (!rel || typeof rel.following === 'boolean' || rel.blocking === true) return
     await loadRelationship(accountId, opts)

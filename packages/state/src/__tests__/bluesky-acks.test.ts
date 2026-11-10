@@ -204,7 +204,7 @@ describe('relationship acks', () => {
     beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000) })
     afterEach(() => { vi.useRealTimers() })
 
-    it('reads at 5 s, 20 s and 60 s while the follow is unknown, and stops once it is known', async () => {
+    it('reads at 5 s and 20 s while the follow is unknown, and stops once it is known', async () => {
       blockedSeed()
       const fetchRelationships = reads(blockedRead(), blockedRead(), rel({ following: true, bluesky: { followUri: FOLLOW_URI, blockUri: null } }))
       const signal = new AbortController().signal
@@ -213,22 +213,89 @@ describe('relationship acks', () => {
       expect(fetchRelationships).toHaveBeenCalledTimes(1)
       expect(cached()?.following).toBeUndefined()
       expect(cached()?.blocking).toBe(false)
-      await vi.advanceTimersByTimeAsync(5_000)
+      await vi.advanceTimersByTimeAsync(4_999)
+      expect(fetchRelationships).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
       expect(fetchRelationships).toHaveBeenCalledTimes(2)
       expect(cached()?.following).toBeUndefined()
-      await vi.advanceTimersByTimeAsync(15_000)
+      await vi.advanceTimersByTimeAsync(14_999)
+      expect(fetchRelationships).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
       expect(fetchRelationships).toHaveBeenCalledTimes(3)
       expect(cached()).toMatchObject({ following: true, blocking: false, bluesky: { followUri: FOLLOW_URI } })
       await vi.advanceTimersByTimeAsync(60_000)
       expect(fetchRelationships).toHaveBeenCalledTimes(3)
     })
 
-    it('stops at 60 s, even when the follow is still unknown', async () => {
+    it('the last read is at lag - 5 s (55 s), inside the lag window: a stale block does not come back', async () => {
       blockedSeed()
       const fetchRelationships = reads(blockedRead())
       await setBlock(BOB, false, { ...bsky({ unblock, fetchRelationships }), signal: new AbortController().signal })
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(fetchRelationships).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(34_999)
+      expect(fetchRelationships).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(fetchRelationships).toHaveBeenCalledTimes(4)
       await vi.advanceTimersByTimeAsync(120_000)
       expect(fetchRelationships).toHaveBeenCalledTimes(4)
+      // Every read still saw the block; the reader's Unblock stands.
+      expect(cached()?.blocking).toBe(false)
+    })
+
+    it('the schedule follows the client\'s lag window', async () => {
+      blockedSeed()
+      const fetchRelationships = reads(blockedRead())
+      const client = { userKey: ME, capabilities: { network: 'bluesky', readLagMs: 30_000 }, unblock, fetchRelationships } as unknown as CaribouClient
+      await setBlock(BOB, false, { clientSource: () => client, signal: new AbortController().signal })
+      await vi.advanceTimersByTimeAsync(24_999)
+      expect(fetchRelationships).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(fetchRelationships).toHaveBeenCalledTimes(4)
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(fetchRelationships).toHaveBeenCalledTimes(4)
+      expect(cached()?.blocking).toBe(false)
+    })
+
+    it('an account change while the Unblock is on its way: no read at all', async () => {
+      blockedSeed()
+      const fetchRelationships = reads(blockedRead())
+      const ack = deferred<RelationshipWriteAck>()
+      const done = setBlock(BOB, false, { ...bsky({ unblock: () => ack.promise, fetchRelationships }), signal: new AbortController().signal })
+      activeUserKey.value = 'did:plc:other@bsky' as UserKey
+      ownerGeneration()
+      ack.resolve({ ack: true, id: BOB.id, flags: { blocking: false }, bluesky: { blockUri: null } })
+      await done
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(fetchRelationships).not.toHaveBeenCalled()
+    })
+
+    it('A, then B, then A again while the Unblock is on its way: no read at all', async () => {
+      blockedSeed()
+      const fetchRelationships = reads(blockedRead())
+      const ack = deferred<RelationshipWriteAck>()
+      const done = setBlock(BOB, false, { ...bsky({ unblock: () => ack.promise, fetchRelationships }), signal: new AbortController().signal })
+      activeUserKey.value = 'did:plc:other@bsky' as UserKey
+      ownerGeneration()
+      activeUserKey.value = ME
+      ownerGeneration()
+      ack.resolve({ ack: true, id: BOB.id, flags: { blocking: false }, bluesky: { blockUri: null } })
+      await done
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(fetchRelationships).not.toHaveBeenCalled()
+    })
+
+    it('the page goes while the Unblock is on its way: no read at all', async () => {
+      blockedSeed()
+      const fetchRelationships = reads(blockedRead())
+      const ack = deferred<RelationshipWriteAck>()
+      const page = new AbortController()
+      const done = setBlock(BOB, false, { ...bsky({ unblock: () => ack.promise, fetchRelationships }), signal: page.signal })
+      page.abort()
+      ack.resolve({ ack: true, id: BOB.id, flags: { blocking: false }, bluesky: { blockUri: null } })
+      await done
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(fetchRelationships).not.toHaveBeenCalled()
     })
 
     it('stops when the page goes (its signal aborts)', async () => {

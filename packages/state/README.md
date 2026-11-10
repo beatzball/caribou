@@ -430,10 +430,14 @@ commit step differs.
 - **The read after Unblock can still see the block (#242).** The AppView
   lags, so that first read can leave the follow unknown. When the caller
   passes its page's `signal` (`setBlock(account, false, { signal })`), the
-  relationship is read again at 5 s, 20 s and 60 s after the Unblock,
-  while the follow is unknown and no block is known. The reads stop when
-  the signal aborts (the page goes) or the active account changes. The
-  profile header passes its signal; other callers read once.
+  relationship is read again at 5 s, at 20 s, and 5 s before the client's
+  lag window (`readLagMs`) ends: 55 s on Bluesky. Every read lands inside
+  the window, so a read that still shows the block cannot undo the
+  Unblock. The reads go on while the follow is unknown and no block is
+  known. The account is taken before the Unblock write starts. No read is
+  made once the signal aborts (the page goes) or the active account
+  changes, even if it changes back. The profile header passes its signal;
+  other callers read once.
 - **An undo never claims more than it removed (A3).** A Bluesky block or
   mute can come from a list (`bluesky.blockingByList`,
   `bluesky.mutingByList`: the list's URI). A personal undo cannot remove
