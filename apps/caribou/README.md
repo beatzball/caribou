@@ -1219,26 +1219,39 @@ account active. With a Mastodon account the page is as before.
    and when it ends ("Until <date>", or "Expired" for a past
    `expiresAt`). An expired word stays in the list, with Remove. Until the
    reader loads: "Loading muted words…". Prefs not loaded: an error line
-   and Retry (the moderation reload).
+   and Retry (the moderation reload). Each row has its own key: a word with
+   no id is keyed by its value and which copy of that value it is, so two
+   such words are two rows.
 3. **Add**: the word, where (default text and tags), how long (forever,
    24 hours, 7 days, 30 days) and who (default everyone). An empty word
-   says so and sends nothing. Each row has Remove (no confirm, as in the
-   Bluesky app).
+   says so and sends nothing. A word typed while a save runs is kept: the
+   field empties only if it still holds the word that was sent. Each row
+   has Remove (no confirm, as in the Bluesky app). When the row leaves the
+   list, focus goes to the next row's Remove, else the previous one, else
+   the word field; not when the reader has moved focus elsewhere.
 4. **One write per click.** A button is busy while its write runs, and a
    click on a busy button does nothing. Writes from two buttons run one
    after the other (the client's queue), so neither is lost.
 5. **One account.** A write belongs to the account active when it
-   started. Its answer is shown only while that account is still active.
-   An account change clears the busy and error state.
+   started. Its answer, or its failure, is shown only while that account
+   is still active and the element is still on the page. An account change
+   or leaving the page clears the busy and error state.
 6. **Nothing shown that did not happen.** The list changes only from the
    prefs the client loads after the write. A failed write leaves the list
    as it was and says so (a line and a toast). A write that worked when
    the load after it failed says "Saved, but your settings did not load
    again", with Retry.
-7. **Applies at once.** After a write, the new prefs go to the reader
-   signal, and every kept page (the keep-alive caches) is emptied, so the
-   next page the reader opens fetches again and is judged with the new
-   words. No page reload.
+7. **Applies at once.** After an edit the prefs the client loaded go to
+   the reader signal. When the words changed (this write, or another app's
+   that the fresh read found), every keep-alive cache is emptied
+   (`clearKeptAlive()`), so the next page the reader opens fetches again
+   and is judged with the new words. No page reload. That empties all of
+   them, all the active account's: the kept page data (`_page-cache.ts`),
+   the timeline and thread stores, and the cards' memory of covers the
+   reader opened with Show and filtered posts they showed. Those covers
+   close again, which is right: the words that decide them changed. While
+   an edit runs, the active client's calls wait for it, so a page opened
+   meanwhile is judged with the new words.
 
 ## Accounts
 

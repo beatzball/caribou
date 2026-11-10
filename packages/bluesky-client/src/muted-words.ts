@@ -61,6 +61,13 @@ export function checkMutedWordEdit(edit: MutedWordEdit, now = Date.now()): Muted
 type Pref = { $type?: string } & Record<string, unknown>
 type Item = Record<string, unknown>
 
+// Past its `expiresAt`: the SDK no longer mutes it.
+function expired(it: Item, now: number): boolean {
+  if (typeof it?.expiresAt !== 'string') return false
+  const at = Date.parse(it.expiresAt)
+  return Number.isFinite(at) && at <= now
+}
+
 const sameValue = (a: unknown, b: string) => typeof a === 'string' && a.toLowerCase() === b.toLowerCase()
 
 /**
@@ -69,7 +76,7 @@ const sameValue = (a: unknown, b: string) => typeof a === 'string' && a.toLowerC
  * changes; everything else is returned as read. Throws for a muted-words
  * pref with no `items` array (rule 8).
  */
-export function applyMutedWordEdit(all: Pref[], edit: MutedWordEdit): { prefs: Pref[] | false; outcome: MutedWordOutcome } {
+export function applyMutedWordEdit(all: Pref[], edit: MutedWordEdit, now = Date.now()): { prefs: Pref[] | false; outcome: MutedWordOutcome } {
   let at = -1
   for (let i = all.length - 1; i >= 0; i--) {
     if (all[i]?.$type === MUTED_WORDS_PREF) { at = i; break }
@@ -79,10 +86,15 @@ export function applyMutedWordEdit(all: Pref[], edit: MutedWordEdit): { prefs: P
   const items = (pref?.items ?? []) as Item[]
 
   if (edit.kind === 'add') {
-    if (items.some((it) => sameValue(it?.value, edit.value))) return { prefs: false, outcome: 'exists' }
+    const same = items.filter((it) => sameValue(it?.value, edit.value))
+    // A word that still mutes: nothing to add. Only expired ones: the
+    // first is replaced in place, so the word mutes again (rule 6).
+    if (same.some((it) => !expired(it, now))) return { prefs: false, outcome: 'exists' }
     const word: Item = { id: TID.nextStr(), value: edit.value, targets: edit.targets, actorTarget: edit.actorTarget }
     if (edit.expiresAt) word.expiresAt = edit.expiresAt
-    const next = { ...(pref ?? { $type: MUTED_WORDS_PREF }), items: [...items, word] }
+    const old = same[0]
+    const nextItems = old ? items.map((it) => (it === old ? word : it)) : [...items, word]
+    const next = { ...(pref ?? { $type: MUTED_WORDS_PREF }), items: nextItems }
     return { prefs: at >= 0 ? all.map((p, i) => (i === at ? next : p)) : [...all, next], outcome: 'added' }
   }
 

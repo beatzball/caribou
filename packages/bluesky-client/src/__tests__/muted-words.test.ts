@@ -191,7 +191,7 @@ describe('muted words: write (rules 5 to 9)', () => {
   })
 
   it('rule 6: a word already there (any case) writes nothing: exists', async () => {
-    const { out, calls } = await restore([MUTED([KEPT])])
+    const { out, calls } = await restore([MUTED([{ ...KEPT, expiresAt: undefined }])])
     const r = await out.editMutedWords(add('KEPT'))
     expect(r.outcome).toBe('exists')
     expect(puts(calls)).toBe(0)
@@ -205,11 +205,79 @@ describe('muted words: write (rules 5 to 9)', () => {
     expect(state.prefs).toEqual([MUTED([]), UNKNOWN, SAVED])
   })
 
-  it('rule 7: a word not in the fresh read writes nothing: absent', async () => {
+  it('rule 7: a word not in the fresh read writes nothing: absent, with the fresh words', async () => {
     const { out, calls, state } = await restore([MUTED([KEPT])])
-    state.prefs = [MUTED([])]
-    expect((await out.editMutedWords({ kind: 'remove', id: KEPT.id, value: 'kept' })).outcome).toBe('absent')
+    state.prefs = [MUTED([]), SAVED]
+    const r = await out.editMutedWords({ kind: 'remove', id: KEPT.id, value: 'kept' })
+    expect(r.outcome).toBe('absent')
     expect(puts(calls)).toBe(0)
+    // The load in the same job gives the server's words, not the old copy.
+    expect(r.prefs!.mutedWords).toEqual([])
+    expect(out.prefs!.mutedWords).toEqual([])
+    expect(r.wordsChanged).toBe(true)
+  })
+
+  it('rule 6: a word another app added: exists, with the fresh words', async () => {
+    const { out, calls, state } = await restore([MUTED([KEPT])])
+    const ext = { id: 'ext', value: 'elsewhere', targets: ['content'], actorTarget: 'all' }
+    state.prefs = [MUTED([KEPT, ext]), SAVED]
+    const r = await out.editMutedWords(add('Elsewhere'))
+    expect(r.outcome).toBe('exists')
+    expect(puts(calls)).toBe(0)
+    expect(r.prefs!.mutedWords.map((w) => w.value)).toEqual(['kept', 'elsewhere'])
+    expect(r.wordsChanged).toBe(true)
+  })
+
+  it('rule 6: exists with nothing changed elsewhere: wordsChanged is false', async () => {
+    const { out } = await restore([MUTED([{ ...KEPT, expiresAt: undefined }])])
+    const r = await out.editMutedWords(add('kept'))
+    expect(r).toMatchObject({ outcome: 'exists', wordsChanged: false })
+  })
+
+  it('rule 6: re-adding an expired word replaces it; the others stay', async () => {
+    // KEPT expired in 2020.
+    const { out, state } = await restore([MUTED([OLD, KEPT]), UNKNOWN])
+    const r = await out.editMutedWords(add('Kept'))
+    expect(r.outcome).toBe('added')
+    const items = (state.prefs[0] as { items: Record<string, unknown>[] }).items
+    expect(items).toHaveLength(2)
+    expect(items[0]).toEqual(OLD)
+    expect(items[1]).toMatchObject({ value: 'Kept', targets: ['content', 'tag'], actorTarget: 'all' })
+    expect(items[1]).not.toHaveProperty('expiresAt')
+    expect(items[1]!.id).not.toBe(KEPT.id)
+    expect(state.prefs[1]).toEqual(UNKNOWN)
+  })
+
+  it('rule 5 (rule Q): nothing else runs until the edit’s load after the write is done', async () => {
+    const { out, calls, routes } = await restore([MUTED([])])
+    const origPut = routes['app.bsky.actor.putPreferences']!
+    const origGet = routes['app.bsky.actor.getPreferences']!
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    let held = false
+    // After the first put, the next prefs read (the edit's load) waits.
+    routes['app.bsky.actor.putPreferences'] = (u, init) => {
+      routes['app.bsky.actor.putPreferences'] = origPut
+      routes['app.bsky.actor.getPreferences'] = async (u2, i2) => {
+        routes['app.bsky.actor.getPreferences'] = origGet
+        held = true
+        await gate
+        return origGet(u2, i2)
+      }
+      return origPut(u, init)
+    }
+    const first = out.editMutedWords(add('one'))
+    await vi.waitFor(() => expect(held).toBe(true))
+    const mark = calls.length
+    const second = out.editMutedWords(add('two'))
+    const reload = out.reloadModeration()
+    const check = out.recheckLabelers()
+    await new Promise((r) => setTimeout(r, 20))
+    // Queued jobs sent nothing while the first job's load was held.
+    expect(calls.slice(mark)).toEqual([])
+    release()
+    await Promise.all([first, second, reload, check])
+    expect(calls.length).toBeGreaterThan(mark)
   })
 
   it('rule 7: an id names one word; another word with the same value stays', async () => {

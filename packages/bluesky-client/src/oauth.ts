@@ -324,10 +324,15 @@ export interface RestoredClient {
   editMutedWords(edit: MutedWordEdit): Promise<MutedWordsResult>
 }
 
-/** What a muted-words write leaves. `reloadFailed`: written, but the load after it failed. */
+/**
+ * What a muted-words edit leaves. `reloadFailed`: the load after it failed
+ * (after a write: written all the same). `wordsChanged`: the loaded words
+ * differ from the ones held before the job (a write, or another app's).
+ */
 export interface MutedWordsResult extends ModerationInputs {
   outcome: MutedWordOutcome
   reloadFailed: boolean
+  wordsChanged: boolean
 }
 
 /** What a moderation load or check leaves: the inputs and the gone labelers. */
@@ -498,10 +503,12 @@ export async function restoreClient(
       failed(err)
       throw err
     })
-    const { outcome } = seen
-    if (outcome !== 'added' && outcome !== 'removed') return { ...inputs(), outcome, reloadFailed: false }
+    // Always a full load, in the same job: after `exists` or `absent` too,
+    // the fresh read showed words the held prefs may not have.
+    const before = JSON.stringify(prefs?.mutedWords ?? null)
     await loadModeration()
-    return { ...inputs(), outcome, reloadFailed: prefs === null }
+    const wordsChanged = prefs !== null && JSON.stringify(prefs.mutedWords) !== before
+    return { ...inputs(), outcome: seen.outcome, reloadFailed: prefs === null, wordsChanged }
   }
 
   // One job: the "is it back" check, the write and the reload.

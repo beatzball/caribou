@@ -24,7 +24,19 @@ const DURATIONS: { value: Duration; label: string; ms: number }[] = [
 ]
 
 const ADD = 'add'
-const keyOf = (w: Word) => (w.id ? `id:${w.id}` : `value:${w.value}`)
+
+// One key per row, for `repeat` and the busy set. A word with no id (an
+// old app's) is keyed by its value and which copy of that value it is, so
+// two such words with the same value are two keys.
+function keyed(words: readonly Word[]): { w: Word; key: string }[] {
+  const seen = new Map<string, number>()
+  return words.map((w) => {
+    if (w.id) return { w, key: `id:${w.id}` }
+    const n = seen.get(w.value) ?? 0
+    seen.set(w.value, n + 1)
+    return { w, key: `value:${w.value}#${n}` }
+  })
+}
 
 /**
  * The active Bluesky reader's muted words (#196; app README, "Bluesky
@@ -72,8 +84,11 @@ export class CaribouMutedWords extends LitElement {
   @state() private duration: Duration = 'forever'
 
   private owner: string | null | undefined = undefined
-  // Moves on every account change: an answer is shown only with its token.
+  // Moves on every account change and on disconnect: an answer is shown
+  // only with its token.
   private token = 0
+  // After a Remove: where focus goes when that row leaves the list.
+  private focusAfter: { key: string; index: number } | null = null
   private stop?: () => void
 
   override connectedCallback() {
@@ -97,13 +112,35 @@ export class CaribouMutedWords extends LitElement {
   override disconnectedCallback() {
     this.stop?.()
     this.stop = undefined
+    // Answers still out are not shown: a reconnect starts fresh.
+    this.token++
+    this.owner = undefined
+    this.focusAfter = null
     super.disconnectedCallback()
+  }
+
+  protected override updated() {
+    const after = this.focusAfter
+    if (!after || !Array.isArray(this.words)) return
+    if (keyed(this.words).some((k) => k.key === after.key)) return
+    this.focusAfter = null
+    // Only when focus went down with the row: not when the reader moved it.
+    const now = document.activeElement
+    const lost = !now || now === document.body || (now === this && !this.renderRoot.querySelector(':focus'))
+    if (!lost) return
+    const buttons = [...this.renderRoot.querySelectorAll<HTMLElement>('li.word caribou-button[data-action="remove"]')]
+    const next = buttons[after.index] ?? buttons[after.index - 1]
+      ?? this.renderRoot.querySelector<HTMLElement>('input[name="value"]')
+    next?.focus()
   }
 
   // One write per button at a time. The client's queue orders the rest.
   private async save(key: string, edit: MutedWordEdit, done: string, failed: string): Promise<boolean> {
     if (this.busy.has(key)) return false
     const token = this.token
+    const account = activeUserKey.peek()
+    // The answer belongs to this element, connected, and to this account.
+    const mine = () => token === this.token && this.isConnected && activeUserKey.peek() === account
     this.busy = new Set([...this.busy, key])
     this.error = ''
     this.reloadFailed = false
@@ -112,14 +149,14 @@ export class CaribouMutedWords extends LitElement {
     let ok = false
     try {
       const r = await editActiveMutedWords(edit)
-      if (token !== this.token || r.outcome === 'stale') return false
+      if (!mine() || r.outcome === 'stale') return false
       ok = true
       if (r.reloadFailed) this.reloadFailed = true
       this.announce = r.outcome === 'exists' ? `You already mute “${edit.value}”.`
         : r.outcome === 'absent' ? `“${edit.value}” was not muted.`
         : done
     } catch (err) {
-      if (token !== this.token) return false
+      if (!mine()) return false
       if ((err as { name?: string } | null)?.name === 'InvalidMutedWord') {
         this.formError = (err as Error).message
       } else {
@@ -127,7 +164,7 @@ export class CaribouMutedWords extends LitElement {
         window.dispatchEvent(new CustomEvent('caribou:toast', { detail: { kind: 'error', message: failed } }))
       }
     } finally {
-      if (token === this.token) this.busy = new Set([...this.busy].filter((k) => k !== key))
+      if (mine()) this.busy = new Set([...this.busy].filter((k) => k !== key))
     }
     return ok
   }
@@ -135,7 +172,8 @@ export class CaribouMutedWords extends LitElement {
   private async onSubmit(e: Event) {
     e.preventDefault()
     if (this.busy.has(ADD) || !Array.isArray(this.words)) return
-    const value = this.value.trim()
+    const typed = this.value
+    const value = typed.trim()
     this.formError = ''
     if (!value) {
       this.formError = 'Enter a word to mute.'
@@ -150,12 +188,17 @@ export class CaribouMutedWords extends LitElement {
     }
     const token = this.token
     const ok = await this.save(ADD, edit, `Muted “${value}”.`, `Could not mute “${value}”. Try again.`)
-    if (ok && token === this.token) this.value = ''
+    // Emptied only when the reader has not typed something new meanwhile.
+    if (ok && token === this.token && this.value === typed) this.value = ''
   }
 
-  private onRemove(w: Word) {
+  private async onRemove(w: Word, key: string, index: number) {
+    if (this.busy.has(key)) return
     const edit: MutedWordEdit = w.id ? { kind: 'remove', id: w.id, value: w.value } : { kind: 'remove', value: w.value }
-    void this.save(keyOf(w), edit, `Unmuted “${w.value}”.`, `Could not remove “${w.value}”. Try again.`)
+    this.focusAfter = { key, index }
+    const ok = await this.save(key, edit, `Unmuted “${w.value}”.`, `Could not remove “${w.value}”. Try again.`)
+    // Not removed: the row stays, and so does focus.
+    if (!ok && this.focusAfter?.key === key) this.focusAfter = null
   }
 
   private onRetry() {
@@ -163,7 +206,7 @@ export class CaribouMutedWords extends LitElement {
     void reloadActiveModeration()
   }
 
-  private renderWord(w: Word) {
+  private renderWord(w: Word, key: string, index: number) {
     const where = w.targets.includes('content') ? 'Text and tags' : 'Tags only'
     const who = w.actorTarget === 'exclude-following' ? 'People I do not follow' : 'Everyone'
     // Rendered in the browser only, so the clock is safe to read.
@@ -174,7 +217,7 @@ export class CaribouMutedWords extends LitElement {
     return html`<li class="word">
       <span class="what"><strong>${w.value}</strong><span class="meta">${where} · ${who} · ${until}</span></span>
       <caribou-button variant="secondary" data-action="remove" label=${`Remove muted word ${w.value}`}
-        ?loading=${this.busy.has(keyOf(w))} @click=${() => this.onRemove(w)}>Remove</caribou-button>
+        ?loading=${this.busy.has(key)} @click=${() => this.onRemove(w, key, index)}>Remove</caribou-button>
     </li>`
   }
 
@@ -186,7 +229,7 @@ export class CaribouMutedWords extends LitElement {
         <caribou-button variant="secondary" data-action="retry" @click=${() => this.onRetry()}>Retry</caribou-button></div>`
     }
     if (words.length === 0) return html`<p class="notice">You have not muted any words.</p>`
-    return html`<ul>${repeat(words, keyOf, (w) => this.renderWord(w))}</ul>`
+    return html`<ul>${repeat(keyed(words), (k) => k.key, (k, i) => this.renderWord(k.w, k.key, i))}</ul>`
   }
 
   // Always in the tree, hidden until the list is loaded: an add needs the

@@ -124,8 +124,11 @@ test.describe('Bluesky muted words', () => {
 
     // Remove: the word goes, one more write.
     await spaGo(page, '/settings/moderation')
-    await words.getByRole('button', { name: 'Remove muted word plain' }).click()
+    // By keyboard: focus moves to the row before, as the row goes.
+    await words.getByRole('button', { name: 'Remove muted word plain' }).focus()
+    await page.keyboard.press('Enter')
     await expect(words.locator('li.word')).toHaveCount(1)
+    await expect(words.getByRole('button', { name: 'Remove muted word finale' })).toBeFocused()
     expect(puts).toHaveLength(2)
     expect((puts[1]![1] as { items: unknown[] }).items).toEqual([OLD])
   })

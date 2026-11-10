@@ -390,14 +390,20 @@ not follow) and an optional `expiresAt`.
    `mutedWordsPref`, or adds one at the end when there is none. Every other
    pref (also types Caribou does not know), its order, and every other
    muted word (also an item the SDK cannot read) stay as read. Then a full
-   load, in the same job.
+   load, in the same job, whatever the outcome: after `exists` or `absent`
+   too, the fresh read may show words the held prefs lack (another app's
+   change), so the answer's `prefs` are the server's. `wordsChanged` says
+   whether the loaded words differ from the ones held before the job.
+   Nothing else in the queue runs until that load is done.
 6. **Add.** The value is `sanitizeMutedWordValue` of the input (trimmed,
    one leading `#` dropped). Refused with no request when it is empty, or
    when `targets` is empty or names something other than `content` and
    `tag`, or `actorTarget` is not `all` or `exclude-following`, or
    `expiresAt` is not a future time. A new word gets a TID `id`. A word
-   with the same value (case does not count) in the fresh read: nothing is
-   written, the answer is `exists`.
+   with the same value (case does not count) in the fresh read that still
+   mutes (no `expiresAt`, or a future one): nothing is written, the answer
+   is `exists`. If every word with that value has expired, the first of
+   them is replaced in place by the new word (`added`); the others stay.
 7. **Remove.** By `id`; a word with no `id` (an old app wrote it) by its
    `value`. Not in the fresh read: nothing is written, `absent`.
 8. **A pref Caribou cannot edit.** A `mutedWordsPref` with no `items`

@@ -352,6 +352,43 @@ describe('muted words', () => {
     expect(reloadModeration).toHaveBeenCalledTimes(1)
   })
 
+  it('rule 7: nothing written, but another app changed the words: the reader and kept pages follow', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    kept.set('page', 1)
+    const prefs = { labelers: [], mutedWords: [] }
+    editMutedWords.mockResolvedValue({ prefs, labelDefs: {}, gone: [], outcome: 'absent', reloadFailed: false, wordsChanged: true })
+    expect((await editActiveMutedWords({ kind: 'remove', value: 'x' })).outcome).toBe('absent')
+    expect(blueskyReader.value).toEqual({ userKey: KEY, prefs, labelDefs: {} })
+    expect(kept.size).toBe(0)
+  })
+
+  it('rule 5: a failure that lands after a switch is not thrown: stale', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let fail!: (e: unknown) => void
+    editMutedWords.mockReturnValue(new Promise((_r, j) => { fail = j }))
+    const a = editActiveMutedWords(ADD)
+    activeUserKey.value = 'bob@example.social' as typeof activeUserKey.value
+    fail(new Error('offline'))
+    expect((await a).outcome).toBe('stale')
+  })
+
+  it('rule 7: the client’s calls wait for an edit in flight', async () => {
+    addUserSession(bsky())
+    const client = await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    editMutedWords.mockReturnValue(new Promise((r) => { finish = r }))
+    const save = editActiveMutedWords(ADD)
+    const read = (client as unknown as { fetchStatus: (id: string) => Promise<unknown> }).fetchStatus('p1')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(fetchStatus).not.toHaveBeenCalled()
+    finish({ prefs: null, labelDefs: {}, gone: [], outcome: 'added', reloadFailed: false, wordsChanged: true })
+    await save
+    await read
+    expect(fetchStatus).toHaveBeenCalledWith('p1')
+  })
+
   it('rule 6: a failed write throws and leaves the reader as it was', async () => {
     addUserSession(bsky())
     await blueskyDriver.restore(bsky(), hooks)

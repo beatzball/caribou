@@ -34,6 +34,8 @@ let active: {
   userKey: string; restored: Restored; reloading: Promise<void> | null
   rechecking: Promise<void> | null; checkedAt: number
   removing?: Map<string, Promise<RemoveOutcome>>
+  /** The muted-words edits in flight: the client's calls wait for them (their load). */
+  editing?: Set<Promise<unknown>>
 } | null = null
 
 /**
@@ -101,20 +103,37 @@ export interface MutedWordsSave {
 /**
  * Adds or removes one of the active reader's muted words (#196; app
  * README, "Bluesky muted words"). The client's queue runs the writes one
- * after the other. The answer is shown only while its account is still
- * active; then the reader is set from it and, after a write, every kept
- * page is emptied, so the next page is fetched and judged with the new
- * words. Throws on a refused or failed write; the reader stays as it was.
+ * after the other, and the client's calls wait for an edit in flight. The
+ * answer, or a failure, is shown only while its account is still active
+ * (else `stale`); then the reader is set from it and, when the words
+ * changed (this write, or another app's), every kept page is emptied, so
+ * the next page is fetched and judged with the new words. Throws on a
+ * refused or failed write; the reader stays as it was.
  */
 export async function editActiveMutedWords(edit: MutedWordEdit): Promise<MutedWordsSave> {
   const a = active
   if (!a || activeUserKey.peek() !== a.userKey) return { outcome: 'stale', reloadFailed: false }
-  const r = await a.restored.editMutedWords(edit)
-  const wrote = r.outcome === 'added' || r.outcome === 'removed'
-  if (active !== a || activeUserKey.peek() !== a.userKey) {
+  const stale = () => active !== a || activeUserKey.peek() !== a.userKey
+  // The client's calls wait for this edit (its load after the write), so a
+  // page opened meanwhile is judged with the new words.
+  const job = a.restored.editMutedWords(edit)
+  a.editing ??= new Set()
+  a.editing.add(job)
+  let r: Awaited<typeof job>
+  try {
+    r = await job
+  } catch (err) {
+    // A failure of an account that is not active now is not shown.
+    if (stale()) return { outcome: 'stale', reloadFailed: false }
+    throw err
+  } finally {
+    a.editing.delete(job)
+  }
+  const changed = r.outcome === 'added' || r.outcome === 'removed' || r.wordsChanged
+  if (stale()) {
     // As for a removal: its account's next reader may have loaded before
-    // this write landed, so it loads once more.
-    if (wrote) {
+    // this answer, so it loads once more.
+    if (changed) {
       if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
       else reloadAfterRestore.add(a.userKey)
     }
@@ -122,7 +141,7 @@ export async function editActiveMutedWords(edit: MutedWordEdit): Promise<MutedWo
   }
   a.checkedAt = Date.now()
   publishReader(a.userKey, r)
-  if (wrote) clearKeptAlive()
+  if (changed) clearKeptAlive()
   return { outcome: r.outcome, reloadFailed: r.reloadFailed }
 }
 
@@ -180,7 +199,9 @@ function afterReload(client: CaribouClient, userKey: string): CaribouClient {
       const value = Reflect.get(target, prop, receiver)
       if (typeof value !== 'function' || prop === 'timelineOrder') return value
       return (...args: unknown[]) => {
-        const pending = active?.userKey === userKey ? active.reloading : null
+        const a = active?.userKey === userKey ? active : null
+        const waits = [a?.reloading, ...(a?.editing ?? [])].filter((p): p is Promise<unknown> => !!p)
+        const pending = waits.length ? Promise.all(waits.map((p) => p.catch(() => {}))) : null
         if (!pending) return (value as (...a: unknown[]) => unknown).apply(target, args)
         return pending.then(() => (value as (...a: unknown[]) => unknown).apply(target, args))
       }

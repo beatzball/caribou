@@ -213,6 +213,106 @@ describe('<caribou-muted-words>', () => {
     expect(toasts).toEqual([])
   })
 
+  it('rule 5: unmount, switch, then the old write fails: no toast', async () => {
+    readWords([KEPT])
+    const el = await mount()
+    let fail!: (e: unknown) => void
+    editActiveMutedWords.mockReturnValue(new Promise((_r, j) => { fail = j }))
+    button(el, 'remove').click()
+    await el.updateComplete
+    el.remove()
+    activeUserKey.value = 'bob@example.social' as typeof activeUserKey.value
+    fail(new Error('offline'))
+    await flush()
+    await flush()
+    expect(toasts).toEqual([])
+  })
+
+  it('rule 5: unmounted while the write runs, same account: no toast', async () => {
+    readWords([KEPT])
+    const el = await mount()
+    let fail!: (e: unknown) => void
+    editActiveMutedWords.mockReturnValue(new Promise((_r, j) => { fail = j }))
+    button(el, 'remove').click()
+    await el.updateComplete
+    el.remove()
+    fail(new Error('offline'))
+    await flush()
+    await flush()
+    expect(toasts).toEqual([])
+  })
+
+  it('rule 3: a word typed while the save runs is kept', async () => {
+    readWords([])
+    const el = await mount()
+    let finish!: (v: unknown) => void
+    editActiveMutedWords.mockReturnValue(new Promise((r) => { finish = r }))
+    await typeWord(el, 'first')
+    submit(el)
+    await el.updateComplete
+    await typeWord(el, 'second')
+    finish({ outcome: 'added', reloadFailed: false })
+    await settle(el)
+    expect(($(el, 'input[name="value"]') as HTMLInputElement).value).toBe('second')
+  })
+
+  it('rule 3: after Remove, focus goes to the next Remove, else the previous, else the word field', async () => {
+    const C: Word = { id: 'c', value: 'third', targets: ['content'] }
+    readWords([KEPT, TAG, C])
+    const el = await mount()
+    editActiveMutedWords.mockResolvedValue({ outcome: 'removed', reloadFailed: false })
+    const active = () => el.shadowRoot!.activeElement as HTMLElement | null
+    const dropRow = async (n: number, left: Word[]) => {
+      button(el, 'remove', n).focus()
+      button(el, 'remove', n).click()
+      await flush()
+      readWords(left)
+      await settle(el)
+    }
+    // The middle one: the next row's Remove (now at the same index).
+    await dropRow(1, [KEPT, C])
+    expect(active()?.closest('li')?.querySelector('strong')?.textContent).toBe('third')
+    // The last one: the previous row's Remove.
+    await dropRow(1, [KEPT])
+    expect(active()?.closest('li')?.querySelector('strong')?.textContent).toBe('spoiler')
+    // The only one: the word field.
+    await dropRow(0, [])
+    expect(active()?.getAttribute('name')).toBe('value')
+  })
+
+  it('rule 3: focus is not moved when the reader moved it elsewhere', async () => {
+    readWords([KEPT, TAG])
+    const el = await mount()
+    const other = document.createElement('button')
+    document.body.appendChild(other)
+    let finish!: (v: unknown) => void
+    editActiveMutedWords.mockReturnValue(new Promise((r) => { finish = r }))
+    button(el, 'remove', 0).focus()
+    button(el, 'remove', 0).click()
+    await el.updateComplete
+    other.focus()
+    readWords([TAG])
+    finish({ outcome: 'removed', reloadFailed: false })
+    await settle(el)
+    expect(document.activeElement).toBe(other)
+  })
+
+  it('rule 2: two id-less words with the same value are two rows, each with its own Remove', async () => {
+    readWords([{ value: 'same', targets: ['content'] }, { value: 'same', targets: ['tag'] }])
+    const el = await mount()
+    const rows = $$(el, 'li.word')
+    expect(rows).toHaveLength(2)
+    expect(rows[1]!.querySelector('.meta')!.textContent).toMatch(/^Tags only/)
+    let finish!: (v: unknown) => void
+    editActiveMutedWords.mockReturnValue(new Promise((r) => { finish = r }))
+    button(el, 'remove', 0).click()
+    await el.updateComplete
+    expect((button(el, 'remove', 0) as unknown as { loading: boolean }).loading).toBe(true)
+    expect((button(el, 'remove', 1) as unknown as { loading: boolean }).loading).toBe(false)
+    finish({ outcome: 'removed', reloadFailed: false })
+    await settle(el)
+  })
+
   it('rule 6: a failed write says so, in a line and a toast; the list stays', async () => {
     readWords([KEPT])
     const el = await mount()
