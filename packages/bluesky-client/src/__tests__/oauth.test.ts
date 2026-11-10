@@ -334,12 +334,14 @@ describe('restoreClient', () => {
     const check = out.recheckLabelers()
     await vi.waitFor(() => expect(release).not.toBeNull())
     lUp = false
-    const reload = await out.reloadModeration()
-    expect(Object.keys(reload.labelDefs!)).toEqual([BSKY_LABELER_DID])
-
+    // One at a time (README, rule Q): the reload runs after the check.
+    const reloading = out.reloadModeration()
     release!()
-    const late = await check
-    expect(Object.keys(late.labelDefs!)).toEqual([BSKY_LABELER_DID])
+    const reload = await reloading
+    expect(Object.keys(reload.labelDefs!)).toEqual([BSKY_LABELER_DID])
+    // The check ran first and answers for its own time; it does not put L
+    // back after the load.
+    await check
     expect(Object.keys(out.labelDefs!)).toEqual([BSKY_LABELER_DID])
   })
 

@@ -634,6 +634,38 @@ active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
 
+**A gone labeler (#238).** A labeler in the reader's prefs that
+`getServices` has no view for keeps every Bluesky card covered (bluesky
+README, "A gone labeler"). After two misses in a row (the first load plus
+a Retry or a recheck), `<caribou-gone-labelers>`, in the app shell, shows
+one notice per gone labeler: "A labeler in your Bluesky moderation
+settings is gone: <DID>. Bluesky posts stay covered until you remove it."
+with a "Remove" button, named "Remove labeler <DID>". The button asks
+first (`confirmDialog`, "Remove labeler?"). Only a yes sends the write,
+and one click sends it once. While it runs the button is busy.
+
+- **One account.** The busy and failed state belong to the account that
+  started the removal, by an operation token. Every owner change (A to B,
+  and B back to A) makes the earlier tokens stale, so an earlier answer or
+  error changes nothing on screen.
+- **Answers.** On `removed`, `absent` or `back` the glue sets the reader
+  again, and the notice goes when the labeler is no longer gone. A live
+  region that is always there says "Labeler removed." (`removed`,
+  `absent`) or "The labeler is back. Nothing was removed." (`back`). It
+  is cleared when a removal starts, so a second removal is announced too.
+  Focus moves to the next Remove button, or to `main`. `main` gets
+  `tabindex="-1"` for that only when it has none, and loses it on blur. On an error the
+  notice stays and says "Could not remove the labeler. Try again." (plain
+  text in the notice's status, no nested alert).
+- **Switch away and back.** A removal's answer that lands while its
+  account is not the active reader is dropped. The glue then reloads that
+  account's moderation once: at once if its new reader is already
+  restored, else when its restore finishes. So the notice does not name a
+  labeler that the write already took out.
+- The cover stays the whole time, until the new reader settles it. The
+  server and the first client render show only the empty live region
+  (the reader signal is empty then).
+
 ### Bluesky compose (#189)
 
 `<caribou-compose-dialog>` with a Bluesky account active. Every rule here
