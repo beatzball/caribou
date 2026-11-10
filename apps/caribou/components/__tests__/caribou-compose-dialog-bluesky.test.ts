@@ -1517,7 +1517,7 @@ describe('Bluesky redraft', () => {
     const source = {
       status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
       files: new Map([['bafkOLD', new Blob(['OLD'], { type: 'image/jpeg' })]]),
-      targets: { reply: null, quote: null }, generation: ownerGeneration(),
+      targets: { reply: null, quote: null }, gates: { replies: null, quotes: true }, generation: ownerGeneration(),
     }
     const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, source, {
       prepareImage: async (b) => ({ blob: new Blob([`re ${await b.text()}`], { type: 'image/jpeg' }), width: 4, height: 3 }),
@@ -1567,7 +1567,7 @@ describe('Bluesky redraft', () => {
     const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
       status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
       files: new Map([['bafkOLD', new Blob(['OLD'], { type: 'image/jpeg' })]]),
-      targets: { reply: null, quote: null }, generation: ownerGeneration(),
+      targets: { reply: null, quote: null }, gates: { replies: null, quotes: true }, generation: ownerGeneration(),
     }, { prepareImage: async (b) => ({ blob: new Blob([`re ${await b.text()}`], { type: 'image/jpeg' }), width: 4, height: 3 }) }))!
     const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
     let el: CaribouComposeDialog
@@ -1626,7 +1626,7 @@ describe('Bluesky redraft', () => {
     const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
     const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
       status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
-      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+      files: new Map(), targets: { reply: null, quote: null }, gates: { replies: null, quotes: true }, generation: ownerGeneration(),
     }, { prepareImage: async () => null }))!
     const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
     let el: CaribouComposeDialog
@@ -1647,7 +1647,7 @@ describe('Bluesky redraft', () => {
     const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
     const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
       status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
-      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+      files: new Map(), targets: { reply: null, quote: null }, gates: { replies: null, quotes: true }, generation: ownerGeneration(),
     }, { prepareImage: async () => null }))!
     const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
     try {
@@ -1677,7 +1677,7 @@ describe('Bluesky redraft', () => {
     const record = { $type: 'app.bsky.feed.post', text: 'from the deleted post', createdAt: 't' } as unknown as BlueskyPostRecord
     const stored = (await storeBlueskyRedraft(pds.client as unknown as CaribouClient, {
       status: { id: SOURCE, uri: SOURCE, bluesky: { uri: SOURCE } } as unknown as Status, record,
-      files: new Map(), targets: { reply: null, quote: null }, generation: ownerGeneration(),
+      files: new Map(), targets: { reply: null, quote: null }, gates: { replies: null, quotes: true }, generation: ownerGeneration(),
     }, { prepareImage: async () => null }))!
     const spy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
     try {

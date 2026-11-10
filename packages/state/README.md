@@ -780,8 +780,11 @@ draft is stored durably first. The order:
    `application/octet-stream`). The reply parent and the quoted post
    (`fetchStatus`, cached): `gone` (`not_found`), `limited`
    (`replyDisabled` / `embeddingDisabled`), `ok`, or `unknown` (the read
-   failed). Any read failing except a target's throws: nothing is
-   deleted. The record not there throws `BlueskyRedraftGone`: the post is
+   failed). The post's reply and quote limits (`blueskyGetOwnGates`, #262).
+   Any read failing except a target's throws: nothing is
+   deleted. A failed limits read throws `BlueskyRedraftGatesUnread`
+   ("Could not read the post's reply and quote limits, so it was not
+   deleted."): a redraft never drops limits without saying so. The record not there throws `BlueskyRedraftGone`: the post is
    already deleted (the card drops it, app README).
 2. **Ask.** When the draft would be empty (no text, no image, no
    quote: a post that is only a link card, a video or a feed card,
@@ -945,7 +948,7 @@ not stored there: the reader has those files.
 | `langs` | `language` = the first one; the others are not kept (compose sends one) |
 | a video, an external link card | not kept. The link's URL stays only if it is in the text. |
 | `tags` | not kept |
-| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again (#262) |
+| reply and quote limits (thread gate, post gate at the post's rkey, #262) | `bluesky.gates` (`readGates`: list rules by id, no titles), for a top-level post. A reply has no limits (G1): its draft gets none, and the confirm says "Its reply and quote limits are not kept." The new post writes them again with its own rkey (G3). |
 | `createdAt` | not kept: a new post gets a new time |
 
 ## Act as another account (`act-as.ts`; Bluesky #197, Mastodon #131)

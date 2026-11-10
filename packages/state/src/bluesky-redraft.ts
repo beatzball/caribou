@@ -3,7 +3,7 @@
 // (read, re-encode, upload, rkey, storage) happens before it.
 import type { UserKey } from '@beatzball/caribou-auth'
 import type {
-  BlueskyBlobRef, BlueskyFacet, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, Status,
+  BlueskyBlobRef, BlueskyFacet, BlueskyGates, BlueskyPostRecord, BlueskyStrongRef, CaribouClient, Status,
 } from '@beatzball/caribou-mastodon-client'
 import { cacheStatus } from './caches.js'
 import {
@@ -11,6 +11,7 @@ import {
   type BlueskyDraftImage, type ComposeDraft, type DraftSlot,
 } from './compose.js'
 import { emptyBlueskyDraft } from './bluesky-compose.js'
+import { hasBlueskyGates } from './bluesky-gates.js'
 import { putDraftFiles, removeDraftFiles } from './draft-files.js'
 import { ownerGeneration } from './keep-alive.js'
 
@@ -23,6 +24,8 @@ export interface BlueskyRedraftSource {
   record: BlueskyPostRecord
   files: Map<string, Blob>
   targets: { reply: RedraftTarget | null; quote: RedraftTarget | null }
+  /** The post's reply and quote limits, from its gate records (#262). */
+  gates: BlueskyGates
   generation: number
 }
 
@@ -57,6 +60,14 @@ export class BlueskyRedraftGone extends Error {
   override name = 'BlueskyRedraftGone'
   constructor() {
     super('This post is already deleted.')
+  }
+}
+
+/** The post's limits could not be read: a redraft would drop them (#262). */
+export class BlueskyRedraftGatesUnread extends Error {
+  override name = 'BlueskyRedraftGatesUnread'
+  constructor() {
+    super("Could not read the post's reply and quote limits, so it was not deleted.")
   }
 }
 
@@ -196,6 +207,15 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
   // Same rkey in another repo is another post.
   if (own.uri !== uri || !isObject(own.value)) throw new Error('The post is not on your server.')
   const record = own.value
+  // #262: the limits, read before anything is deleted. A failed read says so.
+  let gates: BlueskyGates
+  try {
+    gates = await need(client, 'blueskyGetOwnGates')(rkey)
+  } catch {
+    if (generation !== ownerGeneration()) return null
+    throw new BlueskyRedraftGatesUnread()
+  }
+  if (generation !== ownerGeneration()) return null
   const files = new Map<string, Blob>()
   const { quote, images } = embedParts(record)
   for (const img of images) {
@@ -212,7 +232,7 @@ export async function readBlueskyRedraft(client: CaribouClient, status: Status):
     quote ? checkTarget(client, quote.uri, 'embeddingDisabled', generation) : null,
   ])
   if (generation !== ownerGeneration()) return null
-  return { status: post, record, files, targets: { reply: replyState, quote: quoteState }, generation }
+  return { status: post, record, files, targets: { reply: replyState, quote: quoteState }, gates, generation }
 }
 
 /**
@@ -251,6 +271,14 @@ export function redraftLabelsOf(record: BlueskyPostRecord): string[] {
     if (isObject(v) && typeof v.val === 'string' && v.val !== '' && !out.includes(v.val)) out.push(v.val)
   }
   return out
+}
+
+/**
+ * True when the post has reply or quote limits the redraft cannot keep:
+ * it is a reply, and a reply has none (G1, #262).
+ */
+export function redraftDropsGates(source: BlueskyRedraftSource): boolean {
+  return !!replyOf(source.record) && hasBlueskyGates(source.gates)
 }
 
 /**
@@ -333,6 +361,8 @@ export async function storeBlueskyRedraft(
     // A new record with a new rkey (R6), stored with the first save.
     bluesky: emptyBlueskyDraft({
       reply, quote, labels: redraftLabelsOf(record), images, rkey, source: source.status.bluesky?.uri ?? source.status.id,
+      // #262: a top-level post keeps its limits; a reply has none (G1).
+      ...(!reply && hasBlueskyGates(source.gates) ? { gates: source.gates } : {}),
       // Set now, so the rename after the delete only changes its value
       // (and needs no more storage).
       sourceMaybeLive: false, stagedAt: Date.now(),

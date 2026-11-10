@@ -56,6 +56,10 @@ interface Pds {
   failDelete: boolean
   /** The delete is done, but its answer is lost. */
   loseDeleteAnswer: boolean
+  /** Gate records at the old post's rkey, by collection (#262). */
+  gates: Record<string, unknown>
+  gateReads: string[]
+  applyWrites: { $type: string; collection: string; rkey: string; value?: Record<string, unknown> }[][]
 }
 
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS' }
@@ -79,7 +83,7 @@ function appview(pds: Pds): XrpcAnswer {
 }
 
 function newPds(): Pds {
-  return { calls: [], creates: [], deleted: [], failDelete: false, loseDeleteAnswer: false }
+  return { calls: [], creates: [], deleted: [], failDelete: false, loseDeleteAnswer: false, gates: {}, gateReads: [], applyWrites: [] }
 }
 
 async function fixturePds(page: Page, pds: Pds): Promise<void> {
@@ -90,11 +94,30 @@ async function fixturePds(page: Page, pds: Pds): Promise<void> {
     const method = url.pathname.replace('/xrpc/', '')
     if (req.method() === 'OPTIONS') return route.fallback()
     switch (method) {
-      case 'com.atproto.repo.getRecord':
+      case 'com.atproto.repo.getRecord': {
+        const collection = url.searchParams.get('collection') ?? ''
+        const gate = pds.gates[collection]
+        if (collection !== 'app.bsky.feed.post') {
+          pds.gateReads.push(collection)
+          return route.fulfill(gate && url.searchParams.get('rkey') === OLD_RKEY && pds.deleted.length === 0
+            ? json({ uri: `at://${ALICE}/${collection}/${OLD_RKEY}`, cid: POST_CID, value: gate })
+            : json({ error: 'RecordNotFound', message: 'Could not locate record' }, 400))
+        }
         pds.calls.push(`getRecord ${url.searchParams.get('rkey')}`)
         return route.fulfill(url.searchParams.get('rkey') === OLD_RKEY && pds.deleted.length === 0
           ? json({ uri: OLD_URI, cid: POST_CID, value: RECORD })
           : json({ error: 'RecordNotFound', message: 'Could not locate record' }, 400))
+      }
+      case 'com.atproto.repo.applyWrites': {
+        const body = req.postDataJSON() as { repo: string; writes: Pds['applyWrites'][number] }
+        pds.calls.push(`applyWrites ${body.writes.map((w) => `${w.$type.split('#')[1]} ${w.collection}`).join(', ')}`)
+        pds.applyWrites.push(body.writes)
+        if (body.writes[0]!.$type.endsWith('#delete')) pds.deleted.push(body.writes[0]!.rkey)
+        else pds.creates.push({ rkey: body.writes[0]!.rkey, record: body.writes[0]!.value! })
+        return route.fulfill(json({ results: body.writes.map((w) => w.$type.endsWith('#delete')
+          ? { $type: 'com.atproto.repo.applyWrites#deleteResult' }
+          : { $type: 'com.atproto.repo.applyWrites#createResult', uri: `at://${body.repo}/${w.collection}/${w.rkey}`, cid: POST_CID }) }))
+      }
       case 'com.atproto.sync.getBlob':
         pds.calls.push(`getBlob ${url.searchParams.get('cid')}`)
         return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'application/octet-stream' }, body: IMAGE_BYTES })
@@ -175,6 +198,33 @@ test.describe('Bluesky delete and redraft', () => {
       $type: 'app.bsky.feed.post', text: 'a deer photo', langs: ['en'],
       embed: { $type: 'app.bsky.embed.images', images: [{ alt: 'a deer in snow', image: { ref: { $link: NEW_CID } } }] },
     })
+  })
+
+  // #262: the limits go with the post, in one write, and come back in the draft.
+  test('a post with reply and quote limits: one applyWrites deletes them with it, and the redraft keeps them', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    const pds = newPds()
+    pds.gates = {
+      'app.bsky.feed.threadgate': { $type: 'app.bsky.feed.threadgate', post: OLD_URI, createdAt: RECORD.createdAt, allow: [{ $type: 'app.bsky.feed.threadgate#followingRule' }] },
+      'app.bsky.feed.postgate': { $type: 'app.bsky.feed.postgate', post: OLD_URI, createdAt: RECORD.createdAt, embeddingRules: [{ $type: 'app.bsky.feed.postgate#disableRule' }] },
+    }
+    await installFixtureAuth(page, { xrpc: appview(pds) })
+    await fixturePds(page, pds)
+    await signIn(page, origin)
+    await chooseRedraft(page)
+
+    const dialog = page.getByRole('dialog', { name: 'New post' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText('Only people you follow can reply. Quotes are off.')).toBeVisible()
+    expect(pds.calls).toContain('applyWrites delete app.bsky.feed.post, delete app.bsky.feed.threadgate, delete app.bsky.feed.postgate')
+    expect(pds.calls.some((c) => c.startsWith('deleteRecord'))).toBe(false)
+
+    await dialog.getByRole('button', { name: 'Post' }).click()
+    await expect(dialog).toBeHidden()
+    const sent = pds.applyWrites.at(-1)!
+    expect(sent.map((w) => w.collection)).toEqual(['app.bsky.feed.post', 'app.bsky.feed.threadgate', 'app.bsky.feed.postgate'])
+    expect(sent[0]!.rkey).not.toBe(OLD_RKEY)
+    expect(sent[1]!.value).toMatchObject({ allow: [{ $type: 'app.bsky.feed.threadgate#followingRule' }] })
   })
 
   test('a refused delete opens no composer and keeps the post', async ({ page, baseURL }) => {
