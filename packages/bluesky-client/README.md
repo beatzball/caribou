@@ -548,6 +548,34 @@ rollback, the in-flight guard and the account check.
   state layer's in-flight guard is what stops a double click.
 - **Errors** are normalized as for reads; a 401 calls `onUnauthorized`.
 
+## Feeds (#194, spec 9)
+
+Read only. Caribou never writes the reader's feed prefs.
+
+- **Saved feeds (`blueskySavedFeeds()`).** The list comes from
+  `getPreferences().savedFeeds`. The SDK reads `savedFeedsPrefV2` there,
+  and the old `savedFeedsPref` only when there is no V2. The answer keeps
+  the stored order. Each item keeps its pref `id` and `pinned`.
+- **What is kept.** A `timeline` item (Following), and a `feed` item whose
+  value is an `at://<did>/app.bsky.feed.generator/<rkey>` URI. A `list`
+  item waits for lists (#195). An unknown type, or a bad URI, is left out.
+  A second item with the same value is left out.
+- **Names.** Feed items get their name, description, avatar and creator
+  handle from `getFeedGenerators`, 25 per request. A feed the AppView does
+  not return is still in the answer with `available: false` and its rkey
+  as its name: the reader saved it, so the screen says it is gone instead
+  of dropping it. If `getPreferences` or `getFeedGenerators` fails, the
+  call fails (errors as for reads).
+- **A feed's posts.** `fetchTimeline({ type: 'feed', uri })` →
+  `app.bsky.feed.getFeed`. Paging, catch-up and moderation are the same as
+  for Following: the posts go through the same mapper and the reader's
+  moderation. A pin reason or another unknown reason is a plain entry.
+- **A feed that fails.** `UnknownFeed` (the feed is gone) is `not_found`
+  with the message "This feed is gone. Its owner may have deleted it." Any
+  other failure except a 401 keeps its code with the message "This feed
+  did not load. Try again later." A 401 is as for reads. The screen shows
+  the message in the feed's place, never an empty page.
+
 ## Notifications (#191, spec 9)
 
 `src/map/notification.ts` maps one AppView notification; `fetchNotifications`

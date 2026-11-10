@@ -190,6 +190,14 @@ both networks. These add to them:
   with `loadMore` cursor.
 - `createAccountCache(clientSource)` — handle → Account memo with
   in-flight dedup.
+- `savedFeedsCache`, `loadSavedFeeds(opts)` (`saved-feeds.ts`, #194) — a
+  Bluesky reader's saved feeds, keyed by `userKey`, so one account never
+  sees another's. `loadSavedFeeds` reads through
+  `client.blueskySavedFeeds()`. Two loads for one account in flight share
+  one request. An answer that lands after the active account changed is
+  still stored under the account that read it. A failed load keeps what
+  the cache had and throws. A Mastodon client (by `capabilities.network`)
+  stores nothing and answers `[]`. Read only: nothing here writes prefs.
 
 **Glue**
 

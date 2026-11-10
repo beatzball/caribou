@@ -195,6 +195,13 @@ describe('createCaribouClient', () => {
     expect(statuses.map((s) => s.id)).toEqual(['list-1'])
   })
 
+  it('fetchTimeline({ type: "feed" }) is not_found: Mastodon has no custom feeds', async () => {
+    const client = createCaribouClient(userKey, sessionSource())
+    await expect(client.fetchTimeline({ type: 'feed', uri: 'at://did:plc:alice/app.bsky.feed.generator/x' }))
+      .rejects.toMatchObject({ code: 'not_found' })
+    expect(client.blueskySavedFeeds).toBeUndefined()
+  })
+
   it('throws unauthorized when session.get() returns null', async () => {
     const onUnauthorized = vi.fn()
     const sess = { get: () => null, onUnauthorized }
