@@ -30,7 +30,11 @@ function harness(fetchCard: (url: string, s: AbortSignal) => Promise<Data | null
     draft = { ...draft, text, bluesky: { ...draft.bluesky!, ...b } }
     w.check(draft)
   }
-  return { w, fetchCard: vi.mocked(fetchCard), edit, draft: () => draft, disown: () => { owned = false } }
+  // A send freezes the draft without telling the watcher (posting skips check).
+  const freeze = (sent: NonNullable<ComposeDraft['bluesky']>['sent']) => {
+    draft = { ...draft, bluesky: { ...draft.bluesky!, sent } }
+  }
+  return { w, fetchCard: vi.mocked(fetchCard), edit, freeze, draft: () => draft, disown: () => { owned = false } }
 }
 
 beforeEach(() => { vi.useFakeTimers() })
@@ -161,5 +165,49 @@ describe('LinkCardWatcher', () => {
     h.w.stop()
     await vi.advanceTimersByTimeAsync(LINK_CARD_DELAY_MS)
     expect(h.fetchCard).not.toHaveBeenCalled()
+  })
+
+  it('rule 9: a link with no card is not asked again at the next pause', async () => {
+    const h = harness(vi.fn(async () => null))
+    for (const tail of ['', ' and', ' and more', ' and more words']) {
+      h.edit(`see ${A}${tail}`)
+      await vi.advanceTimersByTimeAsync(LINK_CARD_DELAY_MS)
+    }
+    expect(h.fetchCard).toHaveBeenCalledTimes(1)
+    // Another link is still asked.
+    h.edit(`see ${B}`)
+    await vi.advanceTimersByTimeAsync(LINK_CARD_DELAY_MS)
+    expect(h.fetchCard).toHaveBeenCalledTimes(2)
+  })
+
+  const SENT = { input: 'frozen', record: { $type: 'app.bsky.feed.post' as const, text: 't', createdAt: '2026-11-10T00:00:00.000Z' } }
+
+  it('rule 10: no fetch and no card change while a send is pending', async () => {
+    const h = harness()
+    h.edit(`see ${A}`, { sent: SENT })
+    await vi.advanceTimersByTimeAsync(LINK_CARD_DELAY_MS)
+    expect(h.fetchCard).not.toHaveBeenCalled()
+    expect(h.draft().bluesky?.card ?? null).toBeNull()
+  })
+
+  it('rule 10: a card is not removed under a pending send', async () => {
+    const h = harness()
+    h.edit(`see ${A}`)
+    await vi.advanceTimersByTimeAsync(LINK_CARD_DELAY_MS)
+    h.edit('no link now', { sent: SENT })
+    expect(h.draft().bluesky?.card?.uri).toBe(A)
+  })
+
+  it('rule 10: an answer that lands after a send started is dropped', async () => {
+    let release!: () => void
+    const fetchCard = vi.fn((url: string) => new Promise<Data>((r) => { release = () => r(data(url)) }))
+    const h = harness(fetchCard)
+    h.edit(`see ${A}`)
+    await vi.advanceTimersByTimeAsync(LINK_CARD_DELAY_MS)
+    // The send freezes the draft (the dialog checks only while not posting).
+    h.freeze(SENT)
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.draft().bluesky?.card ?? null).toBeNull()
   })
 })

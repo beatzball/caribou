@@ -55,13 +55,39 @@ function deadline(signal?: AbortSignal): { signal: AbortSignal; done: () => void
   }
 }
 
-/** The body as bytes, refused when over `max` (C3). */
+/**
+ * The body as bytes, refused when over `max` (C3). The stream is read in
+ * chunks and cancelled as soon as it passes `max`, so a large or endless
+ * body is never read whole. A body refused by its Content-Length is
+ * cancelled without being read.
+ */
 async function cappedBytes(res: Response, max: number): Promise<ArrayBuffer> {
   const declared = Number(res.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > max) throw new Error('Too large')
-  const buf = await res.arrayBuffer()
-  if (buf.byteLength > max) throw new Error('Too large')
-  return buf
+  if (res.headers.has('content-length') && Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel().catch(() => {})
+    throw new Error('Too large')
+  }
+  const reader = res.body?.getReader()
+  if (!reader) return new ArrayBuffer(0)
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel().catch(() => {})
+      throw new Error('Too large')
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let at = 0
+  for (const c of chunks) {
+    out.set(c, at)
+    at += c.byteLength
+  }
+  return out.buffer
 }
 
 function text(v: unknown, max: number): string {

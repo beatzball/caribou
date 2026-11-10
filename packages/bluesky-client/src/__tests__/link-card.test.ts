@@ -141,3 +141,42 @@ describe('fetchCardImage', () => {
     await expect(fetchCardImage(IMAGE, { fetch: f })).rejects.toThrow()
   })
 })
+
+// C3: the cap stops the transfer, not only the result.
+describe('the size cap reads a stream, and cancels it', () => {
+  // A body of `chunks` chunks of 64 KB, with no Content-Length.
+  function streamed(chunks: number, type: string) {
+    const seen = { pulled: 0, cancelled: false }
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctl) {
+        if (seen.pulled >= chunks) return ctl.close()
+        seen.pulled += 1
+        ctl.enqueue(new Uint8Array(65_536))
+      },
+      cancel() { seen.cancelled = true },
+    }, { highWaterMark: 0 })
+    return { seen, fetch: vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': type } })) }
+  }
+
+  it('an image stream over 5 MB is cancelled long before its end', async () => {
+    const s = streamed(320, 'image/png') // 20 MB
+    await expect(fetchCardImage(IMAGE, { fetch: s.fetch })).rejects.toThrow('Too large')
+    expect(s.seen.cancelled).toBe(true)
+    expect(s.seen.pulled).toBeLessThan(100)
+  })
+
+  it('a card stream over 64 KB is cancelled after its second chunk', async () => {
+    const s = streamed(100, 'application/json')
+    expect(await fetchLinkCard(LINK, { fetch: s.fetch })).toBeNull()
+    expect(s.seen.cancelled).toBe(true)
+    expect(s.seen.pulled).toBeLessThanOrEqual(3)
+  })
+
+  it('a body refused by its Content-Length is cancelled unread', async () => {
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({ pull() {}, cancel() { cancelled = true } })
+    const f = vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': 'image/png', 'content-length': '9000000' } }))
+    await expect(fetchCardImage(IMAGE, { fetch: f })).rejects.toThrow('Too large')
+    expect(cancelled).toBe(true)
+  })
+})

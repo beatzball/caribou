@@ -24,6 +24,8 @@ export interface LinkCardWatcherOptions {
 
 export class LinkCardWatcher {
   private link: string | null = null
+  // Rule 9: the last link that gave no card, so a pause does not ask again.
+  private noCard: string | null = null
   private timer: ReturnType<typeof setTimeout> | null = null
   private ctl: AbortController | null = null
 
@@ -33,6 +35,8 @@ export class LinkCardWatcher {
   check(d: ComposeDraft): void {
     const b = d.bluesky
     if (!b) return this.stop()
+    // Rule 10: a send in doubt is frozen; the card does not change under it.
+    if (b.sent) return this.stop()
     const card = b.card ?? null
     // Rule 2: no card, and no fetch, beside images or a quote.
     if (!cardAllowed(d)) {
@@ -45,7 +49,7 @@ export class LinkCardWatcher {
     if (card && card.uri === link) return this.stop()
     if (card) this.opts.apply(null)
     // Rule 5: a removed card stays removed for its link.
-    if (!link || link === b.cardDismissed) return this.stop()
+    if (!link || link === b.cardDismissed || link === this.noCard) return this.stop()
     if (link === this.link) return
     this.stop()
     this.link = link
@@ -74,9 +78,10 @@ export class LinkCardWatcher {
     if (ctl.signal.aborted) return
     this.ctl = null
     this.link = null
+    if (!data) this.noCard = link
     // Rule 4: a late answer is used only for the same link, dialog and account.
     const d = this.opts.current()
-    if (!data || !d?.bluesky || !cardAllowed(d) || d.bluesky.card) return
+    if (!data || !d?.bluesky || d.bluesky.sent || !cardAllowed(d) || d.bluesky.card) return
     if (this.opts.findLink(d.text) !== link || d.bluesky.cardDismissed === link) return
     this.opts.apply({ ...data, uri: link, thumb: null })
   }

@@ -883,19 +883,31 @@ is its own module, `components/_bluesky-link-card.ts`.
    account, and the draft still has no other embed.
 5. **Remove.** The card's "Remove link card" button removes it and keeps that
    link in `cardDismissed`: the same link does not fetch again. Another link
-   does.
+   does. The button goes with the card, so focus moves to the post text.
 6. **The preview** shows the title, the description, the link's host and
    the image (the `cardyb` URL, `referrerpolicy="no-referrer"`). It is the
    reader's own draft, not someone's post, so no moderation runs on it.
+   A polite live region says "Link card attached: <title>" when a card
+   comes, and is empty when it goes.
 7. **Post.** `prepareCardThumb` (K4) runs before `postBlueskyDraft`. Post
    says "Posting…" while it runs. A `BlueskyBlobNotFound` for the thumb
    drops the stored thumb, so the next Post uploads it again, and says so.
 8. **Mastodon:** nothing changes. Every step above runs only when the
    dialog's client is Bluesky.
+9. **A link with no card is asked once.** When `cardyb` gives no card for
+   a link, the watcher keeps that link and does not ask again at the next
+   pause, for this opening of the dialog. Another link is asked.
+10. **No card change under a pending send.** While the draft has `sent` (a
+    send whose outcome is not known yet), the watcher does not fetch, add
+    or remove a card, and an answer that lands after the send started is
+    dropped. The frozen record decides (state R2); a card change would make
+    the retry read our own post as another.
 
-Tests: `caribou-compose-dialog-bluesky-link-card.test.ts` (debounce, a late
-answer, remove, images and quotes, the post with and without the image,
-Mastodon untouched).
+Tests: `_bluesky-link-card.test.ts` (rules 1 to 5, 9, 10) and
+`caribou-compose-dialog-bluesky-link-card.test.ts` (debounce, a late
+answer, remove with focus and the live region, images and quotes, the post
+with and without the image, a save from another tab during the upload, a
+pending send reopened and retried, Mastodon untouched).
 
 ### Bluesky delete and redraft (#190)
 

@@ -186,7 +186,8 @@ test.describe('Bluesky compose', () => {
     await signIn(page, origin)
     const dialog = await openCompose(page)
     await dialog.getByRole('textbox', { name: 'Post text' }).pressSequentially('see https://example.com/a', { delay: 20 })
-    await expect(dialog.getByText('Example title')).toBeVisible()
+    await expect(dialog.getByText('Example title', { exact: true })).toBeVisible()
+    await expect(dialog.locator('[data-link-card-status]')).toHaveText('Link card attached: Example title')
     // Rule 3: one fetch for the whole typed link, not one per key.
     expect(extracts).toEqual(['https://example.com/a'])
     await dialog.getByRole('button', { name: 'Post' }).click()

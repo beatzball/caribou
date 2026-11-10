@@ -418,6 +418,14 @@ export class CaribouComposeDialog extends LitElement {
     })
   }
 
+  // Rule 5: the focused button goes with the card, so focus moves to the text.
+  private removeLinkCard() {
+    const card = this.draft.bluesky?.card
+    if (!card) return
+    this.patchBluesky({ card: null, cardDismissed: card.uri })
+    void this.updateComplete.then(() => this.textareaEl?.focus())
+  }
+
   // K4: the card's image, fetched through `cardyb` and fitted to the lexicon's 1 MB.
   private async loadCardImage(url: string): Promise<Blob> {
     if (!this.bsky) throw new Error('Bluesky is not loaded')
@@ -995,12 +1003,10 @@ export class CaribouComposeDialog extends LitElement {
     try {
       // K4: the link card's image goes up first, once. Not `patchBluesky`:
       // the editor is read-only while posting.
-      const ready = await prepareCardThumb(client, this.draft, { loadImage: (url) => this.loadCardImage(url) })
+      // K7: it stores the prepared draft only while the slot's revision holds.
+      const ready = await prepareCardThumb(client, owner.slot, this.draft, { loadImage: (url) => this.loadCardImage(url) })
       if (!this.owns(owner) || !ready) return
-      if (ready !== this.draft) {
-        this.draft = ready
-        saveDraft(owner.client.userKey, owner.slot, ready)
-      }
+      this.draft = ready
       sentRkey = this.draft.bluesky?.rkey ?? null
       sentInput = blueskyDraftInput(this.draft)
       const out = await postBlueskyDraft(client, owner.slot, this.draft, {
@@ -1482,8 +1488,10 @@ export class CaribouComposeDialog extends LitElement {
               })}
             </ul>` : nothing}
           ${bluesky && !editing && d.bluesky?.card && cardAllowed(d)
-            ? renderLinkCardPreview(d.bluesky.card, busy, () => this.patchBluesky({ card: null, cardDismissed: d.bluesky!.card!.uri }))
+            ? renderLinkCardPreview(d.bluesky.card, busy, () => this.removeLinkCard())
             : nothing}
+          ${bluesky && !editing ? html`<span class="visually-hidden" aria-live="polite" data-link-card-status>${
+            d.bluesky?.card && cardAllowed(d) ? `Link card attached: ${d.bluesky.card.title}` : ''}</span>` : nothing}
           ${this.activePoll ? this.renderPoll(this.activePoll, busy) : nothing}
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space

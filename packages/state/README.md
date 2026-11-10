@@ -636,12 +636,24 @@ app README.
   the card's `uri`, `title`, `description` and thumb CID.
 - **K6. A card alone does not make a draft non-empty.** Its link is in the
   text.
+- **K7. The prepared draft is stored only for the revision it read.**
+  `prepareCardThumb(client, slot, draft, opts)` reads the slot's revision
+  before the upload, and stores the draft with its thumb through
+  `storeDraftIf` with that revision (R4). Another save in between (another
+  tab) throws `DraftChanged` and keeps that save; storage refusing the write
+  throws `DraftNotSaved`. Nothing is sent either way.
+- **K8. An input frozen before link cards still matches.** With no card,
+  `blueskyDraftInput` has no `card` key, so a pending send frozen by the
+  version before #200 equals its unchanged draft: a found record is
+  `posted`, and an absent one sends the frozen record as it is.
 
 Tests (`bluesky-link-card.test.ts`, `bluesky-compose.test.ts`): the record
 with a card, with a thumb, with images (no card), with a quote (no card); a
 card in a reply; a thumb uploaded once and stored; an image that fails
 posts the card without it; a pending send is not changed; an account
-switch during the upload; the R7 compare with a card.
+switch during the upload; the R7 compare with a card; a save from another
+tab during the upload (K7); storage refusing the prepared draft (K7); an
+input in the exact pre-#200 shape, found and absent (K8).
 
 ## Bluesky delete and redraft (#190)
 

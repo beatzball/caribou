@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  activeClient, activeUserKey, addUserSession, blueskyUserKey, loadDraft, setBlueskyDriver, statusCache, users,
+  activeClient, activeUserKey, addUserSession, blueskyDraftInput, blueskyUserKey, emptyBlueskyDraft, emptyDraft, loadDraft,
+  saveDraft, setBlueskyDriver, statusCache, users,
   type BlueskyDriver, type UserSession,
 } from '@beatzball/caribou-state'
 import {
@@ -189,15 +190,21 @@ describe('Bluesky link cards in compose (#200)', () => {
     expect($(el, '[data-link-card]')).toBeNull()
   })
 
-  it('rule 5: Remove drops the card and it does not come back for that link', async () => {
+  it('rule 5: Remove drops the card, focus goes to the text, and it does not come back for that link', async () => {
     signInBluesky()
     const el = await mount()
     await open(el)
     await type(el, `see ${LINK}`)
     await pause(el)
-    $(el, '[data-action="remove-link-card"]')!.click()
+    expect($(el, '[data-link-card-status]')!.textContent).toBe('Link card attached: A title')
+    // The real inner button, as a keyboard or a pointer reaches it.
+    const inner = $(el, '[data-action="remove-link-card"]')!.shadowRoot!.querySelector('button')!
+    inner.focus()
+    inner.click()
     await settle(el)
     expect($(el, '[data-link-card]')).toBeNull()
+    expect(el.shadowRoot!.activeElement).toBe($(el, 'textarea'))
+    expect($(el, '[data-link-card-status]')!.textContent).toBe('')
     await type(el, `see ${LINK} again`)
     await pause(el)
     expect($(el, '[data-link-card]')).toBeNull()
@@ -290,5 +297,44 @@ describe('Bluesky link cards in compose (#200)', () => {
     await pause(el)
     expect(cards.fetchLinkCard).not.toHaveBeenCalled()
     expect($(el, '[data-link-card]')).toBeNull()
+  })
+
+  it('rule 10: a pending send reopened gets no card, and its retry is one post with no new draft', async () => {
+    const pds = signInBluesky()
+    const base = emptyDraft({ text: `see ${LINK}`, bluesky: emptyBlueskyDraft({ rkey: '3krkeyPENDING' }) })
+    const record: BlueskyPostRecord = { $type: 'app.bsky.feed.post', text: `see ${LINK}`, createdAt: '2026-11-10T00:00:00.000Z' }
+    // The first create landed; its answer and the check after it were lost.
+    pds.records.set('3krkeyPENDING', record)
+    saveDraft(KEY, 'new', { ...base, bluesky: { ...base.bluesky!, sent: { input: blueskyDraftInput(base), record } } })
+    const el = await mount()
+    await open(el)
+    await pause(el)
+    expect(cards.fetchLinkCard).not.toHaveBeenCalled()
+    expect($(el, '[data-link-card]')).toBeNull()
+    await submit(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    expect(pds.records.size).toBe(1)
+    expect($(el, '[data-earlier-posted]')).toBeNull()
+    expect(loadDraft(KEY, 'new')).toBeNull()
+    expect(toasts.at(-1)?.message).toBe('Post published')
+  })
+
+  it('K7: a save from another tab during the card upload wins; nothing is sent', async () => {
+    const pds = signInBluesky()
+    let release!: () => void
+    cards.fetchCardImage = vi.fn(() => new Promise<Blob>((r) => { release = () => r(new Blob(['thumb'], { type: 'image/jpeg' })) }))
+    const el = await mount()
+    await open(el)
+    await type(el, `see ${LINK}`)
+    await pause(el)
+    $<HTMLFormElement>(el, 'form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await settle(el)
+    const stored = loadDraft(KEY, 'new')!
+    saveDraft(KEY, 'new', { ...stored, text: 'newer text from another tab' })
+    release()
+    await settle(el)
+    expect(pds.client.blueskyCreatePost).not.toHaveBeenCalled()
+    expect(loadDraft(KEY, 'new')?.text).toBe('newer text from another tab')
+    expect(toasts.at(-1)?.message).toBe('The draft changed while it was being sent, so nothing was sent.')
   })
 })

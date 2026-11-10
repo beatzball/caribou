@@ -954,7 +954,9 @@ Rules:
   (no network), and only when its URI is `http:` or `https:`.
 - **C3. Strict limits.** 5 s per request (the caller's `AbortSignal` also
   stops it). A body over 64 KB for the card or over 5 MB for the image is
-  refused. `title` is cut to 300 characters, `description` to 1000
+  refused. The body is read as a stream and cancelled as soon as it passes
+  the cap, so it is never read whole; a body whose Content-Length is over
+  the cap is cancelled unread. `title` is cut to 300 characters, `description` to 1000
   (trimmed). The card's `uri` is the link the reader typed, not `cardyb`'s
   `url` field (it can differ after a redirect).
 - **C4. Images come only through the proxy.** The card's `image` is kept only
@@ -966,7 +968,9 @@ Rules:
 
 Tests (`link-card.test.ts`, `compose.test.ts`): a full card; no title; an
 `error`; a 500; bad JSON; a timeout; an image on another host; an image of
-the wrong type; an oversized body; the link the reader typed is kept;
+the wrong type; an oversized body; a 20 MB stream with no Content-Length is
+cancelled long before its end; a Content-Length over the cap is cancelled
+unread; the link the reader typed is kept;
 `cardLink` takes the first link, skips a non-http one, and a bare domain.
 
 ## Delete (#190)

@@ -42,6 +42,7 @@ function sentLabels(b: BlueskyDraft): string[] {
  */
 export function blueskyDraftInput(d: ComposeDraft): string {
   const b = d.bluesky ?? emptyBlueskyDraft()
+  const card = sentCard(b)
   return JSON.stringify({
     text: d.text,
     language: d.language ?? null,
@@ -49,8 +50,9 @@ export function blueskyDraftInput(d: ComposeDraft): string {
     quote: b.quote,
     labels: sentLabels(b),
     images: b.images.map((i) => ({ cid: i.blob.ref.$link, alt: i.alt, aspectRatio: i.aspectRatio })),
-    // K5: the card as it is sent (K2 decides whether it is).
-    card: sentCard(b),
+    // K5: the card as it is sent (K2 decides whether it is). No key with no
+    // card, so an input frozen before #200 still equals its draft's (K8).
+    ...(card ? { card } : {}),
   })
 }
 
