@@ -228,9 +228,10 @@ export function storeDraftIf(
 }
 
 /**
- * The slot of the oldest kept redraft (`redraft:<key>`), or null. A new
- * post opens it before the plain `new` draft, so it cannot be forgotten.
- * A `staged:` slot is never found here.
+ * The slot of the oldest kept redraft (`redraft:<key>`, or an exposed
+ * `staged:<key>` whose rename storage refused), or null. A new post opens
+ * it before the plain `new` draft, so it cannot be forgotten. An unexposed
+ * `staged:` slot is never found here.
  */
 export function findRedraftSlot(userKey: UserKey): DraftSlot | null {
   for (const [slot, d] of Object.entries(readAll(userKey))) {
@@ -282,7 +283,8 @@ export function _testOnlyForgetRevealed(): void {
  * while `from` still has revision `expected` and `to` is empty. `patch`
  * changes the moved draft. No second copy is stored, so a full storage
  * that took the draft takes the rename too. Answers the new revision, or
- * false.
+ * false. No flow renames a revealed slot (it is exposed), so the page-only
+ * fields are not read here.
  */
 export function renameDraftIf(
   userKey: UserKey, from: DraftSlot, expected: string, to: DraftSlot,
@@ -295,11 +297,10 @@ export function renameDraftIf(
   // Rebuilt in order, so the map keeps its shape and its size.
   const next: Partial<Record<DraftSlot, ComposeDraft>> = {}
   for (const [slot, d] of Object.entries(all) as Array<[DraftSlot, ComposeDraft]>) {
-    if (slot === from) next[to] = { ...patch(withRevealed(userKey, from, held as ComposeDraft)), rev }
+    if (slot === from) next[to] = { ...patch(held as ComposeDraft), rev }
     else next[slot] = d
   }
   if (!writeAll(userKey, next)) return false
-  revealed.delete(`${userKey}\u0000${from}`)
   return { rev }
 }
 

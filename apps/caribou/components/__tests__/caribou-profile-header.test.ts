@@ -497,6 +497,46 @@ describe('<caribou-profile-header> across networks', () => {
     expect(button(el)?.textContent).toBe('Follow')
   })
 
+  it('after Unblock, Follow comes back when the AppView catches up; the reads stop when the header goes (#242)', async () => {
+    const client = signIn()
+    asBluesky(client)
+    // The AppView still sees the block at first: the follow is hidden.
+    const blocked = { id: 'did:plc:bob', blocking: true, followedBy: false } as Relationship
+    const fetchRel = vi.spyOn(client, 'fetchRelationships').mockResolvedValue([blocked])
+    vi.spyOn(client, 'unblock').mockResolvedValue({ ack: true, id: 'did:plc:bob', flags: { blocking: false } })
+    const el = await mountWith(BSKY, '', client.userKey)
+    await _testOnlyVeilLoaded()
+    await flush()
+    await el.updateComplete
+    expect(button(el)?.dataset.state).toBe('blocked')
+    vi.useFakeTimers()
+    try {
+      button(el)!.click()
+      await vi.advanceTimersByTimeAsync(0)
+      await el.updateComplete
+      expect(fetchRel).toHaveBeenCalledTimes(2)
+      expect(button(el)).toBeNull()
+      fetchRel.mockResolvedValue([rel({ id: 'did:plc:bob' })])
+      await vi.advanceTimersByTimeAsync(5_000)
+      await el.updateComplete
+      expect(fetchRel).toHaveBeenCalledTimes(3)
+      expect(button(el)?.textContent).toBe('Follow')
+
+      // Once more, with the header gone before the AppView catches up.
+      relationshipCache.value = new Map([[`${client.userKey} did:plc:bob`, blocked]])
+      fetchRel.mockResolvedValue([blocked])
+      await el.updateComplete
+      button(el)!.click()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchRel).toHaveBeenCalledTimes(4)
+      el.remove()
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(fetchRel).toHaveBeenCalledTimes(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('a Bluesky reader on a Mastodon profile: no lookup, no relationship read, no button', async () => {
     const client = signIn()
     asBluesky(client)
