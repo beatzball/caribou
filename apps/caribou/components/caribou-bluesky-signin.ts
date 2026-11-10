@@ -5,6 +5,13 @@ import { startBlueskySignIn } from './_bluesky-session.js'
 import './caribou-button.js'
 
 /**
+ * The sign-in in flight, shared by every form. On a full page load the
+ * router swaps the server's page for a new one (#169): a sign-in started on
+ * the first shows on the second, which does not start another.
+ */
+let pending: Promise<string | null> | null = null
+
+/**
  * The Bluesky sign-in form (spec 5.5, step 2): a handle, a DID or a PDS
  * address. It never guesses the network: this form is Bluesky only.
  */
@@ -28,16 +35,30 @@ export class CaribouBlueskySignin extends LitElement {
 
   private async onSubmit(e: SubmitEvent) {
     e.preventDefault()
-    if (this.submitting) return
+    if (this.submitting || pending) return
     const input = this.renderRoot.querySelector<HTMLInputElement>('input[name="handle"]')!
     const value = input.value.trim()
     if (!value) return
-    this.submitting = true
-    this.error = null
     // On success the page goes to the authorization server and this never
     // returns; it answers only a message for the reader.
-    this.error = await startBlueskySignIn(value)
-    this.submitting = false
+    await this.follow(startBlueskySignIn(value))
+  }
+
+  private async follow(signIn: Promise<string | null>) {
+    pending = signIn
+    this.submitting = true
+    this.error = null
+    try {
+      this.error = await signIn
+    } finally {
+      if (pending === signIn) pending = null
+      this.submitting = false
+    }
+  }
+
+  // After the first render, never in it: the server's render is idle.
+  protected override firstUpdated() {
+    if (pending) void this.follow(pending)
   }
 
   override render() {

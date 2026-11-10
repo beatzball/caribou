@@ -62,8 +62,10 @@ async function fixturePds(page: Page): Promise<Pds> {
 }
 
 async function signIn(page: Page, origin: string) {
-  await page.addInitScript(() => localStorage.setItem('caribou.flag.bluesky', '1'))
   await page.goto(`${origin}/`)
+  // The panels are in the server HTML: wait for the router's mount swap, or
+  // the tab click lands on the mount it drops.
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill('alice.example.com')
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { BLUESKY_FLAG_KEY } from '../_bluesky.js'
 import { blueskyActor, blueskyPostUri, decodeSegment, didOfUserKey, postRouteOf, rendersBluesky, routeOf, routeSegment } from '../_bluesky-route.js'
 
 describe('blueskyActor (spec 8.4)', () => {
@@ -86,14 +85,11 @@ describe('helpers', () => {
     expect(didOfUserKey('did:plc:alice@bsky')).toBe('did:plc:alice')
   })
 
-  it('renders Bluesky views only with the flag on and a Bluesky client', () => {
-    const on = { localStorage: { getItem: (k: string) => (k === BLUESKY_FLAG_KEY ? '1' : null) } } as unknown as Window
-    const off = { localStorage: { getItem: () => null } } as unknown as Window
+  it('renders Bluesky views only for a Bluesky client', () => {
     const bsky = { capabilities: { network: 'bluesky' } } as never
     const masto = { capabilities: { network: 'mastodon' } } as never
-    expect(rendersBluesky(on, bsky)).toBe(true)
-    expect(rendersBluesky(off, bsky)).toBe(false)
-    expect(rendersBluesky(on, masto)).toBe(false)
-    expect(rendersBluesky(on, null)).toBe(false)
+    expect(rendersBluesky(bsky)).toBe(true)
+    expect(rendersBluesky(masto)).toBe(false)
+    expect(rendersBluesky(null)).toBe(false)
   })
 })

@@ -13,7 +13,7 @@ import {
 
 // Bluesky profiles and threads as the server paints them signed out (app
 // README, "Bluesky SSR"). This spec starts its own server from the build,
-// with `BLUESKY_SSR=1` and `BLUESKY_PUBLIC_APPVIEW` pointed at a local
+// with no `BLUESKY_SSR` set and `BLUESKY_PUBLIC_APPVIEW` pointed at a local
 // fixture AppView, so it never reaches the real one.
 //
 // "Appears nowhere" checks read the whole response text: the body, the
@@ -58,7 +58,8 @@ test.beforeAll(async () => {
   server = spawn(process.execPath, [SERVER], {
     env: {
       ...process.env, PORT: String(port), STORAGE_DIR: storage,
-      BLUESKY_SSR: '1', BLUESKY_PUBLIC_APPVIEW: appview.url,
+      // No `BLUESKY_SSR`: on by default (#169). An inherited one is dropped.
+      BLUESKY_SSR: undefined, BLUESKY_PUBLIC_APPVIEW: appview.url,
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   })

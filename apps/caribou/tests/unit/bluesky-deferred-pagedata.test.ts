@@ -27,7 +27,8 @@ let seq = 0
 let limited = new Set<string>()
 
 beforeEach(() => {
-  process.env.BLUESKY_SSR = '1'
+  // No `BLUESKY_SSR`: the server renders Bluesky by default (#169).
+  delete process.env.BLUESKY_SSR
   process.env.BLUESKY_PUBLIC_APPVIEW = `http://deferred-${++seq}.test`
   limited = new Set()
   bsky._testOnlyResetBackoff()
@@ -41,7 +42,6 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.unstubAllGlobals()
-  delete process.env.BLUESKY_SSR
   delete process.env.BLUESKY_PUBLIC_APPVIEW
 })
 

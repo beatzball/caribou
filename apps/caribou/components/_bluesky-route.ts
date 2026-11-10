@@ -3,7 +3,6 @@
 // these rules, so a route means the same on the server and in the browser.
 
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
-import { blueskyEnabled } from './_bluesky.js'
 
 /** What a `/@<segment>` route names (spec 8.4). */
 export type RouteOf =
@@ -104,12 +103,12 @@ export function didOfUserKey(userKey: string): string {
 }
 
 /**
- * True when this browser renders Bluesky views itself: the flag is on and
- * the active account is a Bluesky one. Reader state: read it after the
- * first render, never in it.
+ * True when this browser renders Bluesky views itself: the active account
+ * is a Bluesky one. Reader state: read it after the first render, never in
+ * it.
  */
-export function rendersBluesky(win: Pick<Window, 'localStorage'> | undefined, client: Pick<CaribouClient, 'capabilities'> | null): boolean {
-  return blueskyEnabled(win) && client?.capabilities.network === 'bluesky'
+export function rendersBluesky(client: Pick<CaribouClient, 'capabilities'> | null): boolean {
+  return client?.capabilities.network === 'bluesky'
 }
 
 /** Where the reader is: the path and query, as a key for `stillOn`. */

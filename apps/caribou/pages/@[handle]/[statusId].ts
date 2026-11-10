@@ -54,10 +54,10 @@ export const pageData = definePageData<StatusPageData>(async (event) => {
   // ties the home instance to the cookie instead of the URL.
   const cookieHost = await getInstance(event, { storage: getStorage() })
   const shell: ShellInfo = cookieHost ? { instance: cookieHost, source: 'cookie' } : { instance: null }
-  // A Bluesky post (spec 8.4 rule 5), behind the server flag. It needs no
-  // instance: the public AppView answers for every post.
+  // A Bluesky post (spec 8.4 rule 5), unless the kill switch is off. It
+  // needs no instance: the public AppView answers for every post.
   const route = postRouteOf(handle, statusId)
-  // The flag is read before the import: with it off, no SDK load.
+  // The switch is read before the import: with it off, no SDK load.
   if (route.network === 'bluesky' && blueskySsrEnabled()) {
     const bsky = await import('../../server/lib/bluesky-public.js')
     if (!bsky.validActor(route.actor) || !bsky.validRecordKey(route.rkey)) {
@@ -122,7 +122,7 @@ export class HandleStatusPage extends LitroPage {
     const actor = blueskyActor(data?.handle || routeSegment(window.location.pathname))
     // A deferred page's data has no id: read the address.
     const statusId = data?.statusId || routePostId(window.location.pathname)
-    if (actor && statusId && rendersBluesky(window, activeClient.value)) {
+    if (actor && statusId && rendersBluesky(activeClient.value)) {
       this.blueskyUri = blueskyPostUri(actor, statusId)
       return
     }

@@ -56,9 +56,10 @@ export const pageData = definePageData<HandlePageData>(async (event) => {
   const query = getQuery(event)
   const tab = parseTab(query.tab)
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
-  // A Bluesky route (spec 8.4; README, "Bluesky SSR"), behind the server flag.
+  // A Bluesky route (spec 8.4; README, "Bluesky SSR"), unless the kill
+  // switch is off.
   const route = routeOf(handle)
-  // The flag is read before the import: with it off, no SDK load.
+  // The switch is read before the import: with it off, no SDK load.
   if (route.network === 'bluesky' && blueskySsrEnabled()) {
     const bsky = await import('../server/lib/bluesky-public.js')
     if (!bsky.validActor(route.actor)) {
@@ -127,7 +128,7 @@ export class HandlePage extends LitroPage {
     const data = this.serverData as HandlePageData | null
     // Opened by DID: show the handle form in the address bar (spec 8.4).
     if (data?.kind === 'ok' && data.account.bluesky) replaceDidRoute(window, data.handle, data.account)
-    if (rendersBluesky(window, activeClient.value)) {
+    if (rendersBluesky(activeClient.value)) {
       const tab = parseTab(new URLSearchParams(window.location.search).get('tab'))
       const key = activeUserKey.value
       if (data?.handle === 'me' && key) {

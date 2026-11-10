@@ -1011,8 +1011,8 @@ accounts may load them (spec 12.2, 12.3 item 5).
   atproto chunk, `app-main` imports that chunk statically, and every
   Mastodon page downloads it.
 - `apps/caribou/tests/e2e/bluesky-chunk.spec.ts` checks it: a Mastodon page
-  fetches no script with atproto code in it, and with the flag on the code
-  arrives in `bsky-*.js`. It fails without the group.
+  fetches no script with atproto code in it, and once a Bluesky sign-in
+  starts the code arrives in `bsky-*.js`. It fails without the group.
 
 ## The server-safe rule
 
@@ -1032,11 +1032,13 @@ any module other than the doors and `src/oauth.ts`: a value import, a side-effec
 dynamic `import()`. A lazy load of the SDK belongs in a door too, so the
 server-safe modules stay pure and the chunk rule has one place to look.
 
-## The flag
+## When the chunk loads
 
-`localStorage['caribou.flag.bluesky'] = '1'` turns Bluesky on for a
-developer. Today it only warms the `bsky` chunk. No reader sees a control
-for it, and with it off nothing changes for Mastodon.
+Bluesky is on for everyone in the app; there is no browser flag. The app
+loads the `bsky` chunk only when a Bluesky account restores, a reader
+starts a Bluesky sign-in, or a public Bluesky page is deferred after an
+AppView 429 (the browser then runs moderation itself). A Mastodon page
+never requests it.
 
 ## Fixtures
 

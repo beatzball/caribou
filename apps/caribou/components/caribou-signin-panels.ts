@@ -12,6 +12,40 @@ const TABS: readonly { id: SigninNetwork; label: string }[] = [
 ]
 
 /**
+ * What the reader chose and typed, shared by every mounted set of panels.
+ * On a full page load the router keeps the server's page live while it
+ * renders a second page hidden, then drops the first (#169). The draft
+ * carries the tab, the text and the focused control across that swap. It
+ * is read after the first render, never in it, so the server render and
+ * the first client render stay equal.
+ */
+interface SigninDraft {
+  selected: SigninNetwork
+  /** Input `name` → value: `server` (Mastodon) and `handle` (Bluesky). */
+  fields: Map<string, string>
+  /** The control the reader was in: a tab's id or an input's `name`. */
+  focus: string | null
+}
+
+/** The page element `start` is in: the child of `<litro-outlet>`, across shadow roots. */
+function routedPage(start: Node): Element | null {
+  for (let node: Node | null = start; node;) {
+    const parent: Node | null = node.parentNode
+    if (parent instanceof Element && parent.localName === 'litro-outlet') return node as Element
+    node = parent instanceof ShadowRoot ? parent.host : parent
+  }
+  return null
+}
+
+let draft: SigninDraft = { selected: 'mastodon', fields: new Map(), focus: null }
+const mounted = new Set<CaribouSigninPanels>()
+
+/** Tests only: forget the reader's draft. */
+export function resetSigninDraft() {
+  draft = { selected: 'mastodon', fields: new Map(), focus: null }
+}
+
+/**
  * Two sign-in panels, Mastodon and Bluesky (spec 5.5, step 1). A real
  * tablist, not the link-based `caribou-tabs`, which navigates. Keyboard as
  * the ARIA tabs pattern, with automatic activation: Left and Right move to
@@ -43,8 +77,101 @@ export class CaribouSigninPanels extends LitElement {
 
   @state() selected: SigninNetwork = 'mastodon'
 
+  private _shown?: MutationObserver
+
+  // On the shadow root, not the host: focus moving from a tab to a field is
+  // inside this element, so the browser does not send `focusin` to the host
+  // (its target and related target are both the host there). Here because a
+  // hydrating element has no render root yet in `connectedCallback`.
+  protected override createRenderRoot() {
+    const root = super.createRenderRoot()
+    root.addEventListener('input', this.onInput)
+    root.addEventListener('focusin', this.onFocusin as EventListener)
+    return root
+  }
+
+  override connectedCallback() {
+    super.connectedCallback()
+    mounted.add(this)
+  }
+
+  override disconnectedCallback() {
+    mounted.delete(this)
+    this._shown?.disconnect()
+    this._shown = undefined
+    super.disconnectedCallback()
+  }
+
+  protected override firstUpdated() {
+    void this.restore()
+    // The router renders this page hidden, shows it, then focuses its outlet.
+    // Put the reader back in the control they were in, once it is shown. A
+    // MutationObserver callback runs after the router's synchronous
+    // `removeAttribute('hidden')` + `outlet.focus()`, as in
+    // `caribou-instance-picker.ts`.
+    const page = routedPage(this)
+    if (!page?.hasAttribute('hidden')) return
+    this._shown = new MutationObserver(() => {
+      if (page.hasAttribute('hidden')) return
+      this._shown?.disconnect()
+      this._shown = undefined
+      if (this.isConnected) this.restoreFocus()
+    })
+    this._shown.observe(page, { attributes: true, attributeFilter: ['hidden'] })
+  }
+
+  private input(name: string): HTMLInputElement | null {
+    for (const child of this.renderRoot.querySelectorAll('caribou-instance-picker, caribou-bluesky-signin')) {
+      const input = child.shadowRoot?.querySelector<HTMLInputElement>(`input[name="${name}"]`)
+      if (input) return input
+    }
+    return null
+  }
+
+  /** Bring this set of panels up to the draft. */
+  private async restore() {
+    if (this.selected !== draft.selected) this.selected = draft.selected
+    await this.updateComplete
+    for (const child of this.renderRoot.querySelectorAll('caribou-instance-picker, caribou-bluesky-signin')) {
+      await (child as LitElement).updateComplete
+    }
+    for (const [name, value] of draft.fields) {
+      const input = this.input(name)
+      if (input && input.value !== value) input.value = value
+    }
+  }
+
+  private restoreFocus() {
+    const at = draft.focus
+    if (!at) return
+    const target = at.startsWith('tab-') ? this.renderRoot.querySelector<HTMLElement>(`#${at}`) : this.input(at)
+    target?.focus()
+    // Once: a later visit to the page starts at the outlet, as the router
+    // means it to. After the focus, whose `focusin` writes the draft again.
+    draft.focus = null
+  }
+
+  private others(): CaribouSigninPanels[] {
+    return [...mounted].filter((p) => p !== this)
+  }
+
+  private onInput = (e: Event) => {
+    const input = e.composedPath()[0]
+    if (!(input instanceof HTMLInputElement) || !input.name) return
+    draft.fields.set(input.name, input.value)
+    for (const p of this.others()) void p.restore()
+  }
+
+  private onFocusin = (e: FocusEvent) => {
+    const el = e.composedPath()[0]
+    if (el instanceof HTMLInputElement && el.name) draft.focus = el.name
+    else if (el instanceof HTMLElement && el.getAttribute('role') === 'tab') draft.focus = el.id
+  }
+
   private select(id: SigninNetwork, focus: boolean) {
     this.selected = id
+    draft.selected = id
+    for (const p of this.others()) void p.restore()
     if (focus) void this.updateComplete.then(() => this.tab(id)?.focus())
   }
 

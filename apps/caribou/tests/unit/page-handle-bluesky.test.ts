@@ -2,15 +2,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type * as H3 from 'h3'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import { activeUserKey, clearKeptAlive, users } from '@beatzball/caribou-state'
-import { BLUESKY_FLAG_KEY } from '../../components/_bluesky.js'
 import { blueskyClients } from '../../components/__tests__/_bluesky-clients.js'
 import {
   ALICE, author, blueskyClient, fakeAgent, signInBluesky,
 } from '../../components/__tests__/_bluesky-helpers.js'
 
 // The profile and thread pages swap in a client render for a Bluesky route
-// after hydration (#184; app README, "Bluesky views"): only with the flag on
-// and a Bluesky account active, and never in the first render.
+// after hydration (#184; app README, "Bluesky views"): only with a Bluesky
+// account active, and never in the first render.
 
 vi.mock('../../server/lib/resolve-instance.js', () => ({ resolveInstanceForRoute: vi.fn() }))
 vi.mock('../../server/lib/instance-cookie.js', () => ({ getInstance: vi.fn() }))
@@ -77,7 +76,6 @@ beforeEach(() => {
   activeUserKey.value = null
   blueskyClients.clear()
   localStorage.clear()
-  localStorage.setItem(BLUESKY_FLAG_KEY, '1')
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
 })
 afterEach(() => {
@@ -113,13 +111,6 @@ describe('<page-handle> for a Bluesky route', () => {
     expect(after).toBe('caribou-profile handle=did:plc:reader link-handle=me tab=posts')
   })
 
-  it('no swap with the flag off', async () => {
-    signIn()
-    localStorage.removeItem(BLUESKY_FLAG_KEY)
-    const { after } = await renders('page-handle', profileData('alice.example.com'))
-    expect(after).toBe('article role=alert')
-  })
-
   it('no swap for a Mastodon route, nor with no Bluesky account', async () => {
     signIn()
     expect((await renders('page-handle', profileData('alice@example.social'))).after).toBe('article role=alert')
@@ -137,12 +128,6 @@ describe('<page-handle-statusid> for a Bluesky route', () => {
     const { first, after } = await renders('page-handle-statusid', threadData('alice.example.com'))
     expect(first).toBe('article role=alert')
     expect(after).toBe('caribou-thread statusid=at://alice.example.com/app.bsky.feed.post/3k1')
-  })
-
-  it('no swap with the flag off', async () => {
-    signIn()
-    localStorage.removeItem(BLUESKY_FLAG_KEY)
-    expect((await renders('page-handle-statusid', threadData('alice.example.com'))).after).toBe('article role=alert')
   })
 })
 

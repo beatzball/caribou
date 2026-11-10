@@ -16,6 +16,106 @@ test('landing page renders picker', async ({ page }) => {
   await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible()
 })
 
+// Bluesky is on for everyone (#169): a first visit, with nothing in
+// storage, gets the Bluesky sign-in. The server HTML already has the panels,
+// so the first client render matches it.
+test('a first-time visitor sees the Bluesky sign-in', async ({ page, request }) => {
+  const html = await (await request.get('/')).text()
+  expect(html).toContain('<caribou-signin-panels')
+  expect(html).not.toContain('A Mastodon client. Enter your instance')
+  await gotoSettled(page, '/')
+  expect(await page.evaluate(() => localStorage.length)).toBe(0)
+  await expect(page.getByText('A Mastodon and Bluesky client. Pick a network to sign in.')).toBeVisible()
+  await page.getByRole('tab', { name: 'Bluesky' }).click()
+  await expect(page.getByLabel('Bluesky handle')).toBeVisible()
+  await expect(page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' })).toBeVisible()
+})
+
+// The router keeps the server's page live while it renders the client page
+// hidden, then swaps (#169). Hold the swap: a reader who picks Bluesky and
+// types a handle in that window keeps both, and the focus, after it.
+test('a tab and a handle chosen before the router swap are kept', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __held: FrameRequestCallback[]; __hold: boolean; __release(): void }
+    w.__held = []
+    w.__hold = true
+    const raf = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = (cb) => {
+      if (!w.__hold) return raf(cb)
+      w.__held.push(cb)
+      return 0
+    }
+    w.__release = () => {
+      w.__hold = false
+      for (const cb of w.__held.splice(0)) raf(cb)
+    }
+  })
+  await page.goto('/')
+  // The client page is in the outlet, hidden: the server's page has hydrated.
+  await expect(page.locator('litro-outlet > *')).toHaveCount(2)
+  await expect(page.locator('litro-outlet[data-litro-settled]')).toHaveCount(0)
+  // Only actions with no "stable" check: Playwright waits for animation
+  // frames to call an element stable, and they are held (WebKit then
+  // times out a `click()`). A click event, a focus and key presses need none.
+  const serverPage = page.locator('litro-outlet > :first-child')
+  await serverPage.getByRole('tab', { name: 'Bluesky' }).dispatchEvent('click')
+  await serverPage.getByLabel('Bluesky handle').focus()
+  await page.keyboard.type('alice.example.com')
+  await page.evaluate(() => (window as unknown as { __release(): void }).__release())
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  await expect(page.locator('litro-outlet > *')).toHaveCount(1)
+  await expect(page.getByRole('tab', { name: 'Bluesky' })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByLabel('Bluesky handle')).toHaveValue('alice.example.com')
+  await expect(page.getByLabel('Bluesky handle')).toBeFocused()
+})
+
+// As `hydration-bootstrap.spec.ts`, for the landing: at the swap, the
+// server's page hydrated in place, with one copy of each part.
+test('the landing hydrates in place before the router swap', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+  await page.addInitScript(() => {
+    const deep = (root: ParentNode, selector: string, out: Element[] = []): Element[] => {
+      out.push(...root.querySelectorAll(selector))
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) deep(el.shadowRoot, selector, out)
+      }
+      return out
+    }
+    document.addEventListener('readystatechange', () => {
+      if (document.readyState !== 'interactive') return
+      const outlet = document.querySelector('litro-outlet')
+      const serverPage = outlet?.firstElementChild
+      if (!outlet || !serverPage?.shadowRoot) return
+      const serverMain = deep(serverPage.shadowRoot, 'main')[0]
+      const serverTabs = deep(serverPage.shadowRoot, '[role="tablist"]')[0]
+      new MutationObserver((records) => {
+        if (!records.some((r) => [...r.removedNodes].includes(serverPage))) return
+        const root = serverPage.shadowRoot!
+        const mains = deep(root, 'main')
+        const tablists = deep(root, '[role="tablist"]')
+        ;(window as unknown as { __atSwap: unknown }).__atSwap = {
+          mains: mains.length,
+          panels: deep(root, 'caribou-signin-panels').length,
+          tablists: tablists.length,
+          handles: deep(root, 'input[name="handle"]').length,
+          servers: deep(root, 'input[name="server"]').length,
+          mainIsServerNode: mains[0] === serverMain,
+          tablistIsServerNode: tablists[0] === serverTabs,
+          deferred: deep(root, '[defer-hydration]').map((el) => el.localName),
+        }
+      }).observe(outlet, { childList: true })
+    })
+  })
+  await page.goto('/')
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+  expect(await page.evaluate(() => (window as unknown as { __atSwap?: unknown }).__atSwap)).toEqual({
+    mains: 1, panels: 1, tablists: 1, handles: 1, servers: 1,
+    mainIsServerNode: true, tablistIsServerNode: true, deferred: [],
+  })
+  expect(errors).toEqual([])
+})
+
 test('landing page shows error banner on ?error=denied and clears the param', async ({ page }) => {
   // Both mounts show the banner until the router's swap, so wait for one.
   await gotoSettled(page, '/?error=denied')

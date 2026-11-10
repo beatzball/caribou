@@ -50,7 +50,8 @@ test.beforeAll(async () => {
   server = spawn(process.execPath, [SERVER], {
     env: {
       ...process.env, PORT: String(port), STORAGE_DIR: storage,
-      BLUESKY_SSR: '1', BLUESKY_PUBLIC_APPVIEW: appview.url,
+      // No `BLUESKY_SSR`: on by default (#169). An inherited one is dropped.
+      BLUESKY_SSR: undefined, BLUESKY_PUBLIC_APPVIEW: appview.url,
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   })

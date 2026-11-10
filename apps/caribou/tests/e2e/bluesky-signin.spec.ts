@@ -11,8 +11,10 @@ async function storedUsers(page: Page): Promise<[string, Record<string, unknown>
 }
 
 async function startSignIn(page: Page, origin: string, handle: string, path = '/') {
-  await page.addInitScript(() => localStorage.setItem('caribou.flag.bluesky', '1'))
   await page.goto(`${origin}${path}`)
+  // The panels are in the server HTML: wait for the router's mount swap, or
+  // the tab click lands on the mount it drops.
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill(handle)
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()

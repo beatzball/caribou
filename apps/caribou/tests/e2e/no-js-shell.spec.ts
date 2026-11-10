@@ -7,7 +7,7 @@ test.use({ javaScriptEnabled: false })
 test('landing page shows the heading and the sign-in form', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Caribou')
-  await expect(page.getByText('A Mastodon client. Enter your instance to sign in.')).toBeVisible()
+  await expect(page.getByText('A Mastodon and Bluesky client. Pick a network to sign in.')).toBeVisible()
   await expect(page.getByLabel(/your mastodon instance/i)).toBeVisible()
   await expect(page.getByRole('button', { name: /sign in/i })).toBeEnabled()
   await expect(page.getByRole('alert')).toHaveCount(0)
