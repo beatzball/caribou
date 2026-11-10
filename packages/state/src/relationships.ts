@@ -34,6 +34,12 @@ export function relationshipKnown(rel: Relationship | undefined): rel is Relatio
 
 export interface RelationshipOpts {
   clientSource?: () => CaribouClient | null
+  /**
+   * The page the write was made on. Aborted when the page goes. Only
+   * `setBlock` reads it: after a Bluesky Unblock it reads the follow again
+   * while this page is up (#242).
+   */
+  signal?: AbortSignal
 }
 
 const defaultSource = () => activeClient.value
@@ -435,7 +441,44 @@ export function setBlock(account: AccountHandle, on: boolean, opts: Relationship
         (c, ref) => c.unblock(ref), `Couldn't unblock @${account.acct}.`).then((ok) => {
         // A Bluesky read made while blocked does not show the follow (R2-1),
         // so it is unknown: read it again now the block is gone.
-        if (ok && bluesky && client) void loadRelationship(account.id, { clientSource: () => client })
+        if (ok && bluesky && client) void readFollowAfterUnblock(client, account.id, opts.signal)
         return ok
       })
+}
+
+/** After an Unblock, when to read the follow again: inside the 60 s lag window. */
+const UNBLOCK_REREADS_MS: readonly number[] = [5_000, 20_000, 60_000]
+
+/** Waits `ms`, or less when `signal` aborts. */
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const done = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    signal.addEventListener('abort', done)
+  })
+}
+
+// The first read after an Unblock can still see the block, since the AppView
+// lags, and then the follow stays unknown (R2-1). With a page `signal`, read
+// again at 5 s, 20 s and 60 s while the follow is unknown and no block is
+// known. Stop when the page goes or the active account changes (#242).
+async function readFollowAfterUnblock(client: CaribouClient, accountId: string, signal: AbortSignal | undefined): Promise<void> {
+  const generation = ownerGeneration()
+  const key = relationshipKey(client.userKey, accountId)
+  const opts = { clientSource: () => client }
+  const start = Date.now()
+  await loadRelationship(accountId, opts)
+  if (!signal) return
+  for (const at of UNBLOCK_REREADS_MS) {
+    await wait(Math.max(0, start + at - Date.now()), signal)
+    if (signal.aborted || ownerGeneration() !== generation) return
+    const rel = relationshipCache.value.get(key)
+    if (!rel || relationshipKnown(rel) || rel.blocking === true) return
+    await loadRelationship(accountId, opts)
+  }
 }

@@ -427,6 +427,13 @@ commit step differs.
   still shows Unblock when `blocking` is known. After an Unblock ack, the
   relationship is read again, and that read fills the follow. So Unblock
   never leads to a second follow record.
+- **The read after Unblock can still see the block (#242).** The AppView
+  lags, so that first read can leave the follow unknown. When the caller
+  passes its page's `signal` (`setBlock(account, false, { signal })`), the
+  relationship is read again at 5 s, 20 s and 60 s after the Unblock,
+  while the follow is unknown and no block is known. The reads stop when
+  the signal aborts (the page goes) or the active account changes. The
+  profile header passes its signal; other callers read once.
 - **An undo never claims more than it removed (A3).** A Bluesky block or
   mute can come from a list (`bluesky.blockingByList`,
   `bluesky.mutingByList`: the list's URI). A personal undo cannot remove
