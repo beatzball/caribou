@@ -16,13 +16,16 @@ import '../../components/caribou-timeline.js'
 import type { TimelineInitial } from '../../components/caribou-timeline.js'
 import '../../components/caribou-tag-header.js'
 import '../../components/caribou-auth-required.js'
+import '../../components/caribou-bluesky-tag.js'
 import { enterWithCache } from '../../components/_page-cache.js'
 import { parseTagParam, tagPath } from '../../components/_tag-path.js'
 
 // `tag` is the name as the path gave it, decoded; case is kept for the
 // heading, and the server ignores it. `not-found` is a name no hashtag can
-// have, so no request goes out for it.
-export type TagPageData = (TimelinePageData | { kind: 'not-found' }) & {
+// have, so no request goes out for it. `bluesky` is `?net=bsky`: post
+// search needs a token, so the server fetches nothing and the client
+// decides (`<caribou-bluesky-tag>`; README, "Bluesky search and hashtag page").
+export type TagPageData = (TimelinePageData | { kind: 'not-found' } | { kind: 'bluesky' }) & {
   shell: ShellInfo
   tag: string
   /** The document title; Litro moves it into `<title>` and out of the data. */
@@ -57,8 +60,9 @@ export const pageData = definePageData<TagPageData>(async (event) => {
   }
   // Litro writes `seoTitle` into the page as it is, so it is escaped here.
   const seoTitle = escapeHtml(titleFor(tag))
-  if (!resolution.instance) return { kind: 'auth-required', shell, tag, seoTitle }
   const query = getQuery(event)
+  if (query.net === 'bsky') return { kind: 'bluesky', shell, tag, seoTitle }
+  if (!resolution.instance) return { kind: 'auth-required', shell, tag, seoTitle }
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
     const fetched = await fetchTagTimeline({ instance: resolution.instance, tag, maxId })
@@ -128,6 +132,13 @@ export class TagPage extends LitroPage {
       return html`
         <caribou-app-shell instance=${inst}>
           <article>#${data.tag} is not a hashtag.</article>
+        </caribou-app-shell>
+      `
+    }
+    if (data.kind === 'bluesky') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <caribou-bluesky-tag tag=${data.tag}></caribou-bluesky-tag>
         </caribou-app-shell>
       `
     }

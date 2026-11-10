@@ -221,6 +221,11 @@ export interface SearchInput {
   type?: SearchType
   resolve?: boolean
   limit?: number
+  /**
+   * Bluesky only: the next page of one kind, from `Search.bluesky`. Needs
+   * `type` `accounts` or `statuses`. Mastodon ignores it.
+   */
+  cursor?: string
 }
 
 // Mastodon refuses `resolve` and `offset` without a token (401), so only a

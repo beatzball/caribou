@@ -19,8 +19,7 @@ import './caribou-signout-form.js'
 // `signedIn`: the item shows only while an account is signed in.
 // `needs`: the item shows only when the active account's network has it.
 // `notOn`: the item hides while an account on that network is active, for a
-// feature not built for it yet (spec 2.1: Search and Lists for Bluesky
-// until phase 5).
+// feature not built for it yet (spec 2.1: Lists for Bluesky until phase 5).
 interface NavItem {
   label: string; icon: IconName; href: string; more?: boolean; dot?: boolean; signedIn?: boolean
   needs?: 'localTimeline' | 'publicTimeline'
@@ -34,7 +33,7 @@ const ITEMS: NavItem[] = [
   { label: 'Home',    icon: 'home',  href: '/home' },
   { label: 'Local',   icon: 'users', href: '/local', needs: 'localTimeline' },
   { label: 'Notifications', icon: 'bell', href: '/notifications' },
-  { label: 'Search',  icon: 'search', href: '/search', more: true, notOn: 'bluesky' },
+  { label: 'Search',  icon: 'search', href: '/search', more: true },
   { label: 'Public',  icon: 'globe', href: '/public', more: true, needs: 'publicTimeline' },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
   { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true, notOn: 'bluesky' },

@@ -5,7 +5,9 @@ import { activeClient, activeUserKey, loadTag, tagCache, tagKey, toggleTagFollow
 import './caribou-button.js'
 
 // The top of a hashtag page: the tag, and a Follow button for a signed-in
-// reader. The button follows the tag on the reader's own server.
+// reader. The button follows the tag on the reader's own server, and shows
+// only when that network can follow a tag (`capabilities.followTags`;
+// Bluesky cannot).
 @customElement('caribou-tag-header')
 export class CaribouTagHeader extends LitElement {
   static override styles = css`
@@ -56,12 +58,13 @@ export class CaribouTagHeader extends LitElement {
     // A new session asks its own server again.
     const disposeLoad = effect(() => {
       const name = this.nameSignal.value
-      if (activeClient.value && name) void loadTag(name)
+      if (activeClient.value?.capabilities.followTags && name) void loadTag(name)
     })
     const disposeRead = effect(() => {
       const userKey = activeUserKey.value
       const name = this.nameSignal.value
-      this.following = userKey ? tagCache.value.get(tagKey(userKey, name)) : undefined
+      const canFollow = activeClient.value?.capabilities.followTags === true
+      this.following = userKey && canFollow ? tagCache.value.get(tagKey(userKey, name)) : undefined
     })
     this.dispose = () => { disposeLoad(); disposeRead() }
   }

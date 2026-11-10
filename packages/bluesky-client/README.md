@@ -472,8 +472,9 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `fetchFilters` → `[]` (Bluesky has no server filters).
 - **Writes:** like, repost, bookmark, follow, mute and block are in
   "Actions (#188)" below; compose is in "Compose".
-- **Not here yet:** `local`, `public`, hashtag and list timelines, delete,
-  polls, edit, search, lists and tags throw
+- **Search and the hashtag timeline:** see "Search (#192, #193)".
+- **Not here yet:** `local`, `public` and list timelines, delete,
+  polls, edit, lists and tags throw
   `CaribouError('not_found')` naming the issue that adds them. A screen
   hides those by `capabilities`.
 - **Errors (`normalizeXrpcError`):** 401 → `unauthorized` (and
@@ -481,6 +482,47 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `not_found`, 429 → `rate_limited` with `retryAfter` from
   `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
 - **Dedup:** two equal reads in flight share one request.
+
+## Search (#192, #193)
+
+Both reads go through the reader's PDS with the token, like every other
+signed-in read, so they carry labeler coverage (`answer()`).
+
+`search({ q, type, limit, cursor })`:
+
+| `type` | call | answer |
+|---|---|---|
+| none | `searchActors` and `searchPosts`, at once | `accounts` and `statuses`; `hashtags` `[]` |
+| `accounts` | `searchActors` | `accounts` only |
+| `statuses` | `searchPosts` | `statuses` only |
+| `hashtags` | none | all empty: Bluesky has no hashtag search |
+
+- `q` is trimmed. An empty `q` makes no call and answers all empty.
+- `limit` goes to both calls as it came (the AppView takes 1 to 100).
+  `resolve` is ignored.
+- `cursor` is the next page of one kind. It needs `type` `accounts` or
+  `statuses`; without one it is ignored.
+- `bluesky.accountsCursor` and `bluesky.statusesCursor` are where the next
+  page starts, as the AppView sent them, or `null` when that kind ends.
+  An empty page ends its kind, even with a cursor. A kind not asked is
+  `null`.
+- Each actor maps with `mapAccount` and gets `moderation.profile(view)`;
+  each post maps with `mapPost` and the reader's `moderatePost`. One bad
+  post is dropped, not the page.
+- If either call fails, the search fails.
+
+Hashtag timeline (`fetchTimeline({ type: 'hashtag', tag })`):
+
+- `searchPosts` with `q=#<tag>` and `sort=latest`, the query bsky.app's
+  hashtag page sends. `cursor` and `limit` pass through. An empty page ends
+  the list.
+- `sinceId` (a poll) is a catch-up by the seam 7 rule: pages from the top,
+  at most 3 of 50, until it meets that post.
+
+Errors from these reads keep their code, with a message a screen can show:
+`rate_limited` → "Bluesky is getting too many requests. Wait a minute,
+then try again."; `unreachable` → "Could not reach Bluesky."; any other →
+the read's own message. A 401 still calls `onUnauthorized`.
 
 ## Actions (#188, spec 6.3 and 9)
 

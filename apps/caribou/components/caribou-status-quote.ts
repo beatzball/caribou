@@ -13,7 +13,7 @@ import {
 import { findShell } from './_shell.js'
 import { accountPath, outsidePermalinkName, postPath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
-import { hashtagOf, sameUrl } from './_post-links.js'
+import { blueskyTagPathOf, hashtagOf, sameUrl } from './_post-links.js'
 import { tagPath } from './_tag-path.js'
 import { filterVerdict, type FilterContext, type FilterVerdict } from './_status-filter.js'
 import { mastodonLinkText } from './_shared-styles.js'
@@ -305,7 +305,7 @@ export class CaribouStatusQuote extends LitElement {
     const display = withEdit(q, this.liveEdit)
     const tag = hashtagOf(a, display.tags)
     const mention = tag || !a.matches('.mention') ? undefined : display.mentions?.find((m) => sameUrl(m.url, a.href))
-    const href = tag ? tagPath(tag) : mention ? this.profileHref(mention) : null
+    const href = tag ? tagPath(tag) : mention ? this.profileHref(mention) : blueskyTagPathOf(a, display)
     if (!href) return
     e.preventDefault()
     void import('@beatzball/litro-router').then(({ LitroRouter }) => LitroRouter.go(href))
