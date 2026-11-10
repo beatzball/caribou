@@ -313,7 +313,13 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
       const sweep = async (): Promise<void> => {
         try {
           const left = (await items(ofList, cutChange)).map((it) => ({ collection: ITEM, rkey: it.rkey }))
-          if (left.length > 0) await deleteAll(left)
+          if (left.length > 0) {
+            // A sweep write in doubt: read once more. Nothing left is done.
+            await decided(
+              () => deleteAll(left),
+              async () => ((await items(ofList, cutChange)).length === 0 ? undefined : false),
+            )
+          }
         } catch (err) {
           throw new BlueskyListPartlyDeleted(`Bluesky: the list was deleted, but the sweep failed: ${(err as Error).message}`, {
             listGone: true, userMessage: 'The list was deleted, but some of its members may remain on Bluesky.',

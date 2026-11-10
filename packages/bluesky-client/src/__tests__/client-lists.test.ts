@@ -611,3 +611,45 @@ describe('review fix 2', () => {
     })
   })
 })
+
+describe('review fix 3', () => {
+  function withLateItem(pds: ReturnType<typeof fakePds>, sweep: 'committed' | 'not committed') {
+    const real = pds.api.applyWrites.getMockImplementation()!
+    pds.api.applyWrites
+      .mockImplementationOnce(async (q) => {
+        pds.put(ITEM, '3liteminlate2', { subject: 'did:plc:late', list: FRIENDS_URI, createdAt: 'x' })
+        return real(q)
+      })
+      .mockImplementationOnce(async (q) => {
+        if (sweep === 'committed') await real(q)
+        throw xrpcError(503, 'Unavailable')
+      })
+  }
+
+  it('a sweep write that committed but got no answer: read once more, nothing left, done', async () => {
+    const { client, pds } = setup()
+    withLateItem(pds, 'committed')
+    await expect(client.deleteList(FRIENDS)).resolves.toBeUndefined()
+    expect([...pds.coll(ITEM).values()].filter((r) => r.value.list === FRIENDS_URI)).toEqual([])
+  })
+
+  it('a sweep write that did not commit: items left, the warning', async () => {
+    const { client, pds } = setup()
+    withLateItem(pds, 'not committed')
+    await expect(client.deleteList(FRIENDS)).rejects.toMatchObject({
+      listGone: true, userMessage: 'The list was deleted, but some of its members may remain on Bluesky.',
+    })
+  })
+
+  it('a sweep write in doubt whose read fails: the warning', async () => {
+    const { client, pds } = setup()
+    withLateItem(pds, 'committed')
+    const listRecords = pds.api.listRecords.getMockImplementation()!
+    let n = 0
+    pds.api.listRecords.mockImplementation(async (q) => {
+      if (q.collection === ITEM && ++n > 2) throw xrpcError(503, 'Unavailable')
+      return listRecords(q)
+    })
+    await expect(client.deleteList(FRIENDS)).rejects.toMatchObject({ listGone: true })
+  })
+})

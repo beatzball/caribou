@@ -361,3 +361,42 @@ describe('review fix 2', () => {
     expect($(el, '#members .notice')!.textContent).toContain('No one is in this list yet.')
   })
 })
+
+describe('review fix 3', () => {
+  it('an open picker whose memberships drop (unknown add, failed re-read) loads them again', async () => {
+    signInBlueskyLists()
+    const done = openListPicker(profileAccount(BOB), false)
+    const el = await dialogOf<CaribouListPicker>('caribou-list-picker')
+    await settle(el)
+    const box = () => $(el, `input[data-list-id="${FRIENDS}"]`) as HTMLInputElement | null
+    expect(box()).not.toBeNull()
+    // The add gets no answer, and its read-back fails: the outcome is unknown.
+    store.api.createRecord.mockRejectedValueOnce(Object.assign(new Error('Unavailable'), { status: 503, error: 'Unavailable' }))
+    store.api.getRecord.mockImplementation(async (q: { collection: string; rkey: string }) => {
+      if (q.collection === ITEM) throw Object.assign(new Error('Unavailable'), { status: 503, error: 'Unavailable' })
+      const r = store.coll(q.collection).get(q.rkey)
+      if (!r) throw Object.assign(new Error('Could not locate record'), { status: 400, error: 'RecordNotFound' })
+      return { data: r }
+    })
+    // The re-read of the memberships fails once, so the cache is dropped.
+    const listRecords = store.api.listRecords.getMockImplementation()!
+    let failed = false
+    store.api.listRecords.mockImplementation(async (q: { collection: string }) => {
+      if (q.collection === ITEM && toasts.length > 0 && !failed) {
+        failed = true
+        throw Object.assign(new Error('Unavailable'), { status: 503, error: 'Unavailable' })
+      }
+      return listRecords(q)
+    })
+    box()!.checked = true
+    box()!.dispatchEvent(new Event('change'))
+    for (let i = 0; i < 4; i++) await settle(el)
+    expect(failed).toBe(true)
+    expect(toasts.some((t) => t.startsWith('Could not tell whether @bob.example.com was added'))).toBe(true)
+    // Not stuck on "Loading your lists…": the boxes are back, read again.
+    expect(el.shadowRoot!.textContent).not.toContain('Loading your lists')
+    expect(box()).not.toBeNull()
+    el.cancel()
+    await done
+  })
+})

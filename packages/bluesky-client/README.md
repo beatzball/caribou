@@ -1008,16 +1008,24 @@ feed (`getListFeed`) come from the AppView.
   list. One sweep, no loop; L1 applies (a complete scan only). When the
   sweep fails or is cut, the list is still gone, and the call throws
   `BlueskyListPartlyDeleted` with `listGone: true` and `userMessage` "The
-  list was deleted, but some of its members may remain on Bluesky." An add
-  that lands after the sweep is not caught.
+  list was deleted, but some of its members may remain on Bluesky." When
+  the sweep's own delete gets no clear answer, the client reads once more:
+  no item left → done, as if nothing failed; items left, or that read
+  fails → the same warning.
 - **Accepted limit: an item moved between the scan and the delete (L3).**
   The rkeys come from the scan; `applyWrites` deletes what is at them when
   it runs. Bluesky apps create and delete list items; they do not update
-  them. So an item that another app changes to name another list between
-  the scan and the delete is not protected. Caribou does not handle it.
-  `swapCommit` would guard it, but would also fail the delete on any
-  unrelated write to the repo (a like), so it is not used. An item added
-  after the scan is handled by the sweep (L5).
+  them. Both limits need another app writing to the same list while
+  Caribou deletes it:
+  - **A move during a delete can delete the moved item.** If another app
+    changes an item to name another list between the scan and the delete,
+    the delete removes it, and the other list loses that member.
+  - **An add during the sweep can stay behind.** An item added after the
+    sweep's scan stays as a stray public record naming the deleted list.
+
+  `swapCommit` would guard both, but it would also fail the delete on any
+  unrelated write to the repo (a like), so Caribou does not use it. An
+  item added after the first scan and before the sweep is handled (L5).
 - **A duplicate add heals on remove.** `addListAccounts` does not check
   for an item already there: the picker's box comes from the last read,
   and a stale read can add the same DID twice. Remove deletes every item

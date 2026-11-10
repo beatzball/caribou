@@ -56,7 +56,13 @@ export class CaribouListPicker extends LitElement {
     this.dispose = effect(() => {
       const key = activeUserKey.value
       this.lists = key ? listsCache.value.get(key) : undefined
-      this.memberOf = key && this.account ? accountListsCache.value.get(listKey(key, this.account.id)) : undefined
+      const memberOf = key && this.account ? accountListsCache.value.get(listKey(key, this.account.id)) : undefined
+      // The cache was dropped while shown (a re-read failed after a write
+      // that may have changed it): read it again, or show Retry.
+      const dropped = this.memberOf !== undefined && memberOf === undefined && this.loaded.status === 'ready'
+      this.memberOf = memberOf
+      const client = activeClient.peek()
+      if (dropped && client && client.userKey === key) void this.load(client)
     })
   }
 

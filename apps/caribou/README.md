@@ -669,6 +669,10 @@ reader's, read with their session. A Mastodon account sees no change.
   placeholders on `/lists` and `/lists/<id>` name no network.
 - **Too large.** A list read the client refuses (L1) shows its message
   ("This list is too large to show here. Use bsky.app.") with Retry.
+- **A dropped cache loads again.** When a re-read fails after a write
+  whose outcome is unknown, the state drops that cache. An open Members
+  panel or list picker then reads it again (or shows Retry); it never
+  keeps old rows, and never stays on "Loading".
 - **The list feed** is `<caribou-timeline kind="list">`: the cards apply
   moderation and the reader veil as on Home.
 - **Writes** follow the state rules: shown at once, rolled back with a
