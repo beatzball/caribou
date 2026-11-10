@@ -1,5 +1,11 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.4.9
+
+### Patch Changes
+
+- [#258](https://github.com/beatzball/caribou/pull/258) [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae) Thanks [@beatzball](https://github.com/beatzball)! - New types `BlueskyGates` and `BlueskyReplyRule`. `blueskyCreatePost` takes optional limits.
+
 ## 0.4.8
 
 ### Patch Changes

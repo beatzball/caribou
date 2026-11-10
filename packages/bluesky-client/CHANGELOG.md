@@ -1,5 +1,20 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.1.6
+
+### Patch Changes
+
+- [#258](https://github.com/beatzball/caribou/pull/258) [`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae) Thanks [@beatzball](https://github.com/beatzball)! - `blueskyCreatePost(record, rkey, gates)`: with limits, the post, its thread gate and its post gate go in one `applyWrites` call with the same rkey, so they land together or not at all. A list rule names only a list in the reader's own repo. With no limit, it is `createRecord` as before.
+
+- [#259](https://github.com/beatzball/caribou/pull/259) [`9cc3cf2`](https://github.com/beatzball/caribou/commit/9cc3cf27e605dbec45895375ea07db7af192b780) Thanks [@beatzball](https://github.com/beatzball)! - Add `fetchLinkCard` and `fetchCardImage`, which read a link's card from Bluesky's `cardyb` service, and `cardLink`, which finds the link a card is for.
+
+- [#260](https://github.com/beatzball/caribou/pull/260) [`cf311f6`](https://github.com/beatzball/caribou/commit/cf311f6822e5ad00a5cb2151059f37e6daf696e4) Thanks [@beatzball](https://github.com/beatzball)! - Add `editMutedWords` to the restored Bluesky client: add or remove one muted word. It reads the prefs again under the prefs lock, changes only the muted-words pref, keeps every other pref, and runs in the moderation queue so two quick edits both land.
+
+- [#256](https://github.com/beatzball/caribou/pull/256) [`0b8d690`](https://github.com/beatzball/caribou/commit/0b8d690c6ace2f4cd290937f66962ffc417723f2) Thanks [@beatzball](https://github.com/beatzball)! - A video card now carries the video's HLS playlist in `embedUrl` (http(s) only), so the app can play it.
+
+- Updated dependencies [[`03e5c8d`](https://github.com/beatzball/caribou/commit/03e5c8dbd8b2943bc1e86d3c2e0fb72ea01bc6ae)]:
+  - @beatzball/caribou-mastodon-client@0.4.9
+
 ## 0.1.5
 
 ### Patch Changes
