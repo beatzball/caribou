@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { activeUserKey, addUserSession, users, type BlueskySession } from '@beatzball/caribou-state'
+import { activeUserKey, addUserSession, createKeepAlive, users, type BlueskySession } from '@beatzball/caribou-state'
 import type * as BlueskyModule from '../_bluesky.js'
 
 // The session glue feeds #184's moderation seams (`_bluesky-moderation.ts`):
@@ -10,6 +10,7 @@ const KEY = `${DID}@bsky` as const
 const reloadModeration = vi.fn()
 const recheckLabelers = vi.fn()
 const removeGoneLabeler = vi.fn()
+const editMutedWords = vi.fn()
 const fetchStatus = vi.fn(async (id: string) => ({ id }))
 const restoreClient = vi.fn()
 
@@ -23,7 +24,7 @@ vi.mock('../_bluesky.js', async (importOriginal) => ({
   })),
 }))
 
-const { blueskyDriver, installBlueskyDriver, removeActiveGoneLabeler, LABELER_RECHECK_MS, FOREGROUND_RECHECK_MIN_MS } = await import('../_bluesky-session.js')
+const { blueskyDriver, editActiveMutedWords, installBlueskyDriver, removeActiveGoneLabeler, LABELER_RECHECK_MS, FOREGROUND_RECHECK_MIN_MS } = await import('../_bluesky-session.js')
 const { blueskyGoneLabelers, blueskyReader, BLUESKY_RETRY_EVENT } = await import('../_bluesky-moderation.js')
 
 function bsky(): BlueskySession {
@@ -39,6 +40,7 @@ beforeEach(() => {
   blueskyReader.value = null
   blueskyGoneLabelers.value = null
   removeGoneLabeler.mockReset()
+  editMutedWords.mockReset()
   reloadModeration.mockReset()
   recheckLabelers.mockReset()
   recheckLabelers.mockResolvedValue({ prefs: null, labelDefs: {} })
@@ -46,7 +48,7 @@ beforeEach(() => {
   restoreClient.mockReset()
   restoreClient.mockImplementation(async () => ({
     client: { userKey: KEY, capabilities: { network: 'bluesky' }, timelineOrder: () => null, fetchStatus },
-    prefs: null, labelDefs: null, gone: [], reloadModeration, recheckLabelers, removeGoneLabeler,
+    prefs: null, labelDefs: null, gone: [], reloadModeration, recheckLabelers, removeGoneLabeler, editMutedWords,
   }))
   installBlueskyDriver()
 })
@@ -297,5 +299,70 @@ describe('a gone labeler', () => {
   it('with no Bluesky account active, nothing is sent', async () => {
     expect(await removeActiveGoneLabeler(GONE)).toBe('stale')
     expect(removeGoneLabeler).not.toHaveBeenCalled()
+  })
+})
+
+// App README, "Bluesky muted words" (#196).
+describe('muted words', () => {
+  const ADD = { kind: 'add' as const, value: 'spoiler', targets: ['content' as const], actorTarget: 'all' as const }
+  const kept = createKeepAlive<number>(4)
+
+  it('rule 7: a save sets the reader from its answer and empties the kept pages', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    kept.set('page', 1)
+    const prefs = { labelers: [], mutedWords: [{ value: 'spoiler', targets: ['content'] }] }
+    editMutedWords.mockResolvedValue({ prefs, labelDefs: { x: [] }, gone: [], outcome: 'added', reloadFailed: false })
+    expect(await editActiveMutedWords(ADD)).toEqual({ outcome: 'added', reloadFailed: false })
+    expect(editMutedWords).toHaveBeenCalledWith(ADD)
+    expect(blueskyReader.value).toEqual({ userKey: KEY, prefs, labelDefs: { x: [] } })
+    expect(kept.size).toBe(0)
+  })
+
+  it('rule 7: nothing written (exists) keeps the kept pages', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    kept.set('page', 1)
+    editMutedWords.mockResolvedValue({ prefs: null, labelDefs: {}, gone: [], outcome: 'exists', reloadFailed: false })
+    expect((await editActiveMutedWords(ADD)).outcome).toBe('exists')
+    expect(kept.size).toBe(1)
+  })
+
+  it('rule 6: a write that worked with a failed load after it says so', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    editMutedWords.mockResolvedValue({ prefs: null, labelDefs: {}, gone: [], outcome: 'removed', reloadFailed: true })
+    expect(await editActiveMutedWords({ kind: 'remove', value: 'x' })).toEqual({ outcome: 'removed', reloadFailed: true })
+    expect(blueskyReader.value).toEqual({ userKey: KEY, prefs: null, labelDefs: {} })
+  })
+
+  it('rule 5: an answer that lands after a switch shows nothing; the account reloads when back', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    let finish!: (v: unknown) => void
+    editMutedWords.mockReturnValue(new Promise((r) => { finish = r }))
+    const a = editActiveMutedWords(ADD)
+    activeUserKey.value = 'bob@example.social' as typeof activeUserKey.value
+    finish({ prefs: { labelers: [] }, labelDefs: {}, gone: [], outcome: 'added', reloadFailed: false })
+    expect((await a).outcome).toBe('stale')
+    expect(blueskyReader.value).toBeNull()
+    activeUserKey.value = KEY
+    reloadModeration.mockResolvedValue({ prefs: null, labelDefs: {}, gone: [] })
+    await blueskyDriver.restore(bsky(), hooks)
+    expect(reloadModeration).toHaveBeenCalledTimes(1)
+  })
+
+  it('rule 6: a failed write throws and leaves the reader as it was', async () => {
+    addUserSession(bsky())
+    await blueskyDriver.restore(bsky(), hooks)
+    const before = blueskyReader.value
+    editMutedWords.mockRejectedValue(new Error('offline'))
+    await expect(editActiveMutedWords(ADD)).rejects.toThrow('offline')
+    expect(blueskyReader.value).toBe(before)
+  })
+
+  it('rule 5: with no Bluesky account active, nothing is sent', async () => {
+    expect((await editActiveMutedWords(ADD)).outcome).toBe('stale')
+    expect(editMutedWords).not.toHaveBeenCalled()
   })
 })

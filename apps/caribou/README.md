@@ -1203,6 +1203,43 @@ the address rules and the "newest search wins" rule are the ones in
 click on one, in a Bluesky card or quote, opens it in the app when the tag
 is one of the post's `tags`; any other link is left to the browser.
 
+### Bluesky muted words (#196)
+
+`/settings/moderation` lists and edits the reader's Bluesky muted words
+(`packages/bluesky-client` README, "Muted words"). Only with a Bluesky
+account active. With a Mastodon account the page is as before.
+
+1. **Where.** With a Bluesky account active, the page's first section is
+   "Muted words" (`<caribou-muted-words>`), in place of the server filters
+   section. The mutes and blocks sections stay. The page renders in the
+   browser only, so the server and the first client render do not differ.
+2. **The list** is the active reader's `prefs.mutedWords`
+   (`blueskyReader`). Each row: the word, where it applies ("Text and
+   tags" or "Tags only"), who ("Everyone" or "People I do not follow"),
+   and when it ends ("Until <date>", or "Expired" for a past
+   `expiresAt`). An expired word stays in the list, with Remove. Until the
+   reader loads: "Loading muted words…". Prefs not loaded: an error line
+   and Retry (the moderation reload).
+3. **Add**: the word, where (default text and tags), how long (forever,
+   24 hours, 7 days, 30 days) and who (default everyone). An empty word
+   says so and sends nothing. Each row has Remove (no confirm, as in the
+   Bluesky app).
+4. **One write per click.** A button is busy while its write runs, and a
+   click on a busy button does nothing. Writes from two buttons run one
+   after the other (the client's queue), so neither is lost.
+5. **One account.** A write belongs to the account active when it
+   started. Its answer is shown only while that account is still active.
+   An account change clears the busy and error state.
+6. **Nothing shown that did not happen.** The list changes only from the
+   prefs the client loads after the write. A failed write leaves the list
+   as it was and says so (a line and a toast). A write that worked when
+   the load after it failed says "Saved, but your settings did not load
+   again", with Retry.
+7. **Applies at once.** After a write, the new prefs go to the reader
+   signal, and every kept page (the keep-alive caches) is emptied, so the
+   next page the reader opens fetches again and is judged with the new
+   words. No page reload.
+
 ## Accounts
 
 A reader can be signed in to several accounts, on several servers, with one

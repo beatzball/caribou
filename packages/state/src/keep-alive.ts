@@ -115,7 +115,11 @@ export function createKeepAlive<T>(max: number): KeepAlive<T> {
   return cache
 }
 
-/** Empties every keep-alive cache. Tests call it between cases. */
+/**
+ * Empties every keep-alive cache. Tests call it between cases. The app
+ * calls it after a Bluesky muted-words save, so kept pages are fetched again
+ * and judged with the new words.
+ */
 export function clearKeptAlive(): void {
   for (const cache of all) cache.clear()
 }

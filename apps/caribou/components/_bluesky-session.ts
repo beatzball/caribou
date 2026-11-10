@@ -10,7 +10,7 @@ import type { UserKey } from '@beatzball/caribou-auth'
 import { CaribouError, type CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { BLUESKY_CAPABILITIES } from '@beatzball/caribou-bluesky-client'
 import {
-  activeUserKey, addUserSession, blueskyUserKey, isBlueskySession, renewSession, setBlueskyDriver, users,
+  activeUserKey, addUserSession, blueskyUserKey, clearKeptAlive, isBlueskySession, renewSession, setBlueskyDriver, users,
   BlueskySessionGone,
   type BlueskyDriver,
 } from '@beatzball/caribou-state'
@@ -86,6 +86,44 @@ export function removeActiveGoneLabeler(did: string): Promise<RemoveOutcome> {
   }).finally(() => { a.removing?.delete(did) })
   a.removing.set(did, p)
   return p
+}
+
+/** One muted-words edit (`packages/bluesky-client`, "Muted words"). */
+export type MutedWordEdit = Parameters<Restored['editMutedWords']>[0]
+
+/** How a muted-words save ended. `stale`: the account changed; nothing was shown. */
+export interface MutedWordsSave {
+  outcome: Awaited<ReturnType<Restored['editMutedWords']>>['outcome'] | 'stale'
+  /** Written, but the load after it failed. */
+  reloadFailed: boolean
+}
+
+/**
+ * Adds or removes one of the active reader's muted words (#196; app
+ * README, "Bluesky muted words"). The client's queue runs the writes one
+ * after the other. The answer is shown only while its account is still
+ * active; then the reader is set from it and, after a write, every kept
+ * page is emptied, so the next page is fetched and judged with the new
+ * words. Throws on a refused or failed write; the reader stays as it was.
+ */
+export async function editActiveMutedWords(edit: MutedWordEdit): Promise<MutedWordsSave> {
+  const a = active
+  if (!a || activeUserKey.peek() !== a.userKey) return { outcome: 'stale', reloadFailed: false }
+  const r = await a.restored.editMutedWords(edit)
+  const wrote = r.outcome === 'added' || r.outcome === 'removed'
+  if (active !== a || activeUserKey.peek() !== a.userKey) {
+    // As for a removal: its account's next reader may have loaded before
+    // this write landed, so it loads once more.
+    if (wrote) {
+      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
+      else reloadAfterRestore.add(a.userKey)
+    }
+    return { outcome: 'stale', reloadFailed: false }
+  }
+  a.checkedAt = Date.now()
+  publishReader(a.userKey, r)
+  if (wrote) clearKeptAlive()
+  return { outcome: r.outcome, reloadFailed: r.reloadFailed }
 }
 
 /** Loads the active reader's moderation inputs again. One at a time. */
