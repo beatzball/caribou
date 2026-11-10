@@ -819,6 +819,48 @@ not stored there: the reader has those files.
 | reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again |
 | `createdAt` | not kept: a new post gets a new time |
 
+## Lists (`lists.ts`; Mastodon #51, Bluesky #195)
+
+One set of functions for both networks. The client does the network part
+(bluesky-client README, "Lists").
+
+- **Keyed by account.** Every cache entry is keyed by the account that
+  read it, so one account never sees another's lists.
+- **Writes show at once and go back on a failure,** with a toast. One
+  list's writes, and one membership's writes, go to the server one at a
+  time, in order; only the last one of a run settles the cache.
+- **A read never undoes a pending write.** A read waits while a write to
+  its keys is out, and drops its answer and asks again when a write
+  started or ended while it was out.
+- **An answer for an earlier account writes nothing** (`ownerGeneration`),
+  and its failure says nothing.
+- **Bluesky answers are whole, not acks.** A Bluesky list write answers
+  the list (or nothing), read back from the PDS when the answer was in
+  doubt, so A1 (partial acks) does not apply. The PDS reads its own writes,
+  so a read right after a write is not stale, and no lag window is needed.
+- **A write whose outcome is unknown** (`BlueskyWriteUnknown`: no clear
+  answer, and the read-back failed too) is not shown as done: the change
+  goes back, the toast says "Could not tell whether … Reload to check.",
+  and the lists (and the members, when shown) are read again. That read
+  brings the server's state, whichever it is.
+- **A refusal with words for the reader.** When a failed write carries
+  `userMessage` (a Bluesky list too large to change here), the toast says
+  that instead of "Couldn't …".
+- **A partly done delete (`BlueskyListPartlyDeleted`).** The list comes
+  back, the toast says "Some members were removed, but the list was not
+  deleted. Delete it again to finish.", and the lists, that list's members
+  (when shown) and every known "lists that hold this account" are read
+  again, so the Members panel and the picker's boxes show what is left. An
+  unknown delete reads all three again too. When the list is gone but the
+  sweep after it failed (`listGone: true`), the list stays gone and the
+  toast says some members may remain. **A failed re-read drops the cache
+  it was for** (the members, a "lists that hold this account" entry): the
+  old rows and boxes are never shown as current, and the screen loads
+  them again or shows its Retry.
+- **One click is one write.** The screens send a write per change of a
+  box or per button press; the client's kept rkey makes a repeated intent
+  after a lost answer reuse its record, not make a second one.
+
 ## Notifications (`notifications-store.ts`, `notification-groups.ts`)
 
 **Paging, both networks.** A list ends only when the client says so, with

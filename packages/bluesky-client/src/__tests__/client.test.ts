@@ -196,9 +196,9 @@ describe('fetchTimeline, other kinds', () => {
     await expect(client.fetchTimeline(kind)).rejects.toMatchObject({ code: 'not_found' })
   })
 
-  it('names the issue for list timelines', async () => {
+  it('a list id that is not a TID is not_found', async () => {
     const { client } = setup()
-    await expect(client.fetchTimeline({ type: 'list', id: 'x' })).rejects.toThrow('#195')
+    await expect(client.fetchTimeline({ type: 'list', id: 'x' })).rejects.toMatchObject({ code: 'not_found' })
   })
 })
 
@@ -381,7 +381,7 @@ describe('errors and later features', () => {
     expect(onUnauthorized).not.toHaveBeenCalled()
   })
 
-  it.each(['createStatus', 'fetchGroupedNotifications', 'fetchLists', 'votePoll', 'editStatus'] as const)(
+  it.each(['createStatus', 'fetchGroupedNotifications', 'votePoll', 'editStatus'] as const)(
     '%s is not here yet', async (method) => {
       const { client } = setup()
       const call = (client[method] as () => Promise<unknown>)()

@@ -14,4 +14,4 @@ export { isNoUnauthenticated, isProvenVisible } from './no-unauthenticated.js'
 export { BLUESKY_CAPABILITIES } from './client.js'
 // The words a feed's tab shows (README, "Feeds"), one copy for the app.
 export { FEED_GONE, FEED_FAILED } from './client.js'
-export { BlueskyBlobNotFound, BlueskyDeleteUnknown } from './errors.js'
+export { BlueskyBlobNotFound, BlueskyDeleteUnknown, BlueskyListPartlyDeleted, BlueskyWriteUnknown } from './errors.js'

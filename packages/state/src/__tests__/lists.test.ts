@@ -462,3 +462,161 @@ it('a read that wakes as a new write starts waits for that one too (fable 1)', a
   await r
   expect(userLists()?.map((l) => l.id)).toEqual([])
 })
+
+// Bluesky (#195): a write whose outcome is unknown is not shown as done or
+// as not done. The change goes back, the toast says so, and the lists are
+// read again (README, "Lists").
+describe('a write whose outcome is unknown', () => {
+  const unknown = () => Promise.reject(Object.assign(new CaribouError('unknown', 'in doubt'), { name: 'BlueskyWriteUnknown' }))
+
+  it('create: says so and reads the lists again, which bring the list', async () => {
+    const fetchLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends')])
+      .mockResolvedValueOnce([list('1', 'Friends'), list('9', 'Cats')])
+    const client = fakeClient({ createList: vi.fn(unknown), fetchLists })
+    await loadLists({ clientSource: () => client })
+    expect(await createList({ title: 'Cats' }, { clientSource: () => client })).toBeNull()
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether the list "Cats" was created. Reload to check.'])
+    await vi.waitFor(() => expect(userLists()?.map((l) => l.title)).toEqual(['Friends', 'Cats']))
+  })
+
+  it('rename: the old title comes back, then the read brings what the server has', async () => {
+    const fetchLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends')])
+      .mockResolvedValueOnce([list('1', 'Close friends')])
+    const client = fakeClient({ updateList: vi.fn(unknown), fetchLists })
+    await loadLists({ clientSource: () => client })
+    expect(await updateList('1', { title: 'Close friends' }, { clientSource: () => client })).toBe(false)
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether the list "Close friends" was saved. Reload to check.'])
+    await vi.waitFor(() => expect(listById('1')?.title).toBe('Close friends'))
+  })
+
+  it('delete: says so and reads the lists again', async () => {
+    const fetchLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends'), list('2', 'News')])
+      .mockResolvedValueOnce([list('2', 'News')])
+    const client = fakeClient({ deleteList: vi.fn(unknown), fetchLists })
+    await loadLists({ clientSource: () => client })
+    expect(await deleteList('1', { clientSource: () => client })).toBe(false)
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether the list "Friends" was deleted. Reload to check.'])
+    await vi.waitFor(() => expect(userLists()?.map((l) => l.id)).toEqual(['2']))
+  })
+
+  it('member: says so and reads the members and the account lists again', async () => {
+    const fetchListAccounts = vi.fn()
+      .mockResolvedValueOnce([account('7')])
+      .mockResolvedValueOnce([account('7'), account('8')])
+    const fetchAccountLists = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([list('1', 'Friends')])
+    const client = fakeClient({ addListAccounts: vi.fn(unknown), fetchListAccounts, fetchAccountLists })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('8', { clientSource: () => client })
+    expect(await setListMember('1', account('8'), true, { clientSource: () => client })).toBe(false)
+    expect(toasts.map((t) => t.message)).toEqual(['Could not tell whether @user8 was added to the list "Friends". Reload to check.'])
+    await vi.waitFor(() => expect(listMembers('1')?.map((a) => a.id)).toEqual(['7', '8']))
+    await vi.waitFor(() => expect(accountListIds('8')).toEqual(['1']))
+  })
+
+  it('a plain failure still says "Couldn\'t" and reads nothing again', async () => {
+    const client = fakeClient({ createList: vi.fn(fail) })
+    await loadLists({ clientSource: () => client })
+    await createList({ title: 'Cats' }, { clientSource: () => client })
+    expect(toasts.map((t) => t.message)).toEqual(['Couldn\'t create the list "Cats".'])
+    expect(client.fetchLists).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('review fix 1', () => {
+  const partly = () => Promise.reject(Object.assign(new CaribouError('unknown', 'partly'), {
+    name: 'BlueskyListPartlyDeleted',
+    userMessage: 'Some members were removed, but the list was not deleted. Delete it again to finish.',
+  }))
+
+  it('L2: a partly done delete brings the list back, says so, and reads members and memberships again', async () => {
+    const fetchListAccounts = vi.fn()
+      .mockResolvedValueOnce([account('7'), account('8')])
+      .mockResolvedValueOnce([])
+    const fetchAccountLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends')])
+      .mockResolvedValueOnce([])
+    const client = fakeClient({ deleteList: vi.fn(partly), fetchListAccounts, fetchAccountLists })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('7', { clientSource: () => client })
+    expect(await deleteList('1', { clientSource: () => client })).toBe(false)
+    expect(listById('1')?.title).toBe('Friends')
+    expect(toasts.map((t) => t.message)).toEqual(['Some members were removed, but the list was not deleted. Delete it again to finish.'])
+    // The panel and the picker's boxes show what the server has left.
+    await vi.waitFor(() => expect(listMembers('1')).toEqual([]))
+    await vi.waitFor(() => expect(accountListIds('7')).toEqual([]))
+    expect(client.fetchLists).toHaveBeenCalledTimes(2)
+  })
+
+  it('L1: a refusal with words for the reader is toasted as it is', async () => {
+    const tooLarge = () => Promise.reject(Object.assign(new CaribouError('unknown', 'x'),
+      { userMessage: 'This list is too large to change here. Use bsky.app.' }))
+    const client = fakeClient({ deleteList: vi.fn(tooLarge), removeListAccounts: vi.fn(tooLarge) })
+    await loadLists({ clientSource: () => client })
+    await deleteList('1', { clientSource: () => client })
+    await setListMember('2', account('7'), false, { clientSource: () => client })
+    expect(toasts.map((t) => t.message)).toEqual([
+      'This list is too large to change here. Use bsky.app.',
+      'This list is too large to change here. Use bsky.app.',
+    ])
+    expect(listById('1')?.title).toBe('Friends')
+  })
+
+  it('an unknown delete reads the members and memberships again too', async () => {
+    const unknown = () => Promise.reject(Object.assign(new CaribouError('unknown', 'in doubt'), { name: 'BlueskyWriteUnknown' }))
+    const fetchListAccounts = vi.fn().mockResolvedValueOnce([account('7')]).mockResolvedValueOnce([])
+    const fetchAccountLists = vi.fn().mockResolvedValueOnce([list('1', 'Friends')]).mockResolvedValueOnce([])
+    const client = fakeClient({ deleteList: vi.fn(unknown), fetchListAccounts, fetchAccountLists })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('7', { clientSource: () => client })
+    expect(accountListIds('7')).toEqual(['1'])
+    await deleteList('1', { clientSource: () => client })
+    await vi.waitFor(() => expect(listMembers('1')).toEqual([]))
+    await vi.waitFor(() => expect(accountListIds('7')).toEqual([]))
+  })
+})
+
+describe('review fix 2', () => {
+  const partly = (listGone: boolean, userMessage: string) => () => Promise.reject(Object.assign(
+    new CaribouError('unknown', 'partly'), { name: 'BlueskyListPartlyDeleted', listGone, userMessage }))
+
+  it('a failed re-read drops the members and memberships instead of keeping them as current', async () => {
+    const fetchListAccounts = vi.fn().mockResolvedValueOnce([account('7')]).mockImplementation(fail)
+    const fetchAccountLists = vi.fn().mockResolvedValueOnce([list('1', 'Friends')]).mockImplementation(fail)
+    const client = fakeClient({
+      deleteList: vi.fn(partly(false, 'Some members were removed, but the list was not deleted. Delete it again to finish.')),
+      fetchListAccounts, fetchAccountLists,
+    })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('7', { clientSource: () => client })
+    await deleteList('1', { clientSource: () => client })
+    await vi.waitFor(() => expect(listMembers('1')).toBeUndefined())
+    await vi.waitFor(() => expect(accountListIds('7')).toBeUndefined())
+  })
+
+  it('L5: the list gone but the sweep failed: the list stays gone, and the toast says members may remain', async () => {
+    const fetchAccountLists = vi.fn().mockResolvedValueOnce([list('1', 'Friends')]).mockResolvedValueOnce([])
+    const fetchLists = vi.fn().mockResolvedValueOnce([list('1', 'Friends'), list('2', 'News')]).mockResolvedValue([list('2', 'News')])
+    const client = fakeClient({
+      deleteList: vi.fn(partly(true, 'The list was deleted, but some of its members may remain on Bluesky.')),
+      fetchAccountLists, fetchLists,
+    })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('7', { clientSource: () => client })
+    expect(await deleteList('1', { clientSource: () => client })).toBe(true)
+    expect(listById('1')).toBeUndefined()
+    expect(listMembers('1')).toBeUndefined()
+    expect(toasts.map((t) => t.message)).toEqual(['The list was deleted, but some of its members may remain on Bluesky.'])
+    await vi.waitFor(() => expect(accountListIds('7')).toEqual([]))
+    expect(userLists()?.map((l) => l.id)).toEqual(['2'])
+  })
+})

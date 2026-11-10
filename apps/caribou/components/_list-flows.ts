@@ -13,7 +13,9 @@ export const supportsExclusive = (lists: readonly List[] | undefined) =>
 /** Asks for a new list's fields and makes it. Resolves to the list, or null. */
 export async function newListFlow(lists: readonly List[] | undefined): Promise<List | null> {
   const client = activeClient.peek()
-  const input = await listDialog({ title: 'New list', submitLabel: 'Create', exclusive: supportsExclusive(lists) })
+  const input = await listDialog({
+    title: 'New list', submitLabel: 'Create', exclusive: supportsExclusive(lists), network: client?.capabilities.network,
+  })
   if (!input || !client || activeClient.peek()?.userKey !== client.userKey) return null
   return createList(input, { clientSource: () => client })
 }
@@ -22,7 +24,7 @@ export async function newListFlow(lists: readonly List[] | undefined): Promise<L
 export async function editListFlow(list: List, lists: readonly List[] | undefined): Promise<void> {
   const client = activeClient.peek()
   const input = await listDialog({
-    title: 'Edit list', submitLabel: 'Save', exclusive: supportsExclusive(lists),
+    title: 'Edit list', submitLabel: 'Save', exclusive: supportsExclusive(lists), network: client?.capabilities.network,
     initial: { title: list.title, repliesPolicy: list.repliesPolicy, exclusive: list.exclusive },
   })
   if (!input || !client || activeClient.peek()?.userKey !== client.userKey) return

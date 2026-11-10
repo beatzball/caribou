@@ -80,3 +80,32 @@ export class BlueskyDeleteUnknown extends CaribouError {
     this.name = 'BlueskyDeleteUnknown'
   }
 }
+
+/**
+ * A list write whose outcome is not known (README, "Lists"): the write got
+ * no clear answer, and the read that decides it failed too. The change may
+ * be saved or not; a caller must not say either.
+ */
+export class BlueskyWriteUnknown extends CaribouError {
+  constructor(message: string) {
+    super('unknown', message)
+    this.name = 'BlueskyWriteUnknown'
+  }
+}
+
+/**
+ * A list delete that was only partly done (README, "Lists", L2 and L5).
+ * `listGone` false: some items may be gone, but the list is still there;
+ * delete it again to finish. `listGone` true: the list is gone, but the
+ * sweep after it failed, so some of its items may remain.
+ */
+export class BlueskyListPartlyDeleted extends CaribouError {
+  readonly userMessage: string
+  readonly listGone: boolean
+  constructor(message: string, opts: { listGone: boolean; userMessage: string }) {
+    super('unknown', message)
+    this.name = 'BlueskyListPartlyDeleted'
+    this.listGone = opts.listGone
+    this.userMessage = opts.userMessage
+  }
+}

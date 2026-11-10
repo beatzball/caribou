@@ -22,7 +22,7 @@ export const pageData = definePageData<ListsData>(async (event) => {
 
 @customElement('page-lists')
 export class ListsPage extends LitroPage {
-  // Lists are private: only the access token in the browser can read them.
+  // Lists need the reader's session, which lives only in the browser.
   // Like /bookmarks, the server renders the placeholder and the page
   // renders the lists after `firstUpdated` has read the session.
   @state() private signedIn = false
@@ -39,7 +39,7 @@ export class ListsPage extends LitroPage {
         ${this.signedIn
           ? html`<caribou-lists></caribou-lists>`
           : html`<caribou-auth-required
-              label="/lists shows your lists. It requires a Mastodon access token, which Caribou keeps on your device."
+              label="/lists shows your lists. To see them, sign in. Caribou keeps your sign-in on your device."
             ></caribou-auth-required>`}
       </caribou-app-shell>
     `

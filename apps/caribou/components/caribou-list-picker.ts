@@ -40,7 +40,7 @@ export class CaribouListPicker extends LitElement {
   `]
 
   @property({ attribute: false }) account: Account | null = null
-  /** Whether the reader follows the account: the server adds only those. */
+  /** Whether the reader follows the account: a Mastodon server adds only those. */
   @property({ type: Boolean }) following = true
 
   @state() private lists: List[] | undefined = undefined
@@ -56,7 +56,13 @@ export class CaribouListPicker extends LitElement {
     this.dispose = effect(() => {
       const key = activeUserKey.value
       this.lists = key ? listsCache.value.get(key) : undefined
-      this.memberOf = key && this.account ? accountListsCache.value.get(listKey(key, this.account.id)) : undefined
+      const memberOf = key && this.account ? accountListsCache.value.get(listKey(key, this.account.id)) : undefined
+      // The cache was dropped while shown (a re-read failed after a write
+      // that may have changed it): read it again, or show Retry.
+      const dropped = this.memberOf !== undefined && memberOf === undefined && this.loaded.status === 'ready'
+      this.memberOf = memberOf
+      const client = activeClient.peek()
+      if (dropped && client && client.userKey === key) void this.load(client)
     })
   }
 
@@ -152,10 +158,12 @@ export class CaribouListPicker extends LitElement {
 
   override render() {
     const acct = this.account?.acct ?? ''
-    return html`<dialog aria-labelledby="h" aria-describedby=${this.following ? nothing : 'hint'}
+    // Bluesky takes any account; Mastodon only one the reader follows.
+    const hint = !this.following && !this.account?.bluesky
+    return html`<dialog aria-labelledby="h" aria-describedby=${hint ? 'hint' : nothing}
       @close=${() => this.finish()}>
       <h2 id="h">Lists for @${acct}</h2>
-      ${this.following ? nothing
+      ${!hint ? nothing
         : html`<p id="hint" class="hint">Only accounts you follow can be added to a list.</p>`}
       ${this.renderBody()}
       <div class="buttons">

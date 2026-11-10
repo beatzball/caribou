@@ -19,7 +19,7 @@ import './caribou-signout-form.js'
 // `signedIn`: the item shows only while an account is signed in.
 // `needs`: the item shows only when the active account's network has it.
 // `notOn`: the item hides while an account on that network is active, for a
-// feature not built for it yet (spec 2.1: Lists for Bluesky until phase 5).
+// feature not built for it yet (no item uses it now).
 // `onlyOn`: the item shows only while an account on that network is active,
 // and so never before mount (Feeds, #194).
 interface NavItem {
@@ -40,7 +40,7 @@ const ITEMS: NavItem[] = [
   { label: 'Public',  icon: 'globe', href: '/public', more: true, needs: 'publicTimeline' },
   { label: 'Feeds', icon: 'hash', href: '/feeds', more: true, signedIn: true, onlyOn: 'bluesky' },
   { label: 'Bookmarks', icon: 'bookmark', href: '/bookmarks', more: true },
-  { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true, notOn: 'bluesky' },
+  { label: 'Lists', icon: 'list', href: '/lists', more: true, signedIn: true },
   { label: 'Settings', icon: 'settings', href: '/settings', more: true, dot: true },
 ]
 

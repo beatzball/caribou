@@ -47,6 +47,7 @@ own files; ask in your report for a change in another's.
 | `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
 | `src/compose.ts` | `countPost`, `postFits`, `nextRkey`, `detectFacets` over the SDK's `RichText` and `TID` (browser only, through `./browser`) | #189 |
 | `src/actions.ts` | `createActions`: like, repost, bookmark, follow, mute, block and their undos (the client spreads them in) | #188 |
+| `src/lists.ts` | `createLists`: the reader's curate lists, their members and the list feed's URI (the client spreads them in) | #195 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
 
 How they fit:
@@ -531,8 +532,10 @@ definitions). It imports the SDK for types only; `./browser` exports it.
 - **Tag follow:** `fetchTag`, `followTag` and `unfollowTag` throw
   `CaribouError('not_found')` "Bluesky cannot follow a tag". Bluesky has
   no such feature; the tag page hides Follow by `capabilities.followTags`.
-- **Not here yet:** `local`, `public` and list timelines, delete,
-  polls, edit and lists throw
+- **Lists:** see "Lists (#195)" below. The list timeline is
+  `getListFeed`, paged and caught up like Home.
+- **Not here yet:** `local` and `public` timelines,
+  polls and edit throw
   `CaribouError('not_found')` naming the issue that adds them. A screen
   hides those by `capabilities`.
 - **Errors (`normalizeXrpcError`):** 401 → `unauthorized` (and
@@ -947,6 +950,142 @@ record first and writes a new one (rules in `packages/state` README,
 - `deleteStatus` (Mastodon's) answers `not_found` naming
   `blueskyDeletePost`, like `createStatus`. `fetchStatusSource` does the
   same, naming `blueskyGetOwnPost`: the record is the source.
+
+## Lists (#195, spec 9)
+
+`src/lists.ts`. Only the reader's own **curate** lists
+(`app.bsky.graph.defs#curatelist`). Moderation lists (`modlist`) and
+starter-pack lists (`referencelist`) are out of scope: they are never shown,
+changed or deleted here. **Every Bluesky list is public:** anyone can see its
+name and who is in it. The app says so in the New list and Edit list dialogs.
+
+**Where reads go.** The lists and their members are records in the reader's
+own repo, so they are read from the **PDS** with
+`com.atproto.repo.listRecords` and `getRecord`, not from the AppView. The
+PDS reads its own writes at once; the AppView can lag 60 s, and the state
+layer replaces its cache with each read, so a lagging read would take a new
+list or member off the screen. Only profiles (`getProfiles`) and the list
+feed (`getListFeed`) come from the AppView.
+
+| method | call | answer |
+|---|---|---|
+| `fetchLists()` | `listRecords` on `app.bsky.graph.list`, every page | the curate lists, newest first |
+| `fetchList(id)` | `getRecord` | the list; `not_found` for `RecordNotFound` or another purpose |
+| `createList(input)` | `createRecord` with a client-picked rkey | the new list |
+| `updateList(id, input)` | `getRecord`, then `putRecord` with `swapRecord` | the list as saved |
+| `deleteList(id)` | `applyWrites`: every item of the list, then the list | nothing |
+| `fetchListAccounts(id)` | `listRecords` on `app.bsky.graph.listitem`, then `getProfiles` (25 each) | the members, newest first |
+| `addListAccounts(id, dids)` | one `listitem` record per DID, client-picked rkeys | nothing |
+| `removeListAccounts(id, dids)` | `applyWrites`: delete every item of the list for those DIDs | nothing |
+| `fetchAccountLists(did)` | the `listitem` records whose subject is the DID | the curate lists that hold it |
+
+- **Ids.** A list's id is its record key (a TID: the lexicon says
+  `key: 'tid'`). Its URI is `at://<reader DID>/app.bsky.graph.list/<rkey>`.
+  A record whose key is not a TID, or whose `name` is not a non-empty
+  string, is not a valid list and is left out. A member's id is its DID.
+- **Mapping.** `title` is `name`. Bluesky has no replies policy and no
+  "exclusive": `repliesPolicy` is `'list'` and `exclusive` is `false`, and
+  `updateList` ignores both. The app does not offer them.
+- **Only the reader's repo.** Every read and write names the session's DID
+  as `repo`. An item of another list, or of another collection, is never
+  touched.
+- **The name.** Trimmed. Empty, or over 64 UTF-8 bytes (the lexicon's
+  `maxLength`), is refused before any request (`CaribouError('unknown')`
+  with `userMessage`).
+- **Rename keeps the rest.** `updateList` reads the record and writes it
+  back with only `name` changed: a description, an avatar or fields
+  Caribou does not know stay. `swapRecord` is the read's CID, so a change
+  made elsewhere in between fails the save (`InvalidSwap`) instead of
+  being lost.
+- **Members need not be followed.** Unlike Mastodon, any account can join.
+- **One record per intent (spec 7.2, R1; Actions).** `createList` and
+  `addListAccounts` pick the rkey (`compose.nextRkey`, a TID) and keep it
+  by intent (the name; the list and the DID) until a write answers. After
+  no answer, a timeout or a 5xx, the client reads that rkey back
+  (`getRecord`): found → the write went through, and the call answers it;
+  `RecordNotFound` → the error is thrown, and the next write of the same
+  intent uses the same rkey; the read fails → `BlueskyWriteUnknown` (a
+  `CaribouError('unknown')`, root export) is thrown, and the rkey stays
+  kept. An answered 4xx is thrown as it is and forgets the rkey. Without
+  `compose` the lists cannot be written (`not_found`).
+- **Removal removes them all (A3).** `removeListAccounts` checks the
+  list is a curate list of the reader's first, like every other write, and
+  deletes every
+  item record of that list for the DID, not one guessed one: a list can
+  hold the same account twice when another app added it again. None found
+  is done: the account is already not a member.
+- **Delete takes the items with it.** Deleting a list record leaves its
+  items behind as stray public records, so `deleteList` deletes them too,
+  in `applyWrites` batches of at most 200 writes, the list last. With 199
+  items or fewer it is one atomic call (more in L2 below).
+- **Only `getRecord` / `listRecords` decide a write in doubt.** After a
+  rename, a single-call delete or a removal that got no answer, a timeout or a 5xx, the
+  client reads the PDS: the name is the new one / the list is gone / no
+  item is left → done; otherwise the write's error is thrown; the read
+  fails → `BlueskyWriteUnknown`.
+- **Paging.** `listRecords` 100 per page, at most 50 pages (5,000
+  records). The scan says whether it read to the end. The item scan is
+  over every list item in the repo, all lists together, so the cap is the
+  reader's total items, not one list's.
+- **A complete inventory, or no destructive write (L1).** `deleteList`,
+  `removeListAccounts` and the read that decides a removal in doubt refuse
+  when the item scan was cut: nothing is written, and the error says "This
+  list is too large to change here. Use bsky.app." (`userMessage`, which the
+  state layer toasts). A cut scan never decides a write: a removal whose
+  deciding read was cut is `BlueskyWriteUnknown`. `fetchListAccounts` and
+  `fetchAccountLists` refuse the same way ("This list is too large to show
+  here. Use bsky.app."), so no screen shows a partial set as whole.
+- **A partly done delete says so (L2).** With more than 199 items the
+  delete is several `applyWrites` calls, the list record in the last one.
+  When a call after the first fails (an answered refusal or a lost answer),
+  or the first one's answer is lost, earlier items may be gone while the
+  list stays. The client reads the list record: gone → done; still there →
+  `BlueskyListPartlyDeleted` (a `CaribouError('unknown')`, root export,
+  with `userMessage` "Some members were removed, but the list was not
+  deleted. Delete it again to finish." when an earlier call answered, or
+  "Some members may have been removed, …" when only the first call was in
+  doubt); the read fails →
+  `BlueskyWriteUnknown`. A single call is atomic: its answered refusal, or
+  a lost answer with the list still there, is the plain error.
+- **Sweep after delete (L5).** Another tab or app can add a member while
+  a delete runs. So after the list record is gone, the client scans the
+  items once more and deletes every item that still names the deleted
+  list. One sweep, no loop; L1 applies (a complete scan only). When the
+  sweep fails or is cut, the list is still gone, and the call throws
+  `BlueskyListPartlyDeleted` with `listGone: true` and `userMessage` "The
+  list was deleted, but some of its members may remain on Bluesky." When
+  the sweep's own delete gets no clear answer, the client reads once more:
+  no item left → done, as if nothing failed; items left, or that read
+  fails → the same warning.
+- **Accepted limit: an item moved between the scan and the delete (L3).**
+  The rkeys come from the scan; `applyWrites` deletes what is at them when
+  it runs. Bluesky apps create and delete list items; they do not update
+  them. Both limits need another app writing to the same list while
+  Caribou deletes it:
+  - **A move during a delete can delete the moved item.** If another app
+    changes an item to name another list between the scan and the delete,
+    the delete removes it, and the other list loses that member.
+  - **An add during the sweep can stay behind.** An item added after the
+    sweep's scan stays as a stray public record naming the deleted list.
+
+  `swapCommit` would guard both, but it would also fail the delete on any
+  unrelated write to the repo (a like), so Caribou does not use it. An
+  item added after the first scan and before the sweep is handled (L5).
+- **A duplicate add heals on remove.** `addListAccounts` does not check
+  for an item already there: the picker's box comes from the last read,
+  and a stale read can add the same DID twice. Remove deletes every item
+  for the DID, so the duplicate goes with it.
+- **Cost.** Every member write, `fetchListAccounts` and
+  `fetchAccountLists` scan the whole item collection (and the picker reads
+  the lists too). Up to 50 requests each on a very large repo.
+- **A member the AppView does not know** (deleted, taken down, not yet
+  indexed) is still listed, so it can be removed: an account whose `acct`
+  is the DID, no name, no avatar and **no** `moderation`. The app covers
+  a Bluesky account with no `moderation` (fail closed).
+- **Moderation.** Members carry `moderation.profile(view, coverage)` like
+  every account; the list feed's posts carry the post decision like Home.
+- Reads share the dedup; writes do not. Errors go through
+  `normalizeXrpcError`; a 401 calls `onUnauthorized`.
 
 ## Embeds (`mapEmbed`, spec 7.3)
 

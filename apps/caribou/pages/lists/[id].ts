@@ -35,7 +35,7 @@ export class ListPage extends LitroPage {
     article { padding: var(--space-4); color: var(--fg-muted); }
   `]
 
-  // A list is private: only the access token in the browser can read it,
+  // A list needs the reader's session, which lives only in the browser,
   // so the server cannot paint its posts or even its title. Like /home, the
   // server renders the placeholder; the first client render repeats it, and
   // `firstUpdated` then reads the session and renders the list.
@@ -61,7 +61,7 @@ export class ListPage extends LitroPage {
     if (!this.signedIn) {
       return html`<caribou-app-shell instance=${inst}>
         <caribou-auth-required
-          label="A list's timeline shows posts by the accounts in one of your lists. It requires a Mastodon access token, which Caribou keeps on your device."
+          label="A list's timeline shows posts by the accounts in one of your lists. To see it, sign in. Caribou keeps your sign-in on your device."
         ></caribou-auth-required>
       </caribou-app-shell>`
     }

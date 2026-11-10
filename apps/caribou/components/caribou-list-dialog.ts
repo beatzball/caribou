@@ -1,7 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
-import type { ListInput, List, ListRepliesPolicy } from '@beatzball/caribou-mastodon-client'
+import type { ListInput, List, ListRepliesPolicy, Network } from '@beatzball/caribou-mastodon-client'
 import { activeUserKey } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
 import './caribou-button.js'
@@ -15,7 +15,17 @@ export interface ListDialogOptions {
   initial?: Pick<List, 'title' | 'repliesPolicy'> & { exclusive?: boolean }
   /** Whether to offer `exclusive` (the server sends it on its lists: 4.2+). */
   exclusive: boolean
+  /**
+   * The active account's network. Bluesky (#195): the title only, at most
+   * 64 UTF-8 bytes, and a note that the list is public.
+   */
+  network?: Network
 }
+
+/** What a Bluesky list dialog says (spec 9: the create-list dialog says lists are public). */
+export const BLUESKY_LIST_NOTE = 'Bluesky lists are public. Anyone can see the list\'s name and who is in it.'
+/** The lexicon's `maxLength` for a list's name, in UTF-8 bytes. */
+const BLUESKY_NAME_BYTES = 64
 
 const POLICIES: { value: ListRepliesPolicy; label: string }[] = [
   { value: 'list', label: 'Members of the list' },
@@ -56,12 +66,15 @@ export class CaribouListDialog extends LitElement {
   @property() heading = ''
   @property({ attribute: 'submit-label' }) submitLabel = ''
   @property({ type: Boolean }) exclusiveSupported = false
+  /** A Bluesky list: the title only, and the public note. */
+  @property({ type: Boolean }) bluesky = false
   @property({ attribute: false }) initial: ListDialogOptions['initial'] | null = null
 
   @state() private titleText = ''
   @state() private policy: ListRepliesPolicy = 'list'
   @state() private exclusive = false
-  @state() private empty = false
+  /** Why the title cannot be sent, or null. */
+  @state() private titleError: string | null = null
 
   private resolve: ((input: ListInput | null) => void) | null = null
   private cancelled = false
@@ -97,9 +110,15 @@ export class CaribouListDialog extends LitElement {
   private onSubmit = (e: Event) => {
     e.preventDefault()
     const title = this.titleText.trim()
-    if (!title) {
-      this.empty = true
+    this.titleError = !title ? 'Give the list a title.'
+      : this.bluesky && new TextEncoder().encode(title).length > BLUESKY_NAME_BYTES ? 'This title is too long for Bluesky.'
+        : null
+    if (this.titleError) {
       this.renderRoot.querySelector<HTMLInputElement>('#title')?.focus()
+      return
+    }
+    if (this.bluesky) {
+      this.finish({ title })
       return
     }
     this.finish({
@@ -110,25 +129,27 @@ export class CaribouListDialog extends LitElement {
 
   private onInput = (e: Event) => {
     this.titleText = (e.target as HTMLInputElement).value
-    if (this.titleText.trim()) this.empty = false
+    if (this.titleText.trim()) this.titleError = null
   }
 
   override render() {
+    const describedBy = [this.titleError ? 'title-error' : '', this.bluesky ? 'public-note' : ''].filter(Boolean).join(' ')
     return html`<dialog aria-labelledby="h" @close=${() => this.finish(null)}>
       <form @submit=${this.onSubmit} novalidate>
         <h2 id="h">${this.heading}</h2>
         <label class="field" for="title">Title</label>
         <input id="title" type="text" autocomplete="off" maxlength="100" .value=${this.titleText}
-          aria-invalid=${this.empty ? 'true' : 'false'} aria-describedby=${this.empty ? 'title-error' : nothing}
+          aria-invalid=${this.titleError ? 'true' : 'false'} aria-describedby=${describedBy || nothing}
           @input=${this.onInput} />
-        ${this.empty ? html`<p id="title-error" class="error">Give the list a title.</p>` : nothing}
-        <fieldset>
+        ${this.titleError ? html`<p id="title-error" class="error">${this.titleError}</p>` : nothing}
+        ${this.bluesky ? html`<p id="public-note" class="hint">${BLUESKY_LIST_NOTE}</p>` : nothing}
+        ${this.bluesky ? nothing : html`<fieldset>
           <legend>Show replies to</legend>
           ${POLICIES.map((p) => html`<label class="option">
             <input type="radio" name="policy" value=${p.value} .checked=${this.policy === p.value}
               @change=${() => { this.policy = p.value }} />${p.label}</label>`)}
-        </fieldset>
-        ${this.exclusiveSupported ? html`<fieldset>
+        </fieldset>`}
+        ${this.exclusiveSupported && !this.bluesky ? html`<fieldset>
           <label class="option"><input id="exclusive" type="checkbox" .checked=${this.exclusive}
             aria-describedby="exclusive-hint"
             @change=${(e: Event) => { this.exclusive = (e.target as HTMLInputElement).checked }} />Hide these posts from Home</label>
@@ -153,6 +174,7 @@ export async function listDialog(opts: ListDialogOptions): Promise<ListInput | n
   el.heading = opts.title
   el.submitLabel = opts.submitLabel
   el.exclusiveSupported = opts.exclusive
+  el.bluesky = opts.network === 'bluesky'
   el.initial = opts.initial ?? null
   document.body.appendChild(el)
   const owner = activeUserKey.peek()

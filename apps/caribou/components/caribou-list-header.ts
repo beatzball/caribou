@@ -9,10 +9,29 @@ import {
   setListMember,
 } from '@beatzball/caribou-state'
 import { boxReset } from './_shared-styles.js'
-import { profilePath } from './_profile-path.js'
+import { accountPath } from './_profile-path.js'
 import { spaClick } from './_spa-link.js'
 import { editListFlow, toastRemoved } from './_list-flows.js'
+import { blueskyDecisionSettled, uiOf } from './_bluesky-moderation.js'
 import './caribou-button.js'
+
+/**
+ * What a member row may show (app README, "Bluesky lists"). A Mastodon
+ * account shows all. A Bluesky one shows its avatar only when `avatar`
+ * does not blur, and its name only when `profileList` neither filters nor
+ * blurs; with no decision, neither (fail closed). `settled`: the reader
+ * veil has settled the decision for the current reader; until then,
+ * neither.
+ */
+export function memberRowView(a: Account, settled = true): { avatar: boolean; name: boolean } {
+  if (!a.bluesky) return { avatar: true, name: true }
+  if (!settled) return { avatar: false, name: false }
+  const mod = a.bluesky.moderation
+  const list = uiOf(mod, 'profileList')
+  const avatar = uiOf(mod, 'avatar')
+  const name = !!list && !list.filter && !list.blur
+  return { avatar: name && !!avatar && !avatar.blur, name }
+}
 
 type Members = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; items: Account[] }
 
@@ -71,6 +90,9 @@ export class CaribouListHeader extends LitElement {
   @state() private open = false
   @state() private members: Members = { status: 'loading' }
   @state() private server = ''
+  @state() private network: string | null = null
+  /** The Bluesky members whose decision the reader veil has settled. */
+  @state() private settled: ReadonlySet<string> = new Set()
 
   private dispose: (() => void) | null = null
   private loadedFor: CaribouClient | null = null
@@ -92,8 +114,17 @@ export class CaribouListHeader extends LitElement {
         this.membersOwner = key
         this.members = { status: 'loading' }
       }
-      if (items) this.members = { status: 'ready', items }
       const client = activeClient.value
+      if (items) this.members = { status: 'ready', items }
+      else if (this.members.status === 'ready') {
+        // The cache was dropped (a re-read failed after a write that may
+        // have changed it): the shown rows are not known to be current.
+        this.members = { status: 'loading' }
+        this.membersFor = null
+        if (this.open && client) void this.loadMembers(client)
+      }
+      this.network = client?.capabilities.network ?? null
+      this.settled = this.settledMembers(items, key, client)
       if (client && client !== this.loadedFor) {
         this.loadedFor = client
         this.membersFor = null
@@ -101,6 +132,20 @@ export class CaribouListHeader extends LitElement {
         if (this.open) void this.loadMembers(client)
       }
     })
+  }
+
+  // The veil's check for each Bluesky member (the profile header's rule).
+  // Always calls it once, so this effect follows the reader, definitions
+  // and check signals even with no member shown.
+  private settledMembers(items: readonly Account[] | undefined, reader: UserKey | null, client: CaribouClient | null): Set<string> {
+    blueskyDecisionSettled(null, client)
+    const out = new Set<string>()
+    for (const a of items ?? []) {
+      if (!a.bluesky) continue
+      const owned = { viewerOf: reader, moderation: a.bluesky.moderation ?? null }
+      if (blueskyDecisionSettled(owned, client)) out.add(a.id)
+    }
+    return out
   }
 
   override disconnectedCallback() {
@@ -185,17 +230,22 @@ export class CaribouListHeader extends LitElement {
       body = html`<div role="alert">${m.message}</div>
         <caribou-button variant="secondary" @click=${this.onRetry}>Retry</caribou-button>`
     } else if (m.items.length === 0) {
-      body = html`<p class="notice">No one is in this list yet. Open a profile of someone you follow and choose Add to lists.</p>`
+      body = this.network === 'bluesky'
+        ? html`<p class="notice">No one is in this list yet. Open a profile and choose Add to lists.</p>`
+        : html`<p class="notice">No one is in this list yet. Open a profile of someone you follow and choose Add to lists.</p>`
     } else {
-      body = html`<ul>${repeat(m.items, (a) => a.id, (a) => html`<li data-account-id=${a.id}>
-        ${a.avatarStatic || a.avatar
+      body = html`<ul>${repeat(m.items, (a) => a.id, (a) => {
+        const show = memberRowView(a, this.settled.has(a.id))
+        return html`<li data-account-id=${a.id}>
+        ${show.avatar && (a.avatarStatic || a.avatar)
           ? html`<img src=${a.avatarStatic || a.avatar} alt="" width="40" height="40" loading="lazy" decoding="async" />`
           : html`<span class="no-avatar" aria-hidden="true"></span>`}
-        <a class="who" href=${profilePath(a.acct, this.server, a.url)} @click=${spaClick}>
-          <strong>${a.displayName || a.username}</strong><span>@${a.acct}</span></a>
+        <a class="who" href=${accountPath(a, this.server)} @click=${spaClick}>
+          <strong>${show.name ? a.displayName || a.username : 'Content warning'}</strong><span>@${a.acct}</span></a>
         <caribou-button class="remove" variant="secondary"
           @click=${(e: Event) => { void this.onRemove(a, e) }}>Remove<span class="vh"> @${a.acct}</span></caribou-button>
-      </li>`)}</ul>`
+      </li>`
+      })}</ul>`
     }
     return html`<section id="members" aria-labelledby="members-h"><h2 id="members-h">Members</h2>${body}</section>`
   }
