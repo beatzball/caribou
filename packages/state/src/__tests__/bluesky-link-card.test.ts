@@ -201,6 +201,8 @@ describe('R7 with a card (K5)', () => {
         const title = alterTitle ? 'Another title' : ext.title
         return { uri: `at://did:plc:reader/app.bsky.feed.post/${rkey}`, cid: 'bafy', value: { ...value, embed: { ...value.embed!, external: { ...ext, title, thumb } } } }
       }),
+      // #199: the check also reads the gates; none here (the default).
+      blueskyGetOwnGates: vi.fn(async () => ({ replies: null, quotes: true })),
       fetchStatus: vi.fn(async (id: string) => ({ id, uri: id }) as unknown as Status),
     } as unknown as CaribouClient
     return { c, records }
@@ -241,6 +243,8 @@ describe('a pending send frozen before link cards (K8)', () => {
         const value = records.get(rkey)
         return value ? { uri: `at://did:plc:reader/app.bsky.feed.post/${rkey}`, cid: 'bafy', value } : null
       }),
+      // #199: the check also reads the gates; none here (the default).
+      blueskyGetOwnGates: vi.fn(async () => ({ replies: null, quotes: true })),
       fetchStatus: vi.fn(async (id: string) => ({ id, uri: id }) as unknown as Status),
     }
   }

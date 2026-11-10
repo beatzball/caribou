@@ -56,6 +56,8 @@ function fakeBluesky() {
       const value = records.get(rkey)
       return value ? { uri: `at://${DID}/app.bsky.feed.post/${rkey}`, cid: 'bafynew', value } : null
     }),
+    // #199: the check also reads the gates; none here (the default).
+    blueskyGetOwnGates: vi.fn(async () => ({ replies: null, quotes: true })),
     fetchStatus: vi.fn(async (id: string) => ({ id, uri: id, account: { id: DID } }) as unknown as Status),
     fetchInstance: vi.fn(),
     verifyCredentials: vi.fn(() => new Promise(() => {})),

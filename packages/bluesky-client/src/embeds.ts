@@ -160,6 +160,8 @@ function mapVideo(view: Obj, postUri: string | undefined): PreviewCard {
     image: httpUrl(view.thumbnail),
     ...(dims ? { width: dims.width, height: dims.height } : {}),
     providerName: 'bsky.app',
+    // The HLS playlist the app plays (README, "Embeds"). `card` sets `''`.
+    ...(httpUrl(view.playlist) ? { embedUrl: httpUrl(view.playlist)! } : {}),
   })
 }
 

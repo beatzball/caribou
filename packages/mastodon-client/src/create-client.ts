@@ -1,6 +1,6 @@
 import { createRestAPIClient, type mastodon } from 'masto'
 import type {
-  Account, AccountCredentials, AccountRef, BlueskyBlobRef, BlueskyFacet, BlueskyOwnPost, BlueskyPostRecord, BlueskyStrongRef, Capabilities, Filter, Instance, List, ListRepliesPolicy,
+  Account, AccountCredentials, AccountRef, BlueskyBlobRef, BlueskyFacet, BlueskyGates, BlueskyOwnPost, BlueskyPostRecord, BlueskyStrongRef, Capabilities, Filter, Instance, List, ListRepliesPolicy,
   MediaAttachment, Notification, NotificationType, Poll, Relationship, SavedFeed, Search,
   Status, StatusEdit, StatusRef, StatusWriteAck, RelationshipWriteAck, StatusSource, StatusVisibility, Tag,
 } from './types.js'
@@ -124,10 +124,18 @@ export interface CaribouClient {
   blueskyDetectFacets?(text: string): Promise<BlueskyFacet[]>
   /** Uploads an image as it is. The caller has made it small enough. */
   blueskyUploadBlob?(file: Blob): Promise<BlueskyBlobRef>
-  /** `createRecord` of a post with the given record key. */
-  blueskyCreatePost?(record: BlueskyPostRecord, rkey: string): Promise<BlueskyStrongRef>
+  /**
+   * `createRecord` of a post with the given record key. With limits (#199),
+   * one `applyWrites` of the post and its thread gate and post gate.
+   */
+  blueskyCreatePost?(record: BlueskyPostRecord, rkey: string, gates?: BlueskyGates | null): Promise<BlueskyStrongRef>
   /** `getRecord` on the reader's own PDS for that key, or null when there is none. */
   blueskyGetOwnPost?(rkey: string): Promise<BlueskyOwnPost | null>
+  /**
+   * The limits the reader's post at that key has: its thread gate and post
+   * gate records on the PDS (#199). No records is `{ replies: null, quotes: true }`.
+   */
+  blueskyGetOwnGates?(rkey: string): Promise<BlueskyGates>
   /** `deleteRecord` of the reader's own post (#190). Refuses any other URI. */
   blueskyDeletePost?(uri: string): Promise<void>
   /** The bytes of a blob in the reader's own repo (`com.atproto.sync.getBlob`), for a redraft. */

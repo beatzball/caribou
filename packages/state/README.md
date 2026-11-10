@@ -52,6 +52,10 @@ Sources of truth — see file for full signatures.
 - `isBlueskySession(s)`, `blueskyUserKey(did)`, `setBlueskyDriver(d)`,
   `blueskyRestore`, `signOutBluesky(userKey, generation)` — the Bluesky
   session parts. The rules are below (8 to 12).
+- `actAsAccounts(post)`, `actAsClient(session)`, `readAsAccount(userKey, post)`,
+  `actAs(userKey, action, post, view)` — act on a post as another
+  signed-in account (Bluesky only). The rules are in "Act as another
+  account".
 
 **Session rules** (`users.ts`; the handlers are in
 `apps/caribou/components/_unauthorized.ts`)
@@ -609,6 +613,82 @@ storage refusing every click sends nothing, then one post after a reload
 blob refusal, and a facet lookup that lands late (R4); an answer after an
 account switch tells no screen.
 
+### Reply and quote limits (#199)
+
+`bluesky-gates.ts`. The author of a new post can limit who replies (a
+thread gate, `app.bsky.feed.threadgate`) and turn quotes off (a post gate,
+`app.bsky.feed.postgate`). The draft keeps the choice in `bluesky.gates`
+(`BlueskyGates`); a draft with no `gates` has the default.
+
+**G1. Only a new top-level post has limits.** The `new` and `quote:` slots.
+A reply cannot set a thread gate: the lexicon says the gate's rkey "must
+match the record key of the thread's root post", and a reply is not the
+root, so the AppView ignores it. (A post gate on a reply is valid in the
+lexicon; Caribou keeps both off for a reply, so a reply has no limit
+control at all.) `blueskySentGates` gives `null` for a reply, whatever the
+draft holds.
+
+**G2. The default writes nothing new.** "Everyone can reply, quotes on" is
+`gates` absent, or `{ replies: null, quotes: true }`. Then the send is
+`createRecord` of the post alone, as before #199, and `blueskyDraftInput`
+is the same string as before #199 (so a send pending from before still
+matches its own input, R1).
+
+**G3. Post and limits land together or not at all.** With a limit, the
+send is one `com.atproto.repo.applyWrites`: the post, then the thread gate
+(when replies are limited), then the post gate (when quotes are off). All
+three use the draft's rkey. `applyWrites` is one commit, so the PDS keeps
+all or none. The check after a failed send (R1) reads only the post: the
+post found means its limits are there too.
+
+**G4. The limits are part of the send.** They are frozen in `sent.gates`
+with the record and are part of `blueskyDraftInput`. A retry of an
+unchanged frozen record sends the frozen limits (R2). A limit changed after
+a send in doubt is an edit: when the earlier post is found, the result is
+`earlier-posted` and the new choice stays in the draft.
+
+The post record alone cannot say which limits landed: a retry that
+changed only the limits re-freezes on the same rkey, and the earlier
+write may still land first. So when the **check** finds the post (R1, R2),
+and its content and input match, the send also reads the gate records at
+that rkey (`blueskyGetOwnGates`) and compares them with `sent.gates`
+(`sameBlueskyGates`: the same rules in order, no titles; no records is no
+limit). Same: `posted`. Different: `earlier-posted`, and the reader's
+current choice stays with a new rkey. A failed gate read is "the check
+failed": nothing more is sent and the send stays pending. A send answered
+by its own create needs no read: that answer is for the limits it sent.
+
+**G5. Who can reply.** `replies` is `null` (everyone), `[]` (nobody), or
+some of: people you mention (`mention`), people you follow (`following`),
+your followers (`follower`), and one of your own lists (`list`, its id; the client makes the URI in the reader's repo, so no other list can be named).
+At most one list, so at most 4 rules (the lexicon allows 5). The rules go
+in that order, whatever order they were picked in. Turning off the last
+rule goes back to everyone, not to nobody.
+
+**G6. The limit is said in plain words** (`blueskyGatesText`): "Everyone
+can reply." / "Nobody can reply." / "Only people you mention, people you
+follow, your followers and people on Friends can reply.", then "Quotes are
+on." or "Quotes are off."
+
+**G7. A limit alone is draft content.** `isDraftEmpty` is false for a
+draft whose limit is not the default, so a limit chosen before any text
+is kept through a close or a reload. The default alone is still empty.
+
+**G8. The panel belongs to one account.** The dialog keeps its panel
+across openings and passes it the account (`account`). A new account
+closes the panel and forgets its lists; they load again for that account
+on the next open. A list from another account is never offered.
+
+Tests (`bluesky-gates.test.ts`, `bluesky-compose.test.ts`): each rule's
+record shape, the order, nobody, the plain words, a reply never sends
+limits (G1), the default sends `createRecord` and keeps the old input (G2),
+a limit sends one `applyWrites` call with one rkey (G3), a lost answer then
+a retry is one post with its limits, a limit changed after a lost
+answer is `earlier-posted`, and (review 1) a pending send with no limits,
+then only the limits changed, the check absent, the first write landing
+before the retry, is `earlier-posted` with the new limits kept; a failed
+gate read stays pending (G4); a limit alone is kept (G7).
+
 ## Bluesky link cards (#200, spec 7.2)
 
 `bluesky-link-card.ts`, beside `bluesky-compose.ts`. The fetch is in
@@ -865,8 +945,62 @@ not stored there: the reader has those files.
 | `langs` | `language` = the first one; the others are not kept (compose sends one) |
 | a video, an external link card | not kept. The link's URL stays only if it is in the text. |
 | `tags` | not kept |
-| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again |
+| reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again (#262) |
 | `createdAt` | not kept: a new post gets a new time |
+
+## Act as another account (`act-as.ts`; Bluesky #197, Mastodon #131)
+
+The reader can favourite, boost or bookmark a post as another signed-in
+account without a switch. Today this is for Bluesky posts only. The
+Mastodon part (resolve the post on the other server first) is still open
+in #131; `actAsAccounts` answers no account for a Mastodon post until then.
+
+1. **The picker lists only accounts on the post's network.**
+   `actAsAccounts(post)` answers the signed-in accounts other than the
+   active one: for a Bluesky post, Bluesky accounts only. An expired
+   account is listed, so the picker can say so.
+2. **No resolve step on Bluesky.** An AT URI and CID are the same for every
+   account. The write sends them as the post has them.
+3. **The write goes through the other account's own client.**
+   `actAsClient(session)` is a Bluesky client for that sign-in: its PDS,
+   its session, its repo. The record names its DID. Its restore does not
+   change `blueskyRestore` (no splash) and does not change the active
+   reader's moderation.
+4. **The other account's view stays out of the cache.** `readAsAccount` reads the
+   post through that client and answers its flags and record refs
+   (`ActAsView`). Nothing is written to `statusCache`. An `actAs` write
+   changes no cached flag, record ref or count of the active reader. Counts
+   catch up at the next read. If a copy read by the other client is ever
+   cached, its `viewerOf` names that account, so the merge drops its viewer
+   fields (seam 4, "Copies that are not the reader's").
+5. **An expired account does not write.** `actAs` and `readAsAccount` answer
+   `{ kind: 'expired' }` and send nothing when the session is marked
+   `expired`. A request that finds the session gone (the client answers
+   `unauthorized`) marks it expired, through `caribou:session-expired`, and
+   answers `expired` too.
+   **Expiry voids older answers.** After every await, `actAs` and
+   `readAsAccount` look at the session again. Expired now: the answer is
+   `expired`, whatever the server said. Signed in again (a new
+   `generation`): the answer is `failed` and is not kept.
+6. **One write per account, action and post at a time.** A second call
+   while the first is out answers `{ kind: 'busy' }` and sends nothing.
+7. **Every answer is true.** `ok` carries the view the server left (the
+   flag and record from the ack). `failed` carries a message; the caller
+   keeps its old view.
+8. **An acked write holds through read lag.** The AppView can show a new
+   like up to `readLagMs` (60 s) late. So each write that the server
+   acked is kept, apart from the active reader's slots: by account,
+   sign-in `generation`, post and action, with its flag, its record and
+   the time. `readAsAccount` first waits for that account's writes to the
+   post that are still out. Then, for each action, the kept answer wins
+   over the read when the read started before the write finished, or
+   when the read disagrees with it within `readLagMs`. After that the
+   read wins. So a reopened dialog still shows the like, and its undo
+   deletes the acked record; a click never makes a second like. A failed
+   write keeps nothing new.
+9. **An old sign-in is forgotten.** When a client is made, the clients
+   and kept answers of every sign-in that is no longer stored (signed out,
+   or signed in again) are dropped.
 
 ## Lists (`lists.ts`; Mastodon #51, Bluesky #195)
 

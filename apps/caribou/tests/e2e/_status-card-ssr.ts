@@ -22,7 +22,7 @@ export const SSR_STATUS = {
   },
 }
 
-export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part jqfdYnbj4a8=--><!--lit-node 0--><article data-variant="timeline"><!--lit-part 8OnkIaC4pJY=--><div class="post">
+export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part jqfdYnbj4a8=--><!--lit-node 0--><article data-variant="timeline"><!--lit-part mmdbAgBiQLM=--><div class="post">
         <!--lit-part jsefPjIxCJQ=--><div class="boost-attribution">
                    <!--lit-node 1--><caribou-icon   class="boost-icon" name="repeat2" defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part 5qecDuV0+bI=--><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
     width="1em" height="1em" aria-hidden="true"
@@ -49,6 +49,7 @@ export const SSR_STATUS_CARD = String.raw`<caribou-status-card  variant="timelin
             <!--lit-part--><!--/lit-part-->
             <!--lit-node 14--><div class="status-body" id="status-body" >
               <!--lit-part jR7FnxKaQOE=--><!--lit-node 0--><div class="status-content" ><!--lit-part Ypkg6K/Pp3E=--><p>hello</p><!--/lit-part--></div><!--/lit-part-->
+              <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
               <!--lit-part r0KrAUHLlIs=--><!--lit-node 0--><caribou-status-link-card   defer-hydration><template shadowroot="open" shadowrootmode="open"><!--lit-part uT7q81/2cXo=-->
@@ -162,7 +163,7 @@ export const SSR_CW_STATUS = {
   bookmarked: false, repliesCount: 0,
 }
 
-export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part jqfdYnbj4a8=--><!--lit-node 0--><article data-variant="timeline"><!--lit-part 8OnkIaC4pJY=--><div class="post">
+export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="timeline"><template shadowroot="open" shadowrootmode="open"><!--lit-part jqfdYnbj4a8=--><!--lit-node 0--><article data-variant="timeline"><!--lit-part mmdbAgBiQLM=--><div class="post">
         <!--lit-part--><!--/lit-part-->
         <div class="row">
           <div class="body">
@@ -188,6 +189,7 @@ export const SSR_CW_STATUS_CARD = String.raw`<caribou-status-card  variant="time
                          ><!--lit-part-->Show more<!--/lit-part--></button>
                      </div><!--/lit-part-->
             <!--lit-node 14--><div class="status-body" id="status-body" hidden>
+              <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->
               <!--lit-part--><!--/lit-part-->

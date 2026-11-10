@@ -10,7 +10,7 @@ import { PURIFY_OPTS, installPurifyHooks } from '@beatzball/caribou-mastodon-cli
 import { formatRelativeTime } from '@beatzball/caribou-ui-headless'
 import { effect } from '@preact/signals-core'
 import {
-  activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
+  actAsAccounts, activeClient, activeUser, activeUserKey, cacheStatus, createKeepAlive, deleteOwnStatus, deletedStatusIds, EDIT_FIELDS,
   BLUESKY_SELF_LABELS, BlueskyRedraftGone, NOTHING_KEPT, deleteOwnStatusOutcome, findRedraftOf, forgetDeletedStatus,
   readBlueskyRedraft, redraftKeepsSomething, redraftLabelsOf, settleBlueskyRedraft, storeBlueskyRedraft,
   type BlueskyRedraftSource, type DraftSlot, type PreparedImage,
@@ -25,6 +25,7 @@ import {
   currentBlueskyReader, decisionFits, isFailClosed, surfaceOf, uiOf,
 } from './_bluesky-moderation.js'
 import { confirmBlock, confirmDialog } from './caribou-confirm-dialog.js'
+import { openActAs } from './caribou-act-as-dialog.js'
 import { POLL_EDIT_REFUSED, redraftOf } from './_redraft.js'
 import { showStatusHistory } from './caribou-status-history.js'
 import { spaClick } from './_spa-link.js'
@@ -37,6 +38,8 @@ import './caribou-button.js'
 import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
+import './caribou-bluesky-video.js'
+import { httpUrl } from './_http-url.js'
 import './caribou-status-quote.js'
 import './caribou-status-poll.js'
 
@@ -413,6 +416,9 @@ export class CaribouStatusCard extends LitElement {
   // Both start false, so the server and the first client render show the
   // signed-out bar. `bindActions` sets them after mount.
   @state() private canAct = false
+  // Another account on the post's network is signed in: More offers "Act
+  // as another account" (README, "Act as another account (#197)").
+  @state() private actAsShown = false
   // The network the reader must sign in with to act here, when the active
   // account is on another one (spec section 11). Null otherwise.
   @state() private actNetwork: Network | null = null
@@ -561,6 +567,8 @@ export class CaribouStatusCard extends LitElement {
       this.canAct = sameNetwork && (network === 'bluesky' || this.sameInstance(user?.server))
       const actNetwork = client !== null && !sameNetwork ? network : null
       if (actNetwork !== this.actNetwork) this.actNetwork = actNetwork
+      const actAsShown = !!post && actAsAccounts(post).length > 0
+      if (actAsShown !== this.actAsShown) this.actAsShown = actAsShown
       this.ownPost = this.canAct && post !== null && post !== undefined && user !== null && isOwnAccount(user, post.account)
       const mine = this.canAct && !!post && !!user?.account && user.account.id === post.account.id
       if (mine !== this.mine) this.mine = mine
@@ -1137,7 +1145,8 @@ export class CaribouStatusCard extends LitElement {
           hint=${quoteHint} description=${quoteHint}
           ?soft-disabled=${off || !!limits.quote}
           @click=${this.onQuote}></caribou-icon-button>` : nothing}
-        ${this.mine ? this.renderOwnMenu() : this.canAct && !this.ownPost ? this.renderMenu(post) : nothing}
+        ${this.mine ? this.renderOwnMenu() : this.canAct && !this.ownPost ? this.renderMenu(post)
+          : this.actAsShown ? this.renderActAsMenu(post) : nothing}
         ${this.mine ? html`<p class="redraft-status" role="status">${this.redraftNote ?? ''}</p>` : nothing}
       </div>
     `
@@ -1152,7 +1161,29 @@ export class CaribouStatusCard extends LitElement {
         @click=${this.onMute}>${muting ? 'Unmute' : 'Mute'} @${acct}</button>
       <button type="button" class=${blocking ? 'menu-item' : 'menu-item danger'} data-action="block"
         @click=${this.onBlock}>${blocking ? 'Unblock' : 'Block'} @${acct}</button>
+      ${this.renderActAsItem()}
     </caribou-menu>`
+  }
+
+  private renderActAsItem() {
+    return this.actAsShown
+      ? html`<button type="button" class="menu-item" data-action="act-as" @click=${this.onActAs}>Act as another account…</button>`
+      : nothing
+  }
+
+  // No other item for this reader (cannot act, or the own post before the
+  // account loads), but another account can act.
+  private renderActAsMenu(post: Status) {
+    return html`<caribou-menu class="more" anchored icon="ellipsis" label=${`More actions for post by @${post.account.acct}`}>
+      ${this.renderActAsItem()}
+    </caribou-menu>`
+  }
+
+  private onActAs = async () => {
+    const post = this.status?.reblog ?? this.status
+    if (!post || !this.actAsShown) return
+    await openActAs(post)
+    if (this.isConnected) void this.focusIn('caribou-menu.more')
   }
 
   // The server and the first client render show the plain mark; a reader
@@ -1171,6 +1202,7 @@ export class CaribouStatusCard extends LitElement {
       ${this.canEdit ? html`<button type="button" class="menu-item" data-action="edit" @click=${this.onEdit}>Edit</button>` : nothing}
       <button type="button" class="menu-item danger" data-action="delete" @click=${this.onDelete}>Delete</button>
       <button type="button" class="menu-item danger" data-action="redraft" @click=${this.onRedraft}>Delete &amp; redraft</button>
+      ${this.renderActAsItem()}
     </caribou-menu>`
   }
 
@@ -1460,6 +1492,11 @@ export class CaribouStatusCard extends LitElement {
     const cardOf = (c: PreviewCard): PreviewCard => imagesHidden && c.image ? { ...c, image: null } : c
     const linkCard = bodyShown && display.card && !display.mediaAttachments?.length ? display.card : null
     const recordCard = bodyShown ? display.bluesky?.recordCard ?? null : null
+    // A Bluesky video with a playlist plays in place, only when its media
+    // is shown (README, "Bluesky video", rules 9 and 11). Covered, it has
+    // the media notice and Show even with no thumbnail.
+    const video = !!linkCard && !!display.bluesky && linkCard.type === 'video' && !!httpUrl(linkCard.embedUrl)
+    const playable = video && !imagesHidden
     const avatarBlurred = uiOf(mod, 'avatar')?.blur === true
     // Permalink: anchor on the timestamp, not the whole article — wrapping the
     // <article> would put the post-content links (hashtags, mentions, external
@@ -1511,9 +1548,10 @@ export class CaribouStatusCard extends LitElement {
               ${bodyShown ? html`<div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
               ${bodyShown && display.poll ? html`<caribou-status-poll .status=${display} ?interactive=${this.canAct}></caribou-status-poll>` : nothing}
               ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true || mediaCovered} ?no-override=${mediaLocked} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
-              ${linkCard ? html`<caribou-status-link-card .card=${cardOf(linkCard)} ?play=${!!display.bluesky && linkCard.type === 'video'}></caribou-status-link-card>` : nothing}
+              ${playable ? html`<caribou-bluesky-video .card=${linkCard}></caribou-bluesky-video>` : nothing}
+              ${linkCard && !playable ? html`<caribou-status-link-card .card=${cardOf(linkCard)} ?play=${!!display.bluesky && linkCard.type === 'video'}></caribou-status-link-card>` : nothing}
               ${recordCard ? html`<caribou-status-link-card .card=${cardOf(recordCard)}></caribou-status-link-card>` : nothing}
-              ${mediaCovered && (linkCard?.image || recordCard?.image)
+              ${mediaCovered && (video || linkCard?.image || recordCard?.image)
                 ? html`<p class="media-label">${imagesHidden ? 'Media hidden by a content label' : 'Media with a content label'}
                     ${mediaLocked ? nothing : html`<button type="button" class="media-toggle" aria-pressed=${this.mediaShown ? 'true' : 'false'}
                       @click=${this.onToggleMedia}>${this.mediaShown ? 'Hide' : 'Show'}<span class="vh"> media</span></button>`}</p>`

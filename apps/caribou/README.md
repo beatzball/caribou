@@ -578,7 +578,7 @@ post of a thread and `contentList` everywhere else.
 | `contentList.filter` | The card is hidden, like a filter's `hide`. Never on the focused post. |
 | surface `blur` | The post is covered: "Content warning: <reason names>". A Show button unless `noOverride`. |
 | a fail-closed reason (labeler unavailable, unknown label, moderation failed) | The cover also offers Retry: it fires `caribou:bluesky-moderation-retry` (the session glue reloads definitions) and refetches the post through the active Bluesky client. |
-| `contentMedia.blur` | `caribou-status-media` gets `sensitive`; `contentMedia.noOverride` sets its `no-override`. The link card, the video card and `bluesky.recordCard` lose their image, and one line says "Media hidden by a content label", with Show unless `noOverride`. |
+| `contentMedia.blur` | `caribou-status-media` gets `sensitive`; `contentMedia.noOverride` sets its `no-override`. The link card, the video card and `bluesky.recordCard` lose their image (the video does not play, "Bluesky video"), and one line says "Media hidden by a content label", with Show unless `noOverride`. |
 | `avatar.blur` (the post's result) | The author's avatar is blurred. |
 | a quoted post | The same rules with its own `bluesky.moderation`, inside the quote card: filter and blur cover the quote with its reasons; Show unless `noOverride`; the avatar blurs. |
 | profile header | `avatar` and `banner` from the account's `bluesky.moderation`. A Bluesky account with no result yet is blurred (fail closed). |
@@ -634,6 +634,64 @@ prefs and definitions again (one load at a time), sets the reader, and the
 active client's calls wait for that load, so the card's refetch is judged
 with the new definitions. A failed load leaves the reader as it was.
 With a Mastodon account active, or none, a Bluesky card settles at once.
+
+### Bluesky video (#198)
+
+A Bluesky video (`app.bsky.embed.video`) plays in the card, in
+`<caribou-bluesky-video>` (`components/caribou-bluesky-video.ts`). The
+stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
+
+1. **The thumbnail stays until the reader presses play.** Nothing plays by
+   itself, and nothing loads before the press: no playlist, no `hls.js`.
+   So reduced motion is kept: there is no motion the reader did not ask for.
+2. **The thumbnail is a link to the post on bsky.app.** The server renders
+   it, and the first client render equals it (the hydration rule). Without
+   JavaScript, or with a modifier click, the link opens bsky.app. A plain
+   click plays the video in place. The control plays, so Space plays too,
+   as on a button (Enter already fires the click).
+3. **Safari plays the playlist natively.** A browser that answers
+   `canPlayType('application/vnd.apple.mpegurl')` gets it as the `src`.
+4. **Other browsers use `hls.js`, loaded on the first press only.** It is a
+   dynamic `import()`, in its own chunk, never in the main bundle. A browser
+   with neither (no Media Source Extensions) gets the error of rule 6.
+5. **The embed's size holds the box.** The box uses the embed's
+   `aspectRatio` (16:9 without one), before and after the press, so the
+   page does not jump. A very tall video is capped like an image. A
+   thumbnail the mapper rejected leaves the alt text (or "Video") in the
+   box, not an empty box.
+6. **A stream that fails says so.** A fatal `hls.js` error, a `<video>`
+   error or a failed load of `hls.js` shows "This video could not play."
+   with a link "Watch on bsky.app". The thumbnail stays under it.
+7. **The alt text is shown and read.** It is the video's accessible name
+   (`Play video: <alt>`, then the `<video>` label), and an ALT badge shows it,
+   as on images. With no alt text the names are "Play video" and "Video".
+8. **Leaving the DOM stops it.** When the card leaves the DOM, the `hls.js`
+   instance is destroyed and the `<video>` source is removed. Back in the
+   DOM, the thumbnail shows again. Only another video stops it: a fresh
+   copy of the same post (a new object with the same playlist and link,
+   as a timeline poll gives) keeps playing.
+9. **Moderation covers it.** A media label that hides media (`contentMedia`
+   blur) shows the plain video card with no image, as before; the player
+   renders only when the media is shown. A covered video has the notice
+   and Show (unless `noOverride`) even with no thumbnail. The reader veil and every other
+   cover hide the whole post, player included. Leaving that state is rule 8.
+10. **A quote with video (`recordWithMedia`) plays the same way.** The video
+    is the outer post's media; the quote card shows under it.
+11. **Mastodon does not change.** Only a Bluesky post's video card with a
+    playlist becomes the player. A video card with no playlist keeps the
+    play mark that links to bsky.app.
+12. **Focus follows the reader.** The press puts the `<video>` in the
+    poster's place and focuses it at once, before any download. Nothing
+    focuses it later. On an error, focus moves to the "Watch on bsky.app"
+    link only when it was on the player; focus the reader moved elsewhere
+    stays where it is.
+
+**CSP.** The pages send no Content-Security-Policy, so nothing changed.
+A CSP added later must allow `media-src https://video.bsky.app blob:` (the
+`hls.js` player gives the `<video>` a `blob:` source) and `worker-src blob:`
+(`hls.js` starts its worker from a `blob:` URL), and
+`connect-src https://video.bsky.app` for the playlist and its segments.
+The sign-in complete page's CSP is not touched: it shows no video.
 
 ### Bluesky lists (#195)
 
@@ -816,6 +874,22 @@ focus rules) lists Adult, Suggestive, Nudity and Graphic. Each is a toggle butto
 `aria-pressed`; the menu's name lists the labels on. Labels go in the
 record only with images. Known: the shared menu closes after each choice, so
 two labels take two openings (review note N7, left as it is for day one).
+
+**Who can reply, and quotes** (#199; rules in the `packages/state`
+README, "Reply and quote limits"). A new post or a quote (never a reply)
+shows a button above the toolbar whose text is the limit in plain words,
+for example "Everyone can reply. Quotes are on.". It opens a panel
+(`<caribou-bluesky-gates>`): a "Who can reply" group with "Everyone" and
+"Nobody", then checkboxes for people you mention, people you follow, your
+followers, and one of your own lists (a select, its options bound by the
+`selected` property so it always shows the draft's list). Then, outside
+that group, "Allow quotes". The lists load when the panel first opens. One
+`role="status"` line, there from the start, says "Loading your lists…",
+"You have no lists." or "Could not load your lists." (then there is no list
+choice). The choice is the draft's, so it survives a reload, even with no
+text (state G7). The panel is read-only while a send runs. The dialog
+passes the panel its account: another account closes the panel and loads
+that account's lists (state G8).
 
 **Reply and quote.** `caribou:compose` with `inReplyTo` (a Bluesky post) or
 `quote`. The draft takes the strong refs from the post (`reply.root` from
@@ -1021,6 +1095,45 @@ in `packages/state` ("Bluesky acks") and `packages/bluesky-client`
   → Moderation), the question ends "Blocks on Bluesky are public. Anyone
   can see that you blocked this account." A Mastodon block's text is
   unchanged.
+
+### Act as another account (#197)
+
+With more than one Bluesky account signed in, the reader can favourite,
+boost or bookmark a Bluesky post as another of them, with no switch. The
+state rules are in `packages/state` ("Act as another account"). The
+Mastodon part (#131) is still open: a Mastodon post shows no picker.
+
+1. **The menu item shows only with an account to pick.** More → "Act as
+   another account…" shows on a Bluesky post when another Bluesky account
+   is signed in. It shows for any active account, Mastodon too. A card
+   with no More menu (the reader cannot act on the post) gets a More menu
+   with only this item; so does the reader's own post before the account
+   loads. Every More menu on a card has one name: "More actions for post
+   by @handle". It is reader state, so it shows after the first render;
+   the server render has no menu.
+2. **The picker lists only accounts on the post's network.** Each row
+   names the account by handle. An expired account says "Signed out. Sign
+   in again to use it." and has no buttons.
+3. **The dialog says which account acts.** Picking an account reads the
+   post as that account. Its own Favourite, Boost and Bookmark show, each
+   with `aria-pressed` from that read and a name that ends "as
+   @handle". Nothing shows before the read lands. A write that account
+   made a moment ago still shows after a reopen or a new pick, while the
+   AppView lags (state rule 8), so its undo deletes that record.
+4. **The card does not change.** The other account's write never sets
+   the card's flags or counts (the active reader's view). The dialog
+   shows the other account's flags.
+5. **Every answer is shown as it is.** A write in flight soft-disables
+   its button. A status line (`role="status"`) says what changed and as
+   whom: "Favourited as @bob.example.com."
+   A failure says so (`role="alert"`) and the button keeps its old state.
+   A session that is gone says the account is signed out, and nothing is
+   written. Once signed out, no answer that lands later (a read, or
+   another action's ack) brings the buttons or a "Done" line back.
+6. **The dialog closes when the active account changes.** An answer that
+   lands after it closed changes nothing.
+7. **Focus.** It is a modal `<dialog>`. Focus starts on the first account.
+   Escape closes it, and focus goes back to the card's More button.
 
 ### Bluesky SSR (#185, #186)
 
@@ -1247,6 +1360,56 @@ the address rules and the "newest search wins" rule are the ones in
 `/tags/<tag>?net=bsky` (`packages/bluesky-client` README, facets). A plain
 click on one, in a Bluesky card or quote, opens it in the app when the tag
 is one of the post's `tags`; any other link is left to the browser.
+
+### Bluesky muted words (#196)
+
+`/settings/moderation` lists and edits the reader's Bluesky muted words
+(`packages/bluesky-client` README, "Muted words"). Only with a Bluesky
+account active. With a Mastodon account the page is as before.
+
+1. **Where.** With a Bluesky account active, the page's first section is
+   "Muted words" (`<caribou-muted-words>`), in place of the server filters
+   section. The mutes and blocks sections stay. The page renders in the
+   browser only, so the server and the first client render do not differ.
+2. **The list** is the active reader's `prefs.mutedWords`
+   (`blueskyReader`). Each row: the word, where it applies ("Text and
+   tags" or "Tags only"), who ("Everyone" or "People I do not follow"),
+   and when it ends ("Until <date>", or "Expired" for a past
+   `expiresAt`). An expired word stays in the list, with Remove. Until the
+   reader loads: "Loading muted words…". Prefs not loaded: an error line
+   and Retry (the moderation reload). Each row has its own key: a word with
+   no id is keyed by its value and which copy of that value it is, so two
+   such words are two rows.
+3. **Add**: the word, where (default text and tags), how long (forever,
+   24 hours, 7 days, 30 days) and who (default everyone). An empty word
+   says so and sends nothing. A word typed while a save runs is kept: the
+   field empties only if it still holds the word that was sent. Each row
+   has Remove (no confirm, as in the Bluesky app). When the row leaves the
+   list, focus goes to the next row's Remove, else the previous one, else
+   the word field; not when the reader has moved focus elsewhere.
+4. **One write per click.** A button is busy while its write runs, and a
+   click on a busy button does nothing. Writes from two buttons run one
+   after the other (the client's queue), so neither is lost.
+5. **One account.** A write belongs to the account active when it
+   started. Its answer, or its failure, is shown only while that account
+   is still active and the element is still on the page. An account change
+   or leaving the page clears the busy and error state.
+6. **Nothing shown that did not happen.** The list changes only from the
+   prefs the client loads after the write. A failed write leaves the list
+   as it was and says so (a line and a toast). A write that worked when
+   the load after it failed says "Saved, but your settings did not load
+   again", with Retry.
+7. **Applies at once.** After an edit the prefs the client loaded go to
+   the reader signal. When the words changed (this write, or another app's
+   that the fresh read found), every keep-alive cache is emptied
+   (`clearKeptAlive()`), so the next page the reader opens fetches again
+   and is judged with the new words. No page reload. That empties all of
+   them, all the active account's: the kept page data (`_page-cache.ts`),
+   the timeline and thread stores, and the cards' memory of covers the
+   reader opened with Show and filtered posts they showed. Those covers
+   close again, which is right: the words that decide them changed. While
+   an edit runs, the active client's calls wait for it, so a page opened
+   meanwhile is judged with the new words.
 
 ## Accounts
 

@@ -12,6 +12,9 @@ import { createBlueskyClient, type BlueskyAgent } from './client.js'
 import { detectFacets, nextRkey } from './compose.js'
 import { normalizeXrpcError } from './errors.js'
 import { goneLabelers, labelDefsFromServices, readerModerationSource, type LabelDefs } from './moderation.js'
+import { applyMutedWordEdit, checkMutedWordEdit, type MutedWordEdit, type MutedWordOutcome } from './muted-words.js'
+
+export { InvalidMutedWord, type MutedWordEdit, type MutedWordOutcome } from './muted-words.js'
 
 export const BLUESKY_SCOPE = 'atproto transition:generic'
 
@@ -312,6 +315,24 @@ export interface RestoredClient {
    * nothing, for a DID not in `gone` or when the last check fails.
    */
   removeGoneLabeler(did: string): Promise<ModerationInputs & { outcome: 'removed' | 'back' | 'absent' }>
+  /**
+   * Adds or removes one muted word (README, "Muted words"). One job in the
+   * moderation queue: a fresh read under the prefs lock, the write, then a
+   * full load. Throws `InvalidMutedWord` with no request for an add rule 6
+   * refuses; throws on a failed read or write.
+   */
+  editMutedWords(edit: MutedWordEdit): Promise<MutedWordsResult>
+}
+
+/**
+ * What a muted-words edit leaves. `reloadFailed`: the load after it failed
+ * (after a write: written all the same). `wordsChanged`: the loaded words
+ * differ from the ones held before the job (a write, or another app's).
+ */
+export interface MutedWordsResult extends ModerationInputs {
+  outcome: MutedWordOutcome
+  reloadFailed: boolean
+  wordsChanged: boolean
 }
 
 /** What a moderation load or check leaves: the inputs and the gone labelers. */
@@ -457,9 +478,38 @@ export async function restoreClient(
       if (!out.gone.includes(did)) return Promise.reject(new Error(`Bluesky: ${did} is not a gone labeler`))
       return enqueue(() => removeGone(did))
     },
+    editMutedWords(edit) {
+      let checked: MutedWordEdit
+      try {
+        checked = checkMutedWordEdit(edit)
+      } catch (err) {
+        return Promise.reject(err)
+      }
+      return enqueue(() => editMuted(checked))
+    },
   }
   await out.reloadModeration()
   return out
+
+  // One job: the write (a fresh read under the prefs lock) and the reload.
+  async function editMuted(edit: MutedWordEdit): Promise<MutedWordsResult> {
+    // Set inside the edit, which the SDK calls under its lock.
+    const seen: { outcome: MutedWordOutcome } = { outcome: 'absent' }
+    await prefsWriter(agent)((all) => {
+      const r = applyMutedWordEdit(all, edit)
+      seen.outcome = r.outcome
+      return r.prefs
+    }).catch((err: unknown): never => {
+      failed(err)
+      throw err
+    })
+    // Always a full load, in the same job: after `exists` or `absent` too,
+    // the fresh read showed words the held prefs may not have.
+    const before = JSON.stringify(prefs?.mutedWords ?? null)
+    await loadModeration()
+    const wordsChanged = prefs !== null && JSON.stringify(prefs.mutedWords) !== before
+    return { ...inputs(), outcome: seen.outcome, reloadFailed: prefs === null, wordsChanged }
+  }
 
   // One job: the "is it back" check, the write and the reload.
   async function removeGone(did: string): Promise<ModerationInputs & { outcome: 'removed' | 'back' | 'absent' }> {

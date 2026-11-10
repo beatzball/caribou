@@ -2,13 +2,14 @@ import type { Agent, AppBskyFeedDefs } from '@atproto/api'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
   CaribouError, createDedup,
-  type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet,
+  type Account, type AccountCredentials, type AccountPage, type BlueskyBlobRef, type BlueskyFacet, type BlueskyGates,
   type BlueskyModerationResult, type BlueskyOwnPost, type BlueskyPostRecord,
   type CaribouClient, type Capabilities, type Notification, type NotificationPage, type Role, type SavedFeed, type Search,
   type SearchInput, type Status, type TimelineKind, type TimelinePage,
 } from '@beatzball/caribou-mastodon-client'
 import { createActions, type BlueskyActionsAgent } from './actions.js'
 import { createLists } from './lists.js'
+import { gatedPostWrites, noGates, readGates } from './gates.js'
 import { answerCoverage, commonLabelers } from './content-labelers.js'
 import { BlueskyBlobNotFound, BlueskyDeleteUnknown, normalizeXrpcError } from './errors.js'
 import { mapAccount, mapRelationship, type ProfileView } from './map/account.js'
@@ -295,6 +296,17 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
         throw err
       }
     })
+  }
+
+  // A gate record at the post's rkey, or null for `RecordNotFound` (#199).
+  async function ownGateRecord(collection: string, rkey: string): Promise<unknown> {
+    try {
+      const { data } = await agent.com.atproto.repo.getRecord({ repo: did(), collection, rkey })
+      return data.value ?? null
+    } catch (err) {
+      if (isRecordMissing(err)) return null
+      throw err
+    }
   }
 
   function did(): string {
@@ -818,9 +830,18 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       })
     },
 
-    async blueskyCreatePost(record: BlueskyPostRecord, rkey: string) {
+    async blueskyCreatePost(record: BlueskyPostRecord, rkey: string, gates?: BlueskyGates | null) {
       return write(async () => {
         try {
+          // #199: limits go in one applyWrites with the post, all or none.
+          if (gates && !noGates(gates)) {
+            const { data } = await agent.com.atproto.repo.applyWrites({ repo: did(), writes: gatedPostWrites(did(), rkey, record, gates, listUri) })
+            const first = data.results?.[0] as { uri?: unknown; cid?: unknown } | undefined
+            if (typeof first?.uri !== 'string' || typeof first.cid !== 'string') {
+              throw new CaribouError('server_error', 'Bluesky: the post write answered no post')
+            }
+            return { uri: first.uri, cid: first.cid }
+          }
           const { data } = await agent.com.atproto.repo.createRecord({
             repo: did(), collection: POST_COLLECTION, rkey, record: record as unknown as Record<string, unknown>,
           })
@@ -832,6 +853,17 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     },
 
     blueskyGetOwnPost: getOwnPost,
+
+    // The limits a post of the reader's has (#199): its gate records on the PDS.
+    async blueskyGetOwnGates(rkey: string) {
+      return write(async () => {
+        const [threadgate, postgate] = await Promise.all([
+          ownGateRecord('app.bsky.feed.threadgate', rkey),
+          ownGateRecord('app.bsky.feed.postgate', rkey),
+        ])
+        return readGates(did(), threadgate, postgate)
+      })
+    },
 
     // Delete (#190): only the reader's own post record.
     // Only getRecord decides a delete in doubt (README, "Delete").

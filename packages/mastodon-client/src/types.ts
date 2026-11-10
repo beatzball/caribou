@@ -483,6 +483,28 @@ export interface BlueskyPostRecord {
   createdAt: string
 }
 
+/** One "who can reply" rule of a thread gate (#199). */
+export type BlueskyReplyRule =
+  | { kind: 'mention' }
+  | { kind: 'following' }
+  | { kind: 'follower' }
+  /**
+   * One of the reader's own lists, by its id (the record key). The client
+   * makes the URI in the reader's repo. `title` is for the composer only.
+   */
+  | { kind: 'list'; id: string; title?: string }
+
+/**
+ * Reply and quote limits for a new post (#199). Rules: `packages/state`
+ * README, "Reply and quote limits".
+ */
+export interface BlueskyGates {
+  /** `null`: everyone can reply. `[]`: nobody. */
+  replies: BlueskyReplyRule[] | null
+  /** `false`: nobody can quote it. */
+  quotes: boolean
+}
+
 /** A post record read back from the reader's own PDS. */
 /**
  * One of a Bluesky reader's saved feeds (#194): Following, or a custom feed.
