@@ -33,6 +33,8 @@ type Restored = Awaited<ReturnType<BlueskyBrowser['restoreClient']>>
 let active: {
   userKey: string; restored: Restored; reloading: Promise<void> | null
   rechecking: Promise<void> | null; checkedAt: number
+  /** A fresh reload is queued after the running one and has not started. */
+  reloadQueued?: boolean
   removing?: Map<string, Promise<RemoveOutcome>>
   /** The muted-words edits in flight: the client's calls wait for them (their load). */
   editing?: Set<Promise<unknown>>
@@ -78,7 +80,7 @@ export function removeActiveGoneLabeler(did: string): Promise<RemoveOutcome> {
       // loaded before this write landed: reload it once, now if it is
       // restored, else when its restore finishes (app README, "A gone
       // labeler").
-      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
+      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration({ fresh: true })
       else reloadAfterRestore.add(a.userKey)
       return 'stale'
     }
@@ -134,7 +136,7 @@ export async function editActiveMutedWords(edit: MutedWordEdit): Promise<MutedWo
     // As for a removal: its account's next reader may have loaded before
     // this answer, so it loads once more.
     if (changed) {
-      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration()
+      if (active && active !== a && active.userKey === a.userKey) void reloadActiveModeration({ fresh: true })
       else reloadAfterRestore.add(a.userKey)
     }
     return { outcome: 'stale', reloadFailed: false }
@@ -145,17 +147,34 @@ export async function editActiveMutedWords(edit: MutedWordEdit): Promise<MutedWo
   return { outcome: r.outcome, reloadFailed: r.reloadFailed }
 }
 
-/** Loads the active reader's moderation inputs again. One at a time. */
-export function reloadActiveModeration(): Promise<void> | null {
+/**
+ * Loads the active reader's moderation inputs again. One at a time: a call
+ * while one runs joins it. With `fresh`, it does not join a running one,
+ * which may have read the prefs before a write: it is queued after it
+ * (once; a second `fresh` call joins the queued one), so the last load
+ * reads the prefs after the write (app README, "A gone labeler", #253).
+ */
+export function reloadActiveModeration(opts: { fresh?: boolean } = {}): Promise<void> | null {
   const a = active
   if (!a || activeUserKey.peek() !== a.userKey) return null
   a.checkedAt = Date.now()
-  a.reloading ??= a.restored.reloadModeration().then(
+  const load = () => a.restored.reloadModeration().then(
     (r) => { if (active === a && activeUserKey.peek() === a.userKey) publishReader(a.userKey, r) },
     // Still unknown: the covers stay, with Retry.
     () => {},
-  ).finally(() => { a.reloading = null })
-  return a.reloading
+  )
+  const track = (p: Promise<void>) => {
+    a.reloading = p
+    void p.finally(() => { if (a.reloading === p) a.reloading = null })
+    return p
+  }
+  if (!a.reloading) return track(load())
+  if (!opts.fresh || a.reloadQueued) return a.reloading
+  a.reloadQueued = true
+  return track(a.reloading.then(() => {
+    a.reloadQueued = false
+    return load()
+  }))
 }
 
 /**

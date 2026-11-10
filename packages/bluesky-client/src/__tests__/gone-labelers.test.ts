@@ -5,6 +5,20 @@ import type { OAuthSession } from '@atproto/oauth-client-browser'
 import { BSKY_LABELER_DID, type ModerationPrefs } from '@atproto/api'
 import { restoreClient } from '../oauth.js'
 import { goneLabelers, type LabelDefs } from '../moderation.js'
+import type * as Moderation from '../moderation.js'
+
+// The pair the client's moderation reads now (README, "One pair").
+const source = vi.hoisted(() => ({ inputs: null as null | (() => { prefs: unknown; labelDefs: unknown }) }))
+vi.mock('../moderation.js', async (importOriginal) => {
+  const orig = await importOriginal<typeof Moderation>()
+  return {
+    ...orig,
+    readerModerationSource: (did: string, inputs: Parameters<typeof orig.readerModerationSource>[1]) => {
+      source.inputs = inputs
+      return orig.readerModerationSource(did, inputs)
+    },
+  }
+})
 
 const ALICE = 'did:plc:aliceaaaaaaaaaaaaaaaaaaa'
 const userKey = `${ALICE}@bsky` as const
@@ -118,6 +132,7 @@ async function restore(prefs: unknown[], live: string[] = []) {
   return { ...p, out }
 }
 
+const countOf = (calls: Calls[], method: string) => calls.filter((c) => c.method === method).length
 const writes = (calls: Calls[]) => calls.filter((c) => c.method === 'app.bsky.actor.putPreferences')
 
 describe('restoreClient: gone labelers', () => {
@@ -305,7 +320,6 @@ describe('loads in order', () => {
 // serial queue. Codex's round-2 schedule, and Fable's round-2 notes 2 and 3.
 describe('one at a time', () => {
   const H = 'did:plc:secondgonelabeleraaaaaaa'
-  const countOf = (calls: Calls[], method: string) => calls.filter((c) => c.method === method).length
 
   it('a check asked for during a removal never makes a live labeler gone', async () => {
     const { out, opts, routes, hooks } = await restore([ADULT, LABELERS([GONE, H]), SAVED])
@@ -352,9 +366,13 @@ describe('one at a time', () => {
     const held = holdNext(p.routes, 'app.bsky.actor.getPreferences')
     const older = out.reloadModeration()
     await vi.waitFor(() => expect(held.arrived()).toBe(true))
+    const reads = countOf(p.calls, 'app.bsky.actor.getPreferences')
     // Another app drops LIVE; a newer load is asked for.
     p.opts.prefs = [LABELERS([])]
     const newer = out.reloadModeration()
+    await new Promise((r) => setTimeout(r, 20))
+    // The newer load has not read the prefs while the older one is held.
+    expect(countOf(p.calls, 'app.bsky.actor.getPreferences')).toBe(reads)
     held.release()
     await older
     await newer
@@ -391,7 +409,6 @@ describe('one at a time', () => {
     const { out, opts, routes, calls } = await restore([ADULT, LABELERS([GONE]), SAVED])
     const held = holdNext(routes, 'app.bsky.actor.getPreferences')
     const reload = out.reloadModeration()
-    await vi.waitFor(() => expect(held.arrived()).toBe(false))
     opts.live.add(GONE)
     const removal = out.removeGoneLabeler(GONE)
     held.release()
@@ -399,6 +416,31 @@ describe('one at a time', () => {
     const r = await removal
     expect(r.outcome).toBe('back')
     expect(writes(calls)).toHaveLength(0)
+    // Only the load's definitions request: the removal sent no check.
+    expect(countOf(calls, 'app.bsky.labeler.getServices')).toBe(1)
+  })
+})
+
+describe('one pair (README, "One pair")', () => {
+  it('while a load waits for its definitions, the client still reads the old prefs with the old definitions', async () => {
+    const { out, opts, routes } = await restore([LABELERS([LIVE])], [LIVE])
+    const before = source.inputs!()
+    expect(Object.keys(before.labelDefs as object)).toContain(LIVE)
+    // Another app adds a labeler; a load runs and its definitions are held.
+    const NEW = 'did:web:new.example.com'
+    opts.prefs = [LABELERS([LIVE, NEW])]
+    opts.live.add(NEW)
+    const held = holdNext(routes, 'app.bsky.labeler.getServices')
+    const reload = out.reloadModeration()
+    await vi.waitFor(() => expect(held.arrived()).toBe(true))
+    const mid = source.inputs!()
+    expect(mid.prefs).toBe(before.prefs)
+    expect(mid.labelDefs).toBe(before.labelDefs)
+    held.release()
+    await reload
+    const after = source.inputs!()
+    expect((after.prefs as ModerationPrefs).labelers.map((l) => l.did)).toContain(NEW)
+    expect(Object.keys(after.labelDefs as object)).toContain(NEW)
   })
 })
 
