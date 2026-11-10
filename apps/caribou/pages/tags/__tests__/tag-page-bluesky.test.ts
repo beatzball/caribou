@@ -106,6 +106,38 @@ describe('page-tags-tag with a Bluesky reader', () => {
     expect(mastodonTimeline(el)).toBeNull()
   })
 
+  // #254: on a full load the router swaps in a second element with the same
+  // server data after the first one rewrote the address. The second one sees
+  // `?net=bsky` already, so it takes the address as its own rewrite.
+  it.each(['ok', 'auth-required'])('keeps the Bluesky body in the router element through a switch to Mastodon (%s)', async (kind) => {
+    history.replaceState(null, '', '/tags/cats')
+    signInBluesky()
+    const data = () => kind === 'ok' ? okData('cats') : { kind: 'auth-required', shell: { instance: null }, tag: 'cats' }
+    const first = await mount(data())
+    expect(location.pathname + location.search).toBe('/tags/cats?net=bsky')
+    const second = await mount(data())
+    first.remove()
+    await settle(second)
+    expect(blueskyBody(second)).not.toBeNull()
+    signInMastodon()
+    await settle(second)
+    expect(location.pathname + location.search).toBe('/tags/cats?net=bsky')
+    expect(blueskyBody(second)).not.toBeNull()
+    expect(mastodonTimeline(second)).toBeNull()
+  })
+
+  it('shows the Mastodon body to a Mastodon reader at a Mastodon address after two mounts', async () => {
+    history.replaceState(null, '', '/tags/cats')
+    signInMastodon()
+    const first = await mount(okData('cats'))
+    const second = await mount(okData('cats'))
+    first.remove()
+    await settle(second)
+    expect(location.pathname + location.search).toBe('/tags/cats')
+    expect(blueskyBody(second)).toBeNull()
+    expect(mastodonTimeline(second)).not.toBeNull()
+  })
+
   it('shows the Mastodon timeline to a Mastodon reader and leaves the address alone', async () => {
     history.replaceState(null, '', '/tags/cats')
     signInMastodon()
