@@ -11,7 +11,7 @@ import {
   recoverStagedRedrafts, redraftKeepsSomething, redraftTextOf, settleBlueskyRedraft, storeBlueskyRedraft, type PreparedImage,
 } from '../bluesky-redraft.js'
 import {
-  emptyDraft, findRedraftSlot, loadDraft, renameDraftIf, saveDraft, storedDrafts, _testOnlyForgetRevealed, type DraftSlot,
+  emptyDraft, findRedraftSlot, loadDraft, patchRevealed, renameDraftIf, saveDraft, storedDrafts, _testOnlyForgetRevealed, type DraftSlot,
 } from '../compose.js'
 import { emptyBlueskyDraft } from '../bluesky-compose.js'
 import { getDraftFiles, pruneDraftFiles, _testOnlyClearDraftFiles, _testOnlyFailNextPut } from '../draft-files.js'
@@ -566,6 +566,66 @@ describe('settleBlueskyRedraft (D1)', () => {
     expect(await settleBlueskyRedraft(second.stored, 'deleted')).toBe(stored.slot)
     expect(loadDraft(KEY, stored.slot)!.text).toBe('hello world, plus an edit')
     expect(Object.keys(await getDraftFiles(KEY, stored.redraftSlot))).toHaveLength(1)
+  })
+})
+
+describe('settleBlueskyRedraft: other posts, other tabs, and the page overlay (#243)', () => {
+  async function staged() {
+    const f = fakeClient(IMG_RECORD)
+    const source = (await readBlueskyRedraft(f.client, post()))!
+    return { ...f, stored: (await storeBlueskyRedraft(f.client, source, { prepareImage }))! }
+  }
+  const refuseWrites = () => vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new DOMException('full', 'QuotaExceededError') })
+
+  it('deleted: an orphan staged copy of another post stays (the source check)', async () => {
+    const OTHER = `at://${DID}/app.bsky.feed.post/3kother`
+    const left = emptyDraft({ text: 'another post', bluesky: emptyBlueskyDraft({ source: OTHER, rkey: 'o', stagedAt: Date.now() }) })
+    saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const { stored } = await staged()
+    expect(await settleBlueskyRedraft(stored, 'deleted')).toBe(stored.redraftSlot)
+    expect(loadDraft(KEY, `staged:${left.idempotencyKey}`)!.text).toBe('another post')
+  })
+
+  it('two tabs redraft the same post at once: the second answers the first one\'s redraft', async () => {
+    // Tab B stores first; to tab A it is another tab's flow.
+    const b = await staged()
+    _testOnlyForgetStaging()
+    const a = await staged()
+    expect(await settleBlueskyRedraft(a.stored, 'deleted')).toBe(a.stored.redraftSlot)
+    // A's delete removed B's unexposed copy, so B has nothing of its own.
+    expect(loadDraft(KEY, b.stored.slot)).toBeNull()
+    expect(await settleBlueskyRedraft(b.stored, 'deleted')).toBe(a.stored.redraftSlot)
+  })
+
+  it('a refused rename: storedDrafts shows the page-only fields (exposed, the mark)', async () => {
+    const { stored } = await staged()
+    const spy = refuseWrites()
+    try {
+      await settleBlueskyRedraft(stored, 'unknown')
+      const [[slot, d]] = storedDrafts(KEY)
+      expect(slot).toBe(stored.slot)
+      expect(d.bluesky).toMatchObject({ exposed: true, sourceMaybeLive: true })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('patchRevealed: a gone post clears the page-only mark while storage still refuses; another slot is not touched', async () => {
+    const { stored } = await staged()
+    // A redraft of another post: not the one this flow settles.
+    const other = emptyDraft({ text: 'other', bluesky: emptyBlueskyDraft({ source: `at://${DID}/app.bsky.feed.post/3kother`, sourceMaybeLive: true }) })
+    saveDraft(KEY, `redraft:${other.idempotencyKey}`, other)
+    const spy = refuseWrites()
+    try {
+      await settleBlueskyRedraft(stored, 'unknown')
+      expect(loadDraft(KEY, stored.slot)!.bluesky!.sourceMaybeLive).toBe(true)
+      expect(await checkRedraftSource(fakeClient(null).client, stored.slot)).toBe(false)
+      expect(loadDraft(KEY, stored.slot)!.bluesky!.sourceMaybeLive).toBe(false)
+      patchRevealed(KEY, `redraft:${other.idempotencyKey}`, { sourceMaybeLive: false })
+      expect(loadDraft(KEY, `redraft:${other.idempotencyKey}`)!.bluesky!.sourceMaybeLive).toBe(true)
+    } finally {
+      spy.mockRestore()
+    }
   })
 })
 

@@ -723,6 +723,20 @@ slot stores them). A new post finds it (`findRedraftSlot` takes an
 exposed `staged:` slot), after a reload too once the flag is stored; its
 bytes load by their real key.
 
+**Known gap: a refused rename, a refused reveal write, then a reload.**
+When storage refuses the rename and also every later write, the flag
+`exposed` lives only in this page. After a reload, the `staged:` slot is
+unexposed again, so it is hidden as a staged copy: a new post does not
+find it. Recovery finds it (`recoverStagedRedrafts`): at once when the
+post is gone, or after `STAGED_MAX_AGE_MS` (a day) when the post is still
+up. So the draft is hidden for up to a day, never lost.
+
+**Known cost of rule E (accepted).** If a tab closes before its delete
+goes out, and the reader later uses plain Delete on that post, the next
+new post offers a redraft the reader no longer wants. The reader discards
+it. Plain Delete removes no draft (rule E), so this is the price of never
+losing one.
+
 **Rule D4: the stored redraft wins.** A stored redraft of the same post
 (the same `bluesky.source`: a `redraft:` slot, or an exposed `staged:`
 one) may hold the reader's edits, so it is never replaced. The card looks for it before the confirm: found → it opens,
