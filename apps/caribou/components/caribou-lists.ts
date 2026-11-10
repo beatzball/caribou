@@ -47,6 +47,7 @@ export class CaribouLists extends LitElement {
   @state() private lists: List[] | undefined = undefined
   @state() private error: string | null = null
   @state() private retrying = false
+  @state() private network: string | null = null
 
   private dispose: (() => void) | null = null
   private loadedFor: CaribouClient | null = null
@@ -60,6 +61,7 @@ export class CaribouLists extends LitElement {
       const key = activeUserKey.value
       this.lists = key ? listsCache.value.get(key) : undefined
       const client = activeClient.value
+      this.network = client?.capabilities.network ?? null
       if (client && client !== this.loadedFor) {
         this.loadedFor = client
         void this.load(client)
@@ -114,7 +116,9 @@ export class CaribouLists extends LitElement {
     if (!client) return
     const ok = await confirmDialog({
       title: `Delete "${list.title}"?`,
-      message: 'The list goes for good. The accounts in it stay followed.',
+      // A Bluesky member need not be followed.
+      message: client.capabilities.network === 'bluesky'
+        ? 'The list goes for good.' : 'The list goes for good. The accounts in it stay followed.',
       confirmLabel: 'Delete',
     })
     if (!ok || activeClient.peek()?.userKey !== client.userKey) return
@@ -139,7 +143,7 @@ export class CaribouLists extends LitElement {
     const lists = this.lists
     if (!lists) return html`<p class="notice">Loading your lists…</p>`
     if (lists.length === 0) {
-      return activeClient.peek()?.capabilities.network === 'bluesky'
+      return this.network === 'bluesky'
         ? html`<p class="notice">No lists yet. A list is a timeline of a few accounts. ${BLUESKY_LIST_NOTE}</p>`
         : html`<p class="notice">No lists yet. A list is a timeline of a few accounts you follow.</p>`
     }

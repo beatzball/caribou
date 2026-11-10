@@ -91,3 +91,16 @@ export class BlueskyWriteUnknown extends CaribouError {
     this.name = 'BlueskyWriteUnknown'
   }
 }
+
+/**
+ * A list delete that removed some of its items but not the list record
+ * (README, "Lists", L2). The list is still there, with fewer members.
+ * Delete it again to finish.
+ */
+export class BlueskyListPartlyDeleted extends CaribouError {
+  readonly userMessage = 'Some members were removed, but the list was not deleted. Delete it again to finish.'
+  constructor(message: string) {
+    super('unknown', message)
+    this.name = 'BlueskyListPartlyDeleted'
+  }
+}

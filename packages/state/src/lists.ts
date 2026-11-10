@@ -67,6 +67,13 @@ const named = (list: List | undefined) => (list ? `the list "${list.title}"` : '
 // no import of the Bluesky client.
 const outcomeUnknown = (err: unknown) => (err as { name?: unknown } | null)?.name === 'BlueskyWriteUnknown'
 const unknownToast = (what: string) => `Could not tell whether ${what}. Reload to check.`
+// A Bluesky delete that removed some members but not the list (L2).
+const partlyDeleted = (err: unknown) => (err as { name?: unknown } | null)?.name === 'BlueskyListPartlyDeleted'
+// The client's words for the reader, when a failure has them.
+function userMessage(err: unknown): string | null {
+  const m = (err as { userMessage?: unknown } | null)?.userMessage
+  return typeof m === 'string' && m ? m : null
+}
 
 // After an unknown outcome: read again, so the screen shows what the server
 // has. Best effort; a failed read leaves the cache as the rollback left it.
@@ -223,7 +230,7 @@ export async function createList(input: ListInput, opts: ListsOpts = {}): Promis
     if (outcomeUnknown(err)) {
       toast(unknownToast(`the list "${input.title}" was created`))
       unknownAfter = () => readAgain(() => loadLists({ clientSource: () => client }))
-    } else toast(`Couldn't create the list "${input.title}".`)
+    } else toast(userMessage(err) ?? `Couldn't create the list "${input.title}".`)
     return null
   } finally {
     end([client.userKey])
@@ -276,7 +283,8 @@ export async function updateList(id: string, input: ListInput, opts: ListsOpts =
     } catch (err) {
       unknown = outcomeUnknown(err)
       if (generation === ownerGeneration()) {
-        toast(unknown ? unknownToast(`the list "${input.title}" was saved`) : `Couldn't save the list "${input.title}".`)
+        toast(unknown ? unknownToast(`the list "${input.title}" was saved`)
+          : userMessage(err) ?? `Couldn't save the list "${input.title}".`)
       }
     }
     // Keyed by account, so the old account's copy is right even after a
@@ -305,6 +313,7 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
   return enqueue(listKey(userKey, `list ${id}`), async () => {
     let ok = false
     let unknown = false
+    let reconcile = false
     try {
       await client.deleteList(id)
       ok = true
@@ -316,8 +325,11 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
       setIn(listMembersCache, listKey(userKey, id), undefined)
     } catch (err) {
       unknown = outcomeUnknown(err)
+      // Either way the server may hold less than the cache: read it again.
+      reconcile = unknown || partlyDeleted(err)
       if (generation === ownerGeneration()) {
-        toast(unknown ? unknownToast(`${named(w.confirmed)} was deleted`) : `Couldn't delete ${named(w.confirmed)}.`)
+        toast(unknown ? unknownToast(`${named(w.confirmed)} was deleted`)
+          : userMessage(err) ?? `Couldn't delete ${named(w.confirmed)}.`)
       }
     }
     doneWith(userKey, id, w)
@@ -327,7 +339,17 @@ export async function deleteList(id: string, opts: ListsOpts = {}): Promise<bool
         : [...ls.slice(0, Math.max(0, at)), before, ...ls.slice(Math.max(0, at))]))
     }
     end([userKey])
-    if (unknown && generation === ownerGeneration()) readAgain(() => loadLists({ clientSource: () => client }))
+    if (reconcile && generation === ownerGeneration()) {
+      const source = { clientSource: () => client }
+      const prefix = `${userKey} `
+      const accountIds = [...accountListsCache.value.keys()]
+        .filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length))
+      readAgain(
+        () => loadLists(source),
+        ...(listMembersCache.value.has(listKey(userKey, id)) ? [() => loadListMembers(id, source)] : []),
+        ...accountIds.map((a) => () => loadAccountLists(a, source)),
+      )
+    }
     return ok
   })
 }
@@ -399,7 +421,8 @@ export async function setListMember(
         if (unknown) {
           toast(unknownToast(member ? `@${account.acct} was added to ${title}` : `@${account.acct} was removed from ${title}`))
         } else {
-          toast(member ? `Couldn't add @${account.acct} to ${title}.` : `Couldn't remove @${account.acct} from ${title}.`)
+          toast(userMessage(err)
+            ?? (member ? `Couldn't add @${account.acct} to ${title}.` : `Couldn't remove @${account.acct} from ${title}.`))
         }
       }
     }

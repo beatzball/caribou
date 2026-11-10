@@ -527,3 +527,54 @@ describe('a write whose outcome is unknown', () => {
     expect(client.fetchLists).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('review fix 1', () => {
+  const partly = () => Promise.reject(Object.assign(new CaribouError('unknown', 'partly'), {
+    name: 'BlueskyListPartlyDeleted',
+    userMessage: 'Some members were removed, but the list was not deleted. Delete it again to finish.',
+  }))
+
+  it('L2: a partly done delete brings the list back, says so, and reads members and memberships again', async () => {
+    const fetchListAccounts = vi.fn()
+      .mockResolvedValueOnce([account('7'), account('8')])
+      .mockResolvedValueOnce([])
+    const fetchAccountLists = vi.fn()
+      .mockResolvedValueOnce([list('1', 'Friends')])
+      .mockResolvedValueOnce([])
+    const client = fakeClient({ deleteList: vi.fn(partly), fetchListAccounts, fetchAccountLists })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await loadAccountLists('7', { clientSource: () => client })
+    expect(await deleteList('1', { clientSource: () => client })).toBe(false)
+    expect(listById('1')?.title).toBe('Friends')
+    expect(toasts.map((t) => t.message)).toEqual(['Some members were removed, but the list was not deleted. Delete it again to finish.'])
+    // The panel and the picker's boxes show what the server has left.
+    await vi.waitFor(() => expect(listMembers('1')).toEqual([]))
+    await vi.waitFor(() => expect(accountListIds('7')).toEqual([]))
+    expect(client.fetchLists).toHaveBeenCalledTimes(2)
+  })
+
+  it('L1: a refusal with words for the reader is toasted as it is', async () => {
+    const tooLarge = () => Promise.reject(Object.assign(new CaribouError('unknown', 'x'),
+      { userMessage: 'This list is too large to change here. Use bsky.app.' }))
+    const client = fakeClient({ deleteList: vi.fn(tooLarge), removeListAccounts: vi.fn(tooLarge) })
+    await loadLists({ clientSource: () => client })
+    await deleteList('1', { clientSource: () => client })
+    await setListMember('2', account('7'), false, { clientSource: () => client })
+    expect(toasts.map((t) => t.message)).toEqual([
+      'This list is too large to change here. Use bsky.app.',
+      'This list is too large to change here. Use bsky.app.',
+    ])
+    expect(listById('1')?.title).toBe('Friends')
+  })
+
+  it('an unknown delete reads the members and memberships again too', async () => {
+    const unknown = () => Promise.reject(Object.assign(new CaribouError('unknown', 'in doubt'), { name: 'BlueskyWriteUnknown' }))
+    const fetchListAccounts = vi.fn().mockResolvedValueOnce([account('7')]).mockResolvedValueOnce([])
+    const client = fakeClient({ deleteList: vi.fn(unknown), fetchListAccounts })
+    await loadLists({ clientSource: () => client })
+    await loadListMembers('1', { clientSource: () => client })
+    await deleteList('1', { clientSource: () => client })
+    await vi.waitFor(() => expect(listMembers('1')).toEqual([]))
+  })
+})

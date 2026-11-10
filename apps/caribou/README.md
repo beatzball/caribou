@@ -653,12 +653,22 @@ reader's, read with their session. A Mastodon account sees no change.
 - **Members need not be followed.** The list picker does not say "Only
   accounts you follow can be added to a list." for a Bluesky account, and
   the empty Members panel says "Open a profile and choose Add to lists."
-- **Member rows are moderated.** A Bluesky member row shows the avatar
-  only when its `avatar` context does not blur, and the display name only
-  when its `profileList` context neither filters nor blurs; otherwise the
-  row shows the handle and "Content warning". A member with no decision
-  (one the AppView did not return) is covered the same way (fail closed).
-  The handle and Remove always show, so any member can be removed.
+- **Member rows are moderated, and follow the reader veil.** A Bluesky
+  member row shows the avatar only when its `avatar` context does not
+  blur, and the display name only when its `profileList` context neither
+  filters nor blurs; otherwise the row shows the handle and "Content
+  warning". Both also need the decision settled for the current reader
+  (`blueskyDecisionSettled`, the profile header's rule: made for this
+  reader, definitions loaded, every subscribed labeler covered). The
+  header follows the reader and definition signals, so a new labeler or a
+  definitions reload covers the rows again. A member with no decision (one
+  the AppView did not return) is covered too (fail closed). The handle and
+  Remove always show, so any member can be removed.
+- **Words.** The Delete confirm for a Bluesky list does not say the
+  accounts "stay followed" (members need not be followed). The signed-out
+  placeholders on `/lists` and `/lists/<id>` name no network.
+- **Too large.** A list read the client refuses (L1) shows its message
+  ("This list is too large to show here. Use bsky.app.") with Retry.
 - **The list feed** is `<caribou-timeline kind="list">`: the cards apply
   moderation and the reader veil as on Home.
 - **Writes** follow the state rules: shown at once, rolled back with a

@@ -1,7 +1,7 @@
 import { CaribouError } from '@beatzball/caribou-mastodon-client'
 import { describe, expect, it, vi } from 'vitest'
 import { createBlueskyClient, type BlueskyAgent } from '../client.js'
-import { BlueskyWriteUnknown } from '../errors.js'
+import { BlueskyListPartlyDeleted, BlueskyWriteUnknown } from '../errors.js'
 import { fixture, moderationFor, READER } from './_helpers.js'
 
 // Rules: README, "Lists (#195)".
@@ -463,5 +463,82 @@ describe('Bluesky lists: errors', () => {
     pds.api.listRecords.mockRejectedValueOnce(xrpcError(401, 'AuthMissing'))
     await expect(client.fetchLists()).rejects.toMatchObject({ code: 'unauthorized' })
     expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('review fix 1', () => {
+  const OTHER_URI = `at://${ME}/${LIST}/3lotherlist22`
+  const TOO_LARGE = 'This list is too large to change here. Use bsky.app.'
+
+  it('L1: a delete over 5,000 items refuses and writes nothing', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Big', purpose: CURATE, createdAt: 'x' })
+    for (let i = 0; i < 5001; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: FRIENDS_URI, createdAt: 'x' })
+    await expect(client.deleteList(FRIENDS)).rejects.toMatchObject({ userMessage: TOO_LARGE })
+    expect(pds.api.applyWrites).not.toHaveBeenCalled()
+    expect(pds.coll(LIST).has(FRIENDS)).toBe(true)
+    expect(pds.coll(ITEM).size).toBe(5001)
+  })
+
+  it('L1: a remove whose member sits past the cap, behind other lists\' items, refuses', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Small', purpose: CURATE, createdAt: 'x' })
+    // Newest first: these 5,000 come before the target item.
+    for (let i = 0; i < 5000; i++) pds.put(ITEM, tid(10000 + i), { subject: `did:plc:m${i}`, list: OTHER_URI, createdAt: 'x' })
+    pds.put(ITEM, tid(1), { subject: 'did:plc:alice', list: FRIENDS_URI, createdAt: 'x' })
+    await expect(client.removeListAccounts(FRIENDS, ['did:plc:alice'])).rejects.toMatchObject({ userMessage: TOO_LARGE })
+    expect(pds.api.applyWrites).not.toHaveBeenCalled()
+    expect(pds.coll(ITEM).has(tid(1))).toBe(true)
+  })
+
+  it('L1: a members read that was cut refuses instead of showing part', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Small', purpose: CURATE, createdAt: 'x' })
+    for (let i = 0; i < 5001; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: OTHER_URI, createdAt: 'x' })
+    await expect(client.fetchListAccounts(FRIENDS)).rejects.toMatchObject({ message: 'This list is too large to show here. Use bsky.app.' })
+    await expect(client.fetchAccountLists('did:plc:alice')).rejects.toMatchObject({ code: 'unknown' })
+  })
+
+  for (const [name, error] of [['a lost answer (503)', xrpcError(503, 'Unavailable')], ['an answered refusal (400)', xrpcError(400, 'InvalidRequest')]] as const) {
+    it(`L2: 200 members, the second batch fails with ${name}: partly deleted`, async () => {
+      const { client, pds } = setup({ seeded: false })
+      pds.put(LIST, FRIENDS, { name: 'Two hundred', purpose: CURATE, createdAt: 'x' })
+      for (let i = 0; i < 200; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: FRIENDS_URI, createdAt: 'x' })
+      const real = pds.api.applyWrites.getMockImplementation()!
+      pds.api.applyWrites.mockImplementationOnce(real).mockRejectedValueOnce(error)
+      const err = await client.deleteList(FRIENDS).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(BlueskyListPartlyDeleted)
+      expect(err).toMatchObject({ userMessage: 'Some members were removed, but the list was not deleted. Delete it again to finish.' })
+      expect(pds.coll(ITEM).size).toBe(0)
+      expect(pds.coll(LIST).has(FRIENDS)).toBe(true)
+      // Delete again finishes it.
+      await client.deleteList(FRIENDS)
+      expect(pds.coll(LIST).has(FRIENDS)).toBe(false)
+    })
+  }
+
+  it('L2: a lost answer on the first of several batches with the list still there is partly deleted', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Two hundred', purpose: CURATE, createdAt: 'x' })
+    for (let i = 0; i < 200; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: FRIENDS_URI, createdAt: 'x' })
+    pds.api.applyWrites.mockRejectedValueOnce(xrpcError(502, 'BadGateway'))
+    await expect(client.deleteList(FRIENDS)).rejects.toBeInstanceOf(BlueskyListPartlyDeleted)
+  })
+
+  it('L2: an answered refusal on the first of several batches is the plain error', async () => {
+    const { client, pds } = setup({ seeded: false })
+    pds.put(LIST, FRIENDS, { name: 'Two hundred', purpose: CURATE, createdAt: 'x' })
+    for (let i = 0; i < 200; i++) pds.put(ITEM, tid(i), { subject: `did:plc:m${i}`, list: FRIENDS_URI, createdAt: 'x' })
+    pds.api.applyWrites.mockRejectedValueOnce(xrpcError(400, 'InvalidRequest'))
+    const err = await client.deleteList(FRIENDS).catch((e: unknown) => e)
+    expect(err).not.toBeInstanceOf(BlueskyListPartlyDeleted)
+    expect(err).toMatchObject({ status: 400 })
+  })
+
+  it('Fable 2: remove refuses a mod list and writes nothing', async () => {
+    const { client, pds } = setup()
+    await expect(client.removeListAccounts('3lmodlistbbb2', ['did:plc:spammer'])).rejects.toMatchObject({ code: 'not_found' })
+    expect(pds.api.applyWrites).not.toHaveBeenCalled()
+    expect(pds.coll(ITEM).has('3litemspam222')).toBe(true)
   })
 })

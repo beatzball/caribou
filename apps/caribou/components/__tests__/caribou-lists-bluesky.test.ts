@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
+import type * as ConfirmModule from '../caribou-confirm-dialog.js'
 import type { Account } from '@beatzball/caribou-mastodon-client'
 import { toUserKey } from '@beatzball/caribou-auth'
 import { createBlueskyClient, type BlueskyAgent } from '@beatzball/caribou-bluesky-client/browser'
@@ -15,11 +16,19 @@ import { openListPicker, type CaribouListPicker } from '../caribou-list-picker.j
 import { newListFlow } from '../_list-flows.js'
 import { blueskyClients } from './_bluesky-clients.js'
 import {
-  ALICE, BOB, BSKY_LABELER, READER_DID, READER_KEY, fakeAgent, label, moderationSource, signInBluesky,
+  ALICE, BOB, BSKY_LABELER, READER_DID, READER_KEY, fakeAgent, label, moderationSource, readerOf, signInBluesky,
+  type ModerationOptions,
 } from './_bluesky-helpers.js'
+import { _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
+import { confirmDialog } from '../caribou-confirm-dialog.js'
 
 // Bluesky lists (#195; app README, "Bluesky lists"). The real client over
 // an in-memory PDS, the real moderation, the real screens.
+
+vi.mock('../caribou-confirm-dialog.js', async (importOriginal) => {
+  const real = await importOriginal<typeof ConfirmModule>()
+  return { ...real, confirmDialog: vi.fn(async () => false) }
+})
 
 vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
   const real = await importOriginal<typeof ClientModule>()
@@ -75,7 +84,7 @@ function profile(did: string, handle: string, labels: unknown[] = []) {
 let store: ReturnType<typeof pds>
 let rkeys: string[]
 
-function signInBlueskyLists() {
+function signInBlueskyLists(mod: ModerationOptions = {}) {
   store = pds()
   rkeys = ['3lnewlistaaa2', '3lnewitemaaa2']
   const agent = fakeAgent({
@@ -93,7 +102,7 @@ function signInBlueskyLists() {
   const client = createBlueskyClient({
     userKey: READER_KEY,
     agent: agent as unknown as BlueskyAgent,
-    moderation: moderationSource() as never,
+    moderation: moderationSource(mod) as never,
     compose: { nextRkey: () => rkeys.shift()!, detectFacets: async () => [] },
   })
   signInBluesky(client)
@@ -225,6 +234,8 @@ describe('<caribou-list-header> on Bluesky', () => {
     const el = await mount<CaribouListHeader>('caribou-list-header', (h) => { h.list = FRIENDS })
     $(el, 'button.members')!.click()
     await settle(el)
+    await _testOnlyVeilLoaded()
+    await settle(el)
     const row = (id: string) => $(el, `li[data-account-id="${id}"]`)!
     // Clean: name and avatar.
     expect(row(BOB).textContent).toContain('BOB name')
@@ -290,3 +301,44 @@ function profileAccount(did: string): Account {
     bluesky: { did, handleInvalid: false, labels: [] },
   } as unknown as Account
 }
+
+describe('review fix 1', () => {
+  async function membersOf(mod: ModerationOptions = {}) {
+    signInBlueskyLists(mod)
+    store.put(ITEM, '3litembobaaa2', { subject: BOB, list: `at://${READER_DID}/${LIST}/${FRIENDS}`, createdAt: 'x' })
+    const el = await mount<CaribouListHeader>('caribou-list-header', (h) => { h.list = FRIENDS })
+    $(el, 'button.members')!.click()
+    await settle(el)
+    await _testOnlyVeilLoaded()
+    await settle(el)
+    return { el, row: () => $(el, `li[data-account-id="${BOB}"]`)! }
+  }
+  const covered = (row: HTMLElement) => {
+    expect(row.textContent).not.toContain('BOB name')
+    expect(row.querySelector('img')).toBeNull()
+    expect(row.textContent).toContain('@bob.example.com')
+    expect(row.querySelector('caribou-button.remove')).not.toBeNull()
+  }
+
+  it('L4: a subscribed labeler missing from an otherwise good answer covers the row', async () => {
+    const { row } = await membersOf({ covered: [BSKY_LABELER] })
+    covered(row())
+  })
+
+  it('L4: a definitions recheck covers a row that was shown', async () => {
+    const { el, row } = await membersOf()
+    expect(row().textContent).toContain('BOB name')
+    setBlueskyReader(readerOf({ defs: null }))
+    await settle(el)
+    covered(row())
+  })
+
+  it('Fable 5: the Bluesky delete confirm does not say the accounts stay followed', async () => {
+    signInBlueskyLists()
+    const el = await mount<CaribouLists>('caribou-lists')
+    $(el, 'caribou-button.delete')!.click()
+    await settle(el)
+    const asked = vi.mocked(confirmDialog).mock.calls.at(-1)![0]
+    expect(asked.message).toBe('The list goes for good.')
+  })
+})

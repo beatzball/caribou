@@ -805,6 +805,15 @@ One set of functions for both networks. The client does the network part
   goes back, the toast says "Could not tell whether … Reload to check.",
   and the lists (and the members, when shown) are read again. That read
   brings the server's state, whichever it is.
+- **A refusal with words for the reader.** When a failed write carries
+  `userMessage` (a Bluesky list too large to change here), the toast says
+  that instead of "Couldn't …".
+- **A partly done delete (`BlueskyListPartlyDeleted`).** The list comes
+  back, the toast says "Some members were removed, but the list was not
+  deleted. Delete it again to finish.", and the lists, that list's members
+  (when shown) and every known "lists that hold this account" are read
+  again, so the Members panel and the picker's boxes show what is left. An
+  unknown delete reads all three again too.
 - **One click is one write.** The screens send a write per change of a
   box or per button press; the client's kept rkey makes a repeated intent
   after a lost answer reuse its record, not make a second one.

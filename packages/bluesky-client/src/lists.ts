@@ -3,7 +3,7 @@ import {
   CaribouError,
   type Account, type CaribouClient, type List, type ListInput,
 } from '@beatzball/caribou-mastodon-client'
-import { BlueskyWriteUnknown } from './errors.js'
+import { BlueskyListPartlyDeleted, BlueskyWriteUnknown } from './errors.js'
 import type { ProfileView } from './map/account.js'
 
 // The rules are in the README, "Lists (#195)".
@@ -101,6 +101,14 @@ function refusal(message: string): CaribouError {
   return Object.assign(new CaribouError('unknown', `Bluesky: ${message}`), { userMessage: message })
 }
 
+// L1: a cut scan never authorizes a destructive write or shows as whole.
+// The message is the reader's words, since a screen shows it as it is.
+const TOO_LARGE_TO_CHANGE = 'This list is too large to change here. Use bsky.app.'
+const TOO_LARGE_TO_SHOW = 'This list is too large to show here. Use bsky.app.'
+function tooLarge(message: string): CaribouError {
+  return Object.assign(new CaribouError('unknown', message), { userMessage: message })
+}
+
 function listName(input: ListInput): string {
   const name = input.title.trim()
   if (!name) throw refusal('Give the list a title.')
@@ -144,17 +152,18 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
     return `at://${did()}/${LIST}/${id}`
   }
 
-  async function records(collection: string): Promise<RepoRecord[]> {
+  // Every record of the collection, and whether the scan read to the end.
+  async function records(collection: string): Promise<{ records: RepoRecord[]; complete: boolean }> {
     const repo = did()
     const out: RepoRecord[] = []
     let cursor: string | undefined
     for (let i = 0; i < MAX_RECORD_PAGES; i++) {
       const { data } = await agent.com.atproto.repo.listRecords({ repo, collection, limit: PAGE, ...(cursor ? { cursor } : {}) })
       out.push(...data.records)
-      if (!data.cursor || data.records.length === 0) break
+      if (!data.cursor || data.records.length === 0) return { records: out, complete: true }
       cursor = data.cursor
     }
-    return out
+    return { records: out, complete: false }
   }
 
   async function getRecord(collection: string, rkey: string): Promise<RepoRecord | null> {
@@ -168,7 +177,8 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
   }
 
   async function lists(): Promise<List[]> {
-    return (await records(LIST)).flatMap((r) => asList(r) ?? [])
+    // A cut catalog is shown as it is: it only hides lists, never writes.
+    return (await records(LIST)).records.flatMap((r) => asList(r) ?? [])
   }
 
   // The list record, only when it is one of the reader's curate lists.
@@ -180,12 +190,18 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
     return { ...rec, list }
   }
 
-  async function items(filter: (item: ItemRecord) => boolean): Promise<ItemRecord[]> {
-    return (await records(ITEM)).flatMap((r) => {
+  // The items that match, only from a complete scan; a cut one throws
+  // `cut` (L1).
+  async function items(filter: (item: ItemRecord) => boolean, cut: () => Error): Promise<ItemRecord[]> {
+    const { records: all, complete } = await records(ITEM)
+    if (!complete) throw cut()
+    return all.flatMap((r) => {
       const item = asItem(r)
       return item && filter(item) ? [item] : []
     })
   }
+  const cutChange = () => tooLarge(TOO_LARGE_TO_CHANGE)
+  const cutShow = () => tooLarge(TOO_LARGE_TO_SHOW)
 
   // Deletes in `applyWrites` batches, in the order given. One batch is atomic.
   async function deleteAll(targets: readonly { collection: string; rkey: string }[]): Promise<void> {
@@ -285,19 +301,39 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
     deleteList: (id) => write(async () => {
       const uri = listUri(id)
       await curateRecord(id)
-      const own = (await items((it) => it.list === uri)).map((it) => it.rkey)
+      const own = (await items((it) => it.list === uri, cutChange)).map((it) => it.rkey)
       // The list last: a failure part way leaves the list, not stray items.
       const targets = [...own.map((rkey) => ({ collection: ITEM, rkey })), { collection: LIST, rkey: id }]
-      await decided(
-        () => deleteAll(targets),
-        async () => ((await getRecord(LIST, id)) ? false : undefined),
-      )
+      const batches = chunks(targets, MAX_WRITES)
+      const repo = did()
+      // Whether some batch may have applied: one answered, or one in doubt.
+      let maybeApplied = false
+      for (const batch of batches) {
+        try {
+          await agent.com.atproto.repo.applyWrites({
+            repo, writes: batch.map((t) => ({ $type: DELETE, collection: t.collection, rkey: t.rkey })),
+          })
+          maybeApplied = true
+        } catch (err) {
+          if (answeredRefusal(err) && !maybeApplied) throw err
+          let gone: boolean
+          try {
+            gone = (await getRecord(LIST, id)) === null
+          } catch {
+            throw new BlueskyWriteUnknown(`Could not tell whether the list was deleted: ${(err as Error).message}`)
+          }
+          if (gone) return
+          // One call is atomic: the list is there, so nothing happened.
+          if (batches.length === 1) throw err
+          throw new BlueskyListPartlyDeleted(`Bluesky: the list was partly deleted: ${(err as Error).message}`)
+        }
+      }
     }),
 
     fetchListAccounts: (id) => run(`list-accounts:${id}`, async () => {
       const uri = listUri(id)
       await curateRecord(id)
-      const dids = [...new Set((await items((it) => it.list === uri)).map((it) => it.subject))]
+      const dids = [...new Set((await items((it) => it.list === uri, cutShow)).map((it) => it.subject))]
       const pages = await Promise.all(chunks(dids, PROFILES_BATCH).map((actors) =>
         deps.answer(() => agent.getProfiles({ actors }))))
       const byDid = new Map<string, Account>()
@@ -313,18 +349,20 @@ export function createLists(deps: ListsDeps): ListMethods & { listUri(id: string
 
     removeListAccounts: (id, dids) => write(async () => {
       const uri = listUri(id)
+      await curateRecord(id)
       const wanted = new Set(dids)
       const match = (it: ItemRecord) => it.list === uri && wanted.has(it.subject)
-      const found = (await items(match)).map((it) => it.rkey)
+      const found = (await items(match, cutChange)).map((it) => it.rkey)
       if (found.length === 0) return
+      // A cut deciding read throws, which `decided` turns into unknown.
       await decided(
         () => deleteAll(found.map((rkey) => ({ collection: ITEM, rkey }))),
-        async () => ((await items(match)).length === 0 ? undefined : false),
+        async () => ((await items(match, cutChange)).length === 0 ? undefined : false),
       )
     }),
 
     fetchAccountLists: (accountId) => run(`account-lists:${accountId}`, async () => {
-      const [all, held] = await Promise.all([lists(), items((it) => it.subject === accountId)])
+      const [all, held] = await Promise.all([lists(), items((it) => it.subject === accountId, cutShow)])
       const holding = new Set(held.map((it) => it.list))
       const me = did()
       return all.filter((l) => holding.has(`at://${me}/${LIST}/${l.id}`))

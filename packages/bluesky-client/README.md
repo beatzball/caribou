@@ -875,21 +875,56 @@ feed (`getListFeed`) come from the AppView.
   `CaribouError('unknown')`, root export) is thrown, and the rkey stays
   kept. An answered 4xx is thrown as it is and forgets the rkey. Without
   `compose` the lists cannot be written (`not_found`).
-- **Removal removes them all (A3).** `removeListAccounts` deletes every
+- **Removal removes them all (A3).** `removeListAccounts` checks the
+  list is a curate list of the reader's first, like every other write, and
+  deletes every
   item record of that list for the DID, not one guessed one: a list can
   hold the same account twice when another app added it again. None found
   is done: the account is already not a member.
 - **Delete takes the items with it.** Deleting a list record leaves its
   items behind as stray public records, so `deleteList` deletes them too,
   in `applyWrites` batches of at most 200 writes, the list last. With 199
-  items or fewer it is one atomic call.
+  items or fewer it is one atomic call (more in L2 below).
 - **Only `getRecord` / `listRecords` decide a write in doubt.** After a
-  rename, a delete or a removal that got no answer, a timeout or a 5xx, the
+  rename, a single-call delete or a removal that got no answer, a timeout or a 5xx, the
   client reads the PDS: the name is the new one / the list is gone / no
   item is left → done; otherwise the write's error is thrown; the read
   fails → `BlueskyWriteUnknown`.
 - **Paging.** `listRecords` 100 per page, at most 50 pages (5,000
-  records); past that the rest are not read.
+  records). The scan says whether it read to the end. The item scan is
+  over every list item in the repo, all lists together, so the cap is the
+  reader's total items, not one list's.
+- **A complete inventory, or no destructive write (L1).** `deleteList`,
+  `removeListAccounts` and the read that decides a removal in doubt refuse
+  when the item scan was cut: nothing is written, and the error says "This
+  list is too large to change here. Use bsky.app." (`userMessage`, which the
+  state layer toasts). A cut scan never decides a write: a removal whose
+  deciding read was cut is `BlueskyWriteUnknown`. `fetchListAccounts` and
+  `fetchAccountLists` refuse the same way ("This list is too large to show
+  here. Use bsky.app."), so no screen shows a partial set as whole.
+- **A partly done delete says so (L2).** With more than 199 items the
+  delete is several `applyWrites` calls, the list record in the last one.
+  When a call after the first fails (an answered refusal or a lost answer),
+  or the first one's answer is lost, earlier items may be gone while the
+  list stays. The client reads the list record: gone → done; still there →
+  `BlueskyListPartlyDeleted` (a `CaribouError('unknown')`, root export,
+  with `userMessage` "Some members were removed, but the list was not
+  deleted. Delete it again to finish."); the read fails →
+  `BlueskyWriteUnknown`. A single call is atomic: its answered refusal, or
+  a lost answer with the list still there, is the plain error.
+- **Accepted limit: an item moved between the scan and the delete (L3).**
+  The rkeys come from the scan; `applyWrites` deletes what is at them when
+  it runs. Bluesky apps create and delete list items; they do not update
+  them. So an item that another app changes to name another list between
+  the scan and the delete is not protected. Caribou does not handle it.
+  An item added after the scan survives the delete of its list.
+- **A duplicate add heals on remove.** `addListAccounts` does not check
+  for an item already there: the picker's box comes from the last read,
+  and a stale read can add the same DID twice. Remove deletes every item
+  for the DID, so the duplicate goes with it.
+- **Cost.** Every member write, `fetchListAccounts` and
+  `fetchAccountLists` scan the whole item collection (and the picker reads
+  the lists too). Up to 50 requests each on a very large repo.
 - **A member the AppView does not know** (deleted, taken down, not yet
   indexed) is still listed, so it can be removed: an account whose `acct`
   is the DID, no name, no avatar and **no** `moderation`. The app covers
