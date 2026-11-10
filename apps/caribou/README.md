@@ -977,6 +977,38 @@ in `packages/state` ("Bluesky acks") and `packages/bluesky-client`
   can see that you blocked this account." A Mastodon block's text is
   unchanged.
 
+### Act as another account (#197)
+
+With more than one Bluesky account signed in, the reader can favourite,
+boost or bookmark a Bluesky post as another of them, with no switch. The
+state rules are in `packages/state` ("Act as another account"). The
+Mastodon part (#131) is still open: a Mastodon post shows no picker.
+
+1. **The menu item shows only with an account to pick.** More → "Act as
+   another account…" shows on a Bluesky post when another Bluesky account
+   is signed in. It shows for any active account, Mastodon too. A card
+   with no More menu (the reader cannot act on the post) gets a More menu
+   with only this item. It is reader state, so it shows after the first
+   render; the server render has no menu.
+2. **The picker lists only accounts on the post's network.** Each row
+   names the account by handle. An expired account says "Signed out. Sign
+   in again to use it." and has no buttons.
+3. **The dialog says which account acts.** Picking an account reads the
+   post as that account. Its own Favourite, Boost and Bookmark show, each
+   with `aria-pressed` from that read and a name that ends "as
+   @handle". Nothing shows before the read lands.
+4. **The card does not change.** The other account's write never sets
+   the card's flags or counts (the active reader's view). The dialog
+   shows the other account's flags.
+5. **Every answer is shown as it is.** A write in flight soft-disables
+   its button. A status line (`role="status"`) says what changed and as
+   whom: "Favourited as @bob.example.com."
+   A failure says so (`role="alert"`) and the button keeps its old state.
+   A session that is gone says the account is signed out, and nothing is
+   written.
+6. **The dialog closes when the active account changes.** An answer that
+   lands after it closed changes nothing.
+
 ### Bluesky SSR (#185, #186)
 
 Phase 3. The server paints a Bluesky profile and thread with no token

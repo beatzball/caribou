@@ -85,7 +85,11 @@ const SYNC = new Set<PropertyKey>(['userKey', 'capabilities', 'timelineOrder'])
  * runs every async method on the restored client. `emitExpired` sends
  * `caribou:session-expired` for this session's own `generation`.
  */
-export function deferredBlueskyClient(session: BlueskySession, emitExpired: () => void): CaribouClient {
+export function deferredBlueskyClient(
+  session: BlueskySession, emitExpired: () => void, opts: { splash?: boolean } = {},
+): CaribouClient {
+  // Another account's client (act as, #197) restores without the splash.
+  const splash = opts.splash ?? true
   const d = driver
   const id = `${session.userKey} ${session.generation}`
   let r = restores.get(id)
@@ -107,14 +111,14 @@ export function deferredBlueskyClient(session: BlueskySession, emitExpired: () =
     if (!d) return Promise.reject(new CaribouError('unauthorized', 'Bluesky is not available'))
     if (restore.gone) return Promise.reject(unauthorized())
     if (!restore.ready) {
-      blueskyRestore.value = 'pending'
+      if (splash) blueskyRestore.value = 'pending'
       const run = d.restore(session, hooks).then(
         (c) => {
-          blueskyRestore.value = 'ready'
+          if (splash) blueskyRestore.value = 'ready'
           return c
         },
         (err: unknown) => {
-          blueskyRestore.value = 'failed'
+          if (splash) blueskyRestore.value = 'failed'
           if (err instanceof BlueskySessionGone) {
             hooks.onExpired()
             throw unauthorized()

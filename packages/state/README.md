@@ -52,6 +52,10 @@ Sources of truth — see file for full signatures.
 - `isBlueskySession(s)`, `blueskyUserKey(did)`, `setBlueskyDriver(d)`,
   `blueskyRestore`, `signOutBluesky(userKey, generation)` — the Bluesky
   session parts. The rules are below (8 to 12).
+- `actAsAccounts(post)`, `actAsClient(session)`, `readAsAccount(userKey, post)`,
+  `actAs(userKey, action, post, view)` — act on a post as another
+  signed-in account (Bluesky only). The rules are in "Act as another
+  account".
 
 **Session rules** (`users.ts`; the handlers are in
 `apps/caribou/components/_unauthorized.ts`)
@@ -818,6 +822,42 @@ not stored there: the reader has those files.
 | `tags` | not kept |
 | reply and quote settings (threadgate, postgate) | not kept: they are records keyed by the old rkey; the new post has none, so replies and quotes are open again |
 | `createdAt` | not kept: a new post gets a new time |
+
+## Act as another account (`act-as.ts`; Bluesky #197, Mastodon #131)
+
+The reader can favourite, boost or bookmark a post as another signed-in
+account without a switch. Today this is for Bluesky posts only. The
+Mastodon part (resolve the post on the other server first) is still open
+in #131; `actAsAccounts` answers no account for a Mastodon post until then.
+
+1. **The picker lists only accounts on the post's network.**
+   `actAsAccounts(post)` answers the signed-in accounts other than the
+   active one: for a Bluesky post, Bluesky accounts only. An expired
+   account is listed, so the picker can say so.
+2. **No resolve step on Bluesky.** An AT URI and CID are the same for every
+   account. The write sends them as the post has them.
+3. **The write goes through the other account's own client.**
+   `actAsClient(session)` is a Bluesky client for that sign-in: its PDS,
+   its session, its repo. The record names its DID. Its restore does not
+   change `blueskyRestore` (no splash) and does not change the active
+   reader's moderation.
+4. **The other account's view stays out of the cache.** `readAsAccount` reads the
+   post through that client and answers its flags and record refs
+   (`ActAsView`). Nothing is written to `statusCache`. An `actAs` write
+   changes no cached flag, record ref or count of the active reader. Counts
+   catch up at the next read. If a copy read by the other client is ever
+   cached, its `viewerOf` names that account, so the merge drops its viewer
+   fields (seam 4, "Copies that are not the reader's").
+5. **An expired account does not write.** `actAs` and `readAsAccount` answer
+   `{ kind: 'expired' }` and send nothing when the session is marked
+   `expired`. A request that finds the session gone (the client answers
+   `unauthorized`) marks it expired, through `caribou:session-expired`, and
+   answers `expired` too.
+6. **One write per account, action and post at a time.** A second call
+   while the first is out answers `{ kind: 'busy' }` and sends nothing.
+7. **Every answer is true.** `ok` carries the view the server left (the
+   flag and record from the ack). `failed` carries a message; the caller
+   keeps its old view.
 
 ## Lists (`lists.ts`; Mastodon #51, Bluesky #195)
 
