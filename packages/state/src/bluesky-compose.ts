@@ -43,6 +43,7 @@ function sentLabels(b: BlueskyDraft): string[] {
  */
 export function blueskyDraftInput(d: ComposeDraft): string {
   const b = d.bluesky ?? emptyBlueskyDraft()
+  const card = sentCard(b)
   // G2: no `gates` key without a limit, so the string is as before #199.
   const gates = blueskySentGates(b)
   return JSON.stringify({
@@ -52,8 +53,18 @@ export function blueskyDraftInput(d: ComposeDraft): string {
     quote: b.quote,
     labels: sentLabels(b),
     images: b.images.map((i) => ({ cid: i.blob.ref.$link, alt: i.alt, aspectRatio: i.aspectRatio })),
+    // K5: the card as it is sent (K2 decides whether it is). No key with no
+    // card, so an input frozen before #200 still equals its draft's (K8).
+    ...(card ? { card } : {}),
     ...(gates ? { gates } : {}),
   })
+}
+
+/** The card the record carries (K2): only with no images and no quote. */
+function sentCard(b: BlueskyDraft): { uri: string; title: string; description: string; thumb: string | null } | null {
+  const c = b.card
+  if (!c || b.images.length > 0 || b.quote) return null
+  return { uri: c.uri, title: c.title, description: c.description, thumb: c.thumb ? c.thumb.ref.$link : null }
 }
 
 /** The `app.bsky.feed.post` record a draft makes. */
@@ -64,9 +75,16 @@ export function blueskyRecord(d: ComposeDraft, facets: BlueskyFacet[], createdAt
     images: b.images.map((i) => ({ image: i.blob, alt: i.alt, ...(i.aspectRatio ? { aspectRatio: i.aspectRatio } : {}) })),
   } : null
   const quote = b.quote ? { $type: 'app.bsky.embed.record', record: b.quote } : null
+  const card = sentCard(b) && b.card ? {
+    $type: 'app.bsky.embed.external',
+    external: {
+      uri: b.card.uri, title: b.card.title, description: b.card.description,
+      ...(b.card.thumb ? { thumb: b.card.thumb } : {}),
+    },
+  } : null
   const embed = quote && images
     ? { $type: 'app.bsky.embed.recordWithMedia', record: quote, media: images }
-    : quote ?? images
+    : quote ?? images ?? card
   const labels = sentLabels(b)
   return {
     $type: 'app.bsky.feed.post',
@@ -147,13 +165,15 @@ function strongRef(r: unknown): string {
 
 /**
  * A record's content, field by field (R7): text, reply and quote refs, image
- * CIDs and alt text, self-labels, langs. Not facets: a mention's facet
- * depends on whether its lookup worked, and facets come from the text. Never
+ * CIDs and alt text, self-labels, langs, the link card (K5). Not facets: a
+ * mention's facet depends on whether its lookup worked, and facets come from
+ * the text. Never
  * `createdAt`, and never a deep compare: `getRecord` gives SDK `BlobRef`s.
  */
 function contentOf(r: BlueskyPostRecord): string {
   const embed = r.embed as {
     $type?: string; images?: { image?: unknown; alt?: unknown }[]
+    external?: { uri?: unknown; title?: unknown; description?: unknown; thumb?: unknown }
     record?: { record?: unknown } & Record<string, unknown>; media?: { images?: { image?: unknown; alt?: unknown }[] }
   } | undefined
   const images = embed?.images ?? embed?.media?.images ?? []
@@ -166,6 +186,11 @@ function contentOf(r: BlueskyPostRecord): string {
     images: images.map((i) => [cidOf(i.image), String(i.alt ?? '')]),
     labels: (r.labels?.values ?? []).map((l) => l.val),
     langs: r.langs ?? [],
+    // K5: the card, its thumb by CID.
+    card: embed?.$type === 'app.bsky.embed.external' && embed.external ? [
+      String(embed.external.uri ?? ''), String(embed.external.title ?? ''), String(embed.external.description ?? ''),
+      embed.external.thumb ? cidOf(embed.external.thumb) : '',
+    ] : null,
   })
 }
 

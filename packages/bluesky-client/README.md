@@ -46,7 +46,8 @@ own files; ask in your report for a change in another's.
 | `src/oauth.ts` | sign-in, callback, restore and sign-out over the browser SDK (browser only) | #182 |
 | `src/muted-words.ts` | `checkMutedWordEdit`, `applyMutedWordEdit`: the edit a muted-words write applies (browser only, through `./oauth`) | #196 |
 | `src/syntax.ts` | `isValidHandle`, `isValidDid`, `isValidRecordKey` from `@atproto/syntax`, for the server's route check | #185 |
-| `src/compose.ts` | `countPost`, `postFits`, `nextRkey`, `detectFacets` over the SDK's `RichText` and `TID` (browser only, through `./browser`) | #189 |
+| `src/compose.ts` | `countPost`, `postFits`, `nextRkey`, `detectFacets`, `cardLink` over the SDK's `RichText` and `TID` (browser only, through `./browser`) | #189, #200 |
+| `src/link-card.ts` | `fetchLinkCard`, `fetchCardImage`: a link's card data from Bluesky's `cardyb` service (no SDK; `./browser` exports it) | #200 |
 | `src/actions.ts` | `createActions`: like, repost, bookmark, follow, mute, block and their undos (the client spreads them in) | #188 |
 | `src/lists.ts` | `createLists`: the reader's curate lists, their members and the list feed's URI (the client spreads them in) | #195 |
 | `src/index.ts` | the server-safe surface: everything above but `moderation` and `browser` | shared |
@@ -929,7 +930,7 @@ README, "Bluesky compose".
 `app.bsky.feed.post` with the same `graphemeLen`, so the counter, the Post
 button and the server agree. `postFits` is true at 300 graphemes **and**
 3000 bytes or fewer. A link counts as its whole text: Bluesky does not
-shorten it, and phase 4 sends no link card. Tests: plain text, a family
+shorten it, with or without a link card. Tests: plain text, a family
 emoji (1 grapheme, 25 bytes), a flag, a letter with 50 combining marks (1
 grapheme, 101 bytes), 30 of those (under 300 graphemes, over 3000 bytes),
 CJK (3 bytes each), a link.
@@ -992,6 +993,57 @@ the `packages/state` README, "Reply and quote limits"). `null`, or
   the post's embed.
 - `restoreClient` passes the helpers in as `compose`, so `client.ts` keeps no
   runtime import of the SDK.
+
+## Link cards (#200, spec 7.2)
+
+`src/link-card.ts` and `cardLink` in `src/compose.ts`. The draft and the
+record are in `packages/state` README ("Bluesky link cards"); the dialog's
+debounce in the app README ("Bluesky link cards").
+
+**Where the fetch runs: Bluesky's `cardyb` service, not a Caribou route.**
+The browser calls `https://cardyb.bsky.app/v1/extract?url=<link>`, the
+service the official app uses. It answers with CORS `*`, and its image URLs
+(`https://cardyb.bsky.app/v1/image?url=...`) are a proxy too. Why:
+
+- A Caribou route that fetches a page the reader names is a server-side
+  request to any host. Even with the connection-bound guard from #181, it
+  adds a new attack surface (SSRF, an open proxy, HTML parsing on our
+  server) to every deploy. `cardyb` already exists, for this one job.
+- The reader's browser never connects to the linked site, so the site does
+  not see the reader's IP before the post is out. Only Bluesky sees the
+  link, and the post goes to Bluesky anyway.
+- The cost: one more Bluesky host for a future CSP (`cardyb.bsky.app`,
+  `connect-src` and `img-src`), and a card depends on that service being up.
+  When it is down, the post goes without a card (C1 below).
+
+Rules:
+
+- **C1. A card is extra, never a blocker.** Any failure (network, a timeout,
+  a non-200 answer, a non-JSON body, a non-empty `error`, no `title`) gives
+  `null`: no card and no message.
+- **C2. Only http and https links** are sent to `cardyb`. `cardLink(text)`
+  is the first `#link` facet of the SDK's `detectFacetsWithoutResolution`
+  (no network), and only when its URI is `http:` or `https:`.
+- **C3. Strict limits.** 5 s per request (the caller's `AbortSignal` also
+  stops it). A body over 64 KB for the card or over 5 MB for the image is
+  refused. The body is read as a stream and cancelled as soon as it passes
+  the cap, so it is never read whole; a body whose Content-Length is over
+  the cap is cancelled unread. `title` is cut to 300 characters, `description` to 1000
+  (trimmed). The card's `uri` is the link the reader typed, not `cardyb`'s
+  `url` field (it can differ after a redirect).
+- **C4. Images come only through the proxy.** The card's `image` is kept only
+  when it is an `https://cardyb.bsky.app/` URL. `fetchCardImage(url)` refuses
+  any other URL, and an answer whose type is not `image/*`. No cookies are
+  sent (`credentials: 'omit'`), and no referrer.
+- **C5. No SDK.** The module uses only `fetch`, so tests pass a fake fetch
+  and never hit the network.
+
+Tests (`link-card.test.ts`, `compose.test.ts`): a full card; no title; an
+`error`; a 500; bad JSON; a timeout; an image on another host; an image of
+the wrong type; an oversized body; a 20 MB stream with no Content-Length is
+cancelled long before its end; a Content-Length over the cap is cancelled
+unread; the link the reader typed is kept;
+`cardLink` takes the first link, skips a non-http one, and a bare domain.
 
 ## Delete (#190)
 

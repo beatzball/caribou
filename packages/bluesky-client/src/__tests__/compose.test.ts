@@ -98,3 +98,26 @@ describe('detectFacets', () => {
     expect(JSON.parse(JSON.stringify(facets))).toEqual(facets)
   })
 })
+
+describe('cardLink: the link a card is for (C2)', () => {
+  it('is the first link in the text', async () => {
+    const { cardLink } = await import('../compose.js')
+    expect(cardLink('see https://example.com/a and https://example.org/b')).toBe('https://example.com/a')
+  })
+
+  it('is null with no link', async () => {
+    const { cardLink } = await import('../compose.js')
+    expect(cardLink('no link here')).toBeNull()
+    expect(cardLink('')).toBeNull()
+  })
+
+  it('takes a bare domain, as the SDK does', async () => {
+    const { cardLink } = await import('../compose.js')
+    expect(cardLink('go to example.com now')).toBe('https://example.com')
+  })
+
+  it('skips a link that is not http or https', async () => {
+    const { cardLink } = await import('../compose.js')
+    expect(cardLink('ftp://example.com/x')).toBeNull()
+  })
+})

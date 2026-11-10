@@ -482,6 +482,8 @@ redraft), plus `bluesky`:
 | `labels` | self-labels from the label menu (`BLUESKY_SELF_LABELS`: `porn` Adult, `sexual` Suggestive, `nudity` Nudity, `graphic-media` Graphic), and any other self-label a redraft carries |
 | `rkey` | the record key, made (`blueskyNextRkey`) when the draft is made, and stored with its first save (R6) |
 | `sent` | the exact record a send wrote or tried to, frozen with its facets and `createdAt`, and the input it was made from (`blueskyDraftInput`) |
+| `card` | a link card (#200): `uri`, `title`, `description`, `image` (the `cardyb` image URL, or `null`), `thumb` (the uploaded blob ref, or `null`). See "Bluesky link cards". |
+| `cardDismissed` | the link whose card the reader removed, so it does not come back |
 
 Facets are not kept on their own: they are made from the text at send
 time (`blueskyDetectFacets`, which resolves mentions to DIDs) and frozen in
@@ -490,7 +492,8 @@ time (`blueskyDetectFacets`, which resolves mentions to DIDs) and frozen in
 **The record** (`blueskyRecord`): `text`; `facets` when there are any;
 `reply`; `embed` is `app.bsky.embed.images` (each image with its `alt` and
 `aspectRatio`), `app.bsky.embed.record` for a quote, or
-`app.bsky.embed.recordWithMedia` for both; `labels` as
+`app.bsky.embed.recordWithMedia` for both, or `app.bsky.embed.external` for
+a link card when there is neither (K2); `labels` as
 `com.atproto.label.defs#selfLabels`: the menu's values in menu order,
 **only with images** (the menu labels media, spec 7.4), then any other
 value a redraft carried, as it is (#190); `langs` from a
@@ -685,6 +688,52 @@ answer is `earlier-posted`, and (review 1) a pending send with no limits,
 then only the limits changed, the check absent, the first write landing
 before the retry, is `earlier-posted` with the new limits kept; a failed
 gate read stays pending (G4); a limit alone is kept (G7).
+
+## Bluesky link cards (#200, spec 7.2)
+
+`bluesky-link-card.ts`, beside `bluesky-compose.ts`. The fetch is in
+`packages/bluesky-client` README ("Link cards"); the dialog's part in the
+app README.
+
+- **K1. The draft keeps the card** (`bluesky.card`), so a reload shows it and
+  posts it. The draft keeps `thumb` too: a reload or a retry does not upload
+  the image again.
+- **K2. A card only with no other embed.** `blueskyRecord` writes
+  `app.bsky.embed.external` only when the draft has no images and no quote.
+  `cardAllowed(draft)` says the same for the dialog. A reply can have a card.
+- **K3. The record's embed:** `{ $type: 'app.bsky.embed.external', external:
+  { uri, title, description, thumb? } }`. `thumb` only when the blob is
+  there. `description` is always a string (the lexicon needs it).
+- **K4. The image is uploaded at Post, once** (`prepareCardThumb`). Only for
+  a draft with no pending send (`sent` is `null`): a pending send already
+  froze its record, and changing the draft would make R7 read our own post
+  as another. With a card that has an `image` and no `thumb`: fetch it, fit
+  it to 1 MB (the lexicon's cap), upload it. Success stores `thumb`. Any
+  failure stores `image: null`, so the card is posted without an image and
+  a retry is the same post. The account is checked after every await: an
+  answer for another account changes nothing.
+- **K5. Same post, same card.** `blueskyDraftInput` and R7's compare include
+  the card's `uri`, `title`, `description` and thumb CID.
+- **K6. A card alone does not make a draft non-empty.** Its link is in the
+  text.
+- **K7. The prepared draft is stored only for the revision it read.**
+  `prepareCardThumb(client, slot, draft, opts)` reads the slot's revision
+  before the upload, and stores the draft with its thumb through
+  `storeDraftIf` with that revision (R4). Another save in between (another
+  tab) throws `DraftChanged` and keeps that save; storage refusing the write
+  throws `DraftNotSaved`. Nothing is sent either way.
+- **K8. An input frozen before link cards still matches.** With no card,
+  `blueskyDraftInput` has no `card` key, so a pending send frozen by the
+  version before #200 equals its unchanged draft: a found record is
+  `posted`, and an absent one sends the frozen record as it is.
+
+Tests (`bluesky-link-card.test.ts`, `bluesky-compose.test.ts`): the record
+with a card, with a thumb, with images (no card), with a quote (no card); a
+card in a reply; a thumb uploaded once and stored; an image that fails
+posts the card without it; a pending send is not changed; an account
+switch during the upload; the R7 compare with a card; a save from another
+tab during the upload (K7); storage refusing the prepared draft (K7); an
+input in the exact pre-#200 shape, found and absent (K8).
 
 ## Bluesky delete and redraft (#190)
 

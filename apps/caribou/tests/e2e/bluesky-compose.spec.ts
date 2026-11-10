@@ -121,6 +121,33 @@ async function openCompose(page: Page) {
   return dialog
 }
 
+/**
+ * #200: Bluesky's `cardyb` service and the PDS's `uploadBlob`, routed (never
+ * the network). Answers the links asked and the upload count.
+ */
+async function routeLinkCards(page: Page) {
+  const extracts: string[] = []
+  await page.route('https://cardyb.bsky.app/v1/extract**', async (route) => {
+    extracts.push(new URL(route.request().url()).searchParams.get('url') ?? '')
+    await route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify({
+      error: '', likely_type: 'html', url: 'https://example.com/a', title: 'Example title', description: 'Example description',
+      image: 'https://cardyb.bsky.app/v1/image?url=https%3A%2F%2Fexample.com%2Fog.png',
+    }) })
+  })
+  // A 1x1 PNG.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  await page.route('https://cardyb.bsky.app/v1/image**', (route) => route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'image/png' }, body: png }))
+  let uploads = 0
+  await page.route(`${PDS}/xrpc/com.atproto.repo.uploadBlob`, async (route) => {
+    if (route.request().method() === 'OPTIONS') return route.fallback()
+    uploads += 1
+    await route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'application/json' }, body: JSON.stringify({
+      blob: { $type: 'blob', ref: { $link: CID }, mimeType: 'image/jpeg', size: 100 },
+    }) })
+  })
+  return { extracts, uploads: () => uploads }
+}
+
 test.describe('Bluesky compose', () => {
   // As in bluesky-signin.spec.ts: Playwright WebKit on macOS hangs storing
   // the SDK's DPoP key in IndexedDB. CI runs WebKit on Linux.
@@ -195,6 +222,30 @@ test.describe('Bluesky compose', () => {
     expect(pds.gets).toEqual([pds.creates[0]!.rkey])
   })
 
+  // #200: the card comes from Bluesky's `cardyb` service (routed here, never
+  // the network), and its image is uploaded with `uploadBlob` at Post.
+  test('a link gets a card; Post uploads its image and sends an external embed', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    const pds = await fixturePds(page)
+    const cards = await routeLinkCards(page)
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    await dialog.getByRole('textbox', { name: 'Post text' }).pressSequentially('see https://example.com/a', { delay: 20 })
+    await expect(dialog.getByText('Example title', { exact: true })).toBeVisible()
+    await expect(dialog.locator('[data-link-card-status]')).toHaveText('Link card attached: Example title')
+    // Rule 3: one fetch for the whole typed link, not one per key.
+    expect(cards.extracts).toEqual(['https://example.com/a'])
+    await dialog.getByRole('button', { name: 'Post' }).click()
+    await expect(dialog).toBeHidden()
+    expect(cards.uploads()).toBe(1)
+    expect(pds.creates).toHaveLength(1)
+    expect(pds.creates[0]!.record.embed).toMatchObject({
+      $type: 'app.bsky.embed.external',
+      external: { uri: 'https://example.com/a', title: 'Example title', description: 'Example description', thumb: { mimeType: 'image/jpeg' } },
+    })
+  })
+
   test('reply and quote limits go with the post in one applyWrites, one rkey (#199)', async ({ page, baseURL }) => {
     const origin = loopbackOrigin(baseURL)
     await installFixtureAuth(page)
@@ -258,5 +309,33 @@ test.describe('Bluesky compose', () => {
     expect(pds.applies).toHaveLength(1)
     expect(pds.gates.size).toBe(1)
     expect(pds.gets).toHaveLength(1)
+  })
+
+  // #200 with #199: the card's post record goes into the one applyWrites.
+  test('a link card with limits: one applyWrites whose post has the external embed', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    const pds = await fixturePds(page)
+    const cards = await routeLinkCards(page)
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    await dialog.getByRole('textbox', { name: 'Post text' }).pressSequentially('see https://example.com/a', { delay: 20 })
+    await expect(dialog.getByText('Example title', { exact: true })).toBeVisible()
+    await dialog.getByRole('button', { name: 'Everyone can reply. Quotes are on.' }).click()
+    await dialog.getByRole('checkbox', { name: 'Allow quotes' }).uncheck()
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    await expect(dialog).toBeHidden()
+
+    expect(cards.uploads()).toBe(1)
+    expect(pds.creates).toHaveLength(0)
+    expect(pds.applies).toHaveLength(1)
+    const writes = pds.applies[0]!
+    expect(writes[0]!.collection).toBe('app.bsky.feed.post')
+    expect(writes[0]!.value.embed).toMatchObject({
+      $type: 'app.bsky.embed.external',
+      external: { uri: 'https://example.com/a', title: 'Example title', description: 'Example description', thumb: { mimeType: 'image/jpeg' } },
+    })
+    expect(writes.map((w) => w.collection)).toContain('app.bsky.feed.postgate')
+    expect(writes.every((w) => w.rkey === writes[0]!.rkey)).toBe(true)
   })
 })
