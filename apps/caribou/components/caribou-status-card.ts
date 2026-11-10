@@ -37,6 +37,8 @@ import './caribou-button.js'
 import './caribou-menu.js'
 import './caribou-status-media.js'
 import './caribou-status-link-card.js'
+import './caribou-bluesky-video.js'
+import { httpUrl } from './_http-url.js'
 import './caribou-status-quote.js'
 import './caribou-status-poll.js'
 
@@ -1460,6 +1462,11 @@ export class CaribouStatusCard extends LitElement {
     const cardOf = (c: PreviewCard): PreviewCard => imagesHidden && c.image ? { ...c, image: null } : c
     const linkCard = bodyShown && display.card && !display.mediaAttachments?.length ? display.card : null
     const recordCard = bodyShown ? display.bluesky?.recordCard ?? null : null
+    // A Bluesky video with a playlist plays in place, only when its media
+    // is shown (README, "Bluesky video", rules 9 and 11). Covered, it has
+    // the media notice and Show even with no thumbnail.
+    const video = !!linkCard && !!display.bluesky && linkCard.type === 'video' && !!httpUrl(linkCard.embedUrl)
+    const playable = video && !imagesHidden
     const avatarBlurred = uiOf(mod, 'avatar')?.blur === true
     // Permalink: anchor on the timestamp, not the whole article — wrapping the
     // <article> would put the post-content links (hashtags, mentions, external
@@ -1511,9 +1518,10 @@ export class CaribouStatusCard extends LitElement {
               ${bodyShown ? html`<div class="status-content" @click=${this.onContentClick}>${unsafeHTML(this.safeContent(display.content ?? ''))}</div>` : nothing}
               ${bodyShown && display.poll ? html`<caribou-status-poll .status=${display} ?interactive=${this.canAct}></caribou-status-poll>` : nothing}
               ${bodyShown && display.mediaAttachments?.length ? html`<caribou-status-media .media=${display.mediaAttachments} ?sensitive=${display.sensitive === true || mediaCovered} ?no-override=${mediaLocked} ?revealed=${warning !== ''}></caribou-status-media>` : nothing}
-              ${linkCard ? html`<caribou-status-link-card .card=${cardOf(linkCard)} ?play=${!!display.bluesky && linkCard.type === 'video'}></caribou-status-link-card>` : nothing}
+              ${playable ? html`<caribou-bluesky-video .card=${linkCard}></caribou-bluesky-video>` : nothing}
+              ${linkCard && !playable ? html`<caribou-status-link-card .card=${cardOf(linkCard)} ?play=${!!display.bluesky && linkCard.type === 'video'}></caribou-status-link-card>` : nothing}
               ${recordCard ? html`<caribou-status-link-card .card=${cardOf(recordCard)}></caribou-status-link-card>` : nothing}
-              ${mediaCovered && (linkCard?.image || recordCard?.image)
+              ${mediaCovered && (video || linkCard?.image || recordCard?.image)
                 ? html`<p class="media-label">${imagesHidden ? 'Media hidden by a content label' : 'Media with a content label'}
                     ${mediaLocked ? nothing : html`<button type="button" class="media-toggle" aria-pressed=${this.mediaShown ? 'true' : 'false'}
                       @click=${this.onToggleMedia}>${this.mediaShown ? 'Hide' : 'Show'}<span class="vh"> media</span></button>`}</p>`
