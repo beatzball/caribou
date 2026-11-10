@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALICE, BOB, installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+import { ALICE, BOB, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
 
 // Bluesky card actions through the real SDK and the fixture PDS (#188):
 // a like writes one like record and its undo deletes exactly that record;
@@ -93,7 +93,7 @@ async function signIn(page: Page, origin: string) {
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill('alice.example.com')
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL(`${origin}/home`)
+  await waitForSignedInHome(page, origin)
   await page.getByRole('link', { name: 'Notifications' }).click()
   await page.waitForURL(`${origin}/notifications`)
 }

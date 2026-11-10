@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+import { installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
 
 // Bluesky search and the Bluesky hashtag page (#192, #193; app README,
 // "Bluesky search and hashtag page"), through the real SDK and the fixture
@@ -69,7 +69,7 @@ async function signIn(page: Page, origin: string) {
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill('alice.example.com')
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL(`${origin}/home`)
+  await waitForSignedInHome(page, origin)
 }
 
 test.describe('Bluesky hashtag page, signed out', () => {

@@ -234,3 +234,18 @@ export function loopbackOrigin(baseURL: string | undefined): string {
   if (url.hostname === 'localhost') url.hostname = '127.0.0.1'
   return url.origin
 }
+
+/**
+ * Waits for the sign-in's last page load, to /home, to be live.
+ *
+ * `waitForURL` only waits for the document's `load` event. At that point
+ * the reader sees the server's HTML; the router then swaps it for a page
+ * it renders itself, and sets `data-litro-settled` on the outlet when the
+ * swap is done. A click that is pressed on the server's link and let go on
+ * the router's is not a click on either, so nothing happens (#255). Wait
+ * for the swap before the first click.
+ */
+export async function waitForSignedInHome(page: Page, origin: string): Promise<void> {
+  await page.waitForURL(`${origin}/home`)
+  await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
+}

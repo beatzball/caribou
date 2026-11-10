@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
 
 // A Bluesky video in a real browser (#198; app README, "Bluesky video").
 // The timeline answers one post with a video. The playlist host answers
@@ -50,7 +50,7 @@ async function signIn(page: Page, origin: string) {
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill('alice.example.com')
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL(`${origin}/home`)
+  await waitForSignedInHome(page, origin)
 }
 
 test.describe('Bluesky video', () => {

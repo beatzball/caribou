@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer } from './_bluesky-auth.js'
+import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
 
 // Bluesky delete and redraft through the real SDK (#190; app README,
 // "Bluesky delete and redraft"). The record and its image are read from the
@@ -132,7 +132,7 @@ async function signIn(page: Page, origin: string) {
   await page.getByRole('tab', { name: 'Bluesky' }).click()
   await page.getByLabel('Bluesky handle').fill('alice.example.com')
   await page.getByRole('tabpanel', { name: 'Bluesky' }).getByRole('button', { name: 'Sign in' }).click()
-  await page.waitForURL(`${origin}/home`)
+  await waitForSignedInHome(page, origin)
 }
 
 async function chooseRedraft(page: Page) {
