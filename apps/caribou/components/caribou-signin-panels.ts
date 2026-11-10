@@ -40,9 +40,18 @@ function routedPage(start: Node): Element | null {
 let draft: SigninDraft = { selected: 'mastodon', fields: new Map(), focus: null }
 const mounted = new Set<CaribouSigninPanels>()
 
+/**
+ * True once a page has been shown and had its focus put back. The swap
+ * happens once per page load, so from then on a `focusin` records nothing:
+ * a later visit (Cancel, /home, Back) starts at the outlet, as the router
+ * means it to (#246).
+ */
+let focusRestored = false
+
 /** Tests only: forget the reader's draft. */
 export function resetSigninDraft() {
   draft = { selected: 'mastodon', fields: new Map(), focus: null }
+  focusRestored = false
 }
 
 /**
@@ -142,13 +151,13 @@ export class CaribouSigninPanels extends LitElement {
   }
 
   private restoreFocus() {
+    // Once: before the focus, so its `focusin` records nothing.
+    focusRestored = true
     const at = draft.focus
+    draft.focus = null
     if (!at) return
     const target = at.startsWith('tab-') ? this.renderRoot.querySelector<HTMLElement>(`#${at}`) : this.input(at)
     target?.focus()
-    // Once: a later visit to the page starts at the outlet, as the router
-    // means it to. After the focus, whose `focusin` writes the draft again.
-    draft.focus = null
   }
 
   private others(): CaribouSigninPanels[] {
@@ -163,6 +172,7 @@ export class CaribouSigninPanels extends LitElement {
   }
 
   private onFocusin = (e: FocusEvent) => {
+    if (focusRestored) return
     const el = e.composedPath()[0]
     if (el instanceof HTMLInputElement && el.name) draft.focus = el.name
     else if (el instanceof HTMLElement && el.getAttribute('role') === 'tab') draft.focus = el.id

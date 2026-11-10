@@ -383,7 +383,9 @@ export async function discardBlueskyRedraft(stored: StoredBlueskyRedraft): Promi
  * that one wins: the staged copy and its bytes go, and the stored one takes
  * the mark. Answers the slot that holds the draft now (the staged one,
  * found by a new post in this page, when the rename could not be written),
- * or null.
+ * or null. When another tab's redraft of the same post removed this copy,
+ * it answers that tab's redraft (`findRedraftOf`), so this tab can say
+ * where the text is.
  */
 export async function settleBlueskyRedraft(
   stored: StoredBlueskyRedraft, outcome: 'deleted' | 'failed' | 'unknown',
@@ -401,7 +403,7 @@ export async function settleBlueskyRedraft(
       await dropStaged(stored.userKey, slot, d.rev ?? '')
     }
   }
-  return at
+  return at ?? (source ? findRedraftOf(stored.userKey, source) : null)
 }
 
 async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): Promise<DraftSlot | null> {
@@ -439,10 +441,11 @@ async function promote(userKey: UserKey, slot: DraftSlot, maybeLive: boolean): P
  * reloaded, between the store and the delete's answer. For each, asks the
  * reader's PDS for the post: gone → the draft moves to `redraft:<key>`, as
  * after a delete (unless a redraft of that post is stored: it wins);
- * still there → it stays hidden (the post has the text), and is removed
- * once older than `STAGED_MAX_AGE_MS`. Answers the slots that hold a
- * found draft now. A read that fails, or an account switch, leaves them
- * for next time.
+ * still there → it stays hidden (the post has the text) while younger
+ * than `STAGED_MAX_AGE_MS`, then it moves too, marked `sourceMaybeLive`
+ * (rule E: recovery promotes, it never removes). Answers the slots that
+ * hold a found draft now. A read that fails, or an account switch, leaves
+ * them for next time.
  */
 export async function recoverStagedRedrafts(client: CaribouClient): Promise<DraftSlot[]> {
   const generation = ownerGeneration()

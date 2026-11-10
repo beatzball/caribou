@@ -112,6 +112,9 @@ export class CaribouProfileHeader extends LitElement {
   private targetSignal = signal<Account | null>(null)
   private dispose: (() => void) | null = null
   private resolveSeq = 0
+  // Aborted when the header leaves the page: it stops the reads an Unblock
+  // starts (#242).
+  private page = new AbortController()
 
   // True when the shadow root came from the server (declarative shadow DOM)
   // and the first render hydrates it instead of creating it.
@@ -147,6 +150,8 @@ export class CaribouProfileHeader extends LitElement {
   override disconnectedCallback() {
     this.dispose?.()
     this.dispose = null
+    this.page.abort()
+    this.page = new AbortController()
     super.disconnectedCallback()
   }
 
@@ -290,7 +295,7 @@ export class CaribouProfileHeader extends LitElement {
     if (!target || !client) return
     const opts = { clientSource: () => client }
     if (this.relationship?.blocking) {
-      void setBlock(target, false, opts)
+      void setBlock(target, false, { ...opts, signal: this.page.signal })
       return
     }
     const ok = await confirmBlock(target.acct, resourceNetwork(target))

@@ -12,6 +12,12 @@ import './caribou-button.js'
 let pending: Promise<string | null> | null = null
 
 /**
+ * Sign-ins a page-cache Back forgot (#246). If one answers late, it writes
+ * nothing: a newer sign-in may be out by then.
+ */
+const forgotten = new WeakSet<Promise<string | null>>()
+
+/**
  * The Bluesky sign-in form (spec 5.5, step 2): a handle, a DID or a PDS
  * address. It never guesses the network: this form is Bluesky only.
  */
@@ -33,6 +39,29 @@ export class CaribouBlueskySignin extends LitElement {
   @state() private submitting = false
   @state() private error: string | null = null
 
+  override connectedCallback() {
+    super.connectedCallback()
+    window.addEventListener('pageshow', this.onPageshow)
+  }
+
+  override disconnectedCallback() {
+    window.removeEventListener('pageshow', this.onPageshow)
+    super.disconnectedCallback()
+  }
+
+  /**
+   * Back from the authorization server can restore this page from the
+   * browser's page cache, with the sign-in still "in flight". It never
+   * answers: that page is gone. Forget it, so the form can be sent again
+   * (#246).
+   */
+  private onPageshow = (e: Event) => {
+    if (!(e as PageTransitionEvent).persisted) return
+    if (pending) forgotten.add(pending)
+    pending = null
+    this.submitting = false
+  }
+
   private async onSubmit(e: SubmitEvent) {
     e.preventDefault()
     if (this.submitting || pending) return
@@ -49,10 +78,11 @@ export class CaribouBlueskySignin extends LitElement {
     this.submitting = true
     this.error = null
     try {
-      this.error = await signIn
+      const error = await signIn
+      if (!forgotten.has(signIn)) this.error = error
     } finally {
       if (pending === signIn) pending = null
-      this.submitting = false
+      if (!forgotten.has(signIn)) this.submitting = false
     }
   }
 

@@ -1285,6 +1285,23 @@ describe('Bluesky redraft', () => {
     expect(loadDraft(KEY, SLOT)!.text).toBe('from the deleted post')
   })
 
+  it('an exposed staged slot (its rename was refused) is a kept redraft for the dialog\'s words (#243)', async () => {
+    signInBluesky()
+    saveDraft(KEY, 'new', emptyDraft({ text: 'half written', bluesky: emptyBlueskyDraft({ rkey: '3krkeyHALF' }) }))
+    const left = emptyDraft({ text: 'from the deleted post', bluesky: emptyBlueskyDraft({ source: SOURCE, rkey: '3kleft', exposed: true }) })
+    saveDraft(KEY, `staged:${left.idempotencyKey}`, left)
+    const el = await mount()
+    await open(el)
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('from the deleted post')
+    expect($(el, '[data-redraft-note]')).not.toBeNull()
+    activeUserKey.value = null
+    await settle(el)
+    expect(toasts.at(-1)).toEqual({
+      kind: 'info',
+      message: 'Your redraft is saved for the account you started it with. It opens the next time you write a new post there.',
+    })
+  })
+
   it('says "other unsent draft" only when its own kind\'s slot holds one', async () => {
     signInBluesky()
     saveDraft(KEY, 'new', emptyDraft({ text: 'half written', bluesky: emptyBlueskyDraft({ rkey: '3krkeyHALF' }) }))

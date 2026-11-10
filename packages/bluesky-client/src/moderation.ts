@@ -313,6 +313,21 @@ export { isNoUnauthenticated, isProvenVisible } from './no-unauthenticated.js'
 // Signed-out pages (#187): the server's SSR and the browser's fallback.
 export * from './signed-out.js'
 
+/**
+ * The labelers in the reader's prefs that `getServices` had no view for
+ * (README, "A gone labeler", #238): each DID in `prefs.labelers` with no
+ * definitions, in prefs order, once each. Never Bluesky's own labeler. Prefs
+ * or definitions not loaded: none (a failed load is not "gone").
+ */
+export function goneLabelers(prefs: ModerationPrefs | null, labelDefs: LabelDefs | null): string[] {
+  if (!prefs || !labelDefs) return []
+  const out = new Set<string>()
+  for (const { did } of prefs.labelers) {
+    if (did !== BSKY_LABELER_DID && !Object.hasOwn(labelDefs, did)) out.add(did)
+  }
+  return [...out]
+}
+
 /** The active Bluesky reader, as the veil needs it. `null` fields are "not loaded". */
 export interface BlueskyReader {
   userKey: NonNullable<StatusBluesky['viewerOf']>
