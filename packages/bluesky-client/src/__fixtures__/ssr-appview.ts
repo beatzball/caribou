@@ -253,6 +253,23 @@ export const customLabelFocus = post(alice, 'alice custom label post', {
   labels: [{ src: BSKY_LABELER, uri: 'at://did:plc:alice/app.bsky.feed.post/3kalicecustom', val: 'some-custom-label', cts: CTS }],
 })
 
+/**
+ * `/@carol.example.com/3kcarolfocus` (#273): a plain thread, every author
+ * visible. Bob's root, carol's focused post, bob's reply.
+ */
+const bobRoot = post(bob, 'bob opens the thread', { rkey: '3kbobroot' })
+export const carolFocus = post(carol, 'carol focused post', {
+  rkey: '3kcarolfocus',
+  record: { reply: { root: ref(bobRoot), parent: ref(bobRoot) } },
+})
+const bobReply = post(bob, 'bob replies to carol', {
+  rkey: '3kbobreply',
+  record: { reply: { root: ref(bobRoot), parent: ref(carolFocus) } },
+})
+export const carolThread = { thread: node(carolFocus, { parent: node(bobRoot), replies: [node(bobReply)] }) }
+/** Every post in `carolThread`, for a PDS that answers `getPosts`. */
+export const carolThreadPosts = [bobRoot, carolFocus, bobReply]
+
 /** `app.bsky.labeler.getServices` for Bluesky's labeler, detailed. */
 export const labelerServices = {
   views: [{
@@ -276,6 +293,7 @@ export const threads: Record<string, unknown> = {
   [adultFocus.uri]: adultThread,
   [customLabelFocus.uri]: { thread: node(customLabelFocus) },
   [videoFocus.uri]: { thread: node(videoFocus) },
+  [carolFocus.uri]: carolThread,
 }
 
 /** A handle the fixture AppView fails on with a 500. */
