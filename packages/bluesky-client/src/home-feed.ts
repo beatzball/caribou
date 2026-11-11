@@ -85,6 +85,8 @@ export function showInHome(entry: AppBskyFeedDefs.FeedViewPost, prefs: HomeFeedP
   // Rule 3 and 4: a repost by the reader always shows.
   if (repost) {
     if (mine(repost.by)) return true
+    // Rule 6.1: a reposted reply the AppView sent without `reply` is an orphan.
+    if (postRecord(post.record).reply && !entry.reply) return false
     return !prefs.hideReposts && !(prefs.hideQuotePosts && isQuotePost(post))
   }
   // Rule 3: the reader's own post or reply.

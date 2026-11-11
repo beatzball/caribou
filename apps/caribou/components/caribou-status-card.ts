@@ -892,19 +892,27 @@ export class CaribouStatusCard extends LitElement {
   }
 
   // The card a keyboard reader goes to when this one leaves the list: the
-  // next shown post, else the one before.
-  // The next card in reading order, else the one before. A row can hold
+  // next card in reading order, else the one before. A row can hold
   // several cards (a Bluesky Home slice, #275), so this walks cards, not
   // rows: within a row and across rows. A hidden card is skipped, and so is
   // every card in a row whose own post is hidden (the row is not shown).
+  // The row's own post (the `<li>`'s card, or a slice's last) takes its whole row
+  // with it when it goes, so its neighbour is never in its own row; a
+  // context card's row stays, so its neighbour may be.
   private neighbour(): CaribouStatusCard | null {
-    const list = this.closest('li')?.parentElement
-    if (!list) return null
-    const rowHidden = (li: HTMLLIElement | null) =>
-      !!li && Array.from(li.children).some((c) => c instanceof CaribouStatusCard && c.hidden)
+    const row = this.closest('li')
+    const list = row?.parentElement
+    if (!row || !list) return null
+    // A row's own post: its card, or a Home slice's last card.
+    const cardIn = (el: Element | undefined) =>
+      Array.from(el?.children ?? []).find((c): c is CaribouStatusCard => c instanceof CaribouStatusCard) ?? null
+    const own = (li: HTMLLIElement | null) =>
+      li ? cardIn(li) ?? cardIn(Array.from(li.children).find((c) => c.hasAttribute('data-slice'))) : null
+    const goesWithMe = own(row) === this ? row : null
+    const rowHidden = (li: HTMLLIElement | null) => own(li)?.hidden === true
     const cards = Array.from(list.querySelectorAll('caribou-status-card'))
       .filter((c): c is CaribouStatusCard => c instanceof CaribouStatusCard
-        && (c === this || (!c.hidden && !rowHidden(c.closest('li')))))
+        && (c === this || (!c.hidden && c.closest('li') !== goesWithMe && !rowHidden(c.closest('li')))))
     const at = cards.indexOf(this)
     return cards[at + 1] ?? cards[at - 1] ?? null
   }

@@ -622,8 +622,10 @@ order:
 2. **Muted threads.** A post whose `viewer.threadMuted` is true never shows,
    as a post, a reply or a repost. This wins over rule 3: the reader chose
    to mute it.
-3. **The reader's own.** A post by the reader, a repost by the reader, and
-   a reply to a post by the reader show under every pref.
+3. **The reader's own.** A post by the reader and a repost by the reader
+   show under every pref. A reply to a post by the reader shows under
+   every pref too, unless it is an orphan (rule 6.1). Rule 2 still applies
+   to all of them.
 4. **Reposts.** `hideReposts` hides every repost entry. `hideQuotePosts`
    also hides a repost of a quote post. A repost that shows is the repost
    alone: no reply context, never joined to a thread.
@@ -632,7 +634,9 @@ order:
    that is not there any more: not found, blocked, detached).
 6. **Replies.** A reply is a post whose record has `reply`. In order:
    1. **Orphans never show:** the entry has no `reply`, or its parent or
-      root is not a post view (deleted, blocked).
+      root is not a post view (deleted, blocked). A repost of a reply that
+      came without `reply` is an orphan too (the reader's own repost
+      aside).
    2. `hideReplies` hides it, unless it is a **self-thread**: the parent,
       the grandparent (`reply.grandparentAuthor`) and the root are all by
       the reply's author.

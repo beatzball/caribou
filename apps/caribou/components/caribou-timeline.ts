@@ -60,7 +60,8 @@ export class CaribouTimeline extends LitElement {
     :host { display: block; }
     ul { list-style: none; margin: 0; padding: 0; }
     /* A card hidden by a filter, a mute or a block takes its row with it. */
-    li:has(> caribou-status-card[hidden]) { display: none; }
+    li:has(> caribou-status-card[hidden]),
+    li:has(> [data-slice] > caribou-status-card[hidden]) { display: none; }
     /* A Bluesky Home slice (README, "Bluesky views"): the posts above the
        reply, joined to it by the line their cards draw. */
     /* The skipped posts: the thread line runs on through, dotted. */
@@ -371,10 +372,11 @@ export class CaribouTimeline extends LitElement {
         ></caribou-new-posts-banner>
         <ul>
           ${repeat(shown, (s) => s.id, (s) => this.contextOf(s)
-            // A slice with context is one group, "Thread" (README, "Bluesky views").
+            // A slice with context is one group, "Thread", inside its list
+            // item (README, "Bluesky views").
             ? html`
-            <li role="group" aria-label="Thread">${this.renderContext(s, context)}<caribou-status-card data-status-id=${s.id} .status=${s}
-              filter-context=${context}></caribou-status-card></li>
+            <li><div role="group" aria-label="Thread" data-slice>${this.renderContext(s, context)}<caribou-status-card data-status-id=${s.id} .status=${s}
+              filter-context=${context}></caribou-status-card></div></li>
           `
             : html`
             <li><caribou-status-card data-status-id=${s.id} .status=${s}

@@ -31,12 +31,14 @@ const erin = author('erin', false)
 type Who = typeof dana
 const ref = (p: { uri: string; cid: string }) => ({ uri: p.uri, cid: p.cid })
 
-function post(who: Who, rkey: string, text: string, reply?: { root: { uri: string; cid: string }; parent: { uri: string; cid: string } }) {
+function post(who: Who, rkey: string, text: string, reply?: { root: { uri: string; cid: string }; parent: { uri: string; cid: string } }, labels: string[] = []) {
+  const at = `at://${who.did}/app.bsky.feed.post/${rkey}`
   return {
     ...BASE_POST,
     $type: 'app.bsky.feed.defs#postView',
     uri: `at://${who.did}/app.bsky.feed.post/${rkey}`, cid: CID,
     author: who,
+    labels: labels.map((val) => ({ ver: 1, src: BSKY_LABELER, uri: at, cid: CID, val, cts: '2026-11-10T10:00:00.000Z' })),
     record: { $type: 'app.bsky.feed.post', createdAt: '2026-11-10T10:00:00.000Z', text, ...(reply ? { reply: { root: ref(reply.root), parent: ref(reply.parent) } } : {}) },
   }
 }
@@ -56,12 +58,21 @@ const FEED = [
   { post: plain },
 ]
 
-const xrpc: XrpcAnswer = (method, url) => {
+// A reply that Bluesky's moderators hide (`!hide`): its slice goes with it.
+const hiddenAnswer = post(dana, '3khidden', 'a hidden reply', { root, parent: middle }, ['!hide'])
+const HIDDEN_FEED = [
+  { post: hiddenAnswer, reply: { root, parent: middle, grandparentAuthor: dana } },
+  { post: plain },
+]
+// The answer covers Bluesky's own labeler (README, "Labeler coverage").
+const COVERED = { 'atproto-content-labelers': `${BSKY_LABELER};redact` }
+
+const xrpcFor = (feed: unknown[]): XrpcAnswer => (method, url) => {
   switch (method) {
     case 'app.bsky.actor.getPreferences':
       return { body: { preferences: [] } }
     case 'app.bsky.feed.getTimeline':
-      return { body: { feed: FEED } }
+      return { body: { feed }, headers: COVERED }
     case 'app.bsky.graph.getMutes':
     case 'app.bsky.graph.getBlocks':
       return { body: { [method.endsWith('Mutes') ? 'mutes' : 'blocks']: [] } }
@@ -94,7 +105,7 @@ test.describe('Bluesky Home slices', () => {
 
   test('a reply under its parent and root; no reply to an unfollowed author; a thread once', async ({ page, baseURL }) => {
     const origin = loopbackOrigin(baseURL)
-    await installFixtureAuth(page, { xrpc })
+    await installFixtureAuth(page, { xrpc: xrpcFor(FEED) })
     await signIn(page, origin)
 
     const home = page.locator('page-home caribou-timeline')
@@ -118,5 +129,20 @@ test.describe('Bluesky Home slices', () => {
 
     await expect(home.getByText('a reply to someone the reader does not follow')).toHaveCount(0)
     await expect(home.getByText('an older reply in the same thread')).toHaveCount(0)
+  })
+
+  test('a hidden reply hides its whole slice, context cards too (the row CSS)', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page, { xrpc: xrpcFor(HIDDEN_FEED) })
+    await signIn(page, origin)
+
+    const home = page.locator('page-home caribou-timeline')
+    await expect(home.getByText('a plain post')).toBeVisible()
+    const items = home.locator('ul > li')
+    await expect(items).toHaveCount(2)
+    await expect(items.first()).toBeHidden()
+    await expect(home.getByText('the root of the thread')).toBeHidden()
+    await expect(home.getByText('the parent reply')).toBeHidden()
+    await expect(items.nth(1)).toBeVisible()
   })
 })

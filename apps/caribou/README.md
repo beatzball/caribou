@@ -559,8 +559,10 @@ Mastodon post, account or client renders as before.
      the avatar down to the next card, and there is no rule between them.
   3. A context card that a filter, mute or block hides takes only its own
      place; the reply still shows. A hidden reply hides the whole slice.
-     The `<li>` of a slice with context is `role="group"` named "Thread",
-     so a screen reader hears that its articles belong together.
+     A slice with context keeps its `<li>` (the list stays a list) and
+     wraps its cards in `<div role="group" aria-label="Thread">`, so a
+     screen reader hears that its articles belong together. The row-hiding
+     CSS looks through that group for the reply.
   4. **One slice per thread.** A slice's thread is its root's URI (a plain
      post is its own root). Over the whole list, every page together, only
      the first (newest) entry of a thread shows; a later one, on this page
@@ -574,8 +576,10 @@ Mastodon post, account or client renders as before.
      post with no context (its thread, a profile, the parent of a newer
      reply) does not take it away (`packages/state` README).
   7. After a delete, focus goes to the next shown card in reading order,
-     inside the slice or in the next one, else to the one before. A hidden
-     card, and every card of a hidden slice, is skipped.
+     else to the one before. A hidden card, and every card of a hidden
+     slice, is skipped. Deleting a context card may move focus inside its
+     slice. Deleting the reply takes the whole slice away, so focus goes to
+     a card in another slice.
   8. The thread line sits on the avatar's centre. The card and the timeline
      read the avatar size and padding from `components/_card-geometry.ts`.
      The line runs on, dotted, through the "…" marker.

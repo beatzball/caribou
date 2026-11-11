@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
+import type { Account } from '@beatzball/caribou-mastodon-client'
 import {
-  activeClient, activeUserKey, cacheStatus, clearKeptAlive, statusCache, users, type TimelineStore,
+  activeClient, activeUserKey, addUserSession, cacheStatus, clearKeptAlive, statusCache, users, type TimelineStore,
 } from '@beatzball/caribou-state'
 import '../caribou-timeline.js'
 import type { CaribouTimeline, TimelineInitial, TimelineKind } from '../caribou-timeline.js'
@@ -125,8 +126,12 @@ const c1 = view(carol(), 'c1', { root: root.uri, parent: root.uri })
 const c2 = view(carol(), 'c2', { root: root.uri, parent: c1.uri })
 
 const li = (tl: CaribouTimeline) => [...tl.shadowRoot!.querySelectorAll('ul > li')]
-// What `li:has(> caribou-status-card[hidden])` means (happy-dom cannot match `:has(>)`).
-const rowHidden = (row: Element) => [...row.children].some((c) => c.localName === 'caribou-status-card' && c.hasAttribute('hidden'))
+// A row's own post: its card, or a slice's last card.
+const cardIn = (el: Element | undefined) => [...el?.children ?? []].find((c) => c.localName === 'caribou-status-card') as CaribouStatusCard | undefined
+const leafOf = (row: Element) => (cardIn(row) ?? cardIn([...row.children].find((c) => c.hasAttribute('data-slice'))))!
+// What the row-hiding CSS means (happy-dom cannot match `:has(>)`; the e2e
+// checks the real CSS).
+const rowHidden = (row: Element) => leafOf(row).hasAttribute('hidden')
 
 describe('Home slices', () => {
   it('rule 1: a reply is one slice: root, parent, then the reply, oldest first', async () => {
@@ -172,15 +177,17 @@ describe('Home slices', () => {
         : { data: { feed: page1, cursor: 'c1' } }),
     })
     const tl = await mount('home')
-    expect(li(tl).map((l) => (l.lastElementChild as HTMLElement).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9')])
+    expect(li(tl).map((l) => leafOf(l).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9')])
     await scrollToEnd(tl)
-    expect(li(tl).map((l) => (l.lastElementChild as HTMLElement).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9'), uri(CAROL, 'c8')])
+    expect(li(tl).map((l) => leafOf(l).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9'), uri(CAROL, 'c8')])
   })
 
   it('rule 4: a repost is its own slice, with no context', async () => {
     const r = reply(alice(), 'a2', c1, root)
+    // The AppView sends `reply` on a reposted reply too.
     const repost = {
       post: r.post,
+      reply: r.reply,
       reason: { $type: 'app.bsky.feed.defs#reasonRepost', by: carol(), uri: `at://${CAROL}/app.bsky.feed.repost/r1`, cid: 'bafyr', indexedAt: '2026-11-06T00:00:00.000Z' },
     }
     signIn({ getTimeline: vi.fn(async () => ({ data: { feed: [repost, r], cursor: 'c' } })) })
@@ -195,16 +202,16 @@ describe('Home slices', () => {
     signIn({ getTimeline: vi.fn(async () => ({ data: { feed, cursor: 'c' } })) })
     const tl = await mount('home')
     const before = li(tl)[0]!
-    const leaf = before.lastElementChild
+    const leaf = leafOf(before)
     await storeOf(tl).poll()
     await settle(tl)
     expect(li(tl)[0]).toBe(before)
-    expect(li(tl)[0]!.lastElementChild).toBe(leaf)
+    expect(leafOf(li(tl)[0]!)).toBe(leaf)
     feed = [reply(alice(), 'a3', c2, root), ...feed]
     await storeOf(tl).poll()
     storeOf(tl).applyNewPosts()
     await settle(tl)
-    expect(li(tl).map((l) => (l.lastElementChild as HTMLElement).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9')])
+    expect(li(tl).map((l) => leafOf(l).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9')])
   })
 
   it('fix 1: a new reply to the shown reply keeps the shown slice whole until Apply; the banner counts it', async () => {
@@ -255,7 +262,7 @@ describe('Home slices', () => {
     signIn({ getTimeline: vi.fn(async () => ({ data: { feed: [e], cursor: 'c' } })) })
     const tl = await mount('home')
     const row = li(tl)[0]!
-    expect((row.lastElementChild as CaribouStatusCard).hidden).toBe(true)
+    expect(leafOf(row).hidden).toBe(true)
     expect(rowHidden(row)).toBe(true)
   })
 
@@ -287,13 +294,52 @@ describe('Home slices', () => {
     // Across slices, past a hidden root: the next slice's first shown card.
     second![0]!.hidden = true
     expect(neighbour(first![2]!)?.dataset.statusId).toBe(uri(CAROL, 'c0'))
-    // The last shown card goes back to the one before it.
-    expect(neighbour(second![2]!)?.dataset.statusId).toBe(uri(CAROL, 'c0'))
+    // A slice's reply takes its whole slice with it: its neighbour is in
+    // another slice, never its own parent.
+    expect(neighbour(second![2]!)?.dataset.statusId).toBe(uri(ALICE, 'a2'))
   })
 
-  it('fix 11: a slice with context is a group named "Thread"; a plain post is not', async () => {
+  it('round 3: deleting the reader\'s reply in the last slice puts focus on a card that stays', async () => {
+    const me = who(READER_DID, false)
+    const deleteRecord = vi.fn(async () => ({ data: {} }))
+    signIn({
+      getTimeline: vi.fn(async () => ({ data: { feed: [plain(carol(), 'c9'), reply(me, 'm1', c1, root)], cursor: 'c' } })),
+      com: { atproto: { repo: {
+        createRecord: vi.fn(), deleteRecord,
+        getRecord: vi.fn(async () => { throw Object.assign(new Error('not found'), { status: 400, error: 'RecordNotFound' }) }),
+      } } },
+    })
+    // The reader's own account, so the card offers Delete.
+    addUserSession({
+      userKey: `${READER_DID}@bsky`, server: 'bsky.social', token: '', vapidKey: '', createdAt: 0,
+      account: { id: READER_DID, acct: 'reader.example.com', username: 'reader' } as Account,
+    })
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true }
+    const tl = await mount('home')
+    const mine = leafOf(li(tl)[1]!)
+    expect(mine.dataset.statusId).toBe(uri(READER_DID, 'm1'))
+    const del = mine.shadowRoot!.querySelector<HTMLElement>('caribou-menu.more button[data-action="delete"]')!
+    del.click()
+    await settle(tl)
+    document.querySelector('caribou-confirm-dialog')!.shadowRoot!.querySelector<HTMLElement>('caribou-button.confirm')!.click()
+    await settle(tl)
+    expect(deleteRecord).toHaveBeenCalled()
+    // The slice is gone; focus is on the post above it, which stays.
+    expect(li(tl)).toHaveLength(1)
+    const above = leafOf(li(tl)[0]!)
+    expect(above.isConnected && !above.hidden).toBe(true)
+    expect(tl.shadowRoot!.activeElement).toBe(above)
+    expect(above.shadowRoot!.activeElement?.localName).toBe('article')
+  })
+
+  it('fix 11, round 3: a slice with context has a group named "Thread" inside its list item; a plain post has none', async () => {
     signIn({ getTimeline: vi.fn(async () => ({ data: { feed: [reply(alice(), 'a2', c1, root), plain(carol(), 'c9')], cursor: 'c' } })) })
     const tl = await mount('home')
-    expect(li(tl).map((l) => [l.getAttribute('role'), l.getAttribute('aria-label')])).toEqual([['group', 'Thread'], [null, null]])
+    // The `<li>` stays a list item; the group is inside it.
+    expect(li(tl).map((l) => l.getAttribute('role'))).toEqual([null, null])
+    const group = [...li(tl)[0]!.children].find((c) => c.getAttribute('role') === 'group')!
+    expect(group.getAttribute('aria-label')).toBe('Thread')
+    expect([...group.querySelectorAll('caribou-status-card')].map((c) => (c as HTMLElement).dataset.statusId)).toEqual([root.uri, c1.uri, uri(ALICE, 'a2')])
+    expect(li(tl)[1]!.querySelector('[role="group"]')).toBeNull()
   })
 })

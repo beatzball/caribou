@@ -142,8 +142,14 @@ describe('rule 4: reposts', () => {
   })
 
   it('a reposted reply to an unfollowed author is a repost, not a reply', () => {
-    const r = reply(alice, 'a1', bobRoot).post
-    expect(show(repost(carol, r))).toBe(true)
+    const r = reply(alice, 'a1', bobRoot)
+    expect(show({ ...repost(carol, r.post), reply: r.reply })).toBe(true)
+  })
+
+  it('6.1: a reposted reply with no reply hydration is an orphan; the reader\'s own repost still shows', () => {
+    const r = reply(alice, 'a1', aliceRoot).post
+    expect(show(repost(carol, r))).toBe(false)
+    expect(show(repost(me, r))).toBe(true)
   })
 
   it('a repost has no reply context', () => {
