@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import {
-  activeUserKey, clearKeptAlive, statusCache, users, type TimelineStore,
+  activeClient, activeUserKey, cacheStatus, clearKeptAlive, statusCache, users, type TimelineStore,
 } from '@beatzball/caribou-state'
 import '../caribou-timeline.js'
 import type { CaribouTimeline, TimelineInitial, TimelineKind } from '../caribou-timeline.js'
@@ -9,7 +9,7 @@ import type { CaribouStatusCard } from '../caribou-status-card.js'
 import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded } from '../_bluesky-moderation.js'
 import { blueskyClients } from './_bluesky-clients.js'
 import {
-  ALICE, BOB, CAROL, READER_DID, asPostView, author, blueskyClient, fakeAgent, post, signInBluesky, type FakeAgent,
+  ALICE, BOB, BSKY_LABELER, CAROL, READER_DID, asPostView, author, blueskyClient, fakeAgent, label, post, signInBluesky, type FakeAgent,
 } from './_bluesky-helpers.js'
 
 // Bluesky Home slices (#275; README, "Bluesky views", "Home shows threads
@@ -104,8 +104,8 @@ const bob = () => who(BOB, false)
 
 const uri = (did: string, rkey: string) => `at://${did}/app.bsky.feed.post/${rkey}`
 
-function view(a: ReturnType<typeof author>, rkey: string, reply?: { root: string; parent: string }) {
-  const v = post({ author: a })
+function view(a: ReturnType<typeof author>, rkey: string, reply?: { root: string; parent: string }, labels: ReturnType<typeof label>[] = []) {
+  const v = post({ author: a, labels: labels.map((l) => ({ ...l, uri: uri(a.did, rkey) })) })
   v.uri = uri(a.did, rkey)
   v.cid = `bafy${rkey}`
   const ref = (u: string) => ({ uri: u, cid: `bafy${u.split('/').pop()}` })
@@ -125,6 +125,8 @@ const c1 = view(carol(), 'c1', { root: root.uri, parent: root.uri })
 const c2 = view(carol(), 'c2', { root: root.uri, parent: c1.uri })
 
 const li = (tl: CaribouTimeline) => [...tl.shadowRoot!.querySelectorAll('ul > li')]
+// What `li:has(> caribou-status-card[hidden])` means (happy-dom cannot match `:has(>)`).
+const rowHidden = (row: Element) => [...row.children].some((c) => c.localName === 'caribou-status-card' && c.hasAttribute('hidden'))
 
 describe('Home slices', () => {
   it('rule 1: a reply is one slice: root, parent, then the reply, oldest first', async () => {
@@ -203,5 +205,95 @@ describe('Home slices', () => {
     storeOf(tl).applyNewPosts()
     await settle(tl)
     expect(li(tl).map((l) => (l.lastElementChild as HTMLElement).dataset.statusId)).toEqual([uri(ALICE, 'a3'), uri(CAROL, 'c9')])
+  })
+
+  it('fix 1: a new reply to the shown reply keeps the shown slice whole until Apply; the banner counts it', async () => {
+    const a2 = reply(alice(), 'a2', c1, root)
+    // A is not the top post, so the catch-up does not read A again.
+    let feed: unknown[] = [plain(carol(), 'c9'), a2]
+    signIn({ getTimeline: vi.fn(async () => ({ data: { feed, cursor: 'c' } })) })
+    const tl = await mount('home')
+    // B answers A (the shown reply): B's context caches a plain copy of A.
+    const b = reply(carol(), 'c4', a2.post, root)
+    feed = [b, ...feed]
+    await storeOf(tl).poll()
+    await settle(tl)
+    expect(storeOf(tl).newPostsCount.value).toBe(1)
+    expect(ids(tl)).toEqual([uri(CAROL, 'c9'), root.uri, c1.uri, uri(ALICE, 'a2')])
+    storeOf(tl).applyNewPosts()
+    await settle(tl)
+    // Applied: one slice for the thread, at B, with A as its parent.
+    expect(ids(tl)).toEqual([root.uri, uri(ALICE, 'a2'), uri(CAROL, 'c4'), uri(CAROL, 'c9')])
+  })
+
+  it('fix 1: Home -> thread -> Back: the thread\'s copy of the reply does not drop its context', async () => {
+    signIn({
+      getTimeline: vi.fn(async () => ({ data: { feed: [reply(alice(), 'a2', c1, root)], cursor: 'c' } })),
+      getPosts: vi.fn(async () => ({ data: { posts: [view(alice(), 'a2', { root: root.uri, parent: c1.uri })] } })),
+    })
+    const tl = await mount('home')
+    // The thread page caches the plain copy it reads.
+    cacheStatus((await activeClient.value!.fetchStatus(uri(ALICE, 'a2')))!)
+    tl.remove()
+    document.body.appendChild(tl)
+    await settle(tl)
+    expect(ids(tl)).toEqual([root.uri, c1.uri, uri(ALICE, 'a2')])
+  })
+
+  it('fix 10: a context card hidden by a label takes only its place; the reply still shows', async () => {
+    const hidden = view(carol(), 'c1', { root: root.uri, parent: root.uri }, [label('!hide', BSKY_LABELER)])
+    signIn({ getTimeline: vi.fn(async () => ({ data: { feed: [reply(alice(), 'a2', hidden, root)], cursor: 'c' } })) })
+    const tl = await mount('home')
+    const cards = [...li(tl)[0]!.querySelectorAll<CaribouStatusCard>('caribou-status-card')]
+    expect(cards.map((c) => c.hidden)).toEqual([false, true, false])
+    expect(rowHidden(li(tl)[0]!)).toBe(false)
+  })
+
+  it('fix 10: a hidden reply hides its whole slice', async () => {
+    const e = reply(alice(), 'a2', c1, root)
+    e.post = view(alice(), 'a2', { root: root.uri, parent: c1.uri }, [label('!hide', BSKY_LABELER)])
+    signIn({ getTimeline: vi.fn(async () => ({ data: { feed: [e], cursor: 'c' } })) })
+    const tl = await mount('home')
+    const row = li(tl)[0]!
+    expect((row.lastElementChild as CaribouStatusCard).hidden).toBe(true)
+    expect(rowHidden(row)).toBe(true)
+  })
+
+  it('fix 10: a like on a context card goes to that post and shows on its card', async () => {
+    const createRecord = vi.fn(async () => ({ data: { uri: `at://${READER_DID}/app.bsky.feed.like/l1`, cid: 'bafylike' } }))
+    signIn({
+      getTimeline: vi.fn(async () => ({ data: { feed: [reply(alice(), 'a2', c1, root)], cursor: 'c' } })),
+      com: { atproto: { repo: { createRecord, deleteRecord: vi.fn(), getRecord: vi.fn() } } },
+    })
+    const tl = await mount('home')
+    const parent = li(tl)[0]!.querySelectorAll<CaribouStatusCard>('caribou-status-card')[1]!
+    parent.shadowRoot!.querySelector<HTMLElement>('caribou-icon-button.favourite')!.click()
+    await settle(tl)
+    expect(createRecord).toHaveBeenCalledWith(expect.objectContaining({
+      collection: 'app.bsky.feed.like', record: expect.objectContaining({ subject: { uri: c1.uri, cid: c1.cid } }),
+    }))
+    expect(parent.shadowRoot!.querySelector('caribou-icon-button.favourite')!.getAttribute('label')).toBe('Unfavourite')
+  })
+
+  it('fix 4: after a delete, focus goes to the next shown card in reading order, within and across slices', async () => {
+    signIn({
+      getTimeline: vi.fn(async () => ({ data: { feed: [reply(alice(), 'a2', c1, root), reply(carol(), 'c3', view(carol(), 'c0'), view(alice(), 'r9'))], cursor: 'c' } })),
+    })
+    const tl = await mount('home')
+    const neighbour = (c: CaribouStatusCard) => (c as unknown as { neighbour(): CaribouStatusCard | null }).neighbour()
+    const [first, second] = li(tl).map((l) => [...l.querySelectorAll<CaribouStatusCard>('caribou-status-card')])
+    // Within a slice: the parent's neighbour is the reply under it.
+    expect(neighbour(first![1]!)?.dataset.statusId).toBe(uri(ALICE, 'a2'))
+    // Across slices, past a hidden root: the next slice's first shown card.
+    second![0]!.hidden = true
+    expect(neighbour(first![2]!)?.dataset.statusId).toBe(uri(CAROL, 'c0'))
+    // The last shown card goes back to the one before it.
+    expect(neighbour(second![2]!)?.dataset.statusId).toBe(uri(CAROL, 'c0'))
+  })
+
+  it('fix 11: a slice with context is a group named "Thread"; a plain post is not', async () => {
+    signIn({ getTimeline: vi.fn(async () => ({ data: { feed: [reply(alice(), 'a2', c1, root), plain(carol(), 'c9')], cursor: 'c' } })) })
+    const tl = await mount('home')
+    expect(li(tl).map((l) => [l.getAttribute('role'), l.getAttribute('aria-label')])).toEqual([['group', 'Thread'], [null, null]])
   })
 })

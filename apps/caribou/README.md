@@ -559,14 +559,26 @@ Mastodon post, account or client renders as before.
      the avatar down to the next card, and there is no rule between them.
   3. A context card that a filter, mute or block hides takes only its own
      place; the reply still shows. A hidden reply hides the whole slice.
+     The `<li>` of a slice with context is `role="group"` named "Thread",
+     so a screen reader hears that its articles belong together.
   4. **One slice per thread.** A slice's thread is its root's URI (a plain
      post is its own root). Over the whole list, every page together, only
      the first (newest) entry of a thread shows; a later one, on this page
      or an older one, is not drawn. A repost is never part of a thread: it
      is its own slice.
   5. The key of a slice is the reply's id, so a poll leaves the cards
-     alone. When a newer entry of a thread comes in, it takes the top, and
-     the older slice goes.
+     alone. When a newer entry of a thread comes in, it waits in the
+     banner (which counts entries, not slices); on Apply it takes the top,
+     and the older slice goes.
+  6. A slice keeps its context while it is shown. Another read of the same
+     post with no context (its thread, a profile, the parent of a newer
+     reply) does not take it away (`packages/state` README).
+  7. After a delete, focus goes to the next shown card in reading order,
+     inside the slice or in the next one, else to the one before. A hidden
+     card, and every card of a hidden slice, is skipped.
+  8. The thread line sits on the avatar's centre. The card and the timeline
+     read the avatar size and padding from `components/_card-geometry.ts`.
+     The line runs on, dotted, through the "…" marker.
   Home only, Bluesky only: a Mastodon post has no `bluesky` field, and is
   keyed by its id as before. Home for Bluesky renders on the client only,
   so the server render is not touched.

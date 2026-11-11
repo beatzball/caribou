@@ -77,13 +77,22 @@ describe('rule 1: prefs', () => {
   it('uses the SDK defaults when there is no home pref', () => {
     expect(homeFeedPrefs({ feedViewPrefs: {} })).toEqual(HOME_FEED_DEFAULTS)
     expect(homeFeedPrefs(undefined)).toEqual(HOME_FEED_DEFAULTS)
-    expect(HOME_FEED_DEFAULTS).toEqual({ hideReplies: false, hideRepliesByUnfollowed: true, hideRepliesByLikeCount: 0, hideReposts: false, hideQuotePosts: false })
+    expect(HOME_FEED_DEFAULTS).toEqual({ hideReplies: false, hideReposts: false, hideQuotePosts: false })
   })
 
   it('reads feedViewPrefs.home, and a wrong type is the default', () => {
-    expect(homeFeedPrefs({ feedViewPrefs: { home: { hideReplies: true, hideRepliesByUnfollowed: false, hideRepliesByLikeCount: 2, hideReposts: true, hideQuotePosts: true } } }))
-      .toEqual({ hideReplies: true, hideRepliesByUnfollowed: false, hideRepliesByLikeCount: 2, hideReposts: true, hideQuotePosts: true })
-    expect(homeFeedPrefs({ feedViewPrefs: { home: { hideReplies: 'yes', hideRepliesByLikeCount: -1 } } })).toEqual(HOME_FEED_DEFAULTS)
+    expect(homeFeedPrefs({ feedViewPrefs: { home: { hideReplies: true, hideReposts: true, hideQuotePosts: true } } }))
+      .toEqual({ hideReplies: true, hideReposts: true, hideQuotePosts: true })
+    expect(homeFeedPrefs({ feedViewPrefs: { home: { hideReplies: 'yes' } } })).toEqual(HOME_FEED_DEFAULTS)
+  })
+
+  it('ignores the legacy hideRepliesByUnfollowed and hideRepliesByLikeCount, as bsky.app does', () => {
+    const p = homeFeedPrefs({ feedViewPrefs: { home: { hideRepliesByUnfollowed: false, hideRepliesByLikeCount: 5 } } })
+    expect(p).toEqual(HOME_FEED_DEFAULTS)
+    const parent = post(carol, 'c0')
+    // A reply to an unfollowed author still hides; a reply with no likes still shows.
+    expect(showInHome(reply(alice, 'a1', bobRoot), p, ME)).toBe(false)
+    expect(showInHome(reply(alice, 'a2', parent, parent, { likes: 0 }), p, ME)).toBe(true)
   })
 
   it('reads only the home pref, not another feed', () => {
@@ -91,12 +100,24 @@ describe('rule 1: prefs', () => {
   })
 })
 
-describe('rule 2: the reader\'s own', () => {
-  const all = { hideReplies: true, hideReposts: true, hideQuotePosts: true, hideRepliesByLikeCount: 10 }
+describe('rule 2: muted threads', () => {
+  const muted = (e: AppBskyFeedDefs.FeedViewPost) => ({ ...e, post: { ...e.post, viewer: { threadMuted: true } } })
+  it('drops a post, reply or repost in a thread the reader muted', () => {
+    expect(show(muted(plain(alice, 'a1')))).toBe(false)
+    expect(show(muted(reply(alice, 'a2', post(carol, 'c0'))))).toBe(false)
+    expect(show(muted(repost(carol, aliceRoot)))).toBe(false)
+    // The reader's own, too: the reader chose to mute it.
+    expect(show(muted(plain(me, 'm1')))).toBe(false)
+  })
+})
+
+describe('rule 3: the reader\'s own', () => {
+  const all = { hideReplies: true, hideReposts: true, hideQuotePosts: true }
   it('shows the reader\'s own post, reply and repost under every pref', () => {
     expect(show(plain(me, 'm1'), all)).toBe(true)
     expect(show(reply(me, 'm2', bobRoot), all)).toBe(true)
     expect(show(repost(me, bobRoot), all)).toBe(true)
+    expect(show(repost(me, post(bob, 'bq', { embed: quoteEmbed(aliceRoot) })), all)).toBe(true)
     expect(show({ post: post(me, 'm3', { embed: quoteEmbed(bobRoot) }) }, all)).toBe(true)
   })
 
@@ -108,10 +129,16 @@ describe('rule 2: the reader\'s own', () => {
   })
 })
 
-describe('rule 3: reposts', () => {
+describe('rule 4: reposts', () => {
   it('shows a repost by default and hides it with hideReposts', () => {
     expect(show(repost(alice, bobRoot))).toBe(true)
     expect(show(repost(alice, bobRoot), { hideReposts: true })).toBe(false)
+  })
+
+  it('hideQuotePosts hides a reposted quote too', () => {
+    const quote = post(bob, 'bq', { embed: quoteEmbed(aliceRoot) })
+    expect(show(repost(carol, quote))).toBe(true)
+    expect(show(repost(carol, quote), { hideQuotePosts: true })).toBe(false)
   })
 
   it('a reposted reply to an unfollowed author is a repost, not a reply', () => {
@@ -124,14 +151,14 @@ describe('rule 3: reposts', () => {
   })
 })
 
-describe('rule 4: quote posts', () => {
+describe('rule 5: quote posts', () => {
   const q = { post: post(alice, 'a1', { embed: quoteEmbed(bobRoot) }) }
   it('shows a quote post by default and hides it with hideQuotePosts', () => {
     expect(show(q)).toBe(true)
     expect(show(q, { hideQuotePosts: true })).toBe(false)
   })
 
-  it('counts a quote with media and a gone quote; not a feed card or plain media', () => {
+  it('counts a quote with media and a gone quote; not a feed card or plain media (a difference from bsky.app)', () => {
     expect(isQuotePost(post(alice, 'x', { embed: { $type: 'app.bsky.embed.recordWithMedia#view', record: quoteEmbed(bobRoot), media: {} } }))).toBe(true)
     expect(isQuotePost(post(alice, 'x', { embed: { $type: 'app.bsky.embed.record#view', record: { $type: 'app.bsky.embed.record#viewNotFound', uri: bobRoot.uri } } }))).toBe(true)
     expect(isQuotePost(post(alice, 'x', { embed: { $type: 'app.bsky.embed.record#view', record: { $type: 'app.bsky.feed.defs#generatorView' } } }))).toBe(false)
@@ -139,21 +166,40 @@ describe('rule 4: quote posts', () => {
   })
 })
 
-describe('rule 5: replies', () => {
-  it('5.3 default: hides a reply from a followed author to an unfollowed one', () => {
+describe('rule 6: replies', () => {
+  const a1 = post(alice, 'a1', { reply: { root: aliceRoot.uri, parent: aliceRoot.uri } })
+  const selfThread = () => reply(alice, 'a2', a1, aliceRoot, { grand: alice })
+  const c1 = post(carol, 'c1', { reply: { root: aliceRoot.uri, parent: aliceRoot.uri } })
+  const mixed = () => reply(alice, 'a3', c1, aliceRoot, { grand: alice })
+
+  it('6.1 hides an orphan: parent or root not a post view, or no reply hydration', () => {
+    const notFound = { $type: 'app.bsky.feed.defs#notFoundPost', uri: uri(carol, 'gone'), notFound: true }
+    const blocked = { $type: 'app.bsky.feed.defs#blockedPost', uri: uri(carol, 'gone'), blocked: true, author: { did: carol.did } }
+    expect(show(reply(alice, 'a1', post(carol, 'c1'), notFound))).toBe(false)
+    expect(show(reply(alice, 'a2', post(carol, 'c1'), blocked))).toBe(false)
+    expect(show(reply(alice, 'a3', blocked as unknown as AppBskyFeedDefs.PostView, aliceRoot))).toBe(false)
+    const noHydration = { post: reply(alice, 'a4', aliceRoot).post }
+    expect(show(noHydration)).toBe(false)
+  })
+
+  it('6.2 hideReplies keeps a self-thread (one author all the way) and hides a mixed chain', () => {
+    expect(show(selfThread(), { hideReplies: true })).toBe(true)
+    expect(show(mixed(), { hideReplies: true })).toBe(false)
+    expect(show(reply(alice, 'a5', post(carol, 'c0')), { hideReplies: true })).toBe(false)
+    expect(show(plain(alice, 'a6'), { hideReplies: true })).toBe(true)
+  })
+
+  it('6.3 hides a reply from a followed author to an unfollowed one', () => {
     expect(show(reply(alice, 'a1', bobRoot))).toBe(false)
   })
 
-  it('5.3 default: shows a reply between two followed authors', () => {
+  it('6.3 shows a reply between two followed authors, a self-thread and a mixed chain of followed authors', () => {
     expect(show(reply(alice, 'a1', post(carol, 'c0')))).toBe(true)
+    expect(show(selfThread())).toBe(true)
+    expect(show(mixed())).toBe(true)
   })
 
-  it('5.3 default: shows a self-thread', () => {
-    const a1 = post(alice, 'a1', { reply: { root: aliceRoot.uri, parent: aliceRoot.uri } })
-    expect(show(reply(alice, 'a2', a1, aliceRoot, { grand: alice }))).toBe(true)
-  })
-
-  it('5.3 default: shows a reply when the root or the grandparent author is followed', () => {
+  it('6.3 shows a reply when the root or the grandparent author is followed', () => {
     const b1 = post(bob, 'b1', { reply: { root: post(carol, 'c0').uri, parent: post(carol, 'c0').uri } })
     expect(show(reply(alice, 'a1', b1, post(carol, 'c0')))).toBe(true)
     const b2 = post(bob, 'b2', { reply: { root: bobRoot.uri, parent: bobRoot.uri } })
@@ -161,36 +207,12 @@ describe('rule 5: replies', () => {
     expect(show(reply(alice, 'a1', b2, bobRoot, { grand: bob }))).toBe(false)
   })
 
-  it('5.3 default: hides a reply whose parent or root is not a post view', () => {
-    const notFound = { $type: 'app.bsky.feed.defs#notFoundPost', uri: uri(carol, 'gone'), notFound: true }
-    const blocked = { $type: 'app.bsky.feed.defs#blockedPost', uri: uri(carol, 'gone'), blocked: true, author: { did: carol.did } }
-    const e1 = reply(alice, 'a1', post(carol, 'c1'), notFound)
-    expect(show(e1)).toBe(false)
-    const e2 = reply(alice, 'a2', post(carol, 'c1'), blocked)
-    expect(show(e2)).toBe(false)
-    // With the pref off, it shows (with what context there is).
-    expect(show(e2, { hideRepliesByUnfollowed: false })).toBe(true)
-  })
-
-  it('5.3 off: shows a reply to an unfollowed author', () => {
-    expect(show(reply(alice, 'a1', bobRoot), { hideRepliesByUnfollowed: false })).toBe(true)
-  })
-
-  it('5.1 hideReplies hides every reply not to the reader', () => {
-    expect(show(reply(alice, 'a1', post(carol, 'c0')), { hideReplies: true })).toBe(false)
-    expect(show(plain(alice, 'a2'), { hideReplies: true })).toBe(true)
-  })
-
-  it('5.2 hideRepliesByLikeCount hides a reply with fewer likes', () => {
-    const parent = post(carol, 'c0')
-    expect(show(reply(alice, 'a1', parent, parent, { likes: 1 }), { hideRepliesByLikeCount: 2 })).toBe(false)
-    expect(show(reply(alice, 'a1', parent, parent, { likes: 2 }), { hideRepliesByLikeCount: 2 })).toBe(true)
-    // Not a reply: no like count needed.
-    expect(show(plain(alice, 'a2'), { hideRepliesByLikeCount: 2 })).toBe(true)
+  it('6.3 hides a reply by an author the reader does not follow', () => {
+    expect(show(reply(bob, 'b1', aliceRoot))).toBe(false)
   })
 })
 
-describe('rule 6: context', () => {
+describe('rule 7: context', () => {
   it('a reply to the root: the parent only, no gap', () => {
     expect(replyContextViews(reply(alice, 'a1', aliceRoot))).toEqual({ root: null, parent: aliceRoot, gap: false })
   })
@@ -241,7 +263,7 @@ describe('the client: Home', () => {
     plain(alice, 'a4'),
   ]
 
-  it('rules 1, 5, 6: filters by the default prefs and carries the context, moderated', async () => {
+  it('rules 1, 6, 7: filters by the default prefs and carries the context, moderated', async () => {
     const { client } = setup({ feed })
     const page = await client.fetchTimeline('home')
     expect(page.map((s) => s.id)).toEqual([uri(alice, 'a2'), uri(alice, 'a4')])
@@ -257,13 +279,23 @@ describe('the client: Home', () => {
   })
 
   it('rule 1: follows the reader\'s prefs', async () => {
-    const { client } = setup({ feed, prefs: { feedViewPrefs: { home: { hideRepliesByUnfollowed: false } } } })
-    expect((await client.fetchTimeline('home')).map((s) => s.id)).toEqual([uri(alice, 'a2'), uri(alice, 'a3'), uri(alice, 'a4')])
+    const { client } = setup({ feed, prefs: { feedViewPrefs: { home: { hideReplies: true } } } })
+    expect((await client.fetchTimeline('home')).map((s) => s.id)).toEqual([uri(alice, 'a4')])
   })
 
-  it('rule 1: a failed prefs read is the defaults', async () => {
-    const { client } = setup({ feed, getPreferences: async () => { throw new Error('down') } })
+  it('rule 1: a failed prefs read is the defaults for that page, and the next page reads again', async () => {
+    let fail = true
+    const { agent, client } = setup({
+      feed,
+      getPreferences: async () => {
+        if (fail) throw new Error('down')
+        return { feedViewPrefs: { home: { hideReplies: true } } }
+      },
+    })
     expect((await client.fetchTimeline('home')).map((s) => s.id)).toEqual([uri(alice, 'a2'), uri(alice, 'a4')])
+    fail = false
+    expect((await client.fetchTimeline('home', { cursor: 'next' })).map((s) => s.id)).toEqual([uri(alice, 'a4')])
+    expect(agent.getPreferences).toHaveBeenCalledTimes(2)
   })
 
   it('rule 1: reads the prefs once, and again after the TTL', async () => {

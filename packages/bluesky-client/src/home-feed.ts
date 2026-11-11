@@ -5,19 +5,19 @@ import { postRecord } from './map/post.js'
 // Home (Following) as bsky.app shows it (#275). Rules in the README, "Home:
 // feed prefs and reply context". Pure and server-safe: no SDK at runtime.
 
-/** The reader's `feedViewPref` for `home`, with the SDK's defaults filled in. */
+/**
+ * The reader's `feedViewPref` for `home`, the parts bsky.app still reads.
+ * `hideRepliesByUnfollowed` and `hideRepliesByLikeCount` are legacy: bsky.app
+ * ignores them, and so does Caribou (README, "Home", rule 1).
+ */
 export interface HomeFeedPrefs {
   hideReplies: boolean
-  hideRepliesByUnfollowed: boolean
-  hideRepliesByLikeCount: number
   hideReposts: boolean
   hideQuotePosts: boolean
 }
 
 export const HOME_FEED_DEFAULTS: Readonly<HomeFeedPrefs> = Object.freeze({
   hideReplies: false,
-  hideRepliesByUnfollowed: true,
-  hideRepliesByLikeCount: 0,
   hideReposts: false,
   hideQuotePosts: false,
 })
@@ -33,11 +33,8 @@ export function homeFeedPrefs(prefs: unknown): HomeFeedPrefs {
     Partial<Record<keyof HomeFeedPrefs, unknown>> | undefined
   const d = HOME_FEED_DEFAULTS
   if (!home || typeof home !== 'object') return { ...d }
-  const likes = home.hideRepliesByLikeCount
   return {
     hideReplies: bool(home.hideReplies, d.hideReplies),
-    hideRepliesByUnfollowed: bool(home.hideRepliesByUnfollowed, d.hideRepliesByUnfollowed),
-    hideRepliesByLikeCount: typeof likes === 'number' && Number.isFinite(likes) && likes > 0 ? likes : 0,
     hideReposts: bool(home.hideReposts, d.hideReposts),
     hideQuotePosts: bool(home.hideQuotePosts, d.hideQuotePosts),
   }
@@ -81,27 +78,35 @@ export function isQuotePost(post: AppBskyFeedDefs.PostView): boolean {
 export function showInHome(entry: AppBskyFeedDefs.FeedViewPost, prefs: HomeFeedPrefs, reader: string): boolean {
   const mine = (a: Author | undefined) => !!a && a.did === reader
   const followed = (a: Author | undefined) => !!a && (a.did === reader || !!a.viewer?.following)
-  const repost = repostReason(entry)
-  // Rule 2 and 3: a repost by the reader always shows.
-  if (repost) return mine(repost.by) || !prefs.hideReposts
   const post = entry.post
+  // Rule 2: a thread the reader muted never shows, their own included.
+  if (post.viewer?.threadMuted === true) return false
+  const repost = repostReason(entry)
+  // Rule 3 and 4: a repost by the reader always shows.
+  if (repost) {
+    if (mine(repost.by)) return true
+    return !prefs.hideReposts && !(prefs.hideQuotePosts && isQuotePost(post))
+  }
+  // Rule 3: the reader's own post or reply.
   if (mine(post.author)) return true
   const rec = postRecord(post.record)
   if (!rec.reply) return !(prefs.hideQuotePosts && isQuotePost(post))
-  // Rule 5. A reply to the reader always shows.
+  // Rule 5.1: an orphan never shows.
   const parent = asPostView(entry.reply?.parent)
   const root = asPostView(entry.reply?.root)
-  if (mine(parent?.author)) return true
-  if (prefs.hideReplies) return false
-  if (prefs.hideRepliesByLikeCount > 0 && (post.likeCount ?? 0) < prefs.hideRepliesByLikeCount) return false
+  if (!parent || !root) return false
+  // Rule 3: a reply to the reader.
+  if (mine(parent.author)) return true
   if (prefs.hideQuotePosts && isQuotePost(post)) return false
-  if (!prefs.hideRepliesByUnfollowed) return true
-  if (!followed(post.author) || !parent || !root) return false
   const author = post.author.did
   const grand = entry.reply?.grandparentAuthor as Author | undefined
   const chain = [parent.author, grand, root.author].filter((a): a is Author => !!a)
-  if (chain.every((a) => a.did === author)) return true
-  return chain.some((a) => a.did !== author && followed(a))
+  const selfThread = chain.every((a) => a.did === author)
+  // Rule 5.2: with replies hidden, only a self-thread shows.
+  if (prefs.hideReplies) return selfThread
+  // Rule 5.3: followed author, and a self-thread or a followed author on the way.
+  if (!followed(post.author)) return false
+  return selfThread || chain.some((a) => a.did !== author && followed(a))
 }
 
 /**

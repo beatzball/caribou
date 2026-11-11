@@ -17,6 +17,7 @@ import { timelineFilterContext } from './_status-filter.js'
 import { findShell, loadReaderViewFrom } from './_shell.js'
 import { settleSplash } from './_splash.js'
 import { oneSlicePerThread } from './_bluesky-slices.js'
+import { CARD_AVATAR, CARD_PAD, THREAD_LINE_REACH, THREAD_LINE_X } from './_card-geometry.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag' | 'list' | 'feed'
 
@@ -62,10 +63,16 @@ export class CaribouTimeline extends LitElement {
     li:has(> caribou-status-card[hidden]) { display: none; }
     /* A Bluesky Home slice (README, "Bluesky views"): the posts above the
        reply, joined to it by the line their cards draw. */
+    /* The skipped posts: the thread line runs on through, dotted. */
     .gap {
-      display: flex; align-items: center; min-block-size: 2rem;
-      padding-inline-start: calc(var(--space-4) + 24px - 0.5ch);
+      position: relative; display: flex; align-items: center; min-block-size: 2rem;
+      padding-inline-start: calc(${CARD_PAD} + ${CARD_AVATAR} + var(--space-3));
       color: var(--fg-muted);
+    }
+    .gap::before {
+      content: ''; position: absolute; inset-inline-start: ${THREAD_LINE_X};
+      inset-block: 0 ${THREAD_LINE_REACH};
+      border-inline-start: 2px dotted var(--border);
     }
     .visually-hidden {
       position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -363,8 +370,14 @@ export class CaribouTimeline extends LitElement {
           @apply-new-posts=${this.onApplyNewPosts}
         ></caribou-new-posts-banner>
         <ul>
-          ${repeat(shown, (s) => s.id, (s) => html`
-            <li>${this.renderContext(s, context)}<caribou-status-card data-status-id=${s.id} .status=${s}
+          ${repeat(shown, (s) => s.id, (s) => this.contextOf(s)
+            // A slice with context is one group, "Thread" (README, "Bluesky views").
+            ? html`
+            <li role="group" aria-label="Thread">${this.renderContext(s, context)}<caribou-status-card data-status-id=${s.id} .status=${s}
+              filter-context=${context}></caribou-status-card></li>
+          `
+            : html`
+            <li><caribou-status-card data-status-id=${s.id} .status=${s}
               filter-context=${context}></caribou-status-card></li>
           `)}
         </ul>
@@ -394,8 +407,12 @@ export class CaribouTimeline extends LitElement {
   // The root, a gap, and the parent of a Bluesky Home reply, oldest first.
   // Each is a full card of its own; `joined` draws the line down to the
   // next one.
+  private contextOf(s: Status) {
+    return this.kind === 'home' && !s.reblog ? s.bluesky?.replyContext : undefined
+  }
+
   private renderContext(s: Status, context: string) {
-    const ctx = this.kind === 'home' && !s.reblog ? s.bluesky?.replyContext : undefined
+    const ctx = this.contextOf(s)
     if (!ctx) return nothing
     const card = (post: Status) => html`<caribou-status-card joined data-status-id=${post.id} .status=${post}
       filter-context=${context}></caribou-status-card>`

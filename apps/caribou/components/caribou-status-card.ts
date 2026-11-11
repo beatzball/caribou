@@ -1,3 +1,4 @@
+import { CARD_AVATAR, CARD_PAD, THREAD_LINE_REACH, THREAD_LINE_X } from './_card-geometry.js'
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js'
@@ -248,14 +249,14 @@ export class CaribouStatusCard extends LitElement {
     article { visibility: var(--caribou-reader-veil, visible); }
     article:focus { outline: none; }
     article:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-    article { padding: var(--space-4); border-bottom: 1px solid var(--border); }
+    article { padding: ${CARD_PAD}; border-bottom: 1px solid var(--border); }
     /* The avatar sits in the gutter beside the body, but it is part of the
        author link in the header, so one link holds avatar, name and acct.
        The link's own box is the name line, which is what a link-hint tool
        labels; the focus ring goes around it and the avatar. */
     .row {
-      position: relative; min-height: 48px;
-      padding-inline-start: calc(48px + var(--space-3));
+      position: relative; min-height: ${CARD_AVATAR};
+      padding-inline-start: calc(${CARD_AVATAR} + var(--space-3));
     }
     .author img {
       position: absolute; inset-inline-start: 0; top: 0;
@@ -300,8 +301,8 @@ export class CaribouStatusCard extends LitElement {
     :host([joined]) article { position: relative; border-bottom: none; }
     :host([joined]) article::before {
       content: ''; position: absolute; inline-size: 2px;
-      inset-inline-start: calc(var(--space-4) + 23px);
-      inset-block: calc(var(--space-4) + 48px + var(--space-1)) calc(-1 * var(--space-4) + var(--space-1));
+      inset-inline-start: ${THREAD_LINE_X};
+      inset-block: calc(${CARD_PAD} + ${CARD_AVATAR} + var(--space-1)) ${THREAD_LINE_REACH};
       background: var(--border);
     }
     time { color: var(--fg-muted); font-size: 0.875rem; }
@@ -363,7 +364,7 @@ export class CaribouStatusCard extends LitElement {
     @media (max-width: 480px) {
       .actions:has(> caribou-icon-button.quote) {
         gap: 0; justify-content: space-between;
-        margin-inline-start: calc(-1 * (48px + var(--space-3)));
+        margin-inline-start: calc(-1 * (${CARD_AVATAR} + var(--space-3)));
         /* The last resort, if the counts are still too wide: a second row,
            never a page that scrolls sideways. */
         flex-wrap: wrap;
@@ -892,22 +893,20 @@ export class CaribouStatusCard extends LitElement {
 
   // The card a keyboard reader goes to when this one leaves the list: the
   // next shown post, else the one before.
+  // The next card in reading order, else the one before. A row can hold
+  // several cards (a Bluesky Home slice, #275), so this walks cards, not
+  // rows: within a row and across rows. A hidden card is skipped, and so is
+  // every card in a row whose own post is hidden (the row is not shown).
   private neighbour(): CaribouStatusCard | null {
-    const row = this.closest('li')
-    if (!row) return null
-    const shown = (li: Element | null) => {
-      const card = li?.querySelector(':scope > caribou-status-card, caribou-status-card')
-      return card instanceof CaribouStatusCard && !card.hidden && card !== this ? card : null
-    }
-    for (let li = row.nextElementSibling; li; li = li.nextElementSibling) {
-      const c = shown(li)
-      if (c) return c
-    }
-    for (let li = row.previousElementSibling; li; li = li.previousElementSibling) {
-      const c = shown(li)
-      if (c) return c
-    }
-    return null
+    const list = this.closest('li')?.parentElement
+    if (!list) return null
+    const rowHidden = (li: HTMLLIElement | null) =>
+      !!li && Array.from(li.children).some((c) => c instanceof CaribouStatusCard && c.hidden)
+    const cards = Array.from(list.querySelectorAll('caribou-status-card'))
+      .filter((c): c is CaribouStatusCard => c instanceof CaribouStatusCard
+        && (c === this || (!c.hidden && !rowHidden(c.closest('li')))))
+    const at = cards.indexOf(this)
+    return cards[at + 1] ?? cards[at - 1] ?? null
   }
 
   // The post leaves at once; focus goes to its neighbour. A failure brings

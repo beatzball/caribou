@@ -244,7 +244,10 @@ reply can carry `bluesky.replyContext` (its root and parent, drawn above
 it). `cacheStatus` and `mergeStatus` cache each context post under its own
 id by the same rules, as they do a quoted post, and the reply keeps the
 cached copies. So a like, an edit or a delete of a context post reaches
-its card, and that card reads the cache like any other.
+its card, and that card reads the cache like any other. A copy of the reply
+that carries no context (its thread's, a profile's, or the reply as the
+parent of a newer one) keeps the context the cached copy has, so the Home
+slice stays whole. `forgetReaderFields` scrubs the context copies too.
 
 **SSR seeding is opt-in via `opts.initial`, with three slightly different
 shapes.** All three stores accept seed data and skip the redundant

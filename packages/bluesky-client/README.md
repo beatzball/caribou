@@ -604,33 +604,44 @@ definitions). It imports the SDK for types only; `./browser` exports it.
 
 ## Home: feed prefs and reply context (#275)
 
-Home (`getTimeline`) does what bsky.app's Following feed does. Custom
-feeds, lists, profiles and search are unchanged. The rules, in order:
+Home (`getTimeline`) does what bsky.app's Following feed does, from its
+source (`social-app`, `src/lib/api/feed-manip.ts` and
+`src/state/preferences/feed-tuners.tsx`). The differences are listed at the
+end. Custom feeds, lists, profiles and search are unchanged. The rules, in
+order:
 
 1. **Prefs.** The reader's `feedViewPref` for `feed: "home"`, as the SDK's
-   `getPreferences` reads it (`feedViewPrefs.home`). A missing pref, a
-   missing field, an agent without `getPreferences`, or a failed read uses
-   the defaults: `hideReplies` off, `hideRepliesByUnfollowed` on,
-   `hideRepliesByLikeCount` 0, `hideReposts` off, `hideQuotePosts` off.
-   The client reads the prefs once and reads them again after 10 minutes.
-2. **The reader's own.** A post by the reader, a repost by the reader, and
-   a reply to a post by the reader always show. No pref hides them.
-3. **Reposts.** `hideReposts` hides every repost entry. A repost that
-   shows is the repost alone: no reply context, never joined to a thread.
-4. **Quote posts.** `hideQuotePosts` hides a post that embeds a post
-   (`#record` or `#recordWithMedia` with a post view, or a post that is
-   not there any more). A reposted quote is a repost: rule 3 decides it.
-5. **Replies.** A reply is a post whose record has `reply`. In order:
-   1. `hideReplies` hides it.
-   2. `hideRepliesByLikeCount` > 0 hides it when its `likeCount` is lower.
-   3. `hideRepliesByUnfollowed` hides it unless all of these hold: the
-      author is the reader or followed; the parent and the root are post
-      views (not deleted, not blocked); and either every post on the way
-      (parent, grandparent, root) is by the author (a self-thread), or one
-      of those authors other than the reply's author is the reader or
-      followed. "Followed" is `author.viewer.following` as the AppView
-      sent it. The grandparent is `reply.grandparentAuthor`.
-6. **Context.** A reply that shows carries `bluesky.replyContext`
+   `getPreferences` reads it (`feedViewPrefs.home`): `hideReplies`,
+   `hideReposts`, `hideQuotePosts`, each off when missing or not a boolean.
+   `hideRepliesByUnfollowed` and `hideRepliesByLikeCount` are legacy:
+   bsky.app ignores them, and so does Caribou. The client keeps the prefs
+   for 10 minutes, so a change made in bsky.app shows on the first Home
+   read after that. A failed read (or an agent without `getPreferences`)
+   uses the defaults for that page only and keeps nothing: the next page
+   reads again.
+2. **Muted threads.** A post whose `viewer.threadMuted` is true never shows,
+   as a post, a reply or a repost. This wins over rule 3: the reader chose
+   to mute it.
+3. **The reader's own.** A post by the reader, a repost by the reader, and
+   a reply to a post by the reader show under every pref.
+4. **Reposts.** `hideReposts` hides every repost entry. `hideQuotePosts`
+   also hides a repost of a quote post. A repost that shows is the repost
+   alone: no reply context, never joined to a thread.
+5. **Quote posts.** `hideQuotePosts` hides a post that embeds a post
+   (`#record` or `#recordWithMedia` whose record is a post view, or a post
+   that is not there any more: not found, blocked, detached).
+6. **Replies.** A reply is a post whose record has `reply`. In order:
+   1. **Orphans never show:** the entry has no `reply`, or its parent or
+      root is not a post view (deleted, blocked).
+   2. `hideReplies` hides it, unless it is a **self-thread**: the parent,
+      the grandparent (`reply.grandparentAuthor`) and the root are all by
+      the reply's author.
+   3. Otherwise it shows only when its author is the reader or followed,
+      and it is a self-thread, or an author on the way (parent,
+      grandparent, root) other than the reply's author is the reader or
+      followed. "Followed" is `author.viewer.following` as the AppView sent
+      it.
+7. **Context.** A reply that shows carries `bluesky.replyContext`
    (`StatusBluesky` in `mastodon-client`): `root` (the root post, or
    `null` when the root is the parent or is not a post view), `parent`
    (the parent post), and `gap` (true when posts are skipped between the
@@ -643,6 +654,19 @@ Paging and catch-up read the AppView's pages as before; the filter runs on
 the mapped page. A page the filter empties keeps its cursor (rule "One bad
 post never fails a page"), so the store reads on. Showing a thread once is
 the timeline's job (`apps/caribou` README, "Bluesky views").
+
+The tabs' saved feeds and Home's prefs share one `getPreferences` read when
+both are in flight at once. Otherwise each reads on its own.
+
+**Where Caribou differs from bsky.app:**
+
+- Rule 3. bsky.app does not exempt the reader's own posts or replies to
+  the reader from the prefs. Caribou does: the issue asked for it.
+- Rule 5. bsky.app counts any record embed as a quote post, a feed, list
+  or starter pack card too. Caribou counts only an embedded post: a card
+  for a feed is not a quote.
+- A context post that moderation hides: bsky.app shows a placeholder;
+  Caribou shows nothing in its place (the reply stays).
 
 ## Search (#192, #193)
 

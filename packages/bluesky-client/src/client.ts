@@ -374,12 +374,17 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
   }
 
   // The reader's Home prefs, read once and again after HOME_PREFS_TTL_MS.
-  // A failed read, or an agent without `getPreferences`, is the defaults.
+  // A failed read, or an agent without `getPreferences`, is the defaults for
+  // this page only: nothing is kept, so the next page reads again.
   function readHomePrefs(): Promise<HomeFeedPrefs> {
     if (homePrefs && Date.now() - homePrefs.at < HOME_PREFS_TTL_MS) return homePrefs.prefs
-    const read = preferences().then(homeFeedPrefs, () => ({ ...HOME_FEED_DEFAULTS }))
-    homePrefs = { at: Date.now(), prefs: read }
-    return read
+    const kept: { at: number; prefs: Promise<HomeFeedPrefs> } = { at: Date.now(), prefs: Promise.resolve({ ...HOME_FEED_DEFAULTS }) }
+    kept.prefs = preferences().then(homeFeedPrefs, () => {
+      if (homePrefs === kept) homePrefs = null
+      return { ...HOME_FEED_DEFAULTS }
+    })
+    homePrefs = kept
+    return kept.prefs
   }
 
   function posts(views: readonly AppBskyFeedDefs.PostView[], coverage: BlueskyCoverage): Status[] {
