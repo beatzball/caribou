@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { activeUserKey } from '../users.js'
 import type { Account, Status } from '@beatzball/caribou-mastodon-client'
 import {
   statusCache, accountCache, cacheStatus, cacheAccount, deletedStatusIds, forgetReaderFields, mergeStatus, postRecords, readerQuote,
-  readerFiltered, updateStatus,
+  readerFiltered, readSource, updateStatus,
 } from '../caches.js'
 
 function makeStatus(id: string, fav = false): Status {
@@ -304,5 +305,63 @@ describe('readerFiltered', () => {
     cacheStatus({ ...makeStatus('p'), filtered: hide } as unknown as Status)
     forgetReaderFields()
     expect(readerFiltered('p')).toBeUndefined()
+  })
+})
+
+describe('Bluesky Home reply context (#275)', () => {
+  const bsky = (id: string) => ({
+    ...makeStatus(id),
+    bluesky: { uri: id, cid: 'c', likeUri: null, repostUri: null, replyRef: null, replyDisabled: false, embeddingDisabled: false, labels: [], moderation: null, viewerOf: 'did:plc:reader@bsky' },
+  }) as unknown as Status
+  const leaf = () => {
+    const s = bsky('at://did:plc:alice/app.bsky.feed.post/a2')
+    return { ...s, bluesky: { ...s.bluesky!, replyContext: { root: bsky('at://did:plc:alice/app.bsky.feed.post/a0'), parent: bsky('at://did:plc:carol/app.bsky.feed.post/c1'), gap: false } } } as Status
+  }
+
+  it('cacheStatus caches the root and the parent under their own ids', () => {
+    cacheStatus(leaf())
+    expect(statusCache.value.has('at://did:plc:alice/app.bsky.feed.post/a0')).toBe(true)
+    expect(statusCache.value.has('at://did:plc:carol/app.bsky.feed.post/c1')).toBe(true)
+    // So a like on a context card has a cached copy to change.
+    updateStatus('at://did:plc:carol/app.bsky.feed.post/c1', { favourited: true })
+    expect(statusCache.value.get('at://did:plc:carol/app.bsky.feed.post/c1')?.favourited).toBe(true)
+  })
+
+  it('a plain copy of a shown reply keeps its context: as the parent of a newer reply, from a thread, from page data', () => {
+    const A = 'at://did:plc:alice/app.bsky.feed.post/a2'
+    cacheStatus(leaf())
+    // A newer reply B answers A: caching B caches a plain copy of A.
+    const b = bsky('at://did:plc:carol/app.bsky.feed.post/c3')
+    cacheStatus({ ...b, bluesky: { ...b.bluesky!, replyContext: { root: bsky('at://did:plc:alice/app.bsky.feed.post/a0'), parent: bsky(A), gap: true } } } as Status)
+    expect(statusCache.value.get(A)?.bluesky?.replyContext?.parent.id).toBe('at://did:plc:carol/app.bsky.feed.post/c1')
+    // A thread's copy (cacheStatus) and page data (mergeStatus) of A.
+    cacheStatus(bsky(A))
+    expect(statusCache.value.get(A)?.bluesky?.replyContext?.parent.id).toBe('at://did:plc:carol/app.bsky.feed.post/c1')
+    mergeStatus({ ...bsky(A), favouritesCount: 3 } as Status)
+    expect(statusCache.value.get(A)?.bluesky?.replyContext?.root?.id).toBe('at://did:plc:alice/app.bsky.feed.post/a0')
+    expect(statusCache.value.get(A)?.favouritesCount).toBe(3)
+  })
+
+  it('forgetReaderFields scrubs the reader fields of the context copies too', () => {
+    const l = leaf()
+    const ctx = l.bluesky!.replyContext!
+    // Fetched by the active reader, so the copies keep the reader's fields.
+    activeUserKey.value = 'did:plc:reader@bsky'
+    cacheStatus({ ...l, bluesky: { ...l.bluesky!, replyContext: { ...ctx, parent: { ...ctx.parent, favourited: true } } } } as Status,
+      readSource('did:plc:reader@bsky'))
+    expect(statusCache.value.get('at://did:plc:alice/app.bsky.feed.post/a2')!.bluesky!.replyContext!.parent.bluesky!.viewerOf).toBe('did:plc:reader@bsky')
+    forgetReaderFields()
+    const kept = statusCache.value.get('at://did:plc:alice/app.bsky.feed.post/a2')!.bluesky!.replyContext!
+    expect(kept.parent.bluesky!.viewerOf).toBeNull()
+    expect(kept.root!.bluesky!.viewerOf).toBeNull()
+    expect(kept.parent.favourited).toBeUndefined()
+    activeUserKey.value = null
+  })
+
+  it('mergeStatus caches them too, and keeps a newer edit of a context post', () => {
+    cacheStatus({ ...bsky('at://did:plc:carol/app.bsky.feed.post/c1'), content: '<p>new</p>', editedAt: '2026-11-10T12:00:00Z' } as Status)
+    const merged = mergeStatus(leaf())
+    expect(statusCache.value.has('at://did:plc:alice/app.bsky.feed.post/a0')).toBe(true)
+    expect(merged.bluesky!.replyContext!.parent.content).toBe('<p>new</p>')
   })
 })

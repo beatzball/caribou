@@ -139,10 +139,27 @@ function settleQuote(
   return out
 }
 
+// A Bluesky Home reply's context posts (#275; README, "Bluesky Home
+// context") are cached under their own ids by the same rules (`put`), as a
+// quoted post is: a like, an edit or a delete of one reaches its card.
+//
+// A copy with no context (a thread's, a profile's, or this post as the
+// parent of a newer reply) is the same post read elsewhere: it keeps the
+// context the cached copy has, so the Home slice that shows it stays whole.
+function settleContext(fresh: Status, put: (s: Status) => Status): Status {
+  const ctx = fresh.bluesky?.replyContext
+  if (!ctx) {
+    const had = statusCache.peek().get(fresh.id)?.bluesky?.replyContext
+    return had && fresh.bluesky ? { ...fresh, bluesky: { ...fresh.bluesky, replyContext: had } } : fresh
+  }
+  const replyContext = { ...ctx, root: ctx.root ? put(ctx.root) : null, parent: put(ctx.parent) }
+  return { ...fresh, bluesky: { ...fresh.bluesky!, replyContext } }
+}
+
 function cacheOne(status: Status, source: CopySource): Status {
   const put = (s: Status) => cacheOne(s, source)
   const cache = statusCache.peek()
-  let out = settleQuote(protectVotes(protectEdits(status)), put)
+  let out = settleContext(settleQuote(protectVotes(protectEdits(status)), put), put)
   out = settleViewer(out, knownCopy(out.id, cache), source)
   if (out.reblog) {
     const inner = settleQuote(out.reblog, put)
@@ -283,7 +300,7 @@ function merge(fresh: Status, source: CopySource): Status {
   if (current === fresh) return current
   fresh = protectEdits(fresh)
   // The quote first: its record reads the fresh copy's own `filtered`.
-  let next = settleQuote(fresh, put)
+  let next = settleContext(settleQuote(fresh, put), put)
   next = current ? keepReaderFields(next, current, source) : settleViewer(next, undefined, source)
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog
@@ -307,6 +324,13 @@ function withoutReaderFields(status: Status): Status {
     out.poll = poll
   }
   if (status.reblog) out.reblog = withoutReaderFields(status.reblog)
+  const ctx = status.bluesky?.replyContext
+  if (ctx) {
+    out.bluesky = {
+      ...(out.bluesky as object),
+      replyContext: { ...ctx, root: ctx.root ? withoutReaderFields(ctx.root) : null, parent: withoutReaderFields(ctx.parent) },
+    }
+  }
   const quoted = quotedIn(status)
   if (quoted) out.quote = { ...status.quote!, quotedStatus: withoutReaderFields(quoted) }
   return out as unknown as Status

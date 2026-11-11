@@ -84,6 +84,10 @@ const CID = 'bafyreidsemiehpaya7tpoqfsgxvxkepmwmzfljvdovbvmmiznxuks5injm'
 const view = (p: { uri: string }) => ({
   $type: 'app.bsky.feed.defs#postView', ...JSON.parse(JSON.stringify(p).replace(/"bafy3k\w+"/g, `"${CID}"`)),
 })
+// The post as the reader sees it on Home: the reader follows its author.
+const followed = <T extends { author: object }>(p: T): T => ({
+  ...p, author: { ...p.author, viewer: { ...(p.author as { viewer?: object }).viewer, following: `at://${ALICE}/app.bsky.graph.follow/f1` } },
+})
 const byUri = new Map(carolThreadPosts.map((p) => [p.uri, view(p)]))
 const [rootPost, , replyPost] = carolThreadPosts
 const readerThread = {
@@ -95,8 +99,14 @@ const readerThread = {
 }
 const pds: XrpcAnswer = (method, url) => {
   switch (method) {
+    // Home shows a reply when the reader follows its author and the author
+    // it answers (#275, bluesky-client README "Home"), as bsky.app does.
     case 'app.bsky.feed.getTimeline':
-      return { body: url.searchParams.get('cursor') ? { feed: [] } : { feed: [{ post: view(carolFocus) }] }, headers: COVERED }
+      return {
+        body: url.searchParams.get('cursor') ? { feed: [] }
+          : { feed: [{ post: followed(view(carolFocus)), reply: { root: followed(view(rootPost!)), parent: followed(view(rootPost!)) } }] },
+        headers: COVERED,
+      }
     case 'app.bsky.feed.getPosts':
       return { body: { posts: url.searchParams.getAll('uris').flatMap((u) => byUri.get(u) ?? []) }, headers: COVERED }
     case 'app.bsky.feed.getPostThread':
