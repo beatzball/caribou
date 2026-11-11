@@ -92,7 +92,11 @@ export function replaceDidRoute(
   win.history.replaceState(win.history.state, '', `/@${account.acct}${rest}${search}${hash}`)
 }
 
-/** The AT URI of the post `/@<actor>/<rkey>` names. The AppView resolves a handle in it. */
+/**
+ * The AT URI of the post `/@<actor>/<rkey>` names. Pass a DID for a
+ * signed-in read: the AppView resolves a handle in `getPostThread` but
+ * answers `getPosts` with a 500 for one (#271).
+ */
 export function blueskyPostUri(actor: string, rkey: string): string {
   return `at://${actor}/app.bsky.feed.post/${rkey}`
 }

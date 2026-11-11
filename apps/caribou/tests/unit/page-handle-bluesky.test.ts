@@ -4,7 +4,7 @@ import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import { activeUserKey, clearKeptAlive, users } from '@beatzball/caribou-state'
 import { blueskyClients } from '../../components/__tests__/_bluesky-clients.js'
 import {
-  ALICE, author, blueskyClient, fakeAgent, signInBluesky,
+  ALICE, author, blueskyClient, fakeAgent, post, publicPost, signInBluesky, type FakeAgent,
 } from '../../components/__tests__/_bluesky-helpers.js'
 
 // The profile and thread pages swap in a client render for a Bluesky route
@@ -34,14 +34,20 @@ vi.mock('@beatzball/caribou-mastodon-client', async (importOriginal) => {
 const PROFILE = { ...author(ALICE), description: 'bio', followersCount: 1, followsCount: 2, postsCount: 3 }
 const SHELL = { instance: 'example.social', source: 'cookie' }
 
-function signIn() {
-  signInBluesky(blueskyClient(fakeAgent({
+function signIn(overrides: Partial<FakeAgent> = {}): FakeAgent {
+  const agent = fakeAgent({
     getProfile: vi.fn(async () => ({ data: PROFILE })),
     getAuthorFeed: vi.fn(async () => ({ data: { feed: [] } })),
     getPosts: vi.fn(async () => ({ data: { posts: [] } })),
     getPostThread: vi.fn(async () => ({ data: { thread: { $type: 'app.bsky.feed.defs#notFoundPost', notFound: true } } })),
-  })))
+    ...overrides,
+  })
+  signInBluesky(blueskyClient(agent))
+  return agent
 }
+
+// Every URI the client sent to getPosts.
+const askedPosts = (agent: FakeAgent) => agent.getPosts.mock.calls.flatMap(([q]) => (q as { uris: string[] }).uris)
 
 // The first render (the one that hydrates the server's markup) and the
 // render after mount, as tag names with their attributes.
@@ -123,11 +129,59 @@ describe('<page-handle> for a Bluesky route', () => {
 describe('<page-handle-statusid> for a Bluesky route', () => {
   const threadData = (handle: string) => ({ kind: 'error', message: '', shell: SHELL, handle, statusId: '3k1' })
 
-  it('swaps in the client thread by AT URI after the first render', async () => {
-    signIn()
+  const DID_URI = `at://${ALICE}/app.bsky.feed.post/3k1`
+
+  // README, "Bluesky views": the thread's id is always the DID form (#271).
+  it('rule 3: a handle route looks the DID up, then swaps in the thread by its DID URI', async () => {
+    const agent = signIn()
     const { first, after } = await renders('page-handle-statusid', threadData('alice.example.com'))
     expect(first).toBe('article role=alert')
-    expect(after).toBe('caribou-thread statusid=at://alice.example.com/app.bsky.feed.post/3k1')
+    expect(after).toBe(`caribou-thread statusid=${DID_URI}`)
+    expect(agent.getProfile).toHaveBeenCalledWith({ actor: 'alice.example.com' })
+  })
+
+  it('rule 3: a handle route sends no handle URI to getPosts (the AppView answers 500)', async () => {
+    const agent = signIn()
+    await renders('page-handle-statusid', threadData('alice.example.com'))
+    expect(askedPosts(agent).length).toBeGreaterThan(0)
+    expect(askedPosts(agent).every((u) => u.startsWith(`at://${ALICE}/`))).toBe(true)
+  })
+
+  it('rule 2: a DID route needs no lookup', async () => {
+    const agent = signIn()
+    const { after } = await renders('page-handle-statusid', threadData(ALICE))
+    expect(after).toBe(`caribou-thread statusid=${DID_URI}`)
+    expect(agent.getProfile).not.toHaveBeenCalled()
+  })
+
+  it('rule 1: a handle route whose server thread loaded uses that thread\'s DID URI, with no lookup', async () => {
+    const agent = signIn()
+    const focused = publicPost({ ...post(), uri: DID_URI })
+    const ok = { kind: 'ok', focused, ancestors: [], descendants: [], shell: SHELL, handle: 'alice.example.com', statusId: '3k1' }
+    const { after } = await renders('page-handle-statusid', ok)
+    expect(after).toBe(`caribou-thread statusid=${DID_URI}`)
+    expect(agent.getProfile).not.toHaveBeenCalled()
+  })
+
+  it('rule 3: while the lookup runs, the loading shell, not the server\'s alert', async () => {
+    let answer: (v: unknown) => void = () => {}
+    signIn({ getProfile: vi.fn(() => new Promise((r) => { answer = r })) })
+    const { first, after } = await renders('page-handle-statusid', threadData('alice.example.com'))
+    expect(first).toBe('article role=alert')
+    expect(after).toBe('article role=status aria-busy=true')
+    answer({ data: PROFILE })
+  })
+
+  it('rule 3: a failed lookup says the post could not load, and fetches no post', async () => {
+    // A deferred page starts as the loading shell: the alert comes only
+    // from the failed lookup.
+    const agent = signIn({ getProfile: vi.fn(async () => { throw new Error('profile not found') }) })
+    history.replaceState(null, '', '/@alice.example.com/3k1')
+    const deferred = { kind: 'deferred', appview: 'http://appview.test', shell: SHELL, handle: '', statusId: '' }
+    const { first, after } = await renders('page-handle-statusid', deferred)
+    expect(first).toBe('article role=status aria-busy=true')
+    expect(after).toBe('article role=alert')
+    expect(agent.getPosts).not.toHaveBeenCalled()
   })
 })
 
@@ -214,6 +268,6 @@ describe('a deferred page with a Bluesky account (#187)', () => {
     history.replaceState(null, '', '/@alice.example.com/3k1')
     const { first, after } = await renders('page-handle-statusid', { kind: 'deferred', appview: 'http://appview.test', shell: SHELL, handle: '', statusId: '' })
     expect(first).toBe('article role=status aria-busy=true')
-    expect(after).toBe('caribou-thread statusid=at://alice.example.com/app.bsky.feed.post/3k1')
+    expect(after).toBe(`caribou-thread statusid=at://${ALICE}/app.bsky.feed.post/3k1`)
   })
 })
