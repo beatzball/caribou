@@ -450,6 +450,21 @@ export interface StatusBluesky {
    * so a post can show both. Missing means none.
    */
   recordCard?: PreviewCard | null
+  /**
+   * The posts a Home reply is drawn under (#275; `bluesky-client` README,
+   * "Home: feed prefs and reply context"). Set only on a Home reply that
+   * shows; missing everywhere else.
+   */
+  replyContext?: BlueskyReplyContext
+}
+
+/** A Home reply's context: the root and the parent above it. */
+export interface BlueskyReplyContext {
+  /** The thread's root, or null when it is the parent or not a post. */
+  root: Status | null
+  parent: Status
+  /** Posts are skipped between the root and the parent. */
+  gap: boolean
 }
 
 // ------------------------------------------------------- bluesky compose

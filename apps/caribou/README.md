@@ -546,6 +546,30 @@ Mastodon post, account or client renders as before.
   The store keeps feed order (`timelineOrder()` is `null`). When a catch-up
   does not meet the top post (`gap`), the banner says "Many new posts", and
   applying it replaces the list.
+- **Home shows threads as slices** (#275), as bsky.app's Following feed
+  does. Which entries come in (the reader's feed prefs) is the
+  `bluesky-client` README, "Home: feed prefs and reply context". The
+  timeline then draws them:
+  1. A reply with `bluesky.replyContext` is one slice, one `<li>`: the
+     root (when there is one), a "…" marker when posts are skipped, the
+     parent, then the reply. Oldest at the top, so it reads in order.
+  2. Each post in a slice is a full `<caribou-status-card>`, with its own
+     article, name, moderation covers, actions and time link (to its own
+     thread). The cards above the reply get `joined`: a line runs from
+     the avatar down to the next card, and there is no rule between them.
+  3. A context card that a filter, mute or block hides takes only its own
+     place; the reply still shows. A hidden reply hides the whole slice.
+  4. **One slice per thread.** A slice's thread is its root's URI (a plain
+     post is its own root). Over the whole list, every page together, only
+     the first (newest) entry of a thread shows; a later one, on this page
+     or an older one, is not drawn. A repost is never part of a thread: it
+     is its own slice.
+  5. The key of a slice is the reply's id, so a poll leaves the cards
+     alone. When a newer entry of a thread comes in, it takes the top, and
+     the older slice goes.
+  Home only, Bluesky only: a Mastodon post has no `bluesky` field, and is
+  keyed by its id as before. Home for Bluesky renders on the client only,
+  so the server render is not touched.
 - Profile tabs are posts, replies and media (`getAuthorFeed` filters, in the
   client). The thread is `getPostThread`.
 - The profile and thread pages render on the server as today. After

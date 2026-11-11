@@ -34,6 +34,7 @@ own files; ask in your report for a change in another's.
 | `src/map/post.ts` | `mapPost(view, ctx) → Status` | #177 |
 | `src/map/account.ts` | `mapAccount(view) → Account`, `mapRelationship(view) → Relationship` | #177 |
 | `src/map/feed-entry.ts` | `feedEntryId(entry)`, `mapFeedEntry(entry, ctx) → Status` | #177 |
+| `src/home-feed.ts` | `homeFeedPrefs`, `showInHome`, `replyContextViews`: Home's feed prefs and reply context (server-safe) | #275 |
 | `src/facets.ts` | `renderFacets(text, facets) → html` | #178 |
 | `src/embeds.ts` | `mapEmbed(embed, ctx, postUri?) → { mediaAttachments, card, recordCard, quote }` | #179 |
 | `src/no-unauthenticated.ts` | `isNoUnauthenticated(actor)`, `isProvenVisible(actor)` (the signed-out allow-list), plain data so mappers can call them; the root and `./moderation` export both | #179, #180, #186 |
@@ -600,6 +601,48 @@ definitions). It imports the SDK for types only; `./browser` exports it.
   `not_found`, 429 → `rate_limited` with `retryAfter` from
   `ratelimit-reset`, 5xx → `server_error`, no answer → `unreachable`.
 - **Dedup:** two equal reads in flight share one request.
+
+## Home: feed prefs and reply context (#275)
+
+Home (`getTimeline`) does what bsky.app's Following feed does. Custom
+feeds, lists, profiles and search are unchanged. The rules, in order:
+
+1. **Prefs.** The reader's `feedViewPref` for `feed: "home"`, as the SDK's
+   `getPreferences` reads it (`feedViewPrefs.home`). A missing pref, a
+   missing field, an agent without `getPreferences`, or a failed read uses
+   the defaults: `hideReplies` off, `hideRepliesByUnfollowed` on,
+   `hideRepliesByLikeCount` 0, `hideReposts` off, `hideQuotePosts` off.
+   The client reads the prefs once and reads them again after 10 minutes.
+2. **The reader's own.** A post by the reader, a repost by the reader, and
+   a reply to a post by the reader always show. No pref hides them.
+3. **Reposts.** `hideReposts` hides every repost entry. A repost that
+   shows is the repost alone: no reply context, never joined to a thread.
+4. **Quote posts.** `hideQuotePosts` hides a post that embeds a post
+   (`#record` or `#recordWithMedia` with a post view, or a post that is
+   not there any more). A reposted quote is a repost: rule 3 decides it.
+5. **Replies.** A reply is a post whose record has `reply`. In order:
+   1. `hideReplies` hides it.
+   2. `hideRepliesByLikeCount` > 0 hides it when its `likeCount` is lower.
+   3. `hideRepliesByUnfollowed` hides it unless all of these hold: the
+      author is the reader or followed; the parent and the root are post
+      views (not deleted, not blocked); and either every post on the way
+      (parent, grandparent, root) is by the author (a self-thread), or one
+      of those authors other than the reply's author is the reader or
+      followed. "Followed" is `author.viewer.following` as the AppView
+      sent it. The grandparent is `reply.grandparentAuthor`.
+6. **Context.** A reply that shows carries `bluesky.replyContext`
+   (`StatusBluesky` in `mastodon-client`): `root` (the root post, or
+   `null` when the root is the parent or is not a post view), `parent`
+   (the parent post), and `gap` (true when posts are skipped between the
+   root and the parent: the parent's own parent is not the root, or the
+   root is not shown). Each context post is mapped and moderated like any
+   post, with the page's coverage. With no parent post view there is no
+   context.
+
+Paging and catch-up read the AppView's pages as before; the filter runs on
+the mapped page. A page the filter empties keeps its cursor (rule "One bad
+post never fails a page"), so the store reads on. Showing a thread once is
+the timeline's job (`apps/caribou` README, "Bluesky views").
 
 ## Search (#192, #193)
 

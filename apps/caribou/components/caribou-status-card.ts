@@ -295,6 +295,15 @@ export class CaribouStatusCard extends LitElement {
     article[data-variant="focused"] .status-content { font-size: 1.1rem; }
     article[data-variant="ancestor"] { opacity: 0.75; }
     article[data-variant="descendant"] { margin-inline-start: var(--space-4); }
+    /* A post above a Bluesky Home reply (#275): no rule below it, and a
+       line from its avatar down to the next post's avatar. */
+    :host([joined]) article { position: relative; border-bottom: none; }
+    :host([joined]) article::before {
+      content: ''; position: absolute; inline-size: 2px;
+      inset-inline-start: calc(var(--space-4) + 23px);
+      inset-block: calc(var(--space-4) + 48px + var(--space-1)) calc(-1 * var(--space-4) + var(--space-1));
+      background: var(--border);
+    }
     time { color: var(--fg-muted); font-size: 0.875rem; }
     .permalink {
       color: inherit; text-decoration: none;
@@ -414,6 +423,8 @@ export class CaribouStatusCard extends LitElement {
   // (bookmarks). In every context but account, a post by an account the
   // reader mutes or blocks is hidden too.
   @property({ attribute: 'filter-context' }) filterContext: FilterContext | '' = ''
+  // Drawn above a Bluesky Home reply, joined to it (#275). Style only.
+  @property({ type: Boolean, reflect: true }) joined = false
 
   // Both start false, so the server and the first client render show the
   // signed-out bar. `bindActions` sets them after mount.

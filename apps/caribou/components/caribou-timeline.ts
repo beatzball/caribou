@@ -16,6 +16,7 @@ import { STALE_MS, isCachedSnapshot, trackUpdate } from './_page-cache.js'
 import { timelineFilterContext } from './_status-filter.js'
 import { findShell, loadReaderViewFrom } from './_shell.js'
 import { settleSplash } from './_splash.js'
+import { oneSlicePerThread } from './_bluesky-slices.js'
 
 export type TimelineKind = 'home' | 'local' | 'public' | 'bookmarks' | 'hashtag' | 'list' | 'feed'
 
@@ -59,6 +60,17 @@ export class CaribouTimeline extends LitElement {
     ul { list-style: none; margin: 0; padding: 0; }
     /* A card hidden by a filter, a mute or a block takes its row with it. */
     li:has(> caribou-status-card[hidden]) { display: none; }
+    /* A Bluesky Home slice (README, "Bluesky views"): the posts above the
+       reply, joined to it by the line their cards draw. */
+    .gap {
+      display: flex; align-items: center; min-block-size: 2rem;
+      padding-inline-start: calc(var(--space-4) + 24px - 0.5ch);
+      color: var(--fg-muted);
+    }
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip-path: inset(50%); white-space: nowrap;
+    }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
     .failed { display: flex; align-items: center; gap: var(--space-2); padding-inline-end: var(--space-4); }
@@ -275,7 +287,7 @@ export class CaribouTimeline extends LitElement {
     const button = e.currentTarget as HTMLElement
     const hadFocus = this.shadowRoot?.activeElement === button
     const older = this.failedOlder
-    const before = this.statuses.length
+    const before = this.shown(this.statuses).length
     this.retrying = { older }
     try {
       await store.retry()
@@ -322,7 +334,8 @@ export class CaribouTimeline extends LitElement {
     if (this.loading && statuses.length === 0) {
       return html`<div class="notice">${this.kind === 'bookmarks' ? 'Loading your bookmarks…' : 'Loading your timeline…'}</div>`
     }
-    const last = statuses[statuses.length - 1]
+    const shown = this.shown(statuses)
+    const last = shown[shown.length - 1]
     const context = timelineFilterContext(this.kind) ?? ''
     // A list ends only on a null cursor: an empty page can have more behind
     // it (README, "Bluesky views"). The empty notice waits for the real end;
@@ -350,8 +363,8 @@ export class CaribouTimeline extends LitElement {
           @apply-new-posts=${this.onApplyNewPosts}
         ></caribou-new-posts-banner>
         <ul>
-          ${repeat(statuses, (s) => s.id, (s) => html`
-            <li><caribou-status-card data-status-id=${s.id} .status=${s}
+          ${repeat(shown, (s) => s.id, (s) => html`
+            <li>${this.renderContext(s, context)}<caribou-status-card data-status-id=${s.id} .status=${s}
               filter-context=${context}></caribou-status-card></li>
           `)}
         </ul>
@@ -363,6 +376,32 @@ export class CaribouTimeline extends LitElement {
           : nothing}
       </div>
     `
+  }
+
+  // Home only: one slice per thread (README, "Bluesky views"). Kept while
+  // the list is the same array, so a quiet poll does not build a new one.
+  private shownFrom: readonly Status[] | null = null
+  private shownList: readonly Status[] = []
+  private shown(statuses: readonly Status[]): readonly Status[] {
+    if (this.kind !== 'home') return statuses
+    if (statuses !== this.shownFrom) {
+      this.shownFrom = statuses
+      this.shownList = oneSlicePerThread(statuses)
+    }
+    return this.shownList
+  }
+
+  // The root, a gap, and the parent of a Bluesky Home reply, oldest first.
+  // Each is a full card of its own; `joined` draws the line down to the
+  // next one.
+  private renderContext(s: Status, context: string) {
+    const ctx = this.kind === 'home' && !s.reblog ? s.bluesky?.replyContext : undefined
+    if (!ctx) return nothing
+    const card = (post: Status) => html`<caribou-status-card joined data-status-id=${post.id} .status=${post}
+      filter-context=${context}></caribou-status-card>`
+    return html`<div class="context">${ctx.root ? card(ctx.root) : nothing}${ctx.gap
+      ? html`<div class="gap"><span aria-hidden="true">…</span><span class="visually-hidden">Earlier replies not shown</span></div>`
+      : nothing}${card(ctx.parent)}</div>`
   }
 
   private renderFailed() {

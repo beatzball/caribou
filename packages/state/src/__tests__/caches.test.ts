@@ -306,3 +306,30 @@ describe('readerFiltered', () => {
     expect(readerFiltered('p')).toBeUndefined()
   })
 })
+
+describe('Bluesky Home reply context (#275)', () => {
+  const bsky = (id: string) => ({
+    ...makeStatus(id),
+    bluesky: { uri: id, cid: 'c', likeUri: null, repostUri: null, replyRef: null, replyDisabled: false, embeddingDisabled: false, labels: [], moderation: null, viewerOf: 'did:plc:reader@bsky' },
+  }) as unknown as Status
+  const leaf = () => {
+    const s = bsky('at://did:plc:alice/app.bsky.feed.post/a2')
+    return { ...s, bluesky: { ...s.bluesky!, replyContext: { root: bsky('at://did:plc:alice/app.bsky.feed.post/a0'), parent: bsky('at://did:plc:carol/app.bsky.feed.post/c1'), gap: false } } } as Status
+  }
+
+  it('cacheStatus caches the root and the parent under their own ids', () => {
+    cacheStatus(leaf())
+    expect(statusCache.value.has('at://did:plc:alice/app.bsky.feed.post/a0')).toBe(true)
+    expect(statusCache.value.has('at://did:plc:carol/app.bsky.feed.post/c1')).toBe(true)
+    // So a like on a context card has a cached copy to change.
+    updateStatus('at://did:plc:carol/app.bsky.feed.post/c1', { favourited: true })
+    expect(statusCache.value.get('at://did:plc:carol/app.bsky.feed.post/c1')?.favourited).toBe(true)
+  })
+
+  it('mergeStatus caches them too, and keeps a newer edit of a context post', () => {
+    cacheStatus({ ...bsky('at://did:plc:carol/app.bsky.feed.post/c1'), content: '<p>new</p>', editedAt: '2026-11-10T12:00:00Z' } as Status)
+    const merged = mergeStatus(leaf())
+    expect(statusCache.value.has('at://did:plc:alice/app.bsky.feed.post/a0')).toBe(true)
+    expect(merged.bluesky!.replyContext!.parent.content).toBe('<p>new</p>')
+  })
+})

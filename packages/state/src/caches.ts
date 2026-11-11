@@ -139,10 +139,20 @@ function settleQuote(
   return out
 }
 
+// A Bluesky Home reply's context posts (#275; README, "Bluesky Home
+// context") are cached under their own ids by the same rules (`put`), as a
+// quoted post is: a like, an edit or a delete of one reaches its card.
+function settleContext(fresh: Status, put: (s: Status) => Status): Status {
+  const ctx = fresh.bluesky?.replyContext
+  if (!ctx) return fresh
+  const replyContext = { ...ctx, root: ctx.root ? put(ctx.root) : null, parent: put(ctx.parent) }
+  return { ...fresh, bluesky: { ...fresh.bluesky!, replyContext } }
+}
+
 function cacheOne(status: Status, source: CopySource): Status {
   const put = (s: Status) => cacheOne(s, source)
   const cache = statusCache.peek()
-  let out = settleQuote(protectVotes(protectEdits(status)), put)
+  let out = settleContext(settleQuote(protectVotes(protectEdits(status)), put), put)
   out = settleViewer(out, knownCopy(out.id, cache), source)
   if (out.reblog) {
     const inner = settleQuote(out.reblog, put)
@@ -283,7 +293,7 @@ function merge(fresh: Status, source: CopySource): Status {
   if (current === fresh) return current
   fresh = protectEdits(fresh)
   // The quote first: its record reads the fresh copy's own `filtered`.
-  let next = settleQuote(fresh, put)
+  let next = settleContext(settleQuote(fresh, put), put)
   next = current ? keepReaderFields(next, current, source) : settleViewer(next, undefined, source)
   if (fresh.reblog) {
     const inner = cache.get(fresh.reblog.id) ?? current?.reblog

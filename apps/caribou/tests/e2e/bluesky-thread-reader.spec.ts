@@ -95,8 +95,16 @@ const readerThread = {
 }
 const pds: XrpcAnswer = (method, url) => {
   switch (method) {
+    // The reader follows no one here, so Home shows this reply only with
+    // `hideRepliesByUnfollowed` off (#275, bluesky-client README "Home").
+    case 'app.bsky.actor.getPreferences':
+      return { body: { preferences: [{ $type: 'app.bsky.actor.defs#feedViewPref', feed: 'home', hideRepliesByUnfollowed: false }] } }
     case 'app.bsky.feed.getTimeline':
-      return { body: url.searchParams.get('cursor') ? { feed: [] } : { feed: [{ post: view(carolFocus) }] }, headers: COVERED }
+      return {
+        body: url.searchParams.get('cursor') ? { feed: [] }
+          : { feed: [{ post: view(carolFocus), reply: { root: view(rootPost!), parent: view(rootPost!) } }] },
+        headers: COVERED,
+      }
     case 'app.bsky.feed.getPosts':
       return { body: { posts: url.searchParams.getAll('uris').flatMap((u) => byUri.get(u) ?? []) }, headers: COVERED }
     case 'app.bsky.feed.getPostThread':

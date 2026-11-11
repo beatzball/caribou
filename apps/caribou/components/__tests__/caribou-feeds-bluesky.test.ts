@@ -167,8 +167,9 @@ describe('<caribou-feed-tabs>', () => {
     const tl = timelineOf(el)!
     expect(tl.kind).toBe('home')
     expect(ids(tl)).toEqual([uri('home')])
-    // Read only: nothing but reads went out.
-    expect(agent.getPreferences).toHaveBeenCalledTimes(1)
+    // Read only: nothing but reads went out. One read for the tabs, one
+    // for Home's feed prefs (#275, bluesky-client README "Home").
+    expect(agent.getPreferences).toHaveBeenCalledTimes(2)
   })
 
   it('keeps Following first even when the reader put it after a feed', async () => {

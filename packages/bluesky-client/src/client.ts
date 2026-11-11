@@ -17,6 +17,7 @@ import type { MapContext } from './map/context.js'
 import { feedEntryId, mapFeedEntry } from './map/feed-entry.js'
 import { mapNotification, notificationPostUri, reasonsFor, type NotificationView } from './map/notification.js'
 import { mapPost } from './map/post.js'
+import { HOME_FEED_DEFAULTS, homeFeedPrefs, replyContextViews, showInHome, type HomeFeedPrefs } from './home-feed.js'
 
 /** What Bluesky supports (spec 6.5). */
 export const BLUESKY_CAPABILITIES: Readonly<Capabilities> = Object.freeze({
@@ -135,6 +136,9 @@ function blobMissing(err: unknown): BlueskyBlobNotFound | null {
   if (e?.error !== 'BlobNotFound' && !/could not find blob/i.test(message)) return null
   return new BlueskyBlobNotFound(message, /baf[a-z0-9]+/.exec(message)?.[0] ?? null)
 }
+
+/** How long the client keeps the reader's Home prefs before it reads them again (README, "Home"). */
+export const HOME_PREFS_TTL_MS = 10 * 60_000
 
 /** Entries per page when the client pages on its own (catch-up). */
 export const CATCH_UP_PAGE_SIZE = 50
@@ -337,6 +341,47 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     return each(feed, (e) => e.post.uri, (e) => mapFeedEntry(e, c))
   }
 
+  // Home (README, "Home: feed prefs and reply context"): the entries the
+  // reader's prefs keep, each reply with the posts it is drawn under.
+  function homeEntries(feed: AppBskyFeedDefs.FeedViewPost[], coverage: BlueskyCoverage, prefs: HomeFeedPrefs): Status[] {
+    const c = ctxFor(coverage)
+    const reader = agent.did ?? ''
+    const shown = feed.filter((e) => showInHome(e, prefs, reader))
+    return each(shown, (e) => e.post.uri, (e) => {
+      const status = mapFeedEntry(e, c)
+      const views = replyContextViews(e)
+      if (!views) return status
+      let context: NonNullable<NonNullable<Status['bluesky']>['replyContext']> | null = null
+      try {
+        context = { root: views.root ? mapPost(views.root, c) : null, parent: mapPost(views.parent, c), gap: views.gap }
+      } catch (err) {
+        // A context post that does not map leaves the reply alone.
+        opts.onMapError?.(err, views.parent.uri)
+      }
+      return context ? { ...status, bluesky: { ...status.bluesky!, replyContext: context } } : status
+    })
+  }
+
+  // One `getPreferences` read, shared by the saved feeds and Home while in
+  // flight. Every answer also sets the Home prefs.
+  let homePrefs: { at: number; prefs: Promise<HomeFeedPrefs> } | null = null
+  async function preferences(): Promise<Awaited<ReturnType<NonNullable<BlueskyAgent['getPreferences']>>>> {
+    if (typeof agent.getPreferences !== 'function') throw new CaribouError('unknown', 'Bluesky agent has no getPreferences')
+    // Shared, not normalized here: each caller does its own error handling.
+    const prefs = await dedup.run('preferences', () => agent.getPreferences!())
+    homePrefs = { at: Date.now(), prefs: Promise.resolve(homeFeedPrefs(prefs)) }
+    return prefs
+  }
+
+  // The reader's Home prefs, read once and again after HOME_PREFS_TTL_MS.
+  // A failed read, or an agent without `getPreferences`, is the defaults.
+  function readHomePrefs(): Promise<HomeFeedPrefs> {
+    if (homePrefs && Date.now() - homePrefs.at < HOME_PREFS_TTL_MS) return homePrefs.prefs
+    const read = preferences().then(homeFeedPrefs, () => ({ ...HOME_FEED_DEFAULTS }))
+    homePrefs = { at: Date.now(), prefs: read }
+    return read
+  }
+
   function posts(views: readonly AppBskyFeedDefs.PostView[], coverage: BlueskyCoverage): Status[] {
     const c = ctxFor(coverage)
     return each(views, (v) => v.uri, (v) => mapPost(v, c))
@@ -352,6 +397,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
     fetchPage: (cursor: string | undefined) => Promise<{ data: { feed: AppBskyFeedDefs.FeedViewPost[]; cursor?: string }; coverage: BlueskyCoverage }>,
     sinceId: string,
     maxPages = CATCH_UP_MAX_PAGES,
+    mapAll: (feed: AppBskyFeedDefs.FeedViewPost[], coverage: BlueskyCoverage) => Status[] = entries,
   ): Promise<TimelinePage> {
     const out: AppBskyFeedDefs.FeedViewPost[] = []
     const covered: BlueskyCoverage[] = []
@@ -360,7 +406,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       const { data, coverage } = await fetchPage(cursor)
       covered.push(coverage)
       const at = data.feed.findIndex((e) => feedEntryId(e) === sinceId)
-      if (at !== -1) return page(entries([...out, ...data.feed.slice(0, at + 1)], common(covered)), undefined)
+      if (at !== -1) return page(mapAll([...out, ...data.feed.slice(0, at + 1)], common(covered)), undefined)
       // An empty page ends the feed: its cursor names nothing.
       if (data.feed.length === 0) {
         cursor = undefined
@@ -371,7 +417,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
       if (!cursor) break
     }
     // Not met: a gap. Its cursor is where the page after it starts.
-    return Object.assign(entries(out, common(covered)), { nextCursor: out.length > 0 ? cursor ?? null : null })
+    return Object.assign(mapAll(out, common(covered)), { nextCursor: out.length > 0 ? cursor ?? null : null })
   }
 
   // Home and a list feed: the same paging and catch-up.
@@ -383,13 +429,19 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
         : agent.getTimeline(q)))
     }
     const key = list ? `list:${list}` : 'home'
+    // Home only: a list feed shows every entry, as before.
+    const mapAll = async () => {
+      if (list) return entries
+      const prefs = await readHomePrefs()
+      return (feed: AppBskyFeedDefs.FeedViewPost[], coverage: BlueskyCoverage) => homeEntries(feed, coverage, prefs)
+    }
     if (params.sinceId) {
       const sinceId = params.sinceId
-      return run(`${key}:since:${sinceId}`, () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId))
+      return run(`${key}:since:${sinceId}`, async () => catchUp((c) => fetchPage(c, CATCH_UP_PAGE_SIZE), sinceId, CATCH_UP_MAX_PAGES, await mapAll()))
     }
     return run(`${key}:${params.cursor ?? ''}:${params.limit ?? ''}`, async () => {
-      const { data, coverage } = await fetchPage(params.cursor, params.limit)
-      return feedPage(data.feed, entries(data.feed, coverage), data.cursor)
+      const [{ data, coverage }, map] = await Promise.all([fetchPage(params.cursor, params.limit), mapAll()])
+      return feedPage(data.feed, map(data.feed, coverage), data.cursor)
     })
   }
 
@@ -421,8 +473,7 @@ export function createBlueskyClient(opts: BlueskyClientOptions): CaribouClient {
 
   async function savedFeeds(): Promise<SavedFeed[]> {
     return run('saved-feeds', async () => {
-      if (typeof agent.getPreferences !== 'function') throw new CaribouError('unknown', 'Bluesky agent has no getPreferences')
-      const prefs = await agent.getPreferences()
+      const prefs = await preferences()
       const seen = new Set<string>()
       const kept: { id: string; kind: SavedFeed['kind']; uri: string; pinned: boolean }[] = []
       for (const it of prefs.savedFeeds ?? []) {

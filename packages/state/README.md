@@ -239,6 +239,13 @@ view with no cross-screen sharing to gain. It still side-effects into the
 cache (so timelines pick up freshly-fetched statuses) but doesn't read
 through it.
 
+**A Bluesky Home reply's context posts are cached too** (#275). A Home
+reply can carry `bluesky.replyContext` (its root and parent, drawn above
+it). `cacheStatus` and `mergeStatus` cache each context post under its own
+id by the same rules, as they do a quoted post, and the reply keeps the
+cached copies. So a like, an edit or a delete of a context post reaches
+its card, and that card reads the cache like any other.
+
 **SSR seeding is opt-in via `opts.initial`, with three slightly different
 shapes.** All three stores accept seed data and skip the redundant
 fetch on construction; the differences are in pagination handoff:
