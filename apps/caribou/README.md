@@ -566,6 +566,18 @@ Mastodon post, account or client renders as before.
      after that. If the lookup fails, the page says it could not load the
      post. A late answer is dropped once the reader has left the page or no
      Bluesky account is active.
+- **A kept thread belongs to one reader** (#273). `<caribou-thread>` keeps
+  the stores of the last threads seen, for a revisit. A Bluesky copy's
+  decision is made for one reader (`viewerOf`), so a Bluesky thread's store
+  is kept per reader (`threadStoreKey`):
+  1. a store seeded with page data is kept under the reader its copies were
+     read for (the server's: none);
+  2. a store the element reads itself is kept under the active Bluesky
+     reader;
+  3. so the signed-in thread that replaces the server's (same DID id) never
+     gets the server's signed-out copies. It reads the thread for the reader.
+  A store read with no Bluesky reader (a Mastodon thread, or signed out) is
+  kept by its id, as before.
 
 **Nav.** With a Bluesky account active the rail hides Local and Public (by
 `capabilities`). Search shows for Bluesky ("Bluesky search and hashtag

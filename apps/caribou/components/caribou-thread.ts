@@ -9,13 +9,33 @@ import {
 import './caribou-status-card.js'
 import { isCachedSnapshot } from './_page-cache.js'
 import { findShell, loadReaderViewFrom } from './_shell.js'
+import { currentBlueskyReader } from './_bluesky-moderation.js'
 
 const MAX_DEPTH = 3
 
 // The stores of the threads the reader saw last. A store holds the order the
 // reader saw — new replies at the end — which the server's copy does not, so
 // a revisit paints that order again. Emptied when the active account changes.
+// Keyed by `threadStoreKey`.
 const stores = createKeepAlive<ThreadStore>(12)
+
+/**
+ * The key a kept thread store goes under (app README, "Bluesky views", #273).
+ * A Bluesky copy's decision belongs to one reader (`viewerOf`), so a Bluesky
+ * thread's store is kept per reader: the server's signed-out copy (reader
+ * null) is never handed to a signed-in reader, whose cards would wait on it
+ * for ever. A store read with no Bluesky reader keys by the id alone, as
+ * before.
+ */
+export function threadStoreKey(statusId: string, reader: string | null): string {
+  return reader === null ? statusId : `${reader} ${statusId}`
+}
+
+// The reader a seeded thread's copies were read for: the focused post's
+// decision's, null for a Mastodon thread or a signed-out copy.
+function seedReader(initial: ThreadInitial): string | null {
+  return initial.focused.bluesky?.viewerOf ?? null
+}
 
 export interface ThreadInitial {
   focused: Status
@@ -114,7 +134,10 @@ export class CaribouThread extends LitElement {
   // the server itself must never fill the module-level status cache.
   protected override firstUpdated() {
     const client = activeClient.value
-    const kept = stores.get(this.statusId)
+    // A seeded store is for the reader its copies were read for; one this
+    // element reads itself is for the active reader.
+    const key = threadStoreKey(this.statusId, this.initial ? seedReader(this.initial) : currentBlueskyReader(client))
+    const kept = stores.get(key)
     if (kept) {
       this.store = kept
       // A snapshot is what the store was filled from; data off the network
@@ -134,7 +157,7 @@ export class CaribouThread extends LitElement {
     } else {
       return
     }
-    stores.set(this.statusId, this.store)
+    stores.set(key, this.store)
     if (this.isConnected) this.bind()
   }
 
