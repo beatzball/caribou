@@ -1,5 +1,28 @@
 # caribou-app
 
+## 0.12.0
+
+### Minor Changes
+
+- [#276](https://github.com/beatzball/caribou/pull/276) [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky Home shows threads as bsky.app does. A reply is drawn with its parent above it, and the root when it differs, joined by a thread line. A "…" marker shows when posts are skipped. Each post keeps its own card, moderation and time link. Each thread shows once, at its newest entry, across pages. Reposts stay on their own. Mastodon is unchanged.
+
+### Patch Changes
+
+- [#266](https://github.com/beatzball/caribou/pull/266) [`4c10394`](https://github.com/beatzball/caribou/commit/4c103947ece5f8c91338fd167d8ac61e21b22d2c) Thanks [@beatzball](https://github.com/beatzball)! - Delete and redraft keep reply and quote limits in step. A redraft opens with the limits the post had. When the limits cannot be read, the toast says so and the post is not deleted. A reply with limits says "Its reply and quote limits are not kept."
+
+- [#265](https://github.com/beatzball/caribou/pull/265) [`a64b5c0`](https://github.com/beatzball/caribou/commit/a64b5c05f4ccd895ef355e3e62d3f5c4d421cfaf) Thanks [@beatzball](https://github.com/beatzball)! - A Bluesky removal or muted-words edit answered while its account was away now reloads that account after any reload already running, so the last load reads the prefs after the write.
+
+- [#264](https://github.com/beatzball/caribou/pull/264) [`06d2a84`](https://github.com/beatzball/caribou/commit/06d2a84a5dd009b1bde832aae35e8630c5b0615f) Thanks [@beatzball](https://github.com/beatzball)! - The hashtag page keeps the Bluesky body after a switch to a Mastodon account, when the page was loaded in full by a Bluesky reader. Before, the address said `?net=bsky` but the page showed the Mastodon body.
+
+- [#272](https://github.com/beatzball/caribou/pull/272) [`8726ea4`](https://github.com/beatzball/caribou/commit/8726ea42894f38457ecc1f7c7133493241bb9b4a) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky: a signed-in post page opened by a handle address (`/@<handle>/<rkey>`, as a card's time link makes) now loads. The thread reads the post by its DID address, because the AppView answers `getPosts` with an error for a handle address (#271).
+
+- [#274](https://github.com/beatzball/caribou/pull/274) [`6795621`](https://github.com/beatzball/caribou/commit/6795621cfeef165bb4b541ca5ad692c053df9b13) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky: a signed-in post page now shows its posts. Before, every card in the thread stayed on "Checking this post against your moderation settings…". The page kept the server's signed-out copy of the thread and gave it to the signed-in reader. A kept thread now belongs to one reader (#273).
+
+- Updated dependencies [[`4c10394`](https://github.com/beatzball/caribou/commit/4c103947ece5f8c91338fd167d8ac61e21b22d2c), [`a64b5c0`](https://github.com/beatzball/caribou/commit/a64b5c05f4ccd895ef355e3e62d3f5c4d421cfaf), [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe), [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe), [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe), [`4c10394`](https://github.com/beatzball/caribou/commit/4c103947ece5f8c91338fd167d8ac61e21b22d2c)]:
+  - @beatzball/caribou-bluesky-client@0.2.0
+  - @beatzball/caribou-mastodon-client@0.5.0
+  - @beatzball/caribou-state@0.5.0
+
 ## 0.11.2
 
 ### Patch Changes

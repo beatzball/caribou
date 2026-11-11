@@ -1,5 +1,11 @@
 # @beatzball/caribou-mastodon-client
 
+## 0.5.0
+
+### Minor Changes
+
+- [#276](https://github.com/beatzball/caribou/pull/276) [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe) Thanks [@beatzball](https://github.com/beatzball)! - `StatusBluesky` gets an optional `replyContext` (`BlueskyReplyContext`): the root and parent a Bluesky Home reply is drawn under.
+
 ## 0.4.9
 
 ### Patch Changes
