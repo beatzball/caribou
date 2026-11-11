@@ -558,12 +558,14 @@ Mastodon post, account or client renders as before.
   URI (it accepts one in `getPostThread`). Likes, reposts, caches and the
   act-as dialog key on this id, so it is the form a timeline uses. The
   page finds the DID in this order:
-  1. the route is a DID: use it;
-  2. the server's thread loaded: use its focused post's id;
+  1. the server's thread loaded: use its focused post's id;
+  2. else the route is a DID: use it;
   3. else the reader's own client looks the handle up (`lookupAccount`).
-     The thread renders only after that. If the lookup fails, the page says
-     it could not load the post. A late answer is dropped once the reader
-     has left the page or no Bluesky account is active.
+     While it runs, the page shows the loading shell (`role="status"`),
+     never the server's error or sign-in message. The thread renders only
+     after that. If the lookup fails, the page says it could not load the
+     post. A late answer is dropped once the reader has left the page or no
+     Bluesky account is active.
 
 **Nav.** With a Bluesky account active the rail hides Local and Public (by
 `capabilities`). Search shows for Bluesky ("Bluesky search and hashtag

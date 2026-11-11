@@ -147,14 +147,14 @@ describe('<page-handle-statusid> for a Bluesky route', () => {
     expect(askedPosts(agent).every((u) => u.startsWith(`at://${ALICE}/`))).toBe(true)
   })
 
-  it('rule 1: a DID route needs no lookup', async () => {
+  it('rule 2: a DID route needs no lookup', async () => {
     const agent = signIn()
     const { after } = await renders('page-handle-statusid', threadData(ALICE))
     expect(after).toBe(`caribou-thread statusid=${DID_URI}`)
     expect(agent.getProfile).not.toHaveBeenCalled()
   })
 
-  it('rule 2: a handle route whose server thread loaded uses that thread\'s DID URI, with no lookup', async () => {
+  it('rule 1: a handle route whose server thread loaded uses that thread\'s DID URI, with no lookup', async () => {
     const agent = signIn()
     const focused = publicPost({ ...post(), uri: DID_URI })
     const ok = { kind: 'ok', focused, ancestors: [], descendants: [], shell: SHELL, handle: 'alice.example.com', statusId: '3k1' }
@@ -163,9 +163,23 @@ describe('<page-handle-statusid> for a Bluesky route', () => {
     expect(agent.getProfile).not.toHaveBeenCalled()
   })
 
+  it('rule 3: while the lookup runs, the loading shell, not the server\'s alert', async () => {
+    let answer: (v: unknown) => void = () => {}
+    signIn({ getProfile: vi.fn(() => new Promise((r) => { answer = r })) })
+    const { first, after } = await renders('page-handle-statusid', threadData('alice.example.com'))
+    expect(first).toBe('article role=alert')
+    expect(after).toBe('article role=status aria-busy=true')
+    answer({ data: PROFILE })
+  })
+
   it('rule 3: a failed lookup says the post could not load, and fetches no post', async () => {
+    // A deferred page starts as the loading shell: the alert comes only
+    // from the failed lookup.
     const agent = signIn({ getProfile: vi.fn(async () => { throw new Error('profile not found') }) })
-    const { after } = await renders('page-handle-statusid', threadData('alice.example.com'))
+    history.replaceState(null, '', '/@alice.example.com/3k1')
+    const deferred = { kind: 'deferred', appview: 'http://appview.test', shell: SHELL, handle: '', statusId: '' }
+    const { first, after } = await renders('page-handle-statusid', deferred)
+    expect(first).toBe('article role=status aria-busy=true')
     expect(after).toBe('article role=alert')
     expect(agent.getPosts).not.toHaveBeenCalled()
   })

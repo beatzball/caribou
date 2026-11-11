@@ -95,15 +95,28 @@ test.describe('a Bluesky post opened by its handle address, signed in (#271)', (
       })
     })
     await signIn(page, origin)
+    // Hold the handle lookup, so the test sees the page while it runs.
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => { release = r })
+    await page.route('**/xrpc/app.bsky.actor.getProfile?*', async (route) => {
+      const actor = new URL(route.request().url()).searchParams.get('actor')
+      if (actor === 'bob.example.com' && route.request().method() === 'GET') await held
+      return route.fallback()
+    })
 
     const card = page.locator('page-home caribou-status-card').filter({ hasText: 'a post by handle' })
     await card.locator('litro-link.permalink time').click()
     await page.waitForURL(`${origin}/@bob.example.com/${RKEY}`)
+    const alert = page.locator('page-handle-statusid [role=alert]')
+    // While the lookup runs: the loading shell, and no alert announced.
+    await expect(page.locator('page-handle-statusid [role=status][aria-busy=true]')).toBeVisible()
+    await expect(alert).toHaveCount(0)
+    release()
 
     const thread = page.locator('page-handle-statusid caribou-thread')
     await expect(thread).toHaveAttribute('statusid', POST)
     await expect(thread.locator('caribou-status-card').filter({ hasText: 'a post by handle' })).toBeVisible()
-    await expect(page.locator('page-handle-statusid [role=alert]')).toHaveCount(0)
+    await expect(alert).toHaveCount(0)
     expect(pds.getPosts.length).toBeGreaterThan(0)
     expect(pds.getPosts.flat().every((u) => u.startsWith('at://did:'))).toBe(true)
   })

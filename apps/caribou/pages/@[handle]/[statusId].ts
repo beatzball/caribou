@@ -112,6 +112,9 @@ export class HandleStatusPage extends LitroPage {
   // A deferred page's thread, read by the browser (#187). Set after the
   // first render, which is the loading shell the server sent.
   @state() private fallback: StatusPageData | null = null
+  // A handle route, signed in, while the DID lookup runs (#271): the page
+  // shows the loading shell, never the server's error or auth message.
+  @state() private resolving = false
 
   protected override firstUpdated() {
     const data = this.serverData as StatusPageData | null
@@ -125,11 +128,14 @@ export class HandleStatusPage extends LitroPage {
     const client = activeClient.value
     if (actor && statusId && client && rendersBluesky(client)) {
       // The thread's id is the DID form (README, "Bluesky views", #271):
-      // the route's DID, else the server thread's, else a lookup.
+      // the server thread's, else the route's DID, else a lookup.
       const known = data?.kind === 'ok' && data.focused.bluesky ? data.focused.id : null
       if (known) this.blueskyUri = known
       else if (actor.startsWith('did:')) this.blueskyUri = blueskyPostUri(actor, statusId)
-      else void this.resolveThread(client, actor, statusId, data?.shell ?? { instance: null })
+      else {
+        this.resolving = true
+        void this.resolveThread(client, actor, statusId, data?.shell ?? { instance: null })
+      }
       return
     }
     if (actor && statusId && data?.kind === 'deferred') void this.loadFallback(data, actor, statusId)
@@ -148,9 +154,11 @@ export class HandleStatusPage extends LitroPage {
     }
     // A late answer is dropped once the reader has left this page or the
     // Bluesky account is gone.
-    if (!stillOn(this, window, key) || !rendersBluesky(activeClient.value)) return
+    if (!stillOn(this, window, key)) return
+    this.resolving = false
+    if (!rendersBluesky(activeClient.value)) return
     if (did) this.blueskyUri = blueskyPostUri(did, rkey)
-    else this.fallback = { kind: 'error', message: `Could not find ${handle}`, shell, statusId: rkey, handle }
+    else this.fallback = { kind: 'error', message: '', shell, statusId: rkey, handle }
   }
 
   // Signed out, or a Mastodon account: read the thread from the public
@@ -196,6 +204,13 @@ export class HandleStatusPage extends LitroPage {
         </caribou-app-shell>
       `
     }
+    if (this.resolving || data.kind === 'deferred') {
+      return html`
+        <caribou-app-shell instance=${inst}>
+          <article role="status" aria-busy="true">Loading…</article>
+        </caribou-app-shell>
+      `
+    }
     if (data.kind === 'auth-required') {
       return html`
         <caribou-app-shell instance=${inst}>
@@ -211,13 +226,6 @@ export class HandleStatusPage extends LitroPage {
           <article role="alert">
             Couldn't load status ${data.statusId}.
           </article>
-        </caribou-app-shell>
-      `
-    }
-    if (data.kind === 'deferred') {
-      return html`
-        <caribou-app-shell instance=${inst}>
-          <article role="status" aria-busy="true">Loading…</article>
         </caribou-app-shell>
       `
     }
