@@ -551,9 +551,19 @@ Mastodon post, account or client renders as before.
 - The profile and thread pages render on the server as today. After
   hydration, with a Bluesky account active, a Bluesky route
   (`/@did:…`, or `/@name` with a dot and no second `@`, spec 8.4) swaps in
-  a client-rendered `<caribou-profile>` or `<caribou-thread>`. The thread's
-  id is `at://<handle or did>/app.bsky.feed.post/<rkey>`. `/@me` looks the
-  account up by its DID. Server rendering is in "Bluesky SSR" below.
+  a client-rendered `<caribou-profile>` or `<caribou-thread>`. `/@me` looks
+  the account up by its DID. Server rendering is in "Bluesky SSR" below.
+- **The thread's id is always `at://<did>/app.bsky.feed.post/<rkey>`**
+  (#271). The AppView answers `getPosts` with a 500 for a handle in the
+  URI (it accepts one in `getPostThread`). Likes, reposts, caches and the
+  act-as dialog key on this id, so it is the form a timeline uses. The
+  page finds the DID in this order:
+  1. the route is a DID: use it;
+  2. the server's thread loaded: use its focused post's id;
+  3. else the reader's own client looks the handle up (`lookupAccount`).
+     The thread renders only after that. If the lookup fails, the page says
+     it could not load the post. A late answer is dropped once the reader
+     has left the page or no Bluesky account is active.
 
 **Nav.** With a Bluesky account active the rail hides Local and Public (by
 `capabilities`). Search shows for Bluesky ("Bluesky search and hashtag

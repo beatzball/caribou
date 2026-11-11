@@ -122,11 +122,35 @@ export class HandleStatusPage extends LitroPage {
     const actor = blueskyActor(data?.handle || routeSegment(window.location.pathname))
     // A deferred page's data has no id: read the address.
     const statusId = data?.statusId || routePostId(window.location.pathname)
-    if (actor && statusId && rendersBluesky(activeClient.value)) {
-      this.blueskyUri = blueskyPostUri(actor, statusId)
+    const client = activeClient.value
+    if (actor && statusId && client && rendersBluesky(client)) {
+      // The thread's id is the DID form (README, "Bluesky views", #271):
+      // the route's DID, else the server thread's, else a lookup.
+      const known = data?.kind === 'ok' && data.focused.bluesky ? data.focused.id : null
+      if (known) this.blueskyUri = known
+      else if (actor.startsWith('did:')) this.blueskyUri = blueskyPostUri(actor, statusId)
+      else void this.resolveThread(client, actor, statusId, data?.shell ?? { instance: null })
       return
     }
     if (actor && statusId && data?.kind === 'deferred') void this.loadFallback(data, actor, statusId)
+  }
+
+  // A handle route, signed in: the reader's own client looks the DID up
+  // before the thread renders, so nothing keys or fetches by a handle URI
+  // (the AppView answers getPosts with a 500 for one).
+  private async resolveThread(client: NonNullable<typeof activeClient.value>, handle: string, rkey: string, shell: ShellInfo) {
+    const key = routeKey(window)
+    let did: string | null = null
+    try {
+      did = (await client.lookupAccount(handle)).bluesky?.did ?? null
+    } catch {
+      did = null
+    }
+    // A late answer is dropped once the reader has left this page or the
+    // Bluesky account is gone.
+    if (!stillOn(this, window, key) || !rendersBluesky(activeClient.value)) return
+    if (did) this.blueskyUri = blueskyPostUri(did, rkey)
+    else this.fallback = { kind: 'error', message: `Could not find ${handle}`, shell, statusId: rkey, handle }
   }
 
   // Signed out, or a Mastodon account: read the thread from the public

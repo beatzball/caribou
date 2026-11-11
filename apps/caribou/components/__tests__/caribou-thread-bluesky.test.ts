@@ -60,8 +60,8 @@ afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 describe('<caribou-thread> for a Bluesky post', () => {
   it('reads the thread by AT URI; a filtering label hides a reply, not the opened post', async () => {
-    // The store reads the post (getPosts) and its thread (getPostThread);
-    // the AppView resolves the handle in the URI for both.
+    // The store reads the post (getPosts) and its thread (getPostThread),
+    // by the DID URI the page gives it (README, "Bluesky views", #271).
     agent = fakeAgent({
       getPosts: vi.fn(async () => ({ data: { posts: [view('focus', [label('scam-strict', LABELER)])] } })),
       getPostThread: vi.fn(async () => ({
@@ -74,7 +74,7 @@ describe('<caribou-thread> for a Bluesky post', () => {
       })),
     })
     signInBluesky(blueskyClient(agent))
-    const statusId = blueskyPostUri('alice.example.com', 'focus')
+    const statusId = blueskyPostUri(ALICE, 'focus')
     const el = document.createElement('caribou-thread') as CaribouThread
     el.statusId = statusId
     document.body.appendChild(el)
