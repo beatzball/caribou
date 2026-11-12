@@ -99,6 +99,10 @@ export class CaribouNotifications extends LitElement {
     .who a:hover { text-decoration: underline; }
     .who .rest { color: var(--fg-muted); }
     .rows > li.no-status.grouped .group-body { padding-bottom: var(--space-3); }
+    .announcement:empty {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+    }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
     .inline-error { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); }
@@ -126,6 +130,8 @@ export class CaribouNotifications extends LitElement {
   // come back if the mute fails.
   @state() private silenced: ReadonlySet<string> = new Set()
   private disposeSilenced: (() => void) | null = null
+  // Publish live text only after the initially empty region is mounted.
+  @state() private announcementReady = false
   @state() private loading = true
   @state() private errorMsg: string | null = null
   @state() private hasMore = false
@@ -138,6 +144,9 @@ export class CaribouNotifications extends LitElement {
   private disposeVeil: (() => void) | null = null
 
   private store: NotificationsStore | null = null
+  // Set before the older request starts: its completion can render before
+  // onMore resumes and marks the focused end notice.
+  private loadingOlder: NotificationsStore | null = null
   private disposeBindings: (() => void) | null = null
   private stopPolling: (() => void) | null = null
   private disposeSession: (() => void) | null = null
@@ -191,6 +200,10 @@ export class CaribouNotifications extends LitElement {
       if (!same) this.silenced = ids
     })
     document.addEventListener('visibilitychange', this.onVisibility)
+  }
+
+  protected override firstUpdated() {
+    this.announcementReady = true
   }
 
   override disconnectedCallback() {
@@ -322,16 +335,21 @@ export class CaribouNotifications extends LitElement {
 
   private onMore = async () => {
     const store = this.store
-    if (!store) return
-    await store.loadMore()
-    if (store !== this.store || store.hasMore.peek() || !this.focusIsFree()) {
-      if (store === this.store && !store.hasMore.peek()) this.endedHere = true
-      return
+    if (!store || this.loadingOlder === store) return
+    this.loadingOlder = store
+    try {
+      await store.loadMore()
+      if (store !== this.store || store.hasMore.peek() || !this.focusIsFree()) {
+        if (store === this.store && !store.hasMore.peek()) this.endedHere = true
+        return
+      }
+      this.endedHere = true
+      await this.updateComplete
+      if (!this.focusIsFree()) return
+      ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
+    } finally {
+      if (this.loadingOlder === store) this.loadingOlder = null
     }
-    this.endedHere = true
-    await this.updateComplete
-    if (!this.focusIsFree()) return
-    ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
   }
 
   // `acct` is relative to the user's own server for a local account. A
@@ -525,7 +543,27 @@ export class CaribouNotifications extends LitElement {
     return html`<li class=${cls}>${line}${this.renderGroupBody(g)}${card}</li>`
   }
 
-  private renderList() {
+  private shownItems(): NotificationGroup[] {
+    const hidden = new Set(this.silenced)
+    for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
+    return withoutSilencedAccounts(this.items, hidden)
+  }
+
+  private emptyMessage(): string {
+    return FILTERS.find((f) => f.value === this.filter)!.empty
+  }
+
+  private announcement(shown: NotificationGroup[]): string {
+    // Load older announces its end by focusing the notice. Do not also
+    // speak that notice through the live region. Errors have their alerts.
+    if (!this.announcementReady || this.endedHere || (this.errorMsg && this.items.length === 0)) return ''
+    if (this.loadingOlder === this.store && this.loadingOlder && !this.loading && !this.hasMore) return ''
+    if (this.loading && this.items.length === 0) return 'Loading notifications…'
+    if (shown.length > 0) return ''
+    return this.hasMore ? 'Nothing to show here yet. Older notifications may follow.' : this.emptyMessage()
+  }
+
+  private renderList(shown: NotificationGroup[]) {
     // With rows on screen, a failed poll or Load older keeps them.
     if (this.errorMsg && this.items.length === 0) {
       return html`<div role="alert">
@@ -534,27 +572,22 @@ export class CaribouNotifications extends LitElement {
       </div>`
     }
     if (this.loading && this.items.length === 0) {
-      return html`<div class="notice">Loading notifications…</div>`
+      // Keep loading visible on the first render, before the mounted live
+      // region publishes it in the following update.
+      return this.announcementReady ? nothing : html`<div class="notice">Loading notifications…</div>`
     }
     // An empty page with a cursor is not the end (a Bluesky page of only
     // skipped notifications): older ones are still in reach.
-    const empty = FILTERS.find((f) => f.value === this.filter)!.empty
-    // Muted, blocked and (Bluesky) filtered authors leave their rows. The
-    // notices go by what is left.
-    const hidden = new Set(this.silenced)
-    for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
-    const shown = withoutSilencedAccounts(this.items, hidden)
     if (shown.length === 0 && !this.hasMore) {
       return html`<div>
         ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-        <div class=${this.endedHere ? 'notice end' : 'notice'} tabindex=${this.endedHere ? '-1' : nothing}>${empty}</div>
+        ${this.endedHere ? html`<div class="notice end" tabindex="-1">${this.emptyMessage()}</div>` : nothing}
       </div>`
     }
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      ${shown.length === 0
-        ? html`<div class="notice">Nothing to show here yet. Older notifications may follow.</div>`
-        : html`<ul class="rows">${repeat(shown, (g) => g.key, (g) => this.renderItem(g))}</ul>`}
+      ${shown.length > 0
+        ? html`<ul class="rows">${repeat(shown, (g) => g.key, (g) => this.renderItem(g))}</ul>` : nothing}
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
         : this.endedHere ? html`<div class="notice end" tabindex="-1">No older notifications.</div>` : nothing}
@@ -562,13 +595,18 @@ export class CaribouNotifications extends LitElement {
   }
 
   override render() {
+    // Both the visible notice and its live message describe the moderated
+    // rows, including a list whose authors have all been filtered out.
+    const shown = this.shownItems()
+    const announcement = this.announcement(shown)
     return html`<section aria-labelledby="notifications-h">
       <h1 id="notifications-h">Notifications</h1>
       <div class="filters" role="group" aria-label="Show">
         ${FILTERS.map((f) => html`<caribou-button pressed=${f.value === this.filter ? 'true' : 'false'}
           data-filter=${f.value} @click=${() => this.onFilter(f.value)}>${f.label}</caribou-button>`)}
       </div>
-      ${this.renderList()}
+      <div class=${announcement ? 'announcement notice' : 'announcement'} role="status" aria-live="polite" aria-atomic="true">${announcement}</div>
+      ${this.renderList(shown)}
     </section>`
   }
 }
