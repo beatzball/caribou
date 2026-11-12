@@ -1080,17 +1080,17 @@ export class CaribouStatusCard extends LitElement {
   }
 
   // A post whose author limited replies never opens a composer.
-  private onReply = () => {
+  private onReply = (e: Event) => {
     const post = this.status?.reblog ?? this.status
     if (!this.canAct || !post || this.limits(post).reply) return
-    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { inReplyTo: post } }))
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { inReplyTo: post, invoker: e.currentTarget } }))
   }
 
   // Bluesky only. The composer checks the post's limits again on submit.
-  private onQuote = () => {
+  private onQuote = (e: Event) => {
     const post = this.status?.reblog ?? this.status
     if (!this.canAct || !post?.bluesky || this.limits(post).quote) return
-    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { quote: post } }))
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { quote: post, invoker: e.currentTarget } }))
   }
 
   private onFavourite = () => {

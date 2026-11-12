@@ -354,6 +354,14 @@ account).
    remove the viewport listeners.
 4. The dialog keeps its accessible name and focus behavior. The server
    and first client render stay empty; viewport reads happen only on open.
+5. Send and upload failures stay visible inside the open dialog in an alert
+   live region. The draft and retry controls remain available. A new attempt
+   clears the alert; a late failure from an older opening cannot replace the
+   current opening's alert. The existing page toast still receives the failure.
+6. Reply, Quote, and New post compose events carry their invoking control.
+   Closing returns focus there, including after an iPhone tap that did not
+   focus the control. Shortcuts and callers without an invoker fall back to
+   the captured active element.
 
 **The reader edits and deletes their own posts.** On a post whose author
 has the active account's id (an id, never a handle, so a same-named

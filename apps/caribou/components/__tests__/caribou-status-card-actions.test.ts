@@ -216,7 +216,7 @@ describe('<caribou-status-card> action bar', () => {
     button(el, 'reply').click()
     window.removeEventListener('caribou:compose', compose)
     expect(compose).toHaveBeenCalledOnce()
-    expect((compose.mock.calls[0]![0] as CustomEvent).detail).toEqual({ inReplyTo: inner })
+    expect((compose.mock.calls[0]![0] as CustomEvent).detail).toEqual({ inReplyTo: inner, invoker: el.shadowRoot!.querySelector('caribou-icon-button.reply') })
   })
 
   it('disables boost on a direct post, even your own', async () => {

@@ -287,6 +287,95 @@ describe('caribou-compose-dialog', () => {
     expect(toasts).toEqual([{ kind: 'error', message: 'Could not post: Validation failed' }])
   })
 
+  it('rule 5: a rejected send exposes an in-dialog alert, keeps the draft, and clears on retry', async () => {
+    const client = signIn()
+    const create = vi.spyOn(client, 'createStatus').mockRejectedValueOnce(new Error('Try again'))
+      .mockResolvedValue({ id: 'new', account: ME } as unknown as Status)
+    const el = await mount()
+    await compose(el)
+    await type(el, 'keep this draft')
+    $<HTMLFormElement>(el, 'form')!.requestSubmit()
+    await settle(el)
+    expect($(el, 'dialog [role="alert"]')?.textContent).toContain('Could not post: Try again')
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('keep this draft')
+    expect(postButton(el).disabled).toBe(false)
+    $<HTMLFormElement>(el, 'form')!.requestSubmit()
+    await settle(el)
+    expect(create).toHaveBeenCalledTimes(2)
+    expect($<HTMLDialogElement>(el, 'dialog')!.open).toBe(false)
+    await compose(el)
+    expect($(el, '[role="alert"]')?.textContent ?? '').toBe('')
+  })
+
+  it('rule 5: a failed upload has an in-dialog alert and can be retried', async () => {
+    const client = signIn()
+    vi.spyOn(client, 'uploadMedia').mockRejectedValueOnce(new Error('Upload rejected'))
+      .mockResolvedValue({ id: 'image', type: 'image', url: '' } as unknown as MediaAttachment)
+    const el = await mount()
+    await compose(el)
+    const file = $<HTMLInputElement>(el, 'input[type="file"]')!
+    Object.defineProperty(file, 'files', { value: [new File(['x'], 'image.png', { type: 'image/png' })], configurable: true })
+    file.dispatchEvent(new Event('change'))
+    await settle(el)
+    expect($(el, 'dialog [role="alert"]')?.textContent).toContain('Upload failed: Upload rejected')
+    $(el, '[data-action="retry-media"]')!.click()
+    await settle(el)
+    expect($(el, '[data-action="retry-media"]')).toBeNull()
+    expect($(el, '[role="alert"]')?.textContent ?? '').toBe('')
+  })
+
+  it('rule 5: an older send failure cannot put an alert into a reopened composer', async () => {
+    const client = signIn()
+    let reject!: (e: Error) => void
+    vi.spyOn(client, 'createStatus').mockReturnValue(new Promise((_resolve, fail) => { reject = fail }))
+    const el = await mount()
+    await compose(el)
+    await type(el, 'old send')
+    $<HTMLFormElement>(el, 'form')!.requestSubmit()
+    await settle(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    await compose(el)
+    reject(new Error('Old request failed'))
+    await settle(el)
+    expect($(el, '[role="alert"]')?.textContent ?? '').toBe('')
+  })
+
+  it('rule 6: an explicit invoker wins over the active element for focus return', async () => {
+    signIn()
+    const el = await mount()
+    const invoker = document.createElement('button')
+    const other = document.createElement('button')
+    document.body.append(invoker, other)
+    other.focus()
+    window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { invoker } }))
+    await settle(el)
+    $(el, '[data-action="cancel"]')!.click()
+    await settle(el)
+    expect(document.activeElement).toBe(invoker)
+  })
+
+  for (const mode of ['shortcut fallback', 'ignored second event']) {
+    it(`rule 6: preserves the focus target for ${mode}`, async () => {
+      signIn()
+      const el = await mount()
+      const invoker = document.createElement('button')
+      const other = document.createElement('button')
+      document.body.append(invoker, other)
+      invoker.focus()
+      window.dispatchEvent(new CustomEvent('caribou:compose', {
+        detail: mode === 'shortcut fallback' ? {} : { invoker },
+      }))
+      await settle(el)
+      if (mode === 'ignored second event') {
+        window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { invoker: other } }))
+      }
+      $(el, '[data-action="cancel"]')!.click()
+      await settle(el)
+      expect(document.activeElement).toBe(invoker)
+    })
+  }
+
   it('disables Post while media uploads, then attaches it', async () => {
     const client = signIn()
     let finish!: (m: MediaAttachment) => void

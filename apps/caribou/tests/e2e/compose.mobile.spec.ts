@@ -1,6 +1,7 @@
 import { expect, test, type Page } from './_fixtures.js'
 import { checkComposeHistory } from './_compose-scroll.js'
-import { API, BOB, gotoSettled, json, signIn, status } from './_moderation.js'
+import { expectComposeAlert } from './_compose-a11y.js'
+import { API, ALICE, BOB, gotoSettled, json, signIn, status } from './_moderation.js'
 
 async function replyFromTimeline(page: Page) {
   await signIn(page)
@@ -15,6 +16,11 @@ async function replyFromTimeline(page: Page) {
   await gotoSettled(page, '/home')
   const card = page.locator('caribou-status-card[data-status-id="6"]')
   await card.scrollIntoViewIfNeeded()
+  await page.evaluate(() => {
+    let active = document.activeElement
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
+    if (active instanceof HTMLElement) active.blur()
+  })
   await card.getByRole('button', { name: 'Reply', exact: true }).tap()
   const dialog = page.getByRole('dialog', { name: 'Reply', exact: true })
   await expect(dialog).toBeVisible()
@@ -85,4 +91,47 @@ test('rules 1 and 2: Reply and Cancel stay inside a shrinking and panning visual
 
 test('compose rule 3: Back then Forward restores the phone reading position with the real router', async ({ page }) => {
   await checkComposeHistory(page)
+})
+
+
+for (const close of ['Cancel', 'Escape', 'successful send'] as const) {
+  test(`compose rule 6: tapping Reply returns focus to its invoker after ${close}`, async ({ page }) => {
+    await page.route(`${API}/v1/statuses`, (route) => route.fulfill(json(status('posted', ALICE))))
+    const dialog = await replyFromTimeline(page)
+    const invoker = page.locator('caribou-status-card[data-status-id="6"]').getByRole('button', { name: 'Reply', exact: true })
+    if (close === 'Cancel') await dialog.getByRole('button', { name: 'Cancel' }).tap()
+    else if (close === 'Escape') await page.keyboard.press('Escape')
+    else {
+      await dialog.getByRole('textbox', { name: 'Post text' }).fill('a reply')
+      await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
+    }
+    await expect(dialog).toBeHidden()
+    await expect(invoker).toBeFocused()
+  })
+}
+
+
+test('compose rule 5: a rejected reply stays visible above the phone keyboard and can be retried', async ({ page }) => {
+  await page.addInitScript(() => {
+    const viewport = Object.assign(new EventTarget(), { height: 300, offsetTop: 90 })
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+  })
+  let reject = true
+  await page.route(`${API}/v1/statuses`, (route) => reject
+    ? route.fulfill({ status: 422, json: { error: 'Fixture rejection: try again' } })
+    : route.fulfill(json(status('posted', ALICE))))
+  const dialog = await replyFromTimeline(page)
+  const text = dialog.getByRole('textbox', { name: 'Post text' })
+  await text.fill('keep this reply')
+  await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
+  await expectComposeAlert(page, dialog, 'Could not post: Fixture rejection: try again')
+  await expect(text).toHaveValue('keep this reply')
+  for (const control of [dialog.getByRole('alert'), dialog.getByRole('button', { name: 'Reply', exact: true })]) {
+    const bounds = (await control.boundingBox())!
+    expect(bounds.y).toBeGreaterThanOrEqual(90)
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(390)
+  }
+  reject = false
+  await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
+  await expect(dialog).toBeHidden()
 })

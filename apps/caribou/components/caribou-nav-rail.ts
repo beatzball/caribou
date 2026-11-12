@@ -86,8 +86,8 @@ export function orderAccounts(all: Iterable<UserSession>, active: string | null)
   return [...current, ...list.filter((u) => u.userKey !== active)]
 }
 
-function openCompose() {
-  window.dispatchEvent(new CustomEvent('caribou:compose', { detail: {} }))
+function openCompose(e: Event) {
+  window.dispatchEvent(new CustomEvent('caribou:compose', { detail: { invoker: e.currentTarget } }))
 }
 
 @customElement('caribou-nav-rail')

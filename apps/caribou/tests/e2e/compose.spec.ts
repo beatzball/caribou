@@ -1,5 +1,6 @@
 import { expect, test, type Page } from './_fixtures.js'
 import { checkComposeHistory } from './_compose-scroll.js'
+import { expectComposeAlert } from './_compose-a11y.js'
 
 const INSTANCE = 'example.social'
 const AVATAR = `https://${INSTANCE}/a.png`
@@ -267,6 +268,7 @@ test('a failed upload offers Retry and Remove; Cancel closes from the keyboard',
   await (await chooser).setFiles({ name: 'a.png', mimeType: 'image/png', buffer: PIXEL })
   const list = dialog.getByRole('list', { name: 'Attachments' })
   await expect(list.getByRole('status')).toHaveText('Upload failed')
+  await expectComposeAlert(page, dialog, 'Upload failed: boom')
   await list.getByRole('button', { name: 'Retry' }).click()
   await expect(list.getByRole('button', { name: 'Retry' })).toHaveCount(0)
   // Only a pending item has a status line, so this waits for the retry to land.
@@ -563,4 +565,27 @@ test('compose rule 3: native touch scrolling stops behind the phone sheet and re
   expect(await page.evaluate(() => window.scrollY)).toBe(before)
   await swipe()
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(before)
+})
+
+
+test('compose rule 5: a rejected send exposes its error in the modal AX tree and permits retry', async ({ page }) => {
+  await seedSession(page)
+  const posted = await mockApi(page)
+  let reject = true
+  await page.route('**/api/v1/statuses', (route) => reject
+    ? route.fulfill({ status: 422, json: { error: 'Fixture rejection: try again' } })
+    : route.fallback())
+  await gotoSettled(page, '/home')
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  const text = dialog.getByRole('textbox', { name: 'Post text' })
+  await text.fill('keep my draft')
+  await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+  await expectComposeAlert(page, dialog, 'Could not post: Fixture rejection: try again')
+  await expect(text).toHaveValue('keep my draft')
+  await expect(dialog.getByRole('button', { name: 'Post', exact: true })).toBeEnabled()
+  reject = false
+  await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  expect(posted).toHaveLength(1)
 })
