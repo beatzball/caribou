@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
-import { forceHlsJs, noNewTab, routeHlsFixture, THUMB_BYTES } from './_hls-fixture.js'
+import { brokenNativeHls, forceHlsJs, noMediaSource, noNewTab, routeHlsFixture, THUMB_BYTES } from './_hls-fixture.js'
 
 // A Bluesky video in a real browser (#198; app README, "Bluesky video").
 // The timeline answers one post with a video. The test never reaches
@@ -88,10 +88,10 @@ test.describe('Bluesky video', () => {
     await expect(alert.getByRole('link', { name: 'Watch on bsky.app' }))
       .toHaveAttribute('href', `https://bsky.app/profile/${ALICE}/post/3lalicevideo`)
     expect(playlistAsked).toContain(PLAYLIST)
-    // Rules 3 and 4: a browser with native HLS never loads hls.js; any other
-    // loads it once, on the press. (Newer Chromium plays HLS natively.)
-    const native = await page.evaluate(() => document.createElement('video').canPlayType('application/vnd.apple.mpegurl') !== '')
-    expect(hlsChunk).toHaveLength(native ? 0 : 1)
+    // Rules 3 and 4: a browser with MSE loads hls.js once, on the press,
+    // whatever it answers for native HLS (#277). Every browser here has MSE.
+    const mse = await page.evaluate(() => 'MediaSource' in window || 'ManagedMediaSource' in window)
+    expect(hlsChunk).toHaveLength(mse ? 1 : 0)
   })
 
   test('rule 4: without native HLS, hls.js loads once, on the press, and a fatal error shows rule 6', async ({ page, baseURL }) => {
@@ -155,14 +155,23 @@ test.describe('Bluesky video', () => {
 
   // In CI, Chromium is the browser that runs this one: Playwright's Chromium
   // answers `canPlayType` for HLS, while WebKit on Linux and Firefox do not.
-  test('rule 3: a browser with native HLS plays the stream itself', async ({ page, baseURL }) => {
+  // MSE is taken away, so hls.js cannot run and native HLS plays.
+  test('rule 4: a browser with native HLS and no MSE plays the stream itself', async ({ page, baseURL }) => {
     const native = await page.evaluate(() => document.createElement('video').canPlayType('application/vnd.apple.mpegurl') !== '')
-    test.skip(!native, 'this browser has no native HLS (the next test covers hls.js)')
+    test.skip(!native, 'this browser has no native HLS (the next tests cover hls.js)')
+    await noMediaSource(page)
     await pressPlayAndWatch(page, baseURL, 'native')
   })
 
-  test('rule 4: with hls.js the stream plays', async ({ page, baseURL }) => {
+  test('rule 3: with hls.js the stream plays', async ({ page, baseURL }) => {
     await forceHlsJs(page)
+    await pressPlayAndWatch(page, baseURL, 'hls.js')
+  })
+
+  // #277: Vivaldi on macOS answers "maybe" for native HLS and then cannot
+  // play it. With MSE, hls.js plays and the native player is never used.
+  test('rule 3: a browser that answers "maybe" with a broken native player still plays (#277)', async ({ page, baseURL }) => {
+    await brokenNativeHls(page)
     await pressPlayAndWatch(page, baseURL, 'hls.js')
   })
 })
