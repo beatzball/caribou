@@ -121,6 +121,8 @@ describe('<caribou-thread> — depth recompute on descendant arrival', () => {
 describe('<caribou-thread> — data source', () => {
   it('makes no request when the server sent the thread, signed in or not', async () => {
     const el = await mount({ focused: F, ancestors: [], descendants: [] })
+    expect(el.shadowRoot!.querySelectorAll('h1')).toHaveLength(1)
+    expect(el.shadowRoot!.querySelector('h1')?.textContent).toBe('Thread')
     expect(cards(el).length).toBe(1)
     expect(el.shadowRoot!.querySelector('.loading')).toBeNull()
   })

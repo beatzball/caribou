@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Account } from '@beatzball/caribou-mastodon-client'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
-import { activeUserKey, users } from '@beatzball/caribou-state'
+import { activeUserKey, isOwnAccount, users } from '@beatzball/caribou-state'
 import { blueskyClients } from './_bluesky-clients.js'
 import '../caribou-profile-header.js'
 import type { CaribouProfileHeader } from '../caribou-profile-header.js'
 import {
-  ALICE, BSKY_LABELER, DEFS, LABELER, READER_KEY, author, blueskyClient, fakeAgent, label, prefs, readerOf,
+  ALICE, BSKY_LABELER, DEFS, LABELER, READER_DID, READER_KEY, author, blueskyClient, fakeAgent, label, prefs, readerOf,
   signInBluesky,
 } from './_bluesky-helpers.js'
 import { _testOnlyResetBlueskyVeil, _testOnlyVeilLoaded, setBlueskyReader } from '../_bluesky-moderation.js'
@@ -88,6 +88,18 @@ describe('<caribou-profile-header> for a Bluesky account', () => {
     expect(blurred(el, '.banner')).toBe(false)
   })
 
+  it('rule 3: the reader’s own Bluesky profile has its visible name as an h1', async () => {
+    signInBluesky(blueskyClient(fakeAgent()))
+    const account = await lookedUp([])
+    account.id = READER_DID
+    account.bluesky!.did = READER_DID
+    const session = { ...users.value.get(READER_KEY)!, account }
+    users.value = new Map(users.value).set(READER_KEY, session)
+    expect(isOwnAccount(session, account)).toBe(true)
+    const el = await mount(account, READER_KEY)
+    expect(el.shadowRoot!.querySelector('h1.name')?.textContent).toBe(account.displayName || account.username)
+  })
+
   it('a Bluesky account with no moderation result yet is blurred (fail closed)', async () => {
     const a = await lookedUp([])
     delete a.bluesky!.moderation
@@ -113,7 +125,7 @@ describe('<caribou-profile-header>: the profile cover (profileView) and whose de
     const a = await lookedUp([label('!hide', BSKY_LABELER, ALICE)], {})
     expect(a.bluesky!.moderation!.contexts.profileView).toMatchObject({ blur: true, noOverride: true })
     const el = await mount(a, READER_KEY)
-    expect(el.shadowRoot!.querySelector('.name')).toBeNull()
+    expect(el.shadowRoot!.querySelector('h1.name')).toBeNull()
     expect(el.shadowRoot!.querySelector('.handle')).toBeNull()
     expect(el.shadowRoot!.querySelector('.bio')).toBeNull()
     expect(text(el)).not.toContain('bio')
@@ -125,10 +137,10 @@ describe('<caribou-profile-header>: the profile cover (profileView) and whose de
   it('a !warn account, signed in: covered, and Show reveals the name and bio', async () => {
     signInBluesky(blueskyClient(fakeAgent()))
     const el = await mount(await lookedUp([label('!warn', BSKY_LABELER, ALICE)], {}), READER_KEY)
-    expect(el.shadowRoot!.querySelector('.name')).toBeNull()
+    expect(el.shadowRoot!.querySelector('h1.name')).toBeNull()
     el.shadowRoot!.querySelector<HTMLElement>('button.filter-toggle')!.click()
     await el.updateComplete
-    expect(el.shadowRoot!.querySelector('.name')).not.toBeNull()
+    expect(el.shadowRoot!.querySelector('h1.name')?.textContent).toBe(el.account!.displayName || el.account!.username)
     expect(el.shadowRoot!.querySelector('.bio')!.textContent).toContain('bio')
   })
 
@@ -136,7 +148,7 @@ describe('<caribou-profile-header>: the profile cover (profileView) and whose de
     const a = await lookedUp([label('!no-unauthenticated', ALICE, PROFILE_SELF)])
     const el = await mount(a, null)
     expect(text(el)).toContain('This account asked to be seen only by signed-in readers.')
-    expect(el.shadowRoot!.querySelector('.name')).toBeNull()
+    expect(el.shadowRoot!.querySelector('h1.name')).toBeNull()
     expect(el.shadowRoot!.querySelector('.handle')).toBeNull()
     expect(el.shadowRoot!.querySelector('.bio')).toBeNull()
     expect(el.shadowRoot!.querySelector('img.avatar')).toBeNull()
@@ -146,14 +158,14 @@ describe('<caribou-profile-header>: the profile cover (profileView) and whose de
   it("a decision made for another reader is not used: covered", async () => {
     signInBluesky(blueskyClient(fakeAgent()))
     const el = await mount(await lookedUp([]), 'did:plc:other@bsky')
-    expect(el.shadowRoot!.querySelector('.name')).toBeNull()
+    expect(el.shadowRoot!.querySelector('h1.name')).toBeNull()
     expect(blurred(el, 'img.avatar')).toBe(true)
   })
 
   it('a clean profile for this reader shows everything', async () => {
     signInBluesky(blueskyClient(fakeAgent()))
     const el = await mount(await lookedUp([]), READER_KEY)
-    expect(el.shadowRoot!.querySelector('.name')).not.toBeNull()
+    expect(el.shadowRoot!.querySelector('h1.name')?.textContent).toBe(el.account!.displayName || el.account!.username)
     expect(blurred(el, 'img.avatar')).toBe(false)
   })
 })
@@ -173,7 +185,7 @@ describe('<caribou-profile-header>: the veil (every subscribed labeler covered) 
     prefs: prefs({ labelers: [{ did: BSKY_LABELER, labels: {} }, { did: LABELER, labels: {} }, { did: NEW_LABELER, labels: {} }] }),
     defs: { ...DEFS, [NEW_LABELER]: [] },
   }))
-  const name = (el: Element) => el.shadowRoot!.querySelector('.name')
+  const name = (el: Element) => el.shadowRoot!.querySelector('h1.name')
   const retry = (el: Element) => el.shadowRoot!.querySelector<HTMLElement>('caribou-button.retry')
 
   it('the same reader, but a subscribed labeler not covered: covered, no Show, with Retry; Retry brings a covered copy', async () => {

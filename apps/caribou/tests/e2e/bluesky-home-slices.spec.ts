@@ -103,6 +103,32 @@ test.describe('Bluesky Home slices', () => {
   test.skip(({ browserName }) => browserName === 'webkit' && process.platform === 'darwin',
     'Playwright WebKit on macOS hangs storing a CryptoKey in IndexedDB')
 
+  for (const theme of ['dark', 'light']) {
+    test(`rule 3: populated Bluesky Home has one heading across SPA moves in ${theme}`, async ({ page, baseURL }) => {
+      const origin = loopbackOrigin(baseURL)
+      await page.addInitScript(({ key, theme }) => {
+        localStorage.setItem(`caribou.prefs.${key}`, JSON.stringify({ theme }))
+      }, { key: `${ALICE}@bsky`, theme })
+      await installFixtureAuth(page, { xrpc: xrpcFor(FEED) })
+      await signIn(page, origin)
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+      await expect(page.getByText('a plain post')).toBeVisible()
+      await expect(page.locator('page-home').getByRole('heading', { level: 1, name: 'Home', exact: true })).toHaveCount(1)
+      await expect(page).toHaveTitle('Home · Caribou')
+      const go = (path: string) => page.evaluate((path) => {
+        history.pushState(null, '', path)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      }, path)
+      await go('/settings')
+      await expect(page).toHaveTitle('Settings · Caribou')
+      await expect(page.getByRole('heading', { level: 1, name: 'Home', exact: true })).toHaveCount(0)
+      await page.goBack()
+      await expect(page.getByText('a plain post')).toBeVisible()
+      await expect(page.getByRole('heading', { level: 1, name: 'Home', exact: true })).toHaveCount(1)
+      await expect(page).toHaveTitle('Home · Caribou')
+    })
+  }
+
   test('a reply under its parent and root; no reply to an unfollowed author; a thread once', async ({ page, baseURL }) => {
     const origin = loopbackOrigin(baseURL)
     await installFixtureAuth(page, { xrpc: xrpcFor(FEED) })

@@ -1,3 +1,4 @@
+import { readingHeading } from '../components/_shared-styles.js'
 import { html, css, type PropertyValues } from 'lit'
 import { customElement } from 'lit/decorators.js'
 import { LitroPage, pageReset, type LitroLocation } from '@beatzball/litro/runtime'
@@ -43,7 +44,7 @@ export const pageData = definePageData<LocalPageData>(async (event) => {
 
 @customElement('page-local')
 export class LocalPage extends LitroPage {
-  static override styles = [pageReset, css`
+  static override styles = [pageReset, readingHeading, css`
     article { padding: var(--space-4); color: var(--fg-muted); }
     litro-link { color: var(--accent); text-decoration-line: underline; }
   `]
@@ -71,6 +72,7 @@ export class LocalPage extends LitroPage {
     if (data.kind === 'auth-required') {
       return html`
         <caribou-app-shell instance=${inst}>
+        <h1 class="reading-heading">Local</h1>
           <caribou-auth-required
             label="/local needs to know which instance to query. Sign in once and Caribou will remember."
           ></caribou-auth-required>
@@ -80,6 +82,7 @@ export class LocalPage extends LitroPage {
     if (data.kind === 'error') {
       return html`
         <caribou-app-shell instance=${inst}>
+        <h1 class="reading-heading">Local</h1>
           <article role="alert">
             Couldn't load /local. <litro-link href="/local">Retry</litro-link>
           </article>
@@ -91,6 +94,7 @@ export class LocalPage extends LitroPage {
     // puts the new posts in its banner.
     return html`
       <caribou-app-shell instance=${inst}>
+        <h1 class="reading-heading">Local</h1>
         <caribou-timeline kind="local" .initial=${data}></caribou-timeline>
       </caribou-app-shell>
     `

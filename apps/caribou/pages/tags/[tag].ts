@@ -145,27 +145,14 @@ export class TagPage extends LitroPage {
     })
   }
 
-  // The server writes the title into the page. The router does not change
-  // it on a client-side move (brand-head.ts), so the page sets it, and puts
-  // the app's title back when it leaves. On a full load the router swaps in
-  // a second copy of the page before the first one leaves; that copy keeps
-  // the title.
-  //
-  // Only the page at the address sets it. A page the reader has left can
-  // still render: `enterWithCache` hands it fresh data after it is gone.
   protected override updated(changed: PropertyValues<this>) {
     if (changed.has('serverData' as keyof TagPage) && this.disposeSession) this.routeToBluesky()
-    const data = this.serverData as TagPageData | null
-    if (data?.tag && this.isConnected && atTagPath(data.tag)) document.title = titleFor(data.tag)
   }
 
   override disconnectedCallback() {
     this.disposeSession?.()
     this.disposeSession = null
     super.disconnectedCallback()
-    // No head: the whole document is going away.
-    if (!document.head || document.querySelector('page-tags-tag')) return
-    document.title = PAGE_TITLE
   }
 
   override render() {
