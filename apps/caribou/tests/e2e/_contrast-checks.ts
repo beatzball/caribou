@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs'
 import { test, expect } from '@playwright/test'
 import {
-  activeBoost, compose, expectBoundary, expectText, fixture, mount, post, ratio,
+  activeBoost, compose, expectBoundary, expectPaintedFocusRing, expectText, expectTextSurface, fixture, mount, post, ratio,
   type Network, type Theme,
 } from './_contrast.js'
 
@@ -36,13 +37,16 @@ export function contrastChecks() {
         test('rule 1: active boost counts reach 4.5:1 normally and hovered', async ({ page }) => {
           const card = await mount(page, 'caribou-status-card', { status: post(network) })
           const boost = await activeBoost(card)
-          await expectText(boost.locator('.count'))
-          await boost.hover()
-          await expectText(boost.locator('.count'))
-          for (const surface of ['--bg-1', '--bg-2']) {
+          for (const surface of ['--bg-0', '--bg-1', '--bg-2']) {
+            await page.mouse.move(0, 0)
+            expect(await boost.evaluate((el) => el.matches(':hover'))).toBe(false)
             await card.evaluate((el, surface) => { (el as HTMLElement).style.background = `var(${surface})` }, surface)
+            await expectTextSurface(boost.locator('.count'), surface)
             await expectText(boost.locator('.count'))
           }
+          await boost.hover()
+          await expectTextSurface(boost.locator('.count'), '--bg-1')
+          await expectText(boost.locator('.count'))
         })
 
         test('rule 2: real thread ancestors keep readable metadata, links and boost counts', async ({ page }) => {
@@ -99,6 +103,49 @@ export function contrastChecks() {
           })
         }
 
+        for (const kind of ['image', 'gifv'] as const) {
+          for (const pattern of ['white', 'mixed'] as const) {
+            test(`rule 5: ${kind} focus strokes paint above opaque ${pattern} media`, async ({ page, browserName }, testInfo) => {
+              await page.emulateMedia({ reducedMotion: 'reduce' })
+              const extension = await page.evaluate(() => document.createElement('video').canPlayType('video/webm') ? 'webm' : 'mp4')
+              const preview = new URL(`/focus-${pattern}.svg`, page.url()).href
+              const videoUrl = new URL(`/focus-${pattern}.${extension}`, page.url()).href
+              await page.route(preview, (route) => route.fulfill({
+                contentType: 'image/svg+xml',
+                body: `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="white"/>${pattern === 'mixed' ? '<rect x="200" width="200" height="200" fill="black"/>' : ''}</svg>`,
+              }))
+              if (kind === 'gifv') {
+                await page.route(videoUrl, (route) => route.fulfill({
+                  contentType: `video/${extension}`, body: readFileSync(new URL(`./fixtures/focus-media/${pattern}.${extension}`, import.meta.url)),
+                }))
+              }
+              const card = await mount(page, 'caribou-status-card', { status: { ...post(network, `${kind}-${pattern}`), mediaAttachments: [{
+                id: pattern, type: kind, url: kind === 'image' ? preview : videoUrl, previewUrl: preview, description: `${pattern} fixture`,
+                meta: { small: { width: 400, height: 200, aspect: 2 } },
+              }] } }, `focus-${kind}-${pattern}`)
+              const media = card.locator('caribou-status-media')
+              const control = media.locator(kind === 'image' ? 'a.thumb' : 'button.gifv-toggle')
+              // Decode the poster too: a missing image must not supply the backing.
+              await page.evaluate(async (url) => {
+                const image = new Image()
+                image.src = url
+                await image.decode()
+              }, preview)
+              await control.focus()
+              await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab')
+              await page.keyboard.press(browserName === 'webkit' ? 'Alt+Shift+Tab' : 'Shift+Tab')
+              const png = await expectPaintedFocusRing(control, pattern)
+              await testInfo.attach(`${kind}-${pattern}-focus`, { body: png, contentType: 'image/png' })
+              if (kind === 'gifv') {
+                await control.press('Enter')
+                await expect.poll(() => control.locator('video').evaluate((el) => !(el as HTMLVideoElement).paused && (el as HTMLVideoElement).currentTime > 0)).toBe(true)
+                const playing = await expectPaintedFocusRing(control, pattern)
+                await testInfo.attach(`playing-${pattern}-focus`, { body: playing, contentType: 'image/png' })
+              }
+            })
+          }
+        }
+
         test('rule 5: ALT keyboard focus contrasts with opaque backing over gray, white, black and mixed images', async ({ page }, testInfo) => {
           for (const [name, image] of Object.entries({
             gray: '<rect width="400" height="200" fill="#888"/>',
@@ -141,15 +188,6 @@ export function contrastChecks() {
             expect(focus.stroke).toHaveLength(3)
             expect(ratio(focus.outline, focus.stroke)).toBeGreaterThanOrEqual(3)
             await testInfo.attach(`${name}-focus`, { body: await media.screenshot(), contentType: 'image/png' })
-            const thumb = media.locator('a.thumb')
-            await thumb.focus()
-            const ring = await thumb.evaluate((el) => {
-              const css = getComputedStyle(el)
-              return { visible: el.matches(':focus-visible'), offset: parseFloat(css.outlineOffset), shadow: css.boxShadow }
-            })
-            expect(ring.visible).toBe(true)
-            expect(ring.offset).toBe(-4)
-            expect(ring.shadow).toContain('inset')
           }
         })
       })

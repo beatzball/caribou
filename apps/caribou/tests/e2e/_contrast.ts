@@ -99,7 +99,7 @@ export function ratio(a: number[], b: number[]): number {
 
 // Composite backgrounds and group opacity across every shadow boundary.
 // A faded ancestor must fail even if its declared text token passes.
-export async function textContrast(target: Locator, pseudo?: '::placeholder') {
+async function textColors(target: Locator, pseudo?: '::placeholder') {
   await expect(target).toBeVisible()
   const colors = await target.evaluate((el, pseudo) => {
     type Color = [number, number, number, number]
@@ -126,7 +126,25 @@ export async function textContrast(target: Locator, pseudo?: '::placeholder') {
     }
     return { fg: over(fg, [255, 255, 255, 1]), bg: over(bg, [255, 255, 255, 1]) }
   }, pseudo)
+  return colors
+}
+
+export async function textContrast(target: Locator, pseudo?: '::placeholder') {
+  const colors = await textColors(target, pseudo)
   return ratio(colors.fg, colors.bg)
+}
+
+export async function expectTextSurface(target: Locator, surface: string) {
+  const expected = await target.evaluate((el, surface) => {
+    const probe = document.createElement('span')
+    probe.style.color = `var(${surface})`
+    el.append(probe)
+    const color = getComputedStyle(probe).color.match(/[\d.]+/g)!.map(Number)
+    probe.remove()
+    return color
+  }, surface)
+  const colors = await textColors(target)
+  expect(colors.bg, `effective text background is ${surface}`).toEqual([...expected, 1])
 }
 
 export async function expectText(target: Locator, pseudo?: '::placeholder') {
@@ -168,4 +186,47 @@ export async function activeBoost(card: Locator) {
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).not.toHaveAttribute('aria-disabled', 'true')
   return button
+}
+
+// Decode a browser screenshot through canvas and inspect actual painted pixels.
+// An inset shadow declaration is insufficient: opaque children can cover it.
+export async function expectPaintedFocusRing(target: Locator, pattern: 'white' | 'mixed') {
+  await expect(target).toBeFocused()
+  expect(await target.evaluate((el) => el.matches(':focus-visible'))).toBe(true)
+  const png = await target.screenshot({ scale: 'css' })
+  const samples = await target.page().evaluate(async (base64) => {
+    const image = new Image()
+    image.src = `data:image/png;base64,${base64}`
+    await image.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')!
+    context.drawImage(image, 0, 0)
+    const { width, height } = canvas
+    const { data } = context.getImageData(0, 0, width, height)
+    const pixel = (x: number, y: number) => Array.from(data.slice((y * width + x) * 4, (y * width + x) * 4 + 3))
+    const edges = []
+    for (const fraction of [0.25, 0.75]) {
+      for (const side of ['top', 'bottom', 'left', 'right']) {
+        const line = Array.from({ length: 8 }, (_, d) => {
+          const x = side === 'left' ? d : side === 'right' ? width - 1 - d : Math.floor(width * fraction)
+          const y = side === 'top' ? d : side === 'bottom' ? height - 1 - d : Math.floor(height * fraction)
+          return pixel(x, y)
+        })
+        edges.push({ name: `${side} at ${fraction}`, line })
+      }
+    }
+    return {
+      edges,
+      inside: [pixel(Math.floor(width * 0.25), Math.floor(height / 2)), pixel(Math.floor(width * 0.75), Math.floor(height / 2))],
+    }
+  }, png.toString('base64'))
+  const classify = (pixel: number[]) => pixel.every((c) => c < 32) ? 'b' : pixel.every((c) => c > 223) ? 'w' : '?'
+  expect(samples.inside.map(classify), 'the opaque image/poster/video frame is actually rendered').toEqual(pattern === 'white' ? ['w', 'w'] : ['w', 'b'])
+  for (const edge of samples.edges) {
+    const painted = edge.line.map(classify).join('')
+    expect(painted, `${edge.name}: black / white / black focus strokes above the media`).toMatch(/b+\?*w+\?*b+/)
+  }
+  return png
 }

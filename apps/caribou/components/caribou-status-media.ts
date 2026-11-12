@@ -52,7 +52,7 @@ export class CaribouStatusMedia extends LitElement {
       background: var(--bg-2);
       display: flex; align-items: center; justify-content: center;
     }
-    .thumb { display: block; width: 100%; height: 100%; }
+    .thumb { position: relative; display: block; width: 100%; height: 100%; }
     img, video { display: block; width: 100%; height: 100%; object-fit: cover; }
     .grid[data-count="1"] img, .grid[data-count="1"] video { object-fit: contain; }
     audio { width: 100%; padding: var(--space-2); }
@@ -60,12 +60,14 @@ export class CaribouStatusMedia extends LitElement {
     a:focus-visible, button:focus-visible {
       outline: 2px solid var(--accent); outline-offset: -2px;
     }
-    /* Two opaque strokes keep image pixels from erasing keyboard focus.
-       Full-size controls stay inside the clipped grid; chips have room
-       outside their text for the same contrasting strokes. */
-    a.thumb:focus-visible, .gifv-toggle:focus-visible {
-      outline: 2px solid var(--overlay-fg); outline-offset: -4px;
-      box-shadow: inset 0 0 0 6px var(--overlay-bg);
+    /* Draw above opaque image/video children: a parent's inset shadow
+       would paint underneath them. Keep the strokes inside the clipped
+       grid and let pointer events reach the existing media control. */
+    a.thumb:focus-visible, .gifv-toggle:focus-visible { outline: none; }
+    a.thumb:focus-visible::after, .gifv-toggle:focus-visible::after {
+      content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+      border: 2px solid var(--overlay-bg);
+      box-shadow: inset 0 0 0 2px var(--overlay-fg), inset 0 0 0 4px var(--overlay-bg);
     }
     .alt:focus-visible, caribou-button.hide::part(button):focus-visible {
       outline: 2px solid var(--overlay-fg); outline-offset: 2px;

@@ -23,6 +23,7 @@ pnpm --filter caribou-app test:e2e   # playwright
 
 1. Normal-size muted text and active boost/repost counts reach 4.5:1 on
    canvas, panel, field and hover surfaces in both themes and networks.
+   Check each underlying surface with hover cleared, then check hover separately.
 2. Thread ancestors keep fully opaque text, links and action counts.
    Spacing and the focused post's larger body distinguish thread positions.
 3. Enabled input and textarea placeholders use an explicit color and opacity
@@ -32,7 +33,9 @@ pnpm --filter caribou-app test:e2e   # playwright
    separate token.
 5. Keyboard focus on media overlays stays visible over any image: opaque
    backing and contrasting inner/outer strokes give an image-independent
-   indicator in both themes.
+   indicator in both themes. Full-image focus strokes paint above image/video
+   children inside the clipped grid. Rendered pixels verify both strokes over
+   white and mixed images, GIF posters and playing GIF frames.
 
 ## Conventions
 
