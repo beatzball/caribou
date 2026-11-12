@@ -1,6 +1,8 @@
 import { expect, type Page } from './_fixtures.js'
 import type { Locator } from '@playwright/test'
 
+export const LONG_COMPOSE_ERROR = 'Validation failed: ' + 'This post could not be accepted by the server. '.repeat(10)
+
 /** Check the modal alert, including the browser's native AX tree on Chromium. */
 export async function expectComposeAlert(page: Page, dialog: Locator, message: string) {
   await expect(dialog.getByRole('alert')).toContainText(message)

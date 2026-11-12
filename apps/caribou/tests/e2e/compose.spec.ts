@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './_fixtures.js'
 import { checkComposeHistory } from './_compose-scroll.js'
-import { expectComposeAlert } from './_compose-a11y.js'
+import { expectComposeAlert, LONG_COMPOSE_ERROR } from './_compose-a11y.js'
 
 const INSTANCE = 'example.social'
 const AVATAR = `https://${INSTANCE}/a.png`
@@ -531,15 +531,15 @@ test('compose rule 3: Back then Forward restores the reading position with the r
   await checkComposeHistory(page)
 })
 
-test('compose rule 3: native touch scrolling stops behind the phone sheet and resumes on close', async ({ page, browserName }) => {
+test('compose touch behavior: native header swipes preserve the page position while the sheet is open', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Native swipe input uses Chromium CDP; WebKit has tap automation only.')
   await page.setViewportSize({ width: 393, height: 852 })
   const input = await page.context().newCDPSession(page)
   await input.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
-  const swipe = async () => {
-    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 200, y: 600 }] })
+  const swipe = async (startY = 600, endY = 300) => {
+    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 200, y: startY }] })
     for (let i = 1; i <= 10; i++) {
-      await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 200, y: 600 - i * 30 }] })
+      await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 200, y: startY + (endY - startY) * i / 10 }] })
       await page.waitForTimeout(20)
     }
     await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
@@ -558,7 +558,11 @@ test('compose rule 3: native touch scrolling stops behind the phone sheet and re
   const dialog = page.getByRole('dialog', { name: 'New post' })
   await expect(dialog).toBeVisible()
   expect(await page.evaluate(() => window.scrollY)).toBe(before)
-  await swipe()
+  const header = (await dialog.locator('header').boundingBox())!
+  const startY = header.y + header.height / 2
+  // Start on the non-scrolling header. This checks the combined native
+  // modal/overscroll behavior, not the root lock in isolation.
+  await swipe(startY, startY + 300)
   expect(await page.evaluate(() => window.scrollY)).toBe(before)
   await dialog.getByRole('button', { name: 'Cancel' }).click()
   await expect(dialog).toBeHidden()
@@ -568,24 +572,33 @@ test('compose rule 3: native touch scrolling stops behind the phone sheet and re
 })
 
 
-test('compose rule 5: a rejected send exposes its error in the modal AX tree and permits retry', async ({ page }) => {
-  await seedSession(page)
-  const posted = await mockApi(page)
-  let reject = true
-  await page.route('**/api/v1/statuses', (route) => reject
-    ? route.fulfill({ status: 422, json: { error: 'Fixture rejection: try again' } })
-    : route.fallback())
-  await gotoSettled(page, '/home')
-  await page.keyboard.press('n')
-  const dialog = page.getByRole('dialog', { name: 'New post' })
-  const text = dialog.getByRole('textbox', { name: 'Post text' })
-  await text.fill('keep my draft')
-  await dialog.getByRole('button', { name: 'Post', exact: true }).click()
-  await expectComposeAlert(page, dialog, 'Could not post: Fixture rejection: try again')
-  await expect(text).toHaveValue('keep my draft')
-  await expect(dialog.getByRole('button', { name: 'Post', exact: true })).toBeEnabled()
-  reject = false
-  await dialog.getByRole('button', { name: 'Post', exact: true }).click()
-  await expect(dialog).toBeHidden()
-  expect(posted).toHaveLength(1)
-})
+for (const rejection of ['Fixture rejection: try again', LONG_COMPOSE_ERROR]) {
+  test(`compose rule 5: a ${rejection.length}-character send error stays in the modal AX tree and permits retry`, async ({ page }) => {
+    if (rejection === LONG_COMPOSE_ERROR) {
+      await page.setViewportSize({ width: 393, height: 852 })
+      await page.addInitScript(() => {
+        const viewport = Object.assign(new EventTarget(), { height: 300, offsetTop: 90 })
+        Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+      })
+    }
+    await seedSession(page)
+    const posted = await mockApi(page)
+    let reject = true
+    await page.route('**/api/v1/statuses', (route) => reject
+      ? route.fulfill({ status: 422, json: { error: rejection } })
+      : route.fallback())
+    await gotoSettled(page, '/home')
+    await page.keyboard.press('n')
+    const dialog = page.getByRole('dialog', { name: 'New post' })
+    const text = dialog.getByRole('textbox', { name: 'Post text' })
+    await text.fill('keep my draft')
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    await expectComposeAlert(page, dialog, `Could not post: ${rejection.trim()}`)
+    await expect(text).toHaveValue('keep my draft')
+    await expect(dialog.getByRole('button', { name: 'Post', exact: true })).toBeEnabled()
+    reject = false
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect(posted).toHaveLength(1)
+  })
+}

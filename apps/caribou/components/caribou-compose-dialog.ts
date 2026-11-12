@@ -333,6 +333,10 @@ export class CaribouComposeDialog extends LitElement {
         padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
       }
       header, .toolbar { flex-shrink: 0; }
+      .compose-error {
+        max-height: 20%; overflow-y: auto; overscroll-behavior: contain;
+        overflow-wrap: anywhere;
+      }
       .sheet-body {
         display: flex; flex-direction: column; gap: var(--space-3);
         flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -1510,7 +1514,7 @@ export class CaribouComposeDialog extends LitElement {
             <h2 id="compose-title">${title}</h2>
             <caribou-button data-action="cancel" @click=${() => this.close()}>Cancel</caribou-button>
           </header>
-          ${this.error ? html`<p class="note problem compose-error" role="alert" aria-atomic="true">${this.error}</p>` : nothing}
+          ${this.error ? html`<p class="note problem compose-error" role="alert" aria-atomic="true" tabindex="0">${this.error}</p>` : nothing}
           <div class="sheet-body">
           ${this.replyTo ? html`
             <div class="reply-to" data-reply-to>

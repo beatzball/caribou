@@ -357,7 +357,10 @@ account).
 5. Send and upload failures stay visible inside the open dialog in an alert
    live region. The draft and retry controls remain available. A new attempt
    clears the alert; a late failure from an older opening cannot replace the
-   current opening's alert. The existing page toast still receives the failure.
+   current opening's alert. On phones, the alert's height is bounded and its
+   text can be scrolled with the keyboard. A long server message leaves room
+   for the editor and keeps Post and Cancel above the keyboard. The page
+   toast still receives the failure.
 6. Reply, Quote, and New post compose events carry their invoking control.
    Closing returns focus there, including after an iPhone tap that did not
    focus the control. Shortcuts and callers without an invoker fall back to

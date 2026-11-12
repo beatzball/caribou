@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './_fixtures.js'
 import { checkComposeHistory } from './_compose-scroll.js'
-import { expectComposeAlert } from './_compose-a11y.js'
+import { expectComposeAlert, LONG_COMPOSE_ERROR } from './_compose-a11y.js'
 import { API, ALICE, BOB, gotoSettled, json, signIn, status } from './_moderation.js'
 
 async function replyFromTimeline(page: Page) {
@@ -111,27 +111,46 @@ for (const close of ['Cancel', 'Escape', 'successful send'] as const) {
 }
 
 
-test('compose rule 5: a rejected reply stays visible above the phone keyboard and can be retried', async ({ page }) => {
-  await page.addInitScript(() => {
-    const viewport = Object.assign(new EventTarget(), { height: 300, offsetTop: 90 })
-    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+for (const rejection of [
+  'Fixture rejection: try again',
+  LONG_COMPOSE_ERROR,
+]) {
+  test(`compose rule 5: a ${rejection.length}-character rejection leaves the editor and actions above the phone keyboard`, async ({ page }) => {
+    await page.addInitScript(() => {
+      const viewport = Object.assign(new EventTarget(), { height: 300, offsetTop: 90 })
+      Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+    })
+    let reject = true
+    await page.route(`${API}/v1/statuses`, (route) => reject
+      ? route.fulfill({ status: 422, json: { error: rejection } })
+      : route.fulfill(json(status('posted', ALICE))))
+    const dialog = await replyFromTimeline(page)
+    const text = dialog.getByRole('textbox', { name: 'Post text' })
+    await text.fill('keep this reply')
+    await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
+    await expectComposeAlert(page, dialog, `Could not post: ${rejection.trim()}`)
+    await expect(text).toHaveValue('keep this reply')
+    const body = dialog.locator('.sheet-body')
+    expect(await body.evaluate((el) => el.clientHeight)).toBeGreaterThan(0)
+    const alert = dialog.getByRole('alert')
+    if (rejection.length > 100) {
+      const area = await alert.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }))
+      expect(area.client).toBeGreaterThan(0)
+      expect(area.scroll).toBeGreaterThan(area.client)
+      await alert.focus()
+      await page.keyboard.press('End')
+      await expect.poll(() => alert.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+      await expect(alert).toContainText('This post could not be accepted by the server.')
+    }
+    for (const control of [alert,
+      dialog.getByRole('button', { name: 'Reply', exact: true }),
+      dialog.getByRole('button', { name: 'Cancel', exact: true })]) {
+      const bounds = (await control.boundingBox())!
+      expect(bounds.y).toBeGreaterThanOrEqual(90)
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(390)
+    }
+    reject = false
+    await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
+    await expect(dialog).toBeHidden()
   })
-  let reject = true
-  await page.route(`${API}/v1/statuses`, (route) => reject
-    ? route.fulfill({ status: 422, json: { error: 'Fixture rejection: try again' } })
-    : route.fulfill(json(status('posted', ALICE))))
-  const dialog = await replyFromTimeline(page)
-  const text = dialog.getByRole('textbox', { name: 'Post text' })
-  await text.fill('keep this reply')
-  await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
-  await expectComposeAlert(page, dialog, 'Could not post: Fixture rejection: try again')
-  await expect(text).toHaveValue('keep this reply')
-  for (const control of [dialog.getByRole('alert'), dialog.getByRole('button', { name: 'Reply', exact: true })]) {
-    const bounds = (await control.boundingBox())!
-    expect(bounds.y).toBeGreaterThanOrEqual(90)
-    expect(bounds.y + bounds.height).toBeLessThanOrEqual(390)
-  }
-  reject = false
-  await dialog.getByRole('button', { name: 'Reply', exact: true }).tap()
-  await expect(dialog).toBeHidden()
-})
+}
