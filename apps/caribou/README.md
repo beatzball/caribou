@@ -713,21 +713,20 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
    JavaScript, or with a modifier click, the link opens bsky.app. A plain
    click plays the video in place. The control plays, so Space plays too,
    as on a button (Enter already fires the click).
-3. **`hls.js` plays first, wherever it can (#277).** A browser with Media
-   Source Extensions (MSE: `MediaSource` or `ManagedMediaSource`) uses
-   `hls.js`, as bsky.app does. The check is a cheap name test; it loads
-   nothing. Its answer to `canPlayType('application/vnd.apple.mpegurl')`
-   does not decide the path: Vivaldi on macOS (#277) can answer "maybe"
-   and still fail to play natively. Safari with MSE takes this path too,
-   when `hls.js` reports support.
-4. **Native HLS only where `hls.js` cannot run.** A browser with no MSE
-   that answers `canPlayType` gets the playlist as the `src`. A browser
-   with MSE also gets it when `hls.js` does not load or says it is not
-   supported. A browser with neither gets the error of rule 6. If native
-   playback errors and MSE is available, try `hls.js` once more before
-   showing the error. `hls.js` is a dynamic `import()`,
-   in its own chunk, never in the main bundle, loaded on the first press
-   only.
+3. **Native HLS plays first (#279).** A browser that answers
+   `canPlayType('application/vnd.apple.mpegurl')` gets the playlist as its
+   `src`, even with Media Source Extensions (MSE). The press mounts and
+   focuses the player and calls `play()` synchronously, before any await
+   or import. This keeps Safari's first audible press and leaves native
+   remote playback available for AirPlay and Chromecast.
+4. **`hls.js` is the fallback.** With no native HLS, use `hls.js` when MSE
+   (`MediaSource` or `ManagedMediaSource`) is available. If native playback
+   errors, switch to `hls.js` once: Vivaldi on macOS (#277) can answer
+   "maybe" and still fail natively. Duplicate errors during its load do
+   not retry again. Keep the same player and focus; leaving cancels the
+   load. A browser with neither player gets the error of rule 6. `hls.js`
+   is a dynamic `import()` in its own chunk, loaded only when needed after
+   the press; a working native player never loads it.
 5. **The embed's size holds the box.** The box uses the embed's
    `aspectRatio` (16:9 without one), before and after the press, so the
    page does not jump. A very tall video is capped like an image. A
@@ -763,10 +762,13 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
 
 **Tests.** `tests/e2e/bluesky-video.spec.ts` plays a tiny HLS stream from
 `tests/e2e/fixtures/hls/` (about 4 KB; `make.sh` there makes it again) and
-checks that the playback position moves, natively (in Chromium with MSE
-taken away) and with `hls.js`. It also makes Chromium answer "maybe" with a
-native player that fails, as Vivaldi does (#277), and the stream still
-plays. `tests/e2e/bluesky-ssr.spec.ts` checks both paths on a signed-out
+checks that the playback position moves, natively with MSE available and
+with `hls.js`. The native path loads no hls.js chunk, and unit tests check
+that click and Space call `play()` before the press handler returns.
+The native tests use the audible fixture in `fixtures/hls/audible/` (a
+two-second 440 Hz tone) and verify unmuted playback after one press. The
+suite also makes Chromium answer "maybe" with a native player that fails,
+as Vivaldi does (#277), and the stream still plays. `tests/e2e/bluesky-ssr.spec.ts` checks both paths on a signed-out
 direct load, including Safari/WebKit. Its "a server-painted video" tests
 also check that the server's poster hydrates in place, equals the client's
 render, and plays by keyboard.

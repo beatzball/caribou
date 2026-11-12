@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, type Page } from './_fixtures.js'
 import { livePage, serverPageReport, watchServerPage } from './_server-page.js'
 import { startAppViewStub, type AppViewStub } from './_appview-stub.js'
-import { brokenNativeHls, noMediaSource, noNewTab, routeHlsFixture } from './_hls-fixture.js'
+import { brokenNativeHls, noNewTab, routeHlsFixture } from './_hls-fixture.js'
 import {
   HANA_SECRETS, NORA_SECRETS, PARTIAL_SECRETS,
 } from '../../../../packages/bluesky-client/src/__fixtures__/ssr-appview.js'
@@ -326,14 +326,13 @@ test.describe('a server-painted video (#261)', () => {
       if (how === 'native') {
         const native = await page.evaluate(() => document.createElement('video').canPlayType('application/vnd.apple.mpegurl') !== '')
         test.skip(!native, 'this browser has no native HLS')
-        await noMediaSource(page)
       } else {
-        // Includes Safari with MSE: native support must not bypass hls.js.
+        // A native error must switch to hls.js, including Safari with MSE.
         await brokenNativeHls(page)
       }
       const chunks: string[] = []
       page.on('request', (req) => { if (/\/hls-[^/]*\.js$/.test(req.url())) chunks.push(req.url()) })
-      const served = await routeHlsFixture(page)
+      const served = await routeHlsFixture(page, how === 'native')
       await page.goto(`${base}${PATH}`)
       await settled(page)
       await page.waitForLoadState('networkidle')
@@ -346,6 +345,12 @@ test.describe('a server-painted video (#261)', () => {
       await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 15_000 })
         .toBeGreaterThan(0.5)
       expect(chunks).toHaveLength(how === 'hls.js' ? 1 : 0)
+      if (how === 'native') {
+        expect(await video.evaluate((v: HTMLVideoElement) => ({
+          muted: v.muted, volume: v.volume, remoteDisabled: v.disableRemotePlayback === true,
+        }))).toEqual({ muted: false, volume: 1, remoteDisabled: false })
+        await expect(video).toHaveAttribute('src', /playlist\.m3u8$/)
+      }
       expect(served).toEqual(expect.arrayContaining(['playlist.m3u8', 'video.m3u8', 'seg0.m2ts']))
       await expect(player.getByRole('alert')).toHaveCount(0)
     })

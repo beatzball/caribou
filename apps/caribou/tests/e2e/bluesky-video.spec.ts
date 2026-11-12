@@ -1,11 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
 import { ALICE, installFixtureAuth, loopbackOrigin, type XrpcAnswer, waitForSignedInHome } from './_bluesky-auth.js'
-import { brokenNativeHls, forceHlsJs, noMediaSource, noNewTab, routeHlsFixture, THUMB_BYTES } from './_hls-fixture.js'
+import { brokenNativeHls, forceHlsJs, noNewTab, routeHlsFixture, THUMB_BYTES } from './_hls-fixture.js'
 
 // A Bluesky video in a real browser (#198; app README, "Bluesky video").
 // The timeline answers one post with a video. The test never reaches
 // video.bsky.app: the first two tests answer 404 there and see rule 6's
-// error; the last two get the tiny stream in `fixtures/hls/` and see it play.
+// error; the playback tests get the stream in `fixtures/hls/` and see it play.
 
 const POST_URI = `at://${ALICE}/app.bsky.feed.post/3lalicevideo`
 const CID = 'bafyreib7upx3s2pfhghouqwntlb4vsokgkwi7kmeqfsyddvum2xle33riq'
@@ -88,8 +88,8 @@ test.describe('Bluesky video', () => {
     await expect(alert.getByRole('link', { name: 'Watch on bsky.app' }))
       .toHaveAttribute('href', `https://bsky.app/profile/${ALICE}/post/3lalicevideo`)
     expect(playlistAsked).toContain(PLAYLIST)
-    // Rules 3 and 4: a browser with MSE loads hls.js once, on the press,
-    // whatever it answers for native HLS (#277). Every browser here has MSE.
+    // Rule 4: the failed native stream falls back once when MSE exists.
+    // With no native HLS, MSE uses hls.js directly. Both load one chunk.
     const mse = await page.evaluate(() => 'MediaSource' in window || 'ManagedMediaSource' in window)
     expect(hlsChunk).toHaveLength(mse ? 1 : 0)
   })
@@ -124,11 +124,22 @@ test.describe('Bluesky video', () => {
   })
 
   // Rules 3 and 4 with a real stream: the playback position moves.
-  async function pressPlayAndWatch(page: Page, baseURL: string | undefined, how: 'native' | 'hls.js') {
+  async function pressPlayAndWatch(page: Page, baseURL: string | undefined, how: 'native' | 'hls.js', audible = false) {
     const origin = loopbackOrigin(baseURL)
     const hlsChunk: string[] = []
     page.on('request', (req) => { if (/\/hls-[^/]*\.js$/.test(req.url())) hlsChunk.push(req.url()) })
-    const served = await routeHlsFixture(page)
+    await page.addInitScript(() => {
+      const real = HTMLMediaElement.prototype.play
+      const state = { inPress: false, nativeCalls: [] as boolean[] }
+      Object.assign(window, { __nativePlay: state })
+      document.addEventListener('click', () => { state.inPress = true }, true)
+      document.addEventListener('click', () => { state.inPress = false })
+      HTMLMediaElement.prototype.play = function () {
+        if (this.src.endsWith('.m3u8')) state.nativeCalls.push(state.inPress)
+        return real.call(this)
+      }
+    })
+    const served = await routeHlsFixture(page, audible)
     // Rule 2: a plain click plays here. A new tab (bsky.app) would mean the
     // click was not stopped; `page.url()` cannot see that.
     const popups: string[] = []
@@ -147,30 +158,38 @@ test.describe('Bluesky video', () => {
       .toBeGreaterThan(0.5)
     const state = await video.evaluate((v: HTMLVideoElement) => ({ error: v.error?.code ?? null, blob: v.src.startsWith('blob:') }))
     expect(state).toEqual({ error: null, blob: how === 'hls.js' })
+    if (audible) {
+      expect(await video.evaluate((v: HTMLVideoElement) => ({ muted: v.muted, volume: v.volume })))
+        .toEqual({ muted: false, volume: 1 })
+    }
     expect(served).toEqual(expect.arrayContaining(['playlist.m3u8', 'video.m3u8', 'seg0.m2ts']))
     expect(hlsChunk).toHaveLength(how === 'hls.js' ? 1 : 0)
+    if (how === 'native') {
+      expect(await page.evaluate(() => (window as unknown as {
+        __nativePlay: { nativeCalls: boolean[] }
+      }).__nativePlay.nativeCalls)).toEqual([true])
+    }
     await expect(page.getByRole('alert')).toHaveCount(0)
     expect(await noNewTab(page, popups)).toEqual([])
   }
 
   // In CI, Chromium is the browser that runs this one: Playwright's Chromium
   // answers `canPlayType` for HLS, while WebKit on Linux and Firefox do not.
-  // MSE is taken away, so hls.js cannot run and native HLS plays.
-  test('rule 4: a browser with native HLS and no MSE plays the stream itself', async ({ page, baseURL }) => {
+  // MSE stays available: native HLS must still play first (#279).
+  test('rule 3: native HLS plays first with MSE and loads no hls.js (#279)', async ({ page, baseURL }) => {
     const native = await page.evaluate(() => document.createElement('video').canPlayType('application/vnd.apple.mpegurl') !== '')
     test.skip(!native, 'this browser has no native HLS (the next tests cover hls.js)')
-    await noMediaSource(page)
-    await pressPlayAndWatch(page, baseURL, 'native')
+    await pressPlayAndWatch(page, baseURL, 'native', true)
   })
 
-  test('rule 3: with hls.js the stream plays', async ({ page, baseURL }) => {
+  test('rule 4: with hls.js the stream plays', async ({ page, baseURL }) => {
     await forceHlsJs(page)
     await pressPlayAndWatch(page, baseURL, 'hls.js')
   })
 
   // #277: Vivaldi on macOS answers "maybe" for native HLS and then cannot
-  // play it. With MSE, hls.js plays and the native player is never used.
-  test('rule 3: a browser that answers "maybe" with a broken native player still plays (#277)', async ({ page, baseURL }) => {
+  // play it. A native error switches to hls.js once (#279).
+  test('rule 4: a browser that answers "maybe" with a broken native player still plays (#277)', async ({ page, baseURL }) => {
     await brokenNativeHls(page)
     await pressPlayAndWatch(page, baseURL, 'hls.js')
   })
