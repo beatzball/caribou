@@ -1,5 +1,13 @@
 # caribou-app
 
+## 0.12.1
+
+### Patch Changes
+
+- [#281](https://github.com/beatzball/caribou/pull/281) [`a30c4ba`](https://github.com/beatzball/caribou/commit/a30c4ba8e72c86bdadbad7ed4f7d57ad48761170) Thanks [@beatzball](https://github.com/beatzball)! - Start native Bluesky video playback inside the play press when supported. Load hls.js only without native support or once after a native playback error, keeping native remote playback available.
+
+- [#278](https://github.com/beatzball/caribou/pull/278) [`a49c476`](https://github.com/beatzball/caribou/commit/a49c476b6da423431d34bb00a00c74a2ae591e01) Thanks [@beatzball](https://github.com/beatzball)! - Prefer hls.js for Bluesky videos when Media Source Extensions are available, fixing playback in Vivaldi on macOS. Keep native HLS as a fallback and retry hls.js once after a native playback error.
+
 ## 0.12.0
 
 ### Minor Changes
