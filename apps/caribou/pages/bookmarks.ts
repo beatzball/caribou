@@ -1,3 +1,4 @@
+import { readingHeading } from '../components/_shared-styles.js'
 import { html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { LitroPage } from '@beatzball/litro/runtime'
@@ -22,6 +23,7 @@ export const pageData = definePageData<BookmarksData>(async (event) => {
 
 @customElement('page-bookmarks')
 export class BookmarksPage extends LitroPage {
+  static override styles = [readingHeading]
   // Bookmarks are private: only the access token in the browser can read
   // them. Like /home, the server renders the placeholder and the page
   // renders the list after `firstUpdated` has read the session.
@@ -40,6 +42,7 @@ export class BookmarksPage extends LitroPage {
     const data = (this.serverData ?? { shell: { instance: null } }) as BookmarksData
     return html`
       <caribou-app-shell instance=${data.shell.instance ?? ''}>
+        <h1 class="reading-heading">Bookmarks</h1>
         ${this.signedIn
           ? html`<caribou-timeline kind="bookmarks"></caribou-timeline>`
           : html`<caribou-auth-required

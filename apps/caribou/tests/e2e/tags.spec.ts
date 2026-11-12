@@ -144,7 +144,7 @@ test.describe('signed in', () => {
     await expect(page.getByText("Couldn't follow #AI.")).toBeVisible()
   })
 
-  test('the title goes back to Caribou on the next page', async ({ page }) => {
+  test('the title names Home on the next page', async ({ page }) => {
     await page.route('**/api/v1/tags/AI', (route) => route.fulfill(json(tag(false))))
     await page.route('**/api/v1/timelines/home*', (route) => route.fulfill(json([])))
     await page.goto('/tags/AI')
@@ -155,7 +155,7 @@ test.describe('signed in', () => {
       window.dispatchEvent(new PopStateEvent('popstate'))
     })
     await expect.poll(() => new URL(page.url()).pathname).toBe('/home')
-    await expect(page).toHaveTitle('Caribou')
+    await expect(page).toHaveTitle('Home · Caribou')
   })
 })
 

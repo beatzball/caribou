@@ -100,6 +100,23 @@ sets `data-litro-settled` on `<litro-outlet>`. Both run their lifecycle, so
 clean up in `disconnectedCallback`, and wait for
 `litro-outlet[data-litro-settled]` in an e2e test before interacting.
 
+**Page titles and reading structure (#292).**
+
+1. Every route has a descriptive document title on full loads and SPA moves,
+   including Back and Forward. Server and client share the route-name resolver.
+   Search includes its query; tags keep their case; Blog articles name the post.
+2. Profile and thread titles use only identity allowed by moderation. Private
+   list names appear after the reader loads them. Only the connected, visible
+   page for the current address may refine its title; a late answer from a
+   departed or hidden page cannot overwrite it. The title is ready before the
+   router's existing route announcement. No second live region is added.
+3. The visible profile name is an h1, including after revealing a covered
+   identity. A covered identity has no heading until reveal. Home, Local,
+   Public, Bookmarks and threads have one page heading, visually hidden to
+   preserve the reading layout. Server and first client render stay equal.
+4. Desktop rail cards belong to a named complementary landmark. Search keeps
+   its own named landmark. The phone's hidden rail adds no landmarks.
+
 **Links.** `<litro-link href="/x">text</litro-link>` is the default. It renders
 a real anchor in its own shadow root, so style the `litro-link` element (color
 and text decoration inherit into the anchor). When the anchor itself must carry
@@ -170,9 +187,8 @@ table): `#Café`, `#cafe` and `#CAFE` are one tag, for the follow state, the
 kept timeline and the match against `status.tags`. A read that fails with
 anything but 404 leaves the state as it was, and no button shows while it is
 unknown. A read that overlaps a write, or a result from an earlier account,
-is dropped. It is the one page with its own title (`#tag · Caribou`): the
-server sets it through `seoTitle`, and on the client only the connected page
-whose tag is in the address sets it; it puts `Caribou` back when it leaves.
+is dropped. Its title is `#tag · Caribou`, resolved by the shared route-title lifecycle
+on the server and client.
 `tests/e2e/tags-ssr.spec.ts` starts its own server with
 `tests/e2e/fixtures/upstream-stub.mjs`, which answers the server's requests to
 `example.social`, so the server-painted page and its hydration run in CI.

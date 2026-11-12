@@ -35,8 +35,16 @@ describe('caribou-right-rail', () => {
     expect(el.shadowRoot!.querySelector('.session')).toBeNull()
   })
 
-  it('renders both session variants when an instance is set', async () => {
+  it('rule 4: keeps both session variants and utility cards inside the supporting landmark', async () => {
     const el = await mount('example.social')
+    const supporting = el.shadowRoot!.querySelector('aside[aria-label="Supporting information"]')!
+    expect(supporting).not.toBeNull()
+    expect(supporting.querySelector('.brand')).not.toBeNull()
+    expect(supporting.querySelector('.links')).not.toBeNull()
+    expect(supporting.querySelector('.shortcuts')).not.toBeNull()
+    expect(supporting.querySelectorAll('.session')).toHaveLength(2)
+    expect(supporting.querySelector('[role="search"]')).toBeNull()
+    expect(el.shadowRoot!.querySelector('[role="search"]')?.getAttribute('aria-label')).toBe('Search')
     expect(el.shadowRoot!.querySelector('.signed-in')?.textContent).toContain('example.social')
     expect(el.shadowRoot!.querySelector('.browsing')?.textContent).toContain('example.social')
     expect(el.shadowRoot!.querySelector('form[action="/api/signout"]')).not.toBeNull()

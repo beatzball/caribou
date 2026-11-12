@@ -22,6 +22,7 @@ import { startChangelogSeen } from './components/_changelog-seen.js'
 import { startShortcuts } from './components/_shortcuts.js'
 import { installBlueskyDriver, loadsAccountOn } from './components/_bluesky-session.js'
 import './components/caribou-update-notice.js'
+import { startRouteTitles } from './components/_route-titles.js'
 import { routes } from './routes.generated.js'
 
 // Hydrate session from localStorage before any component reads it.
@@ -70,6 +71,7 @@ if (typeof window !== 'undefined') {
 
 const outlet = document.querySelector('litro-outlet') as (Element & { routes: unknown }) | null
 if (outlet) {
+  startRouteTitles(outlet)
   outlet.routes = withStaleBuildReload(routes)
 } else {
   console.warn('[litro] <litro-outlet> not found — router will not start.')

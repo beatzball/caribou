@@ -35,7 +35,7 @@ describe('caribou-profile-header SSR', () => {
   it('renders the account from a property binding', async () => {
     const out = strip(await ssr(html`<caribou-profile-header .account=${ACCOUNT}></caribou-profile-header>`))
     expect(out).toContain('<template shadowroot="open" shadowrootmode="open">')
-    expect(out).toContain('<div class="name">Alice</div>')
+    expect(out).toContain('<h1 class="name">Alice</h1>')
     expect(out).toContain('<div class="handle">@alice@example.social</div>')
     expect(out).toContain('src="https://example.social/a-static.png"')
     expect(out).toContain('<strong>30</strong> Posts')
@@ -71,7 +71,7 @@ describe('caribou-profile SSR', () => {
 
   it('paints the header, the tabs and every card, with no Loading flash', async () => {
     const out = await render(INITIAL)
-    expect(out).toContain('<div class="name">Alice</div>')
+    expect(out).toContain('<h1 class="name">Alice</h1>')
     expect(out).toMatch(/<caribou-profile-tabs[^>]*handle="alice@example\.social"[^>]*tab="posts"/)
     expect(out.match(/<caribou-status-card\s/g)).toHaveLength(2)
     expect(out.match(/<li\b/g)).toHaveLength(2)
@@ -133,7 +133,7 @@ describe('/@[handle] page SSR', () => {
     const out = await render({ kind: 'ok', ...INITIAL, shell, handle: 'alice@example.social' })
     expect(out).toMatch(/<caribou-app-shell[^>]*instance="example\.social"/)
     expect(out).toMatch(/<caribou-profile[^>]*handle="alice@example\.social"[^>]*tab="posts"/)
-    expect(out).toContain('<div class="name">Alice</div>')
+    expect(out).toContain('<h1 class="name">Alice</h1>')
     expect(out.match(/<caribou-status-card\s/g)).toHaveLength(2)
     expect(out).toContain('<p>post 210</p>')
     expect(out).not.toContain('Loading…')

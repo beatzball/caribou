@@ -48,7 +48,7 @@ export class CaribouProfileHeader extends LitElement {
     }
     .filter-toggle:hover { background: var(--bg-1); }
     .filter-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .name   { color: var(--fg-0); font-weight: 600; font-size: 1.25rem; }
+    .name   { margin: 0; color: var(--fg-0); font-weight: 600; font-size: 1.25rem; }
     .handle { color: var(--fg-muted); }
     .bio    { color: var(--fg-1); padding: 0 var(--space-3) var(--space-3); }
     .counts { display: flex; gap: var(--space-4); padding: 0 var(--space-3) var(--space-3); color: var(--fg-1); }
@@ -429,7 +429,7 @@ export class CaribouProfileHeader extends LitElement {
       <div class="row">
         <img class=${blurAvatar ? 'avatar blurred' : 'avatar'} src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
         <div>
-          <div class="name">${a.displayName || a.username}</div>
+          <h1 class="name">${a.displayName || a.username}</h1>
           <div class="handle">@${a.acct}</div>
           ${this.renderBadges()}
         </div>
@@ -453,7 +453,7 @@ export class CaribouProfileHeader extends LitElement {
     return html`<div class="identity">
       <div class="row">
         <div>
-          <div class="name">${a.displayName || a.username}</div>
+          <h1 class="name">${a.displayName || a.username}</h1>
           <div class="handle">@${a.acct}</div>
           ${this.renderBadges()}
         </div>

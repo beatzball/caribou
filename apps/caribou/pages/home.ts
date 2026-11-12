@@ -1,3 +1,4 @@
+import { readingHeading } from '../components/_shared-styles.js'
 import { html } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { LitroPage, type LitroLocation } from '@beatzball/litro/runtime'
@@ -27,6 +28,7 @@ export const pageData = definePageData<HomeData>(async (event) => {
 
 @customElement('page-home')
 export class HomePage extends LitroPage {
+  static override styles = [readingHeading]
   // The access token lives only in the browser, so the server cannot know
   // who is signed in: it always renders the placeholder. The first client
   // render repeats that; `firstUpdated` then reads the session and the page
@@ -58,6 +60,7 @@ export class HomePage extends LitroPage {
     const data = (this.serverData ?? { shell: { instance: null } }) as HomeData
     return html`
       <caribou-app-shell instance=${data.shell.instance ?? ''}>
+        <h1 class="reading-heading">Home</h1>
         ${this.signedIn && this.bluesky
           ? html`<caribou-feed-tabs feed=${this.feed}></caribou-feed-tabs>`
           : this.signedIn

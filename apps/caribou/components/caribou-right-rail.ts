@@ -71,39 +71,41 @@ export class CaribouRightRail extends LitElement {
   override render() {
     const inst = this.instance
     return html`
-      <form class="search" role="search" action="/search" method="get" @submit=${this.onSearch}>
+      <form class="search" role="search" aria-label="Search" action="/search" method="get" @submit=${this.onSearch}>
         <caribou-icon name="search"></caribou-icon>
         <label class="vh" for="rail-search">Search</label>
         <input id="rail-search" type="search" name="q" autocomplete="off" enterkeyhint="search" placeholder="Search" />
       </form>
-      <div class="card">
-        <strong class="brand"><img src="/logo.png" alt="" width="24" height="24" />${APP_NAME}</strong>
-        <div>v${PACKAGE_VERSION}</div>
-        <a href=${REPO_URL} rel="noopener" target="_blank">GitHub</a>
-      </div>
-      <div class="card">
-        <ul class="links">
-          <li><litro-link href="/privacy">Privacy</litro-link></li>
-          <li><litro-link href="/about">About</litro-link></li>
-          <li><litro-link href="/changelog">Changelog</litro-link></li>
-        </ul>
-        ${inst
-          // Native sign-out button: the form must work with JavaScript off.
-          ? html`<div class="session signed-in">Signed in to <strong>${inst}</strong> ·
-                   <caribou-signout-form>
-                     <form action="/api/signout" method="post" style="display:inline;">
-                       <button type="submit" class="signout-btn">Sign out</button>
-                     </form>
-                   </caribou-signout-form>
-                 </div>
-                 <div class="session browsing">Browsing <strong>${inst}</strong></div>`
-          : nothing}
-      </div>
-      <div class="card">
-        <div aria-disabled="true" title="Coming soon">Theme toggle</div>
-        <div aria-disabled="true" title="Coming soon">Zen mode</div>
-        <litro-link class="shortcuts" href="/settings#keyboard">Keyboard shortcuts</litro-link>
-      </div>
+      <aside aria-label="Supporting information">
+        <div class="card">
+          <strong class="brand"><img src="/logo.png" alt="" width="24" height="24" />${APP_NAME}</strong>
+          <div>v${PACKAGE_VERSION}</div>
+          <a href=${REPO_URL} rel="noopener" target="_blank">GitHub</a>
+        </div>
+        <div class="card">
+          <ul class="links">
+            <li><litro-link href="/privacy">Privacy</litro-link></li>
+            <li><litro-link href="/about">About</litro-link></li>
+            <li><litro-link href="/changelog">Changelog</litro-link></li>
+          </ul>
+          ${inst
+            // Native sign-out button: the form must work with JavaScript off.
+            ? html`<div class="session signed-in">Signed in to <strong>${inst}</strong> ·
+                     <caribou-signout-form>
+                       <form action="/api/signout" method="post" style="display:inline;">
+                         <button type="submit" class="signout-btn">Sign out</button>
+                       </form>
+                     </caribou-signout-form>
+                   </div>
+                   <div class="session browsing">Browsing <strong>${inst}</strong></div>`
+            : nothing}
+        </div>
+        <div class="card">
+          <div aria-disabled="true" title="Coming soon">Theme toggle</div>
+          <div aria-disabled="true" title="Coming soon">Zen mode</div>
+          <litro-link class="shortcuts" href="/settings#keyboard">Keyboard shortcuts</litro-link>
+        </div>
+      </aside>
     `
   }
 }

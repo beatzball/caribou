@@ -11,6 +11,8 @@ import { ROOT_FORWARD_HEAD } from '../lib/root-forward-head.js';
 import { READER_VEIL_HEAD } from '../lib/reader-veil-head.js';
 import { THEME_HEAD } from '../lib/theme-head.js';
 import { TIMELINE_SPLASH_HEAD } from '../lib/timeline-splash-head.js';
+import { routeTitle } from '../../components/_route-title.js';
+import { escapeTitle, withRouteTitle } from '../lib/route-title.js';
 import { SPLASH_TARGETS } from '../../components/_splash.js';
 
 // The path is echoed into the page. A URL pathname is percent-encoded, but
@@ -19,7 +21,8 @@ const escapeHtml = (text: string): string =>
   text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 export default defineEventHandler(async (event) => {
-  const pathname = getRequestURL(event).pathname;
+  const url = getRequestURL(event);
+  const pathname = url.pathname;
   const result = matchRoute(routes, pathname);
 
   if (!result) {
@@ -48,7 +51,7 @@ export default defineEventHandler(async (event) => {
 
   const handler = createPageHandler({
     route: matched,
-    pageModule: pageModules[matched.filePath],
+    pageModule: withRouteTitle(pageModules[matched.filePath]!, url),
     // `routeMeta.head` is appended into every page's <head> by Litro's
     // shell builder. We inline two stylesheets here:
     //   • TOKENS_HEAD — design-token CSS variables (`var(--bg-0)` etc.).
@@ -68,7 +71,7 @@ export default defineEventHandler(async (event) => {
     // on purpose: the first run is before the theme-color meta exists, and
     // the last one (when `/` stays) sets that meta.
     routeMeta: {
-      title: PAGE_TITLE,
+      title: escapeTitle(routeTitle(url)),
       head: (matched.path === '/' ? THEME_HEAD + ROOT_FORWARD_HEAD
         : (SPLASH_TARGETS as readonly string[]).includes(matched.path) ? TIMELINE_SPLASH_HEAD : '') + TOKENS_HEAD + BASE_HEAD + READER_VEIL_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD,
     },
