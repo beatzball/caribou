@@ -359,19 +359,19 @@ export class CaribouStatusCard extends LitElement {
        44 px targets do not fit beside the avatar: the bar starts under the
        avatar, the space between controls shrinks, and big counts are short
        (2.1K). At 360 px and up a busy post fits on one row; at 320 px its
-       bar can take a second row. A Mastodon bar has no Quote and is as it
-       was. */
+       bar can take a second row. Mastodon uses the same wrapping layout
+       so its More control and large counts stay inside a 320 px viewport. */
     @media (max-width: 480px) {
-      .actions:has(> caribou-icon-button.quote) {
+      .actions {
         gap: 0; justify-content: space-between;
         margin-inline-start: calc(-1 * (${CARD_AVATAR} + var(--space-3)));
         /* The last resort, if the counts are still too wide: a second row,
            never a page that scrolls sideways. */
         flex-wrap: wrap;
       }
-      .actions:has(> caribou-icon-button.quote) caribou-menu.more { margin-inline-start: 0; }
+      .actions caribou-menu.more { margin-inline-start: 0; }
       /* Less side padding: a count still has room, the target stays 44 px. */
-      .actions:has(> caribou-icon-button.quote) caribou-icon-button::part(button) { padding-inline: var(--space-1); }
+      .actions caribou-icon-button::part(button) { padding-inline: var(--space-1); }
     }
     .actions caribou-menu.more::part(trigger) { color: var(--fg-muted); }
     @media (pointer: fine) {

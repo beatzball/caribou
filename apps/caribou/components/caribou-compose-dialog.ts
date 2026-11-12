@@ -296,6 +296,12 @@ export class CaribouComposeDialog extends LitElement {
     .media .state[data-state="failed"] { color: var(--danger); }
     .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
     .toolbar select { width: auto; }
+    caribou-menu.labels button {
+      min-block-size: 44px; padding: var(--space-2); font: inherit;
+      color: var(--fg-0); background: var(--bg-1); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); text-align: start; overflow-wrap: anywhere;
+    }
+    caribou-menu.labels button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .spacer { flex: 1; }
     .note { margin: 0; color: var(--fg-muted); font-size: 0.875rem; }
     .count { color: var(--fg-muted); font-variant-numeric: tabular-nums; }

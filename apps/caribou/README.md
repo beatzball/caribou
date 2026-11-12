@@ -1999,3 +1999,19 @@ starts its own server and seeds its own storage, and needs only the build.
 3. A temporary Bluesky fetch or refresh failure leaves the account signed in
    and can be retried. The SDK's lock serializes refresh across tabs.
    Mastodon session behavior stays the same.
+
+### Layout and target sizes (#291)
+
+1. At 320px, post actions wrap inside the viewport on both networks,
+   including content warnings and large counts. Phone targets stay 44px.
+2. Anchored menus stay at least 8px inside the visible viewport on both
+   sides, including after resize, scrolling and visual-viewport changes.
+   Long labels wrap; compose media-label buttons have 44px hit heights.
+3. Blog article links have real anchor hit areas at least 44px tall, with
+   normal links and SPA navigation preserved.
+4. Attachment ALT buttons have at least 24px hit areas, or 44px on coarse
+   pointers. ALT opens the description; the neighboring image still opens
+   its viewer, which also shows that description. Image ALT size is an
+   advisory improvement; GIF, video, audio and file badges share the rule.
+5. Layout uses CSS and menu placement runs only after opening. The server
+   render and first client render stay equal in both themes.
