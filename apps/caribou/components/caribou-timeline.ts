@@ -59,6 +59,7 @@ export class CaribouTimeline extends LitElement {
   static override styles = css`
     :host { display: block; }
     ul { list-style: none; margin: 0; padding: 0; }
+    ul:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     /* A card hidden by a filter, a mute or a block takes its row with it. */
     li:has(> caribou-status-card[hidden]),
     li:has(> [data-slice] > caribou-status-card[hidden]) { display: none; }
@@ -287,7 +288,21 @@ export class CaribouTimeline extends LitElement {
     if (this.canFetch) e.preventDefault()
   }
 
-  private onApplyNewPosts = () => { this.store?.applyNewPosts() }
+  private onApplyNewPosts = async () => {
+    const banner = this.renderRoot.querySelector('caribou-new-posts-banner')
+    const hadFocus = !!banner && this.shadowRoot?.activeElement === banner
+    this.store?.applyNewPosts()
+    await this.updateComplete
+    // Only recover the banner's focus. A programmatic apply must leave
+    // the reader's work position alone, including on a gap replacement.
+    if (!hadFocus || !this.isConnected) return
+    let active = document.activeElement
+    while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
+    if (active && active !== document.body && active !== banner && active.isConnected) return
+    const list = this.renderRoot.querySelector('ul')
+    list?.setAttribute('tabindex', '-1')
+    list?.focus()
+  }
 
   private onRetry = async (e: Event) => {
     const store = this.store

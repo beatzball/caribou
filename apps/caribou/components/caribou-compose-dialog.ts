@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from 'lit'
 import { customElement, query, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
+import { repeat } from 'lit/directives/repeat.js'
 import {
   activeClient, activeUser, activeUserKey, userName, editOwnStatus, findRedraftSlot, isDraftEmpty, newestKnownStatus, olderEdit,
   draftSlot, emptyDraft, getDraftFiles, loadDraft, postDraft, pruneDraftFiles, saveDraft,
@@ -1477,6 +1478,28 @@ export class CaribouComposeDialog extends LitElement {
     ${on.length > 0 ? html`<span class="note" data-labels>${on.join(', ')}</span>` : nothing}`
   }
 
+  // Only the reader's Remove click owns recovery. Upload completion and
+  // failure can remove pending state too, without taking focus.
+  private async removeAttachment(event: Event, remove: () => void) {
+    const control = event.currentTarget as HTMLElement
+    const controls = [...this.renderRoot.querySelectorAll<HTMLElement>('[data-action="remove-media"]')]
+    const at = controls.indexOf(control)
+    const hadFocus = this.shadowRoot?.activeElement === control
+    const session = this.session
+    remove()
+    await this.updateComplete
+    if (!hadFocus || !this.isConnected || !this.open || session !== this.session) return
+    const active = document.activeElement instanceof HTMLElement ? deepActive(document.activeElement) : null
+    // An interaction during rendering may have selected another target.
+    if (active && active !== document.body && active.isConnected) return
+    const remaining = [...this.renderRoot.querySelectorAll<LitElement>('[data-action="remove-media"]')]
+    const target = remaining[Math.min(at, remaining.length - 1)]
+      ?? this.renderRoot.querySelector<LitElement>('[data-action="add-media"]')
+    await target?.updateComplete
+    if (!target?.isConnected) return
+    ;(target.shadowRoot?.querySelector<HTMLElement>('button') ?? target).focus()
+  }
+
   private removeMedia(id: string) {
     this.patchDraft({ media: this.draft.media.filter((m) => m.id !== id) })
   }
@@ -1558,7 +1581,7 @@ export class CaribouComposeDialog extends LitElement {
             <p class="note" id="compose-media-note">Media stays as it is. Caribou cannot edit attachments yet.</p>`
           : !editing && mediaCount > 0 ? html`
             <ul class="media" aria-label="Attachments">
-              ${images.map((img, i) => {
+              ${repeat(images, (img) => img.id, (img, i) => {
                 const id = img.id
                 const label = mediaLabel(img.name, 'image', i + 1)
                 const preview = this.blobPreviews.get(id)
@@ -1572,10 +1595,10 @@ export class CaribouComposeDialog extends LitElement {
                       images: (this.draft.bluesky?.images ?? []).map((x) => x.id === id
                         ? { ...x, alt: (e.target as HTMLInputElement).value } : x),
                     })}>
-                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeBlueskyImage(id)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
+                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${(e: Event) => this.removeAttachment(e, () => this.removeBlueskyImage(id))}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
                 </li>`
               })}
-              ${d.media.map((m, i) => {
+              ${repeat(d.media, (m) => m.id, (m, i) => {
                 const label = mediaLabel(m.name, m.type, i + 1)
                 return html`
                 <li data-media=${m.id}>
@@ -1589,10 +1612,10 @@ export class CaribouComposeDialog extends LitElement {
                         ? { ...x, description: (e.target as HTMLInputElement).value } : x),
                     })}
                     @change=${(e: Event) => this.saveAltOrToast(m.id, (e.target as HTMLInputElement).value)}>
-                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${() => this.removeMedia(m.id)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
+                  <caribou-button data-action="remove-media" ?disabled=${busy} @click=${(e: Event) => this.removeAttachment(e, () => this.removeMedia(m.id))}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
                 </li>`
               })}
-              ${this.pending.map((p, i) => {
+              ${repeat(this.pending, (p) => p.localId, (p, i) => {
                 const label = mediaLabel(p.file.name, p.file.type, (bluesky ? images.length : d.media.length) + i + 1)
                 return html`
                 <li data-pending=${p.localId}>
@@ -1611,7 +1634,7 @@ export class CaribouComposeDialog extends LitElement {
                   ${p.state === 'failed'
                     ? html`<caribou-button data-action="retry-media" @click=${() => void (bluesky ? this.uploadBluesky(p.file, p) : this.upload(p.file, p))}>Retry<span class="visually-hidden"> ${label}</span></caribou-button>`
                     : nothing}
-                  <caribou-button data-action="remove-media" @click=${() => this.removePending(p.localId)}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
+                  <caribou-button data-action="remove-media" @click=${(e: Event) => this.removeAttachment(e, () => this.removePending(p.localId))}>Remove<span class="visually-hidden"> ${label}</span></caribou-button>
                 </li>`
               })}
             </ul>` : nothing}

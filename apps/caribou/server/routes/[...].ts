@@ -73,6 +73,7 @@ export default defineEventHandler(async (event) => {
         : (SPLASH_TARGETS as readonly string[]).includes(matched.path) ? TIMELINE_SPLASH_HEAD : '') + TOKENS_HEAD + BASE_HEAD + READER_VEIL_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD,
     },
     appScriptUrl: APP_SCRIPT_URL,
+    skipLinks: [{ label: 'Skip to content', href: '#caribou-main' }],
   });
   return handler(event);
 });

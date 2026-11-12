@@ -176,3 +176,63 @@ it('an error still shows when four Undo toasts are up, and the Undo toasts stay 
   expect(messages(el, 'alert')).toEqual(["Couldn't delete the list."])
   expect(messages(el, 'status')).toHaveLength(4)
 })
+
+describe('keyboard focus rule 5', () => {
+  it('returns a dismissed or timed-out focused toast to the prior work target', async () => {
+    const el = await mount()
+    const work = document.createElement('button')
+    document.body.append(work)
+    work.focus()
+    toast({ kind: 'error', message: 'error' })
+    await el.updateComplete
+    let dismiss = el.shadowRoot!.querySelector('caribou-icon-button')!.shadowRoot!.querySelector('button')!
+    dismiss.focus()
+    dismiss.click()
+    await el.updateComplete
+    await Promise.resolve()
+    expect(document.activeElement).toBe(work)
+    toast({ kind: 'info', message: 'timeout' })
+    await el.updateComplete
+    dismiss = el.shadowRoot!.querySelector('caribou-icon-button')!.shadowRoot!.querySelector('button')!
+    dismiss.focus()
+    vi.advanceTimersByTime(TOAST_TIMEOUT_MS)
+    await el.updateComplete
+    await Promise.resolve()
+    expect(document.activeElement).toBe(work)
+  })
+
+  it('dismisses a middle toast to the next control and respects action destinations', async () => {
+    const el = await mount()
+    const destination = document.createElement('button')
+    document.body.append(destination)
+    destination.focus()
+    for (const message of ['first', 'middle', 'last']) toast({ kind: 'error', message })
+    await el.updateComplete
+    const buttons = [...el.shadowRoot!.querySelectorAll('caribou-icon-button')]
+    buttons[1]!.shadowRoot!.querySelector('button')!.focus()
+    buttons[1]!.click()
+    await el.updateComplete
+    await Promise.resolve()
+    expect(el.shadowRoot!.activeElement).toBe(buttons[2])
+    toast({ kind: 'error', message: 'action', action: { label: 'Choose', run: () => destination.focus() } })
+    await el.updateComplete
+    const action = el.shadowRoot!.querySelector('.action')!
+    action.shadowRoot!.querySelector<HTMLElement>('button')!.focus()
+    ;(action as HTMLElement).click()
+    await el.updateComplete
+    await Promise.resolve()
+    expect(document.activeElement).toBe(destination)
+  })
+
+  it('preserves work focus when an unfocused toast disappears', async () => {
+    const el = await mount()
+    const work = document.createElement('button')
+    document.body.append(work)
+    toast({ kind: 'info', message: 'timeout' })
+    await el.updateComplete
+    work.focus()
+    vi.advanceTimersByTime(TOAST_TIMEOUT_MS)
+    await el.updateComplete
+    expect(document.activeElement).toBe(work)
+  })
+})
