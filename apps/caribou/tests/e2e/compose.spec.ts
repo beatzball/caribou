@@ -1,4 +1,6 @@
 import { expect, test, type Page } from './_fixtures.js'
+import { checkComposeHistory } from './_compose-scroll.js'
+import { expectComposeAlert, LONG_COMPOSE_ERROR } from './_compose-a11y.js'
 
 const INSTANCE = 'example.social'
 const AVATAR = `https://${INSTANCE}/a.png`
@@ -266,6 +268,7 @@ test('a failed upload offers Retry and Remove; Cancel closes from the keyboard',
   await (await chooser).setFiles({ name: 'a.png', mimeType: 'image/png', buffer: PIXEL })
   const list = dialog.getByRole('list', { name: 'Attachments' })
   await expect(list.getByRole('status')).toHaveText('Upload failed')
+  await expectComposeAlert(page, dialog, 'Upload failed: boom')
   await list.getByRole('button', { name: 'Retry' }).click()
   await expect(list.getByRole('button', { name: 'Retry' })).toHaveCount(0)
   // Only a pending item has a status line, so this waits for the retry to land.
@@ -486,3 +489,136 @@ test('a fresh sign-in loads the account once, and compose then uses its default 
   expect(calls).toBe(1)
   expect(errors).toEqual([])
 })
+
+test('compose rule 3: native wheel cannot move the page; closing restores its position without a layout jump', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await seedSession(page)
+  await mockApi(page)
+  await gotoSettled(page, '/home')
+  // Make the otherwise short fixture timeline scrollable.
+  await page.locator('caribou-timeline').evaluate((timeline) => { timeline.style.minHeight = '3000px' })
+  await page.evaluate(() => window.scrollTo(0, 400))
+  const card = page.locator('caribou-status-card').first()
+  const before = (await card.boundingBox())!
+  const rail = page.locator('caribou-nav-rail nav')
+  const railBefore = await rail.boundingBox()
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog).toBeVisible()
+  expect(await rail.boundingBox()).toEqual(railBefore)
+  const locked = (await card.boundingBox())!
+  expect(locked.x).toBeCloseTo(before.x, 0)
+  expect(locked.y).toBeCloseTo(before.y, 0)
+  expect(locked.width).toBeCloseTo(before.width, 0)
+  const sheet = (await dialog.boundingBox())!
+  const viewport = page.viewportSize()!
+  expect(sheet.width).toBeLessThan(viewport.width)
+  expect(sheet.y + sheet.height / 2).toBeCloseTo(viewport.height / 2, 0)
+  await page.mouse.move(5, 5)
+  await page.mouse.wheel(0, 600)
+  await page.waitForTimeout(200)
+  expect((await card.boundingBox())!.y).toBeCloseTo(locked.y, 0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(400)
+  const after = (await card.boundingBox())!
+  expect(after.x).toBeCloseTo(before.x, 0)
+  expect(after.width).toBeCloseTo(before.width, 0)
+  expect(await rail.boundingBox()).toEqual(railBefore)
+})
+
+test('compose rule 3: Back then Forward restores the reading position with the real router', async ({ page }) => {
+  await checkComposeHistory(page)
+})
+
+test('compose touch behavior: native header swipes preserve the page position while the sheet is open', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Native swipe input uses Chromium CDP; WebKit has tap automation only.')
+  await page.setViewportSize({ width: 393, height: 852 })
+  const input = await page.context().newCDPSession(page)
+  await input.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+  const swipe = async (startY = 600, endY = 300) => {
+    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 200, y: startY }] })
+    for (let i = 1; i <= 10; i++) {
+      await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 200, y: startY + (endY - startY) * i / 10 }] })
+      await page.waitForTimeout(20)
+    }
+    await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      let previous = window.scrollY
+      let stableFrames = 0
+      let stableSince = performance.now()
+      const sample = () => {
+        const current = window.scrollY
+        stableFrames = current === previous ? stableFrames + 1 : 0
+        if (current !== previous) stableSince = performance.now()
+        previous = current
+        // Near the end of a fling, rounded scrollY can pause for several
+        // frames before its final pixel. Require a quiet interval as well.
+        if (stableFrames >= 3 && performance.now() - stableSince >= 200) resolve()
+        else requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    }))
+  }
+  await seedSession(page)
+  await mockApi(page)
+  await gotoSettled(page, '/home')
+  await page.locator('caribou-timeline').evaluate((timeline) => { timeline.style.minHeight = '4000px' })
+  await page.evaluate(() => window.scrollTo(0, 400))
+  // A control gesture proves this input drives the browser's native scroll.
+  await swipe()
+  // Capture and open in one browser task so momentum cannot advance
+  // between separate evaluations of the baseline and the compose event.
+  const before = await page.evaluate(() => {
+    const y = window.scrollY
+    window.dispatchEvent(new CustomEvent('caribou:compose'))
+    return y
+  })
+  expect(before).toBeGreaterThan(400)
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog).toBeVisible()
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
+  const header = (await dialog.locator('header').boundingBox())!
+  const startY = header.y + header.height / 2
+  // Start on the non-scrolling header. This checks the combined native
+  // modal/overscroll behavior, not the root lock in isolation.
+  await swipe(startY, startY + 300)
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
+  await swipe()
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(before)
+})
+
+
+for (const rejection of ['Fixture rejection: try again', LONG_COMPOSE_ERROR]) {
+  test(`compose rule 5: a ${rejection.length}-character send error stays in the modal AX tree and permits retry`, async ({ page }) => {
+    if (rejection === LONG_COMPOSE_ERROR) {
+      await page.setViewportSize({ width: 393, height: 852 })
+      await page.addInitScript(() => {
+        const viewport = Object.assign(new EventTarget(), { height: 300, offsetTop: 90 })
+        Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport })
+      })
+    }
+    await seedSession(page)
+    const posted = await mockApi(page)
+    let reject = true
+    await page.route('**/api/v1/statuses', (route) => reject
+      ? route.fulfill({ status: 422, json: { error: rejection } })
+      : route.fallback())
+    await gotoSettled(page, '/home')
+    await page.keyboard.press('n')
+    const dialog = page.getByRole('dialog', { name: 'New post' })
+    const text = dialog.getByRole('textbox', { name: 'Post text' })
+    await text.fill('keep my draft')
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    await expectComposeAlert(page, dialog, `Could not post: ${rejection.trim()}`)
+    await expect(text).toHaveValue('keep my draft')
+    await expect(dialog.getByRole('button', { name: 'Post', exact: true })).toBeEnabled()
+    reject = false
+    await dialog.getByRole('button', { name: 'Post', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect(posted).toHaveLength(1)
+  })
+}

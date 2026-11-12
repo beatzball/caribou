@@ -129,7 +129,9 @@ describe('Bluesky reader, Bluesky post', () => {
     expect(soft(button(el, 'quote'))).toBe(false)
     button(el, 'reply').click()
     button(el, 'quote').click()
-    expect(seen.map((e) => Object.keys(e.detail))).toEqual([['inReplyTo'], ['quote']])
+    expect(seen.map((e) => Object.keys(e.detail))).toEqual([['inReplyTo', 'invoker'], ['quote', 'invoker']])
+    expect(seen[0]!.detail.invoker).toBe(el.shadowRoot!.querySelector('caribou-icon-button.reply'))
+    expect(seen[1]!.detail.invoker).toBe(el.shadowRoot!.querySelector('caribou-icon-button.quote'))
     expect(seen[1]!.detail.quote.id).toBe(POST_URI)
   })
 

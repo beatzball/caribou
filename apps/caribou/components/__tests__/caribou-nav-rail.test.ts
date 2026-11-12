@@ -235,6 +235,7 @@ describe('caribou-nav-rail', () => {
       window.removeEventListener('caribou:compose', onCompose)
     }
     expect(seen).toHaveLength(1)
+    expect((seen[0] as CustomEvent).detail.invoker).toBe(el.shadowRoot!.querySelector('caribou-button.compose-btn'))
     activeUserKey.value = null
     expect(el.hasAttribute('can-compose')).toBe(false)
   })

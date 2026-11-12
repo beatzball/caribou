@@ -32,6 +32,8 @@ import { LinkCardWatcher, linkCardStyles, renderLinkCardPreview } from './_blues
  * page has the post it replied to).
  */
 export interface ComposeDetail {
+  /** The control that opened compose; taps need not focus it on iOS. */
+  invoker?: HTMLElement
   inReplyTo?: Status
   edit?: { status: Status; source: StatusSource }
   redraft?: ComposeDraft
@@ -260,8 +262,7 @@ export class CaribouComposeDialog extends LitElement {
     :host { display: contents; }
     dialog {
       width: min(600px, calc(100vw - 2 * var(--space-4)));
-      /* dvh follows the visible area as Safari's toolbars come and go; the
-         insets keep Post and Cancel out of the home-indicator zone. */
+      /* Wide screens keep the centered dialog and its safe-area limits. */
       max-height: calc(100vh - 2 * var(--space-4));
       max-height: calc(100dvh - 2 * var(--space-4)
         - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
@@ -269,7 +270,10 @@ export class CaribouComposeDialog extends LitElement {
       background: var(--bg-0); color: var(--fg-0);
     }
     dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+    dialog, textarea { overscroll-behavior: contain; }
+    .sheet-body { display: contents; }
     form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+    .compose-error { flex-shrink: 0; }
     header { display: flex; justify-content: space-between; align-items: center; }
     h2 { margin: 0; font-size: 1.1em; }
     .reply-to {
@@ -312,6 +316,35 @@ export class CaribouComposeDialog extends LitElement {
       .poll .settings select, .poll .check { min-block-size: 44px; }
     }
     .poll .problem, .note.problem { color: var(--danger); }
+    @media (max-width: 767px) {
+      dialog {
+        position: fixed; top: var(--compose-viewport-top, 0px); bottom: auto;
+        left: 0; right: 0; margin: 0;
+        width: 100%; max-width: none;
+        height: 100vh;
+        height: var(--compose-viewport-height, 100dvh);
+        max-height: none; overflow: hidden; border: 0; border-radius: 0;
+      }
+      form {
+        height: 100%; min-height: 0;
+        padding-top: max(var(--space-4), env(safe-area-inset-top, 0px));
+        padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
+        padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
+        padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+      }
+      header, .toolbar { flex-shrink: 0; }
+      .compose-error {
+        max-height: 20%; overflow-y: auto; overscroll-behavior: contain;
+        overflow-wrap: anywhere;
+      }
+      .sheet-body {
+        display: flex; flex-direction: column; gap: var(--space-3);
+        flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+      }
+      .sheet-body > * { flex-shrink: 0; }
+      .reply-to { max-height: none; overflow: visible; }
+      textarea { resize: none; }
+    }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
@@ -327,6 +360,7 @@ export class CaribouComposeDialog extends LitElement {
   @state() private editing: Status | null = null
   @state() private pending: PendingMedia[] = []
   @state() private posting = false
+  @state() private error: string | null = null
   // Counts openings, so a post that finishes after its dialog closed knows
   // it no longer owns the dialog.
   private session = 0
@@ -364,6 +398,8 @@ export class CaribouComposeDialog extends LitElement {
   private draftKey: DraftSlot = 'new'
   private returnFocus: HTMLElement | null = null
   private showPending = false
+  private releasePage?: () => void
+  private unwatchViewport?: () => void
   // The account the dialog was opened for. Every read and write goes
   // through it, so a sign-out or an account switch while the dialog is
   // open can never save the draft under, or post as, another account.
@@ -393,6 +429,7 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   override disconnectedCallback() {
+    this.close()
     const i = mounted.indexOf(this)
     if (i >= 0) mounted.splice(i, 1)
     window.removeEventListener('caribou:compose', this.onCompose)
@@ -449,6 +486,7 @@ export class CaribouComposeDialog extends LitElement {
     // close(), and an update in between must not open the dialog again.
     if (this.showPending && this.dialogEl) {
       this.showPending = false
+      this.watchViewport(this.dialogEl)
       if (!this.dialogEl.open) this.dialogEl.showModal()
       const ta = this.textareaEl
       if (ta) {
@@ -465,11 +503,16 @@ export class CaribouComposeDialog extends LitElement {
   private onCompose = (e: Event) => {
     if (!this.isActive()) return
     const detail = (e as CustomEvent<ComposeDetail | undefined>).detail
+    const session = this.session
     if (detail?.edit) this.showEdit(detail.edit.status, detail.edit.source)
     else if (detail?.blueskyRedraft) detail.opened = this.showStoredRedraft(detail.blueskyRedraft)
     else if (detail?.redraft) this.showRedraft(detail.redraft, detail.inReplyTo ?? null)
     else if (detail?.quote) this.showQuote(detail.quote)
     else this.show(detail?.inReplyTo ?? null)
+    // An ignored event must not replace an already-open dialog's invoker.
+    if (this.open && this.session !== session && detail?.invoker?.isConnected) {
+      this.returnFocus = detail.invoker
+    }
   }
 
   // Everything every kind of opening shares. False when the dialog cannot
@@ -484,6 +527,7 @@ export class CaribouComposeDialog extends LitElement {
     this.limits = defaultLimits(client.capabilities)
     this.session += 1
     this.posting = false
+    this.error = null
     this.syncedAlt = new Map()
     this.altSaves = new Map()
     this.replyTo = null
@@ -504,7 +548,7 @@ export class CaribouComposeDialog extends LitElement {
       this.cardWatcher = this.makeCardWatcher(client, session)
       void loadBluesky().then(
         (m) => { if (session === this.session) this.bsky = m },
-        () => { if (session === this.session) toast('error', 'Could not load Bluesky. Check your connection and open the composer again.') },
+        () => { if (session === this.session) this.reportError('Could not load Bluesky. Check your connection and open the composer again.') },
       )
     }
     return true
@@ -512,6 +556,7 @@ export class CaribouComposeDialog extends LitElement {
 
   private finishOpen() {
     this.open = true
+    this.lockPage()
     this.showPending = true
     this.ready = true
     const client = this.client
@@ -772,7 +817,7 @@ export class CaribouComposeDialog extends LitElement {
       // Stored with the draft (an empty draft is not stored; its next save is).
       saveDraft(owner.client.userKey, owner.slot, this.draft)
     }, (err: unknown) => {
-      if (this.owns(owner)) toast('error', `Could not get the post ready: ${errorText(err)}. Open the composer again.`)
+      if (this.owns(owner)) this.reportError(`Could not get the post ready: ${errorText(err)}. Open the composer again.`)
     })
   }
 
@@ -820,14 +865,74 @@ export class CaribouComposeDialog extends LitElement {
     }
   }
 
+  // Keep the document scroller in place: a fixed body shifts sticky rails
+  // and emits scrollY=0, which the router saves as the reading position.
+  // The native modal makes the background inert; root overflow/overscroll
+  // contain user scrolling while the sheet body remains scrollable.
+  private lockPage() {
+    const body = document.body
+    const root = document.documentElement
+    const bodyStyle = body.style.cssText
+    const rootStyle = root.style.cssText
+    const x = window.scrollX
+    const y = window.scrollY
+    const width = root.clientWidth
+    const padding = parseFloat(getComputedStyle(body).paddingRight) || 0
+    root.style.overflow = 'hidden'
+    root.style.overscrollBehavior = 'none'
+    // Measure the actual change: an existing stable scrollbar gutter may
+    // already reserve this space, in which case no padding is needed.
+    const gutter = Math.max(0, root.clientWidth - width)
+    if (gutter) body.style.paddingRight = `${padding + gutter}px`
+    this.releasePage = () => {
+      body.style.cssText = bodyStyle
+      root.style.cssText = rootStyle
+      // Usually nothing moved, so no restoration scroll event is needed.
+      if (window.scrollX === x && window.scrollY === y) return
+      // An app-wide smooth-scroll rule must not animate this restoration.
+      const behavior = root.style.getPropertyValue('scroll-behavior')
+      const priority = root.style.getPropertyPriority('scroll-behavior')
+      root.style.setProperty('scroll-behavior', 'auto', 'important')
+      window.scrollTo(x, y)
+      if (behavior) root.style.setProperty('scroll-behavior', behavior, priority)
+      else root.style.removeProperty('scroll-behavior')
+    }
+  }
+
+  private watchViewport(dialog: HTMLDialogElement) {
+    const viewport = window.visualViewport
+    if (!viewport) return // CSS keeps the dvh fallback.
+    const update = () => {
+      dialog.style.setProperty('--compose-viewport-height', `${viewport.height}px`)
+      dialog.style.setProperty('--compose-viewport-top', `${viewport.offsetTop}px`)
+    }
+    update()
+    viewport.addEventListener('resize', update)
+    viewport.addEventListener('scroll', update)
+    this.unwatchViewport = () => {
+      viewport.removeEventListener('resize', update)
+      viewport.removeEventListener('scroll', update)
+      dialog.style.removeProperty('--compose-viewport-height')
+      dialog.style.removeProperty('--compose-viewport-top')
+    }
+  }
+
   private close() {
     this.dialogEl?.close()
+    // close fires asynchronously in browsers, and no dialog exists yet if
+    // an account switch happens before the opening render. Clean up now.
+    this.onClose()
   }
 
   // Runs for Esc, the Cancel button and a successful post alike. The draft
   // is already stored, so closing loses nothing.
   private onClose = () => {
+    // Ignore a queued close event from an earlier opening.
+    if (!this.open || this.dialogEl?.open) return
     this.open = false
+    this.showPending = false
+    this.unwatchViewport?.()
+    this.unwatchViewport = undefined
     this.cardWatcher?.stop()
     this.client = null
     this.editing = null
@@ -841,7 +946,17 @@ export class CaribouComposeDialog extends LitElement {
     void pruneDraftFiles()
     const target = this.returnFocus
     this.returnFocus = null
-    if (target?.isConnected) target.focus()
+    if (target?.isConnected) target.focus({ preventScroll: true })
+    this.releasePage?.()
+    this.releasePage = undefined
+  }
+
+  // The page toaster is inert behind a native modal. Keep the current
+  // opening's failure inside it as well, without letting an older request
+  // put its error into a reopened draft.
+  private reportError(message: string, session = this.session) {
+    if (this.open && session === this.session) this.error = message
+    toast('error', message)
   }
 
   private patchDraft(patch: Partial<ComposeDraft>) {
@@ -917,7 +1032,7 @@ export class CaribouComposeDialog extends LitElement {
     const known = newestKnownStatus(opened.id)
     const post = known && olderEdit(opened, known) ? known : opened
     if (post.poll) {
-      toast('error', POLL_EDIT_REFUSED)
+      this.reportError(POLL_EDIT_REFUSED)
       return
     }
     const session = this.session
@@ -938,7 +1053,7 @@ export class CaribouComposeDialog extends LitElement {
       this.close()
       toast('info', 'Post updated')
     } catch (err) {
-      toast('error', `Could not save the edit: ${errorText(err)}`)
+      this.reportError(`Could not save the edit: ${errorText(err)}`, session)
     } finally {
       if (session === this.session) this.posting = false
     }
@@ -947,7 +1062,7 @@ export class CaribouComposeDialog extends LitElement {
   // Why a send was refused. A target still being read is not a problem: Post again in a moment.
   private refuse(reason: string): void {
     if (reason === CHECKING) toast('info', CHECKING_REFUSED)
-    else toast('error', reason)
+    else this.reportError(reason)
   }
 
   private async submit() {
@@ -961,6 +1076,7 @@ export class CaribouComposeDialog extends LitElement {
     }
     if (!client || !this.canPost) return
     if (activeUserKey.value !== client.userKey) return
+    this.error = null
     if (this.editing) return this.saveEdit(client, this.editing)
     if (this.isBluesky) return this.submitBluesky(client)
     const done = this.replyTo ? 'Reply posted' : 'Post published'
@@ -973,7 +1089,7 @@ export class CaribouComposeDialog extends LitElement {
       try {
         await Promise.all(this.draft.media.map((m) => this.saveAlt(m.id, m.description)))
       } catch (err) {
-        toast('error', `Could not save the alt text: ${errorText(err)}`)
+        this.reportError(`Could not save the alt text: ${errorText(err)}`, session)
         return
       }
       await postDraft(client, this.draftKey, this.sendable)
@@ -987,7 +1103,7 @@ export class CaribouComposeDialog extends LitElement {
       this.close()
       toast('info', done)
     } catch (err) {
-      toast('error', `Could not post: ${errorText(err)}`)
+      this.reportError(`Could not post: ${errorText(err)}`, session)
     } finally {
       if (session === this.session) this.posting = false
     }
@@ -1043,9 +1159,9 @@ export class CaribouComposeDialog extends LitElement {
       toast('info', done)
     } catch (err) {
       if (!this.owns(owner)) return
-      if (err instanceof DraftNotSaved || err instanceof DraftChanged) toast('error', err.message)
+      if (err instanceof DraftNotSaved || err instanceof DraftChanged) this.reportError(err.message)
       else if (err instanceof BlueskyBlobNotFound) await this.recoverBlob(owner, err)
-      else toast('error', `Could not post: ${errorText(err).replace(/\.$/, '')}. Post again to retry; it is never sent twice.`)
+      else this.reportError(`Could not post: ${errorText(err).replace(/\.$/, '')}. Post again to retry; it is never sent twice.`)
     } finally {
       if (owner.session === this.session) this.posting = false
     }
@@ -1064,7 +1180,7 @@ export class CaribouComposeDialog extends LitElement {
     if (card?.thumb && cardAllowed(this.draft) && (err.cid === null || card.thumb.ref.$link === err.cid)) {
       this.draft = { ...this.draft, bluesky: { ...this.draft.bluesky!, card: { ...card, thumb: null } } }
       saveDraft(owner.client.userKey, owner.slot, this.draft)
-      toast('error', 'The server no longer has the link card’s image. Post again to upload it again.')
+      this.reportError('The server no longer has the link card’s image. Post again to upload it again.')
       return
     }
     const gone = (this.draft.bluesky?.images ?? []).filter((i) => err.cid === null || i.blob.ref.$link === err.cid)
@@ -1083,7 +1199,7 @@ export class CaribouComposeDialog extends LitElement {
         replaced.set(img.id, { ...img, blob, size: blob.size, mime: blob.mimeType })
         uploaded += 1
       } catch (upErr) {
-        if (this.owns(owner)) toast('error', `Upload failed: ${errorText(upErr)}`)
+        if (this.owns(owner)) this.reportError(`Upload failed: ${errorText(upErr)}`)
         return
       }
     }
@@ -1095,7 +1211,7 @@ export class CaribouComposeDialog extends LitElement {
     this.draft = { ...this.draft, bluesky: { ...b, images: b.images.map((i) => replaced.get(i.id) ?? i) } }
     saveDraft(owner.client.userKey, owner.slot, this.draft)
     // R5: say only what happened.
-    toast('error', missing.size > 0
+    this.reportError(missing.size > 0
       ? 'The server no longer has an image. Remove it and add it again, then post.'
       : uploaded > 0
       ? 'An image was uploaded again. Post again to send.'
@@ -1130,13 +1246,16 @@ export class CaribouComposeDialog extends LitElement {
     const room = this.limits.maxMedia - attached - this.pending.length
     const files = [...(input.files ?? [])]
     input.value = ''
-    if (files.length > room) toast('error', `You can attach up to ${this.limits.maxMedia} files.`)
+    this.error = null
+    if (files.length > room) this.reportError(`You can attach up to ${this.limits.maxMedia} files.`)
     for (const file of files.slice(0, Math.max(0, room))) void (this.isBluesky ? this.uploadBluesky(file) : this.upload(file))
   }
 
   private async upload(file: File, retry?: PendingMedia) {
     const client = this.client
     if (!client) return
+    const session = this.session
+    if (retry) this.error = null
     const item: PendingMedia = retry
       ? { ...retry, state: 'uploading' }
       : { localId: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), description: '', state: 'uploading' }
@@ -1171,7 +1290,7 @@ export class CaribouComposeDialog extends LitElement {
         const { mediaId: _stale, ...rest } = p
         return { ...rest, state: 'failed', ...(mediaId ? { mediaId } : {}) }
       })
-      toast('error', `Upload failed: ${errorText(err)}`)
+      this.reportError(`Upload failed: ${errorText(err)}`, session)
     }
   }
 
@@ -1181,6 +1300,7 @@ export class CaribouComposeDialog extends LitElement {
     const owner = this.owner()
     const client = owner?.client
     if (!owner || !client?.blueskyUploadBlob) return
+    if (retry) this.error = null
     const item: PendingMedia = retry
       ? { ...retry, state: 'uploading' }
       : { localId: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), description: '', state: 'uploading' }
@@ -1194,13 +1314,13 @@ export class CaribouComposeDialog extends LitElement {
       // A canvas that refuses to encode: the item goes, with a message.
       if (!this.owns(owner)) return
       this.removePending(item.localId)
-      toast('error', `${file.name || 'The file'} could not be prepared: ${errorText(err)}`)
+      this.reportError(`${file.name || 'The file'} could not be prepared: ${errorText(err)}`)
       return
     }
     if (!this.owns(owner)) return
     if (!fit.ok) {
       this.removePending(item.localId)
-      toast('error', fitRefusal(file.name || 'The file', fit.reason))
+      this.reportError(fitRefusal(file.name || 'The file', fit.reason))
       return
     }
     try {
@@ -1221,7 +1341,7 @@ export class CaribouComposeDialog extends LitElement {
     } catch (err) {
       if (!this.owns(owner)) return
       this.pending = this.pending.map((p) => p.localId === item.localId ? { ...p, state: 'failed' } : p)
-      toast('error', `Upload failed: ${errorText(err)}`)
+      this.reportError(`Upload failed: ${errorText(err)}`)
     }
   }
 
@@ -1258,8 +1378,9 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   private saveAltOrToast(id: string, description: string) {
+    const session = this.session
     this.saveAlt(id, description).catch((err: unknown) => {
-      toast('error', `Could not save the alt text: ${errorText(err)}`)
+      this.reportError(`Could not save the alt text: ${errorText(err)}`, session)
     })
   }
 
@@ -1393,6 +1514,8 @@ export class CaribouComposeDialog extends LitElement {
             <h2 id="compose-title">${title}</h2>
             <caribou-button data-action="cancel" @click=${() => this.close()}>Cancel</caribou-button>
           </header>
+          ${this.error ? html`<p class="note problem compose-error" role="alert" aria-atomic="true" tabindex="0">${this.error}</p>` : nothing}
+          <div class="sheet-body">
           ${this.replyTo ? html`
             <div class="reply-to" data-reply-to>
               <strong>${this.replyTo.account.displayName || this.replyTo.account.username}</strong>
@@ -1502,6 +1625,7 @@ export class CaribouComposeDialog extends LitElement {
             <!-- #199: reply and quote limits, for a new post or a quote only. -->
             <caribou-bluesky-gates .gates=${d.bluesky?.gates} .clientSource=${this.gatesClient} .account=${this.client?.userKey ?? null} ?disabled=${busy}
               @gates-change=${(e: CustomEvent<BlueskyGates>) => this.patchBluesky({ gates: e.detail })}></caribou-bluesky-gates>` : nothing}
+          </div>
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space
                  clicks it, and the click opens the hidden file input. -->

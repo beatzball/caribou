@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { expectComposeAlert } from './_compose-a11y.js'
 import { ALICE, installFixtureAuth, loopbackOrigin, waitForSignedInHome } from './_bluesky-auth.js'
 
 // Bluesky compose through the real SDK (#189, spec 7.2): the counter is the
@@ -181,6 +182,30 @@ test.describe('Bluesky compose', () => {
     })
   })
 
+  test('rule 5: a rejected send exposes an in-dialog alert and keeps the draft for retry', async ({ page, baseURL }) => {
+    const origin = loopbackOrigin(baseURL)
+    await installFixtureAuth(page)
+    const pds = await fixturePds(page)
+    let reject = true
+    await page.route(`${PDS}/xrpc/com.atproto.repo.createRecord`, (route) =>
+      route.request().method() === 'POST' && reject
+        ? route.fulfill({ status: 400, headers: CORS,
+          json: { error: 'InvalidRequest', message: 'Fixture rejection: try again' } })
+        : route.fallback())
+    await signIn(page, origin)
+    const dialog = await openCompose(page)
+    const text = dialog.getByRole('textbox', { name: 'Post text' })
+    await text.fill('keep this Bluesky draft')
+    await dialog.getByRole('button', { name: 'Post' }).click()
+    await expectComposeAlert(page, dialog, 'Fixture rejection: try again')
+    await expect(text).toHaveValue('keep this Bluesky draft')
+    await expect(dialog.getByRole('button', { name: 'Post' })).toBeEnabled()
+    reject = false
+    await dialog.getByRole('button', { name: 'Post' }).click()
+    await expect(dialog).toBeHidden()
+    expect(pds.creates).toHaveLength(1)
+  })
+
   test('the first send is written but its answer is lost: the retry finds it, one post', async ({ page, baseURL }) => {
     const origin = loopbackOrigin(baseURL)
     await installFixtureAuth(page)
@@ -194,7 +219,7 @@ test.describe('Bluesky compose', () => {
     await dialog.getByRole('button', { name: 'Post' }).click()
     // Wait for the send to end (its toast), not only for the note: a reload
     // while the check is still running would leave the 502 for after it.
-    await expect(page.getByText('Post again to retry', { exact: false })).toBeVisible()
+    await expect(dialog.getByRole('alert').filter({ hasText: 'Post again to retry' })).toBeVisible()
     await expect(dialog.getByText('The last send did not finish.', { exact: false })).toBeVisible()
 
     // A reload keeps the draft, its rkey and the frozen record.

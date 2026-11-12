@@ -302,6 +302,19 @@ describe('Bluesky compose: posting once', () => {
     expect(toasts.at(-1)).toMatchObject({ kind: 'info', message: 'Post published' })
   })
 
+  it('rule 5: a rejected Bluesky send keeps the draft and exposes an alert for retry', async () => {
+    const pds = signInBluesky()
+    pds.client.blueskyCreatePost.mockRejectedValueOnce(new Error('Fixture rejection'))
+    const el = await mount()
+    await open(el)
+    await type(el, 'keep this draft')
+    await submit(el)
+    expect($(el, 'dialog [role="alert"]')?.textContent).toContain('Fixture rejection')
+    expect($<HTMLTextAreaElement>(el, 'textarea')!.value).toBe('keep this draft')
+    await submit(el)
+    expect(pds.records.size).toBe(1)
+  })
+
   it('the first send times out but the record was written: one post, no second create', async () => {
     const pds = signInBluesky()
     pds.loseNext.value = true

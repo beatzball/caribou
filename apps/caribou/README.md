@@ -335,6 +335,37 @@ asks again, so it never undoes a change still on its way.
 `/lists` is kept on an account switch; `/lists/<id>` is not (ids are per
 account).
 
+**Compose viewport rules (#282), for Mastodon and Bluesky.**
+
+1. Below 768px, compose is a sheet at the visual viewport's top offset,
+   with its height. It follows viewport resize and scroll while open;
+   without `visualViewport`, it uses `dvh`. Safe-area padding keeps the
+   controls clear of device insets.
+2. The sheet body scrolls with `overscroll-behavior: contain`. The header
+   with Cancel and the toolbar with Post stay visible above the keyboard.
+   Wide screens keep the centered dialog.
+3. Opening locks user scrolling on the document root, without fixing the
+   body or changing the document scroll offset. Sticky desktop rails stay
+   in place, scrollbar space is preserved, and the router keeps its reading
+   position through Back and Forward. The native modal makes the background
+   inert; root overscroll is disabled while the sheet body can still scroll.
+   Post, Cancel, Escape, an account change, and navigation release the lock
+   and restore that position and the previous page styles. Close and disconnect
+   remove the viewport listeners.
+4. The dialog keeps its accessible name and focus behavior. The server
+   and first client render stay empty; viewport reads happen only on open.
+5. Send and upload failures stay visible inside the open dialog in an alert
+   live region. The draft and retry controls remain available. A new attempt
+   clears the alert; a late failure from an older opening cannot replace the
+   current opening's alert. On phones, the alert's height is bounded and its
+   text can be scrolled with the keyboard. A long server message leaves room
+   for the editor and keeps Post and Cancel above the keyboard. The page
+   toast still receives the failure.
+6. Reply, Quote, and New post compose events carry their invoking control.
+   Closing returns focus there, including after an iPhone tap that did not
+   focus the control. Shortcuts and callers without an invoker fall back to
+   the captured active element.
+
 **The reader edits and deletes their own posts.** On a post whose author
 has the active account's id (an id, never a handle, so a same-named
 account on another server is not the reader), the post menu has Edit,
