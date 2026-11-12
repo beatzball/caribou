@@ -1,5 +1,13 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.2.1
+
+### Patch Changes
+
+- [#285](https://github.com/beatzball/caribou/pull/285) [`1dff252`](https://github.com/beatzball/caribou/commit/1dff252fcd08a26fbdbb2655de37868469b8e2db) Thanks [@beatzball](https://github.com/beatzball)! - Keep Bluesky sessions after a temporary token refresh failure. Check stored credentials before expiring an account on a 401, and record safe session-end reasons locally.
+
+  Retain SDK deletion notices and their causes during a session check. Recheck storage after the running check, without expiring a newer sign-in.
+
 ## 0.2.0
 
 ### Minor Changes

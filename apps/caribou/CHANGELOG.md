@@ -1,5 +1,15 @@
 # caribou-app
 
+## 0.12.3
+
+### Patch Changes
+
+- [#285](https://github.com/beatzball/caribou/pull/285) [`1dff252`](https://github.com/beatzball/caribou/commit/1dff252fcd08a26fbdbb2655de37868469b8e2db) Thanks [@beatzball](https://github.com/beatzball)! - Show the latest local Bluesky session-end reason in Settings → Accounts as selectable plain text, without tokens or personal data.
+
+- Updated dependencies [[`1dff252`](https://github.com/beatzball/caribou/commit/1dff252fcd08a26fbdbb2655de37868469b8e2db), [`1dff252`](https://github.com/beatzball/caribou/commit/1dff252fcd08a26fbdbb2655de37868469b8e2db)]:
+  - @beatzball/caribou-state@0.5.1
+  - @beatzball/caribou-bluesky-client@0.2.1
+
 ## 0.12.2
 
 ### Patch Changes
