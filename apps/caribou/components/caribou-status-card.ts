@@ -291,10 +291,10 @@ export class CaribouStatusCard extends LitElement {
     }
     /* Focused post emphasis: bigger body type only. The accent border was
        visually load-bearing in the wrong direction — readers mistook the
-       blue 1px outline for an "older posts" affordance. Ancestor opacity
-       and descendant indentation already differentiate the focused row. */
+       blue 1px outline for an "older posts" affordance. Ancestor spacing
+       and descendant indentation differentiate the focused row. */
     article[data-variant="focused"] .status-content { font-size: 1.1rem; }
-    article[data-variant="ancestor"] { opacity: 0.75; }
+    article[data-variant="ancestor"] { padding-block-end: var(--space-5); }
     article[data-variant="descendant"] { margin-inline-start: var(--space-4); }
     /* A post above a Bluesky Home reply (#275): no rule below it, and a
        line from its avatar down to the next post's avatar. */

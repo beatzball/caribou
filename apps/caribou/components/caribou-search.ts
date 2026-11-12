@@ -87,9 +87,10 @@ export class CaribouSearch extends LitElement {
     form { display: flex; gap: var(--space-2); padding: 0 var(--space-3) var(--space-3); }
     input {
       flex: 1; min-width: 0; font: inherit; color: var(--fg-0);
-      background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md);
+      background: var(--bg-1); border: 1px solid var(--input-border); border-radius: var(--radius-md);
       padding: var(--space-2) var(--space-3); min-height: 44px;
     }
+    input::placeholder { color: var(--fg-muted); opacity: 1; }
     input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     /* A native submit: the form works with JavaScript off, which
        <caribou-button type="submit"> cannot do (README, Shared controls). */

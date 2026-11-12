@@ -285,8 +285,9 @@ export class CaribouComposeDialog extends LitElement {
     .acct { color: var(--fg-muted); }
     textarea, input[type="text"], select {
       width: 100%; font: inherit; color: var(--fg-0); background: var(--bg-1);
-      border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-2);
+      border: 1px solid var(--input-border); border-radius: var(--radius-md); padding: var(--space-2);
     }
+    input::placeholder, textarea::placeholder { color: var(--fg-muted); opacity: 1; }
     textarea { min-height: 8em; resize: vertical; }
     .media { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
     .media li { display: flex; flex-direction: column; gap: var(--space-1); }
