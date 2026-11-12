@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.2
+
+### Patch Changes
+
+- [#283](https://github.com/beatzball/caribou/pull/283) [`668d6f8`](https://github.com/beatzball/caribou/commit/668d6f8bb5d1ed6e3629f09b375a7f04d492c5e2) Thanks [@beatzball](https://github.com/beatzball)! - Keep compose above the iOS keyboard with a sheet sized to the visual viewport, and lock the page until compose closes. Preserve sticky navigation and Back/Forward reading positions while composing. Show send and upload errors inside the composer and restore focus to its invoking control after touch activation. Bound long error alerts on phones so the editor and posting controls stay above the keyboard.
+
 ## 0.12.1
 
 ### Patch Changes
