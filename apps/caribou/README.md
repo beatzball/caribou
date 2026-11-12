@@ -713,19 +713,30 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
    JavaScript, or with a modifier click, the link opens bsky.app. A plain
    click plays the video in place. The control plays, so Space plays too,
    as on a button (Enter already fires the click).
-3. **Safari plays the playlist natively.** A browser that answers
-   `canPlayType('application/vnd.apple.mpegurl')` gets it as the `src`.
-4. **Other browsers use `hls.js`, loaded on the first press only.** It is a
-   dynamic `import()`, in its own chunk, never in the main bundle. A browser
-   with neither (no Media Source Extensions) gets the error of rule 6.
+3. **`hls.js` plays first, wherever it can (#277).** A browser with Media
+   Source Extensions (MSE: `MediaSource` or `ManagedMediaSource`) uses
+   `hls.js`, as bsky.app does. The check is a cheap name test; it loads
+   nothing. Its answer to `canPlayType('application/vnd.apple.mpegurl')`
+   does not decide the path: Vivaldi on macOS (#277) can answer "maybe"
+   and still fail to play natively. Safari with MSE takes this path too,
+   when `hls.js` reports support.
+4. **Native HLS only where `hls.js` cannot run.** A browser with no MSE
+   that answers `canPlayType` gets the playlist as the `src`. A browser
+   with MSE also gets it when `hls.js` does not load or says it is not
+   supported. A browser with neither gets the error of rule 6. If native
+   playback errors and MSE is available, try `hls.js` once more before
+   showing the error. `hls.js` is a dynamic `import()`,
+   in its own chunk, never in the main bundle, loaded on the first press
+   only.
 5. **The embed's size holds the box.** The box uses the embed's
    `aspectRatio` (16:9 without one), before and after the press, so the
    page does not jump. A very tall video is capped like an image. A
    thumbnail the mapper rejected leaves the alt text (or "Video") in the
    box, not an empty box.
-6. **A stream that fails says so.** A fatal `hls.js` error, a `<video>`
-   error or a failed load of `hls.js` shows "This video could not play."
-   with a link "Watch on bsky.app". The thumbnail stays under it.
+6. **A stream that fails says so.** After the fallbacks in rule 4, a fatal
+   `hls.js` error, a `<video>` error or an unavailable player shows
+   "This video could not play." with a link "Watch on bsky.app". The
+   thumbnail stays under it.
 7. **The alt text is shown and read.** It is the video's accessible name
    (`Play video: <alt>`, then the `<video>` label), and an ALT badge shows it,
    as on images. With no alt text the names are "Play video" and "Video".
@@ -752,10 +763,13 @@ stream is HLS: a `.m3u8` playlist on `video.bsky.app`. The rules:
 
 **Tests.** `tests/e2e/bluesky-video.spec.ts` plays a tiny HLS stream from
 `tests/e2e/fixtures/hls/` (about 4 KB; `make.sh` there makes it again) and
-checks that the playback position moves, natively and with `hls.js`.
-`tests/e2e/bluesky-ssr.spec.ts` ("a server-painted video") checks that the
-server's poster hydrates in place, equals the client's render, and plays
-by keyboard.
+checks that the playback position moves, natively (in Chromium with MSE
+taken away) and with `hls.js`. It also makes Chromium answer "maybe" with a
+native player that fails, as Vivaldi does (#277), and the stream still
+plays. `tests/e2e/bluesky-ssr.spec.ts` checks both paths on a signed-out
+direct load, including Safari/WebKit. Its "a server-painted video" tests
+also check that the server's poster hydrates in place, equals the client's
+render, and plays by keyboard.
 
 **CSP.** The pages send no Content-Security-Policy, so nothing changed.
 A CSP added later must allow `media-src https://video.bsky.app blob:` (the

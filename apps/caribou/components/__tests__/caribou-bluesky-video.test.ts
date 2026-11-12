@@ -61,10 +61,22 @@ async function mount(card: PreviewCard): Promise<CaribouBlueskyVideo> {
 
 const $ = <T extends Element = HTMLElement>(el: Element, sel: string) => el.shadowRoot!.querySelector<T>(sel)
 
-// Native HLS is Safari's; happy-dom answers '' for every type.
+// happy-dom answers '' for every type. Chromium-based browsers answer
+// "maybe" for HLS (#277).
 function nativeHls(yes: boolean) {
   vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockImplementation(
     (type: string) => yes && type === 'application/vnd.apple.mpegurl' ? 'maybe' : '')
+}
+
+// happy-dom has no Media Source Extensions. Most tests give it one, as in
+// every desktop browser; `mse(false)` takes it away, as on an older iPhone.
+function mse(yes: boolean) {
+  vi.stubGlobal('MediaSource', yes ? class {} : undefined)
+  vi.stubGlobal('ManagedMediaSource', undefined)
+  if (!yes) {
+    delete (globalThis as { MediaSource?: unknown }).MediaSource
+    delete (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource
+  }
 }
 
 async function press(el: CaribouBlueskyVideo) {
@@ -89,10 +101,12 @@ describe('<caribou-bluesky-video>', () => {
     hls.FakeHls.isSupported.mockReturnValue(true)
     play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     nativeHls(false)
+    mse(true)
   })
   afterEach(() => {
     document.removeEventListener('click', noNavigation)
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('no click in this file can navigate', async () => {
@@ -130,8 +144,98 @@ describe('<caribou-bluesky-video>', () => {
     expect($(el, 'video')).toBeNull()
   })
 
-  it('rule 3: Safari plays the playlist natively, with no hls.js', async () => {
+  it('rule 3: with MSE, hls.js plays even when the browser answers "maybe" for native HLS (#277)', async () => {
     nativeHls(true)
+    const el = await mount(videoCard())
+    await press(el)
+    expect(hls.load).toHaveBeenCalledTimes(1)
+    expect(hls.instances[0]!.loadSource).toHaveBeenCalledWith(PLAYLIST)
+    expect($(el, 'video')!.hasAttribute('src')).toBe(false)
+  })
+
+  it('rule 3: ManagedMediaSource counts as MSE', async () => {
+    nativeHls(true)
+    mse(false)
+    vi.stubGlobal('ManagedMediaSource', class {})
+    const el = await mount(videoCard())
+    await press(el)
+    expect(hls.load).toHaveBeenCalledTimes(1)
+    expect($(el, 'video')!.hasAttribute('src')).toBe(false)
+  })
+
+  it('rule 4: with MSE, hls.js that does not load falls back to native HLS', async () => {
+    nativeHls(true)
+    hls.load.mockImplementationOnce(async () => { throw new Error('chunk failed') })
+    const el = await mount(videoCard())
+    await press(el)
+    expect($(el, 'video')!.getAttribute('src')).toBe(PLAYLIST)
+    expect($(el, '[role="alert"]')).toBeNull()
+  })
+
+  it('rule 4: with MSE, hls.js that is not supported falls back to native HLS', async () => {
+    nativeHls(true)
+    hls.FakeHls.isSupported.mockReturnValue(false)
+    const el = await mount(videoCard())
+    await press(el)
+    expect($(el, 'video')!.getAttribute('src')).toBe(PLAYLIST)
+    expect(hls.instances).toHaveLength(0)
+  })
+
+  it('rule 4: a native error retries hls.js once with MSE, keeping the player and focus (#277)', async () => {
+    nativeHls(true)
+    hls.load.mockRejectedValueOnce(new Error('chunk failed'))
+    const el = await mount(videoCard())
+    await press(el)
+    const v = $<HTMLVideoElement>(el, 'video')!
+    expect(v.getAttribute('src')).toBe(PLAYLIST)
+    v.dispatchEvent(new Event('error'))
+    v.dispatchEvent(new Event('error'))
+    await vi.waitFor(() => expect(hls.instances).toHaveLength(1))
+    expect(hls.load).toHaveBeenCalledTimes(2)
+    expect(hls.instances[0]!.loadSource).toHaveBeenCalledWith(PLAYLIST)
+    expect(hls.instances[0]!.attachMedia).toHaveBeenCalledWith(v)
+    expect(v.hasAttribute('src')).toBe(false)
+    expect(el.shadowRoot!.activeElement).toBe(v)
+    expect($(el, '[role="alert"]')).toBeNull()
+    // Failure after the one retry is final, with no further import.
+    hls.instances[0]!.fail(true)
+    await el.updateComplete
+    expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
+    expect(hls.load).toHaveBeenCalledTimes(2)
+  })
+
+  it('rule 4: a native error whose hls.js retry cannot load shows the error', async () => {
+    nativeHls(true)
+    hls.load.mockRejectedValue(new Error('chunk failed'))
+    const el = await mount(videoCard())
+    await press(el)
+    $(el, 'video')!.dispatchEvent(new Event('error'))
+    await vi.waitFor(async () => {
+      await el.updateComplete
+      expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
+    })
+    expect(hls.load).toHaveBeenCalledTimes(2)
+    expect(hls.instances).toHaveLength(0)
+  })
+
+  it('rule 8: leaving during the native error retry never attaches hls.js', async () => {
+    nativeHls(true)
+    hls.load.mockRejectedValueOnce(new Error('chunk failed'))
+    const el = await mount(videoCard())
+    await press(el)
+    let release!: () => void
+    hls.load.mockImplementationOnce(() => new Promise((r) => { release = () => r({ default: hls.FakeHls } as never) }))
+    $(el, 'video')!.dispatchEvent(new Event('error'))
+    await vi.waitFor(() => expect(hls.load).toHaveBeenCalledTimes(2))
+    el.remove()
+    release()
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(hls.instances).toHaveLength(0)
+  })
+
+  it('rule 4: with no MSE, native HLS plays, with no hls.js', async () => {
+    nativeHls(true)
+    mse(false)
     const el = await mount(videoCard())
     await press(el)
     const v = $<HTMLVideoElement>(el, 'video')!
@@ -155,6 +259,17 @@ describe('<caribou-bluesky-video>', () => {
 
   it('rule 4: a browser with neither shows the error', async () => {
     hls.FakeHls.isSupported.mockReturnValue(false)
+    const el = await mount(videoCard())
+    $(el, 'a.poster')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0 }))
+    await vi.waitFor(async () => {
+      await el.updateComplete
+      expect($(el, '[role="alert"]')?.textContent).toContain('This video could not play.')
+    })
+    expect(hls.instances).toHaveLength(0)
+  })
+
+  it('rule 4: with no MSE and no native HLS, the error shows and hls.js never loads', async () => {
+    mse(false)
     const el = await mount(videoCard())
     $(el, 'a.poster')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true, button: 0 }))
     await vi.waitFor(async () => {
@@ -192,6 +307,7 @@ describe('<caribou-bluesky-video>', () => {
 
   it('rule 6: a <video> error shows the error', async () => {
     nativeHls(true)
+    mse(false)
     const el = await mount(videoCard())
     await press(el)
     $(el, 'video')!.dispatchEvent(new Event('error'))
@@ -211,6 +327,7 @@ describe('<caribou-bluesky-video>', () => {
 
   it('rule 7: the alt text names the control and the video, and the ALT badge shows it', async () => {
     nativeHls(true)
+    mse(false)
     const el = await mount(videoCard())
     expect($(el, 'a.poster')!.getAttribute('aria-label')).toBe('Play video: A caribou running')
     expect($(el, '.alt-text')!.textContent).toBe('A caribou running')
@@ -226,6 +343,7 @@ describe('<caribou-bluesky-video>', () => {
 
   it('rule 7: with no alt text the playing video is named "Video"', async () => {
     nativeHls(true)
+    mse(false)
     const el = await mount(videoCard({ title: 'Video' }))
     await press(el)
     expect($(el, 'video')!.getAttribute('aria-label')).toBe('Video')
@@ -233,6 +351,7 @@ describe('<caribou-bluesky-video>', () => {
 
   it('rule 2: Space on the play control plays too', async () => {
     nativeHls(true)
+    mse(false)
     const el = await mount(videoCard())
     const key = new KeyboardEvent('keydown', { key: ' ', bubbles: true, composed: true, cancelable: true })
     $(el, 'a.poster')!.dispatchEvent(key)

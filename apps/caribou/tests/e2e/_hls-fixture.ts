@@ -41,6 +41,34 @@ export async function forceHlsJs(page: Page): Promise<void> {
   })
 }
 
+// As on an iPhone before Safari 17.1: no Media Source Extensions, so
+// hls.js cannot run and native HLS plays (rule 4).
+export async function noMediaSource(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    delete (window as { MediaSource?: unknown }).MediaSource
+    delete (window as { ManagedMediaSource?: unknown }).ManagedMediaSource
+  })
+}
+
+// As in Vivaldi on macOS (#277): the browser answers "maybe" for native
+// HLS, and its native player then fails. A playlist set as the `src` turns
+// into a source no browser plays, so the `<video>` fires `error`.
+export async function brokenNativeHls(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const real = HTMLMediaElement.prototype.canPlayType
+    HTMLMediaElement.prototype.canPlayType = function (type: string) {
+      return /mpegurl/i.test(type) ? 'maybe' : real.call(this, type)
+    }
+    const src = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')!
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+      ...src,
+      set(this: HTMLMediaElement, value: string) {
+        src.set!.call(this, /\.m3u8(\?|$)/.test(value) ? 'data:video/x-broken;base64,AAAA' : value)
+      },
+    })
+  })
+}
+
 // A new tab opened by a press shows up late (after a keyboard press, more
 // than a second later in Chromium). Wait a moment for one before saying
 // there was none. `seen` holds the ones that came already.

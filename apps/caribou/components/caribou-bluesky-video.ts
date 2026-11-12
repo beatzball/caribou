@@ -22,6 +22,13 @@ export function videoAspect(card: PreviewCard): number {
   return Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9
 }
 
+// Media Source Extensions, by name only: nothing loads (rule 3).
+// `ManagedMediaSource` is Safari's (iPhone 17.1 and later).
+function hasMediaSource(): boolean {
+  return typeof globalThis.MediaSource === 'function'
+    || typeof (globalThis as { ManagedMediaSource?: unknown }).ManagedMediaSource === 'function'
+}
+
 function altOf(card: PreviewCard): string {
   return card.title === NO_ALT_TITLE ? '' : card.title
 }
@@ -79,6 +86,7 @@ export class CaribouBlueskyVideo extends LitElement {
   @query('video') private video!: HTMLVideoElement | null
 
   private hls: Hls | null = null
+  private playback: 'native' | 'hls' | 'retry' | null = null
   // Bumped on every stop, so a load of hls.js that lands after the reader
   // left (or after a new card) does nothing (rule 8).
   private run = 0
@@ -106,6 +114,7 @@ export class CaribouBlueskyVideo extends LitElement {
   // Rule 8: destroy hls.js and take the source off the <video>.
   private stop() {
     this.run++
+    this.playback = null
     this.hls?.destroy()
     this.hls = null
     const v = this.video
@@ -160,33 +169,64 @@ export class CaribouBlueskyVideo extends LitElement {
     const v = this.video
     const playlist = httpUrl(this.card?.embedUrl)
     if (!v || !playlist || run !== this.run) return
-    if (v.canPlayType(HLS_TYPE)) {
-      // Rule 3: Safari.
-      v.src = playlist
-    } else {
-      // Rule 4: hls.js, loaded now and only now.
-      let HlsClass: typeof Hls
-      try {
-        HlsClass = (await loadHls()).default
-      } catch {
-        if (run === this.run) this.fail()
-        return
-      }
-      if (run !== this.run) return
-      if (!HlsClass.isSupported()) { this.fail(); return }
-      const h = new HlsClass()
-      this.hls = h
-      h.on(HlsClass.Events.ERROR, (_event, data) => {
-        if (data.fatal && this.hls === h) this.fail()
-      })
-      h.loadSource(playlist)
-      h.attachMedia(v)
+    const native = v.canPlayType(HLS_TYPE) !== ''
+    // Rule 3: hls.js first wherever there is MSE, whatever `canPlayType`
+    // says (#277: Vivaldi answers "maybe" and then cannot play).
+    if (hasMediaSource()) {
+      const attached = await this.attachHls(v, playlist, run)
+      if (run !== this.run || attached) return
     }
+    // Rule 4: native HLS only where hls.js cannot run.
+    if (!native) { this.fail(); return }
+    this.playback = 'native'
+    v.src = playlist
     void v.play().catch(() => { /* the browser refused; the controls stay */ })
   }
 
+  // Rule 3: hls.js, loaded now and only now. False when it cannot run here
+  // (it did not load, or it is not supported), so rule 4 can try native.
+  private async attachHls(v: HTMLVideoElement, playlist: string, run: number): Promise<boolean> {
+    let HlsClass: typeof Hls
+    try {
+      HlsClass = (await loadHls()).default
+    } catch {
+      return false
+    }
+    if (run !== this.run || !HlsClass.isSupported()) return false
+    const h = new HlsClass()
+    this.hls = h
+    this.playback = 'hls'
+    h.on(HlsClass.Events.ERROR, (_event, data) => {
+      if (data.fatal && this.hls === h) this.fail()
+    })
+    h.loadSource(playlist)
+    h.attachMedia(v)
+    void v.play().catch(() => { /* the browser refused; the controls stay */ })
+    return true
+  }
+
   private onVideoError = () => {
-    if (this.phase === 'playing') this.fail()
+    if (this.phase !== 'playing' || this.playback === 'retry') return
+    if (this.playback === 'native' && hasMediaSource()) {
+      // Rule 4: one retry after a native error. Mark it before awaiting the
+      // import, so duplicate errors cannot start another retry or end it.
+      this.playback = 'retry'
+      void this.retryNative(this.run)
+    } else {
+      this.fail()
+    }
+  }
+
+  private async retryNative(run: number) {
+    const v = this.video
+    const playlist = httpUrl(this.card?.embedUrl)
+    if (!v || !playlist) { this.fail(); return }
+    // Clear the native error before hls.js attaches to the same player.
+    // Keep the element and focus; only fail() may move focus (rule 12).
+    v.removeAttribute('src')
+    v.load()
+    const attached = await this.attachHls(v, playlist, run)
+    if (run === this.run && !attached) this.fail()
   }
 
   private renderAlt(alt: string) {
