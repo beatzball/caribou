@@ -1,3 +1,4 @@
+import { recordNotificationAnnouncements } from './_notification-announcements.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from '@beatzball/caribou-mastodon-client'
 import {
@@ -620,6 +621,28 @@ describe('caribou-notifications', () => {
 
 
 describe('notification filter announcements (README rule 2)', () => {
+  it.each(['light', 'dark'])('mounts empty before announcing a deferred initial request in %s theme', async (theme) => {
+    document.documentElement.dataset.theme = theme
+    let release!: () => void
+    fetchSpy.mockImplementationOnce(() => new Promise<Notification[]>((r) => { release = () => r([]) }))
+    const el = document.createElement('caribou-notifications') as CaribouNotifications
+    const frames = recordNotificationAnnouncements(el)
+    document.body.appendChild(el)
+    await vi.waitFor(() => expect(frames.some((frame) => frame.message === 'Loading notifications…')).toBe(true))
+    expect(frames[0]!.message).toBe('')
+    expect(frames[0]!.notice).toBe('Loading notifications…')
+    const region = frames[0]!.region!
+    expect(region).not.toBeNull()
+    expect(region.getAttribute('aria-live')).toBe('polite')
+    expect(region.getAttribute('aria-atomic')).toBe('true')
+    expect(frames.every((frame) => frame.region === region)).toBe(true)
+    expect(el.shadowRoot!.querySelector('.notice')!.textContent).toBe('Loading notifications…')
+    release()
+    await vi.waitFor(() => expect(region.textContent).toBe('No notifications yet.'))
+    expect(el.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+    delete document.documentElement.dataset.theme
+  })
+
   it.each(['light', 'dark'])('keeps a polite region and filter focus in %s theme', async (theme) => {
     document.documentElement.dataset.theme = theme
     fetchSpy.mockResolvedValueOnce([notif('1', 'follow')])
@@ -654,18 +677,24 @@ describe('notification filter announcements (README rule 2)', () => {
 })
 
 
-it('announces an empty cursor page, then lets end focus speak once (README rule 2)', async () => {
+it('never publishes terminal live text before focusing the pagination end (README rule 2)', async () => {
   fetchSpy.mockResolvedValueOnce(Object.assign([] as Notification[], { nextCursor: 'older' }))
   const el = await mount()
   const region = el.shadowRoot!.querySelector('[role="status"]')!
   expect(region).not.toBeNull()
   expect(region.textContent).toBe('Nothing to show here yet. Older notifications may follow.')
-  fetchSpy.mockResolvedValueOnce(Object.assign([] as Notification[], { nextCursor: null }))
+  const frames = recordNotificationAnnouncements(el)
+  let release!: () => void
+  fetchSpy.mockImplementationOnce(() => new Promise<Notification[]>((r) => { release = () => r(Object.assign([] as Notification[], { nextCursor: null })) }))
   const more = el.shadowRoot!.querySelector<HTMLElement>('.more caribou-button')!
   more.focus()
   more.click()
+  await vi.waitFor(() => expect(region.textContent).toBe('Loading notifications…'))
+  release()
   await vi.waitFor(() => expect(el.shadowRoot!.querySelector('.notice.end')).not.toBeNull())
   await flush()
+  expect(frames.map((frame) => frame.message)).not.toContain('No notifications yet.')
+  expect(frames.every((frame) => frame.region === region)).toBe(true)
   expect(el.shadowRoot!.activeElement).toBe(el.shadowRoot!.querySelector('.notice.end'))
   expect(el.shadowRoot!.querySelector('[role="status"]')).toBe(region)
   expect(region.textContent).toBe('')

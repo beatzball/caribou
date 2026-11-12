@@ -130,6 +130,8 @@ export class CaribouNotifications extends LitElement {
   // come back if the mute fails.
   @state() private silenced: ReadonlySet<string> = new Set()
   private disposeSilenced: (() => void) | null = null
+  // Publish live text only after the initially empty region is mounted.
+  @state() private announcementReady = false
   @state() private loading = true
   @state() private errorMsg: string | null = null
   @state() private hasMore = false
@@ -142,6 +144,9 @@ export class CaribouNotifications extends LitElement {
   private disposeVeil: (() => void) | null = null
 
   private store: NotificationsStore | null = null
+  // Set before the older request starts: its completion can render before
+  // onMore resumes and marks the focused end notice.
+  private loadingOlder: NotificationsStore | null = null
   private disposeBindings: (() => void) | null = null
   private stopPolling: (() => void) | null = null
   private disposeSession: (() => void) | null = null
@@ -195,6 +200,10 @@ export class CaribouNotifications extends LitElement {
       if (!same) this.silenced = ids
     })
     document.addEventListener('visibilitychange', this.onVisibility)
+  }
+
+  protected override firstUpdated() {
+    this.announcementReady = true
   }
 
   override disconnectedCallback() {
@@ -326,16 +335,21 @@ export class CaribouNotifications extends LitElement {
 
   private onMore = async () => {
     const store = this.store
-    if (!store) return
-    await store.loadMore()
-    if (store !== this.store || store.hasMore.peek() || !this.focusIsFree()) {
-      if (store === this.store && !store.hasMore.peek()) this.endedHere = true
-      return
+    if (!store || this.loadingOlder === store) return
+    this.loadingOlder = store
+    try {
+      await store.loadMore()
+      if (store !== this.store || store.hasMore.peek() || !this.focusIsFree()) {
+        if (store === this.store && !store.hasMore.peek()) this.endedHere = true
+        return
+      }
+      this.endedHere = true
+      await this.updateComplete
+      if (!this.focusIsFree()) return
+      ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
+    } finally {
+      if (this.loadingOlder === store) this.loadingOlder = null
     }
-    this.endedHere = true
-    await this.updateComplete
-    if (!this.focusIsFree()) return
-    ;(this.shadowRoot?.querySelector('.notice.end') as HTMLElement | null)?.focus()
   }
 
   // `acct` is relative to the user's own server for a local account. A
@@ -542,7 +556,8 @@ export class CaribouNotifications extends LitElement {
   private announcement(shown: NotificationGroup[]): string {
     // Load older announces its end by focusing the notice. Do not also
     // speak that notice through the live region. Errors have their alerts.
-    if (this.endedHere || (this.errorMsg && this.items.length === 0)) return ''
+    if (!this.announcementReady || this.endedHere || (this.errorMsg && this.items.length === 0)) return ''
+    if (this.loadingOlder === this.store && this.loadingOlder && !this.loading && !this.hasMore) return ''
     if (this.loading && this.items.length === 0) return 'Loading notifications…'
     if (shown.length > 0) return ''
     return this.hasMore ? 'Nothing to show here yet. Older notifications may follow.' : this.emptyMessage()
@@ -557,7 +572,9 @@ export class CaribouNotifications extends LitElement {
       </div>`
     }
     if (this.loading && this.items.length === 0) {
-      return nothing
+      // Keep loading visible on the first render, before the mounted live
+      // region publishes it in the following update.
+      return this.announcementReady ? nothing : html`<div class="notice">Loading notifications…</div>`
     }
     // An empty page with a cursor is not the end (a Bluesky page of only
     // skipped notifications): older ones are still in reach.
