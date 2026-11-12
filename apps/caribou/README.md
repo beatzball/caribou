@@ -335,6 +335,23 @@ asks again, so it never undoes a change still on its way.
 `/lists` is kept on an account switch; `/lists/<id>` is not (ids are per
 account).
 
+**Compose viewport rules (#282), for Mastodon and Bluesky.**
+
+1. Below 768px, compose is a sheet at the visual viewport's top offset,
+   with its height. It follows viewport resize and scroll while open;
+   without `visualViewport`, it uses `dvh`. Safe-area padding keeps the
+   controls clear of device insets.
+2. The sheet body scrolls with `overscroll-behavior: contain`. The header
+   with Cancel and the toolbar with Post stay visible above the keyboard.
+   Wide screens keep the centered dialog.
+3. Opening locks the page at its current scroll position without moving
+   desktop content when the scrollbar disappears. Post, Cancel, Escape,
+   an account change, and navigation release the lock and restore that
+   position and the previous page styles. Close and disconnect remove
+   the viewport listeners.
+4. The dialog keeps its accessible name and focus behavior. The server
+   and first client render stay empty; viewport reads happen only on open.
+
 **The reader edits and deletes their own posts.** On a post whose author
 has the active account's id (an id, never a handle, so a same-named
 account on another server is not the reader), the post menu has Edit,

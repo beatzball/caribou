@@ -486,3 +486,36 @@ test('a fresh sign-in loads the account once, and compose then uses its default 
   expect(calls).toBe(1)
   expect(errors).toEqual([])
 })
+
+test('compose rule 3: native wheel cannot move the page; closing restores its position without a layout jump', async ({ page }) => {
+  await seedSession(page)
+  await mockApi(page)
+  await gotoSettled(page, '/home')
+  // Make the otherwise short fixture timeline scrollable.
+  await page.locator('body').evaluate((body) => { body.style.minHeight = '3000px' })
+  await page.evaluate(() => window.scrollTo(0, 400))
+  const card = page.locator('caribou-status-card').first()
+  const before = (await card.boundingBox())!
+  await page.keyboard.press('n')
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('body')).toHaveCSS('position', 'fixed')
+  const locked = (await card.boundingBox())!
+  expect(locked.x).toBeCloseTo(before.x, 0)
+  expect(locked.y).toBeCloseTo(before.y, 0)
+  expect(locked.width).toBeCloseTo(before.width, 0)
+  const sheet = (await dialog.boundingBox())!
+  const viewport = page.viewportSize()!
+  expect(sheet.width).toBeLessThan(viewport.width)
+  expect(sheet.y + sheet.height / 2).toBeCloseTo(viewport.height / 2, 0)
+  await page.mouse.move(5, 5)
+  await page.mouse.wheel(0, 600)
+  await page.waitForTimeout(200)
+  expect((await card.boundingBox())!.y).toBeCloseTo(locked.y, 0)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(400)
+  const after = (await card.boundingBox())!
+  expect(after.x).toBeCloseTo(before.x, 0)
+  expect(after.width).toBeCloseTo(before.width, 0)
+})

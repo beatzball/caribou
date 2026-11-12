@@ -260,8 +260,7 @@ export class CaribouComposeDialog extends LitElement {
     :host { display: contents; }
     dialog {
       width: min(600px, calc(100vw - 2 * var(--space-4)));
-      /* dvh follows the visible area as Safari's toolbars come and go; the
-         insets keep Post and Cancel out of the home-indicator zone. */
+      /* Wide screens keep the centered dialog and its safe-area limits. */
       max-height: calc(100vh - 2 * var(--space-4));
       max-height: calc(100dvh - 2 * var(--space-4)
         - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
@@ -269,6 +268,8 @@ export class CaribouComposeDialog extends LitElement {
       background: var(--bg-0); color: var(--fg-0);
     }
     dialog::backdrop { background: rgb(0 0 0 / 0.5); }
+    dialog, textarea { overscroll-behavior: contain; }
+    .sheet-body { display: contents; }
     form { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
     header { display: flex; justify-content: space-between; align-items: center; }
     h2 { margin: 0; font-size: 1.1em; }
@@ -312,6 +313,31 @@ export class CaribouComposeDialog extends LitElement {
       .poll .settings select, .poll .check { min-block-size: 44px; }
     }
     .poll .problem, .note.problem { color: var(--danger); }
+    @media (max-width: 767px) {
+      dialog {
+        position: fixed; top: var(--compose-viewport-top, 0px); bottom: auto;
+        left: 0; right: 0; margin: 0;
+        width: 100%; max-width: none;
+        height: 100vh;
+        height: var(--compose-viewport-height, 100dvh);
+        max-height: none; overflow: hidden; border: 0; border-radius: 0;
+      }
+      form {
+        height: 100%; min-height: 0;
+        padding-top: max(var(--space-4), env(safe-area-inset-top, 0px));
+        padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
+        padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
+        padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+      }
+      header, .toolbar { flex-shrink: 0; }
+      .sheet-body {
+        display: flex; flex-direction: column; gap: var(--space-3);
+        flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+      }
+      .sheet-body > * { flex-shrink: 0; }
+      .reply-to { max-height: none; overflow: visible; }
+      textarea { resize: none; }
+    }
     .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   `]
 
@@ -364,6 +390,8 @@ export class CaribouComposeDialog extends LitElement {
   private draftKey: DraftSlot = 'new'
   private returnFocus: HTMLElement | null = null
   private showPending = false
+  private releasePage?: () => void
+  private unwatchViewport?: () => void
   // The account the dialog was opened for. Every read and write goes
   // through it, so a sign-out or an account switch while the dialog is
   // open can never save the draft under, or post as, another account.
@@ -393,6 +421,7 @@ export class CaribouComposeDialog extends LitElement {
   }
 
   override disconnectedCallback() {
+    this.close()
     const i = mounted.indexOf(this)
     if (i >= 0) mounted.splice(i, 1)
     window.removeEventListener('caribou:compose', this.onCompose)
@@ -449,6 +478,7 @@ export class CaribouComposeDialog extends LitElement {
     // close(), and an update in between must not open the dialog again.
     if (this.showPending && this.dialogEl) {
       this.showPending = false
+      this.watchViewport(this.dialogEl)
       if (!this.dialogEl.open) this.dialogEl.showModal()
       const ta = this.textareaEl
       if (ta) {
@@ -512,6 +542,7 @@ export class CaribouComposeDialog extends LitElement {
 
   private finishOpen() {
     this.open = true
+    this.lockPage()
     this.showPending = true
     this.ready = true
     const client = this.client
@@ -820,14 +851,74 @@ export class CaribouComposeDialog extends LitElement {
     }
   }
 
+  // Fixed body works on iOS, where overflow:hidden alone lets the page
+  // move behind a modal. Save before showModal/focus can scroll anything.
+  private lockPage() {
+    const body = document.body
+    const root = document.documentElement
+    const bodyStyle = body.style.cssText
+    const rootStyle = root.style.cssText
+    const x = window.scrollX
+    const y = window.scrollY
+    const width = root.clientWidth
+    const padding = parseFloat(getComputedStyle(body).paddingRight) || 0
+    body.style.position = 'fixed'
+    body.style.top = `${-y}px`
+    body.style.left = `${-x}px`
+    body.style.right = '0'
+    body.style.overflow = 'hidden'
+    root.style.overflow = 'hidden'
+    // Measure the actual change: an existing stable scrollbar gutter may
+    // already reserve this space, in which case no padding is needed.
+    const gutter = Math.max(0, root.clientWidth - width)
+    if (gutter) body.style.paddingRight = `${padding + gutter}px`
+    this.releasePage = () => {
+      body.style.cssText = bodyStyle
+      root.style.cssText = rootStyle
+      // An app-wide smooth-scroll rule must not animate this restoration.
+      const behavior = root.style.getPropertyValue('scroll-behavior')
+      const priority = root.style.getPropertyPriority('scroll-behavior')
+      root.style.setProperty('scroll-behavior', 'auto', 'important')
+      window.scrollTo(x, y)
+      if (behavior) root.style.setProperty('scroll-behavior', behavior, priority)
+      else root.style.removeProperty('scroll-behavior')
+    }
+  }
+
+  private watchViewport(dialog: HTMLDialogElement) {
+    const viewport = window.visualViewport
+    if (!viewport) return // CSS keeps the dvh fallback.
+    const update = () => {
+      dialog.style.setProperty('--compose-viewport-height', `${viewport.height}px`)
+      dialog.style.setProperty('--compose-viewport-top', `${viewport.offsetTop}px`)
+    }
+    update()
+    viewport.addEventListener('resize', update)
+    viewport.addEventListener('scroll', update)
+    this.unwatchViewport = () => {
+      viewport.removeEventListener('resize', update)
+      viewport.removeEventListener('scroll', update)
+      dialog.style.removeProperty('--compose-viewport-height')
+      dialog.style.removeProperty('--compose-viewport-top')
+    }
+  }
+
   private close() {
     this.dialogEl?.close()
+    // close fires asynchronously in browsers, and no dialog exists yet if
+    // an account switch happens before the opening render. Clean up now.
+    this.onClose()
   }
 
   // Runs for Esc, the Cancel button and a successful post alike. The draft
   // is already stored, so closing loses nothing.
   private onClose = () => {
+    // Ignore a queued close event from an earlier opening.
+    if (!this.open || this.dialogEl?.open) return
     this.open = false
+    this.showPending = false
+    this.unwatchViewport?.()
+    this.unwatchViewport = undefined
     this.cardWatcher?.stop()
     this.client = null
     this.editing = null
@@ -841,7 +932,9 @@ export class CaribouComposeDialog extends LitElement {
     void pruneDraftFiles()
     const target = this.returnFocus
     this.returnFocus = null
-    if (target?.isConnected) target.focus()
+    if (target?.isConnected) target.focus({ preventScroll: true })
+    this.releasePage?.()
+    this.releasePage = undefined
   }
 
   private patchDraft(patch: Partial<ComposeDraft>) {
@@ -1393,6 +1486,7 @@ export class CaribouComposeDialog extends LitElement {
             <h2 id="compose-title">${title}</h2>
             <caribou-button data-action="cancel" @click=${() => this.close()}>Cancel</caribou-button>
           </header>
+          <div class="sheet-body">
           ${this.replyTo ? html`
             <div class="reply-to" data-reply-to>
               <strong>${this.replyTo.account.displayName || this.replyTo.account.username}</strong>
@@ -1502,6 +1596,7 @@ export class CaribouComposeDialog extends LitElement {
             <!-- #199: reply and quote limits, for a new post or a quote only. -->
             <caribou-bluesky-gates .gates=${d.bluesky?.gates} .clientSource=${this.gatesClient} .account=${this.client?.userKey ?? null} ?disabled=${busy}
               @gates-change=${(e: CustomEvent<BlueskyGates>) => this.patchBluesky({ gates: e.detail })}></caribou-bluesky-gates>` : nothing}
+          </div>
           <div class="toolbar">
             <!-- The button is the one control Tab reaches; Enter or Space
                  clicks it, and the click opens the hidden file input. -->
