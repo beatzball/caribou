@@ -1,5 +1,14 @@
 # caribou-app
 
+## 0.12.4
+
+### Patch Changes
+
+- [#295](https://github.com/beatzball/caribou/pull/295) [`5075d96`](https://github.com/beatzball/caribou/commit/5075d9667c9d53dd03ce6acd0c1f8b75bce2e3c9) Thanks [@beatzball](https://github.com/beatzball)! - Improve placeholder and unfocused field contrast. Keep thread ancestors opaque and show contrasting keyboard focus over media. Paint image and GIF focus strokes above their media content.
+
+- Updated dependencies [[`5075d96`](https://github.com/beatzball/caribou/commit/5075d9667c9d53dd03ce6acd0c1f8b75bce2e3c9)]:
+  - @beatzball/caribou-design-tokens@0.1.3
+
 ## 0.12.3
 
 ### Patch Changes
