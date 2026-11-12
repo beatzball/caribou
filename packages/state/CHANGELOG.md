@@ -1,5 +1,18 @@
 # @beatzball/caribou-state
 
+## 0.5.0
+
+### Minor Changes
+
+- [#276](https://github.com/beatzball/caribou/pull/276) [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe) Thanks [@beatzball](https://github.com/beatzball)! - `cacheStatus` and `mergeStatus` cache a Bluesky Home reply's context posts (`bluesky.replyContext`) under their own ids, as they do a quoted post. A like, an edit or a delete of a context post reaches its card. A later copy of the reply with no context keeps the cached context, and `forgetReaderFields` scrubs the context copies.
+
+### Patch Changes
+
+- [#266](https://github.com/beatzball/caribou/pull/266) [`4c10394`](https://github.com/beatzball/caribou/commit/4c103947ece5f8c91338fd167d8ac61e21b22d2c) Thanks [@beatzball](https://github.com/beatzball)! - A Bluesky redraft keeps the post's reply and quote limits. `readBlueskyRedraft` reads them with the post. `redraftGatesOf` gives the limits the draft can send: none for a reply, and no list from another repo or unknown rule. `redraftDropsGates` is true when the draft keeps less than the post had, so the confirm can say so before the delete. A failed read throws `BlueskyRedraftGatesUnread`, so nothing is deleted.
+
+- Updated dependencies [[`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe)]:
+  - @beatzball/caribou-mastodon-client@0.5.0
+
 ## 0.4.11
 
 ### Patch Changes

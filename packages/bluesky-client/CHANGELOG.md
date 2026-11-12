@@ -1,5 +1,20 @@
 # @beatzball/caribou-bluesky-client
 
+## 0.2.0
+
+### Minor Changes
+
+- [#276](https://github.com/beatzball/caribou/pull/276) [`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe) Thanks [@beatzball](https://github.com/beatzball)! - Bluesky Home follows the reader's Following feed prefs, as bsky.app does. The client reads `feedViewPref` for `home` (hide replies, hide reposts, hide quote posts). A reply shows only when the reader follows its author and someone it answers, or when it is a self-thread. Orphan replies (a reposted one too) and muted threads never show. The reader's own posts and reposts always show, unless the reader muted the thread. Replies to the reader show unless they are orphans or in a muted thread. A reply that shows carries its root and parent as `bluesky.replyContext`, each mapped and moderated. Lists, custom feeds and profiles are unchanged.
+
+### Patch Changes
+
+- [#266](https://github.com/beatzball/caribou/pull/266) [`4c10394`](https://github.com/beatzball/caribou/commit/4c103947ece5f8c91338fd167d8ac61e21b22d2c) Thanks [@beatzball](https://github.com/beatzball)! - Deleting a Bluesky post now deletes its reply and quote limits too. The client reads the thread gate and post gate first. A post with no gate is one `deleteRecord`, as before. A post with a gate is one `applyWrites` that deletes the post and only the gates found. A failed gate read fails the delete, with nothing written.
+
+- [#265](https://github.com/beatzball/caribou/pull/265) [`a64b5c0`](https://github.com/beatzball/caribou/commit/a64b5c05f4ccd895ef355e3e62d3f5c4d421cfaf) Thanks [@beatzball](https://github.com/beatzball)! - A moderation load now sets the prefs and the label definitions together, so no decision uses new prefs with old definitions.
+
+- Updated dependencies [[`580ad61`](https://github.com/beatzball/caribou/commit/580ad61165958e6e6b2badf52d59a60d4ba930fe)]:
+  - @beatzball/caribou-mastodon-client@0.5.0
+
 ## 0.1.6
 
 ### Patch Changes
