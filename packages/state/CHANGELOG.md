@@ -1,5 +1,11 @@
 # @beatzball/caribou-state
 
+## 0.5.1
+
+### Patch Changes
+
+- [#285](https://github.com/beatzball/caribou/pull/285) [`1dff252`](https://github.com/beatzball/caribou/commit/1dff252fcd08a26fbdbb2655de37868469b8e2db) Thanks [@beatzball](https://github.com/beatzball)! - Clarify that a Bluesky API 401 requires a stored-session check before expiry. A temporary token refresh failure keeps the account signed in.
+
 ## 0.5.0
 
 ### Minor Changes
