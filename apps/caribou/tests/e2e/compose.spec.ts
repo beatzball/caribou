@@ -543,7 +543,22 @@ test('compose touch behavior: native header swipes preserve the page position wh
       await page.waitForTimeout(20)
     }
     await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-    await page.waitForTimeout(500)
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      let previous = window.scrollY
+      let stableFrames = 0
+      let stableSince = performance.now()
+      const sample = () => {
+        const current = window.scrollY
+        stableFrames = current === previous ? stableFrames + 1 : 0
+        if (current !== previous) stableSince = performance.now()
+        previous = current
+        // Near the end of a fling, rounded scrollY can pause for several
+        // frames before its final pixel. Require a quiet interval as well.
+        if (stableFrames >= 3 && performance.now() - stableSince >= 200) resolve()
+        else requestAnimationFrame(sample)
+      }
+      requestAnimationFrame(sample)
+    }))
   }
   await seedSession(page)
   await mockApi(page)
@@ -552,9 +567,14 @@ test('compose touch behavior: native header swipes preserve the page position wh
   await page.evaluate(() => window.scrollTo(0, 400))
   // A control gesture proves this input drives the browser's native scroll.
   await swipe()
-  const before = await page.evaluate(() => window.scrollY)
+  // Capture and open in one browser task so momentum cannot advance
+  // between separate evaluations of the baseline and the compose event.
+  const before = await page.evaluate(() => {
+    const y = window.scrollY
+    window.dispatchEvent(new CustomEvent('caribou:compose'))
+    return y
+  })
   expect(before).toBeGreaterThan(400)
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('caribou:compose')))
   const dialog = page.getByRole('dialog', { name: 'New post' })
   await expect(dialog).toBeVisible()
   expect(await page.evaluate(() => window.scrollY)).toBe(before)
