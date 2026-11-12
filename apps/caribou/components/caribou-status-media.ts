@@ -60,6 +60,17 @@ export class CaribouStatusMedia extends LitElement {
     a:focus-visible, button:focus-visible {
       outline: 2px solid var(--accent); outline-offset: -2px;
     }
+    /* Two opaque strokes keep image pixels from erasing keyboard focus.
+       Full-size controls stay inside the clipped grid; chips have room
+       outside their text for the same contrasting strokes. */
+    a.thumb:focus-visible, .gifv-toggle:focus-visible {
+      outline: 2px solid var(--overlay-fg); outline-offset: -4px;
+      box-shadow: inset 0 0 0 6px var(--overlay-bg);
+    }
+    .alt:focus-visible, caribou-button.hide::part(button):focus-visible {
+      outline: 2px solid var(--overlay-fg); outline-offset: 2px;
+      box-shadow: 0 0 0 6px var(--overlay-bg);
+    }
     button {
       font: inherit; cursor: pointer; border: 0;
       border-radius: var(--radius-sm);
@@ -67,7 +78,7 @@ export class CaribouStatusMedia extends LitElement {
     .alt {
       position: absolute; inset-block-end: var(--space-2); inset-inline-start: var(--space-2);
       padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
-      color: #fff; background: rgb(0 0 0 / 0.7);
+      color: var(--overlay-fg); background: var(--overlay-bg);
     }
     .gifv-toggle {
       position: relative; display: block; width: 100%; height: 100%;
@@ -76,7 +87,7 @@ export class CaribouStatusMedia extends LitElement {
     .gif-badge {
       position: absolute; inset-block-start: var(--space-2); inset-inline-start: var(--space-2);
       padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
-      color: #fff; background: rgb(0 0 0 / 0.7); border-radius: var(--radius-sm);
+      color: var(--overlay-fg); background: var(--overlay-bg); border-radius: var(--radius-sm);
     }
     /* Without the Popover API a [popover] is an ordinary element; keep the
        description out of the grid then. The image alt still carries it. */
@@ -100,7 +111,7 @@ export class CaribouStatusMedia extends LitElement {
       position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2);
       font-size: 0.75rem;
       --caribou-button-size: 0;
-      --caribou-button-bg: rgb(0 0 0 / 0.7); --caribou-button-fg: #fff;
+      --caribou-button-bg: var(--overlay-bg); --caribou-button-fg: var(--overlay-fg);
     }
     caribou-button:is(.reveal, .hide)::part(button) {
       border: 0; border-radius: var(--radius-sm);

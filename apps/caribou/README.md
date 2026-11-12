@@ -19,6 +19,21 @@ pnpm --filter caribou-app test:e2e   # playwright
 | `server/` | Nitro routes, API handlers and server-only libraries. |
 | `tests/` | `unit/`, `integration/` (SSR output), `e2e/` (Playwright). Component tests sit in `components/__tests__/`. |
 
+## Contrast rules (#288)
+
+1. Normal-size muted text and active boost/repost counts reach 4.5:1 on
+   canvas, panel, field and hover surfaces in both themes and networks.
+2. Thread ancestors keep fully opaque text, links and action counts.
+   Spacing and the focused post's larger body distinguish thread positions.
+3. Enabled input and textarea placeholders use an explicit color and opacity
+   and reach 4.5:1 on the field fill in both browser engines and themes.
+4. Unfocused text-entry controls have a boundary reaching 3:1 against both
+   the field fill and the surrounding surface. Decorative borders keep their
+   separate token.
+5. Keyboard focus on media overlays stays visible over any image: opaque
+   backing and contrasting inner/outer strokes give an image-independent
+   indicator in both themes.
+
 ## Conventions
 
 **Components are `LitElement`s with decorators.** `@customElement('caribou-x')`,

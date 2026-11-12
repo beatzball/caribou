@@ -11,8 +11,9 @@ export class CaribouInstancePicker extends LitElement {
     label { color: var(--fg-1); }
     input {
       padding: var(--space-3); border-radius: var(--radius-md);
-      border: 1px solid var(--border); background: var(--bg-1); color: var(--fg-0);
+      border: 1px solid var(--input-border); background: var(--bg-1); color: var(--fg-0);
     }
+    input::placeholder { color: var(--fg-muted); opacity: 1; }
     caribou-button { --caribou-button-size: 2.75rem; }
     [role="alert"] { color: var(--danger); margin: 0; }
   `]
