@@ -67,14 +67,48 @@ export class CaribouToaster extends LitElement {
 
   private nextId = 1
   private timers = new Map<number, ReturnType<typeof setTimeout>>()
+  private workTargets: HTMLElement[] = []
+  private focusVersion = 0
+  private focusRoot: ShadowRoot | null = null
+
+  private onFocus = (e: Event) => {
+    this.focusVersion++
+    this.rememberWork(e)
+  }
+
+  // Focusout leaves the work subtree before entering the toast. Its path
+  // names the latest field even when earlier moves within that subtree
+  // were retargeted to the same host and never reached the shell.
+  private rememberWork = (e: Event) => {
+    const path = e.composedPath()
+    if (path.includes(this)) return
+    const target = path[0]
+    if (target instanceof HTMLElement && target !== document.body) {
+      this.workTargets = [target, ...this.workTargets.filter((t) => t !== target)].slice(0, 8)
+    }
+  }
 
   override connectedCallback() {
     super.connectedCallback()
     window.addEventListener('caribou:toast', this.onToast)
+    document.addEventListener('focusin', this.onFocus)
+    document.addEventListener('focusout', this.rememberWork)
+    // Related targets within the page can retarget to the same host, so
+    // those focus events never reach document. Observe the shell too.
+    const root = this.getRootNode()
+    this.focusRoot = root instanceof ShadowRoot ? root : null
+    this.focusRoot?.addEventListener('focusin', this.onFocus)
+    this.focusRoot?.addEventListener('focusout', this.rememberWork)
   }
 
   override disconnectedCallback() {
     window.removeEventListener('caribou:toast', this.onToast)
+    document.removeEventListener('focusin', this.onFocus)
+    document.removeEventListener('focusout', this.rememberWork)
+    this.focusRoot?.removeEventListener('focusin', this.onFocus)
+    this.focusRoot?.removeEventListener('focusout', this.rememberWork)
+    this.focusRoot = null
+    this.workTargets = []
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
     this.toasts = []
@@ -107,7 +141,9 @@ export class CaribouToaster extends LitElement {
       const [old] = next.splice(at, 1)
       this.clearTimer(old!.id)
     }
+    const recover = this.recoverAfterRemoval(this.toasts.filter((t) => !next.includes(t)).map((t) => t.id))
     this.toasts = next
+    void recover()
     // A toast with an action waits for the reader, like an error: a
     // timeout could take the action away before it is read (WCAG 2.2.1).
     if (toast.kind === 'info' && !toast.action) {
@@ -121,13 +157,43 @@ export class CaribouToaster extends LitElement {
   }
 
   private dismiss(id: number) {
+    const recover = this.recoverAfterRemoval([id])
     this.clearTimer(id)
     this.toasts = this.toasts.filter((t) => t.id !== id)
+    void recover()
+  }
+
+  private recoverAfterRemoval(ids: number[]) {
+    const focused = this.shadowRoot?.activeElement?.closest<HTMLElement>('[data-toast-id]')
+    const ownsFocus = !!focused && ids.includes(Number(focused.dataset.toastId))
+    const rows = [...this.renderRoot.querySelectorAll<HTMLElement>('[data-toast-id]')]
+    const at = focused ? rows.indexOf(focused) : -1
+    const version = this.focusVersion
+    return async () => {
+      await this.updateComplete
+      // An action can deliberately select its own destination. Any later
+      // focus movement also belongs to the reader, not this recovery.
+      if (!ownsFocus || !this.isConnected || version !== this.focusVersion) return
+      let active = document.activeElement
+      while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
+      if (active && active !== document.body && active.isConnected) return
+      const remaining = rows.filter((row) => row.isConnected)
+      const next = rows.slice(at + 1).find((row) => row.isConnected)
+        ?? remaining.at(-1)
+      const control = next?.querySelector<LitElement>('caribou-button, caribou-icon-button')
+      await control?.updateComplete
+      if (version !== this.focusVersion) return
+      const root = this.getRootNode()
+      const target = control?.shadowRoot?.querySelector<HTMLElement>('button')
+        ?? this.workTargets.find(canRestoreFocus)
+        ?? (root instanceof ShadowRoot ? root.querySelector<HTMLElement>('main') : null)
+      if (target && canRestoreFocus(target)) target.focus()
+    }
   }
 
   private renderList(kind: ToastKind) {
     return repeat(this.toasts.filter((t) => t.kind === kind), (t) => t.id, (t) => html`
-      <div class="toast" data-kind=${t.kind} role=${kind === 'error' ? 'alert' : nothing}>
+      <div class="toast" data-toast-id=${t.id} data-kind=${t.kind} role=${kind === 'error' ? 'alert' : nothing}>
         <span class="message">${t.message}</span>
         ${t.action ? html`<caribou-button class="action" variant="secondary"
           @click=${() => { this.dismiss(t.id); t.action!.run() }}>${t.action.label}</caribou-button>` : nothing}
@@ -150,4 +216,16 @@ export class CaribouToaster extends LitElement {
       </div>
     `
   }
+}
+
+function canRestoreFocus(target: HTMLElement): boolean {
+  if (!target.isConnected || target.matches(':disabled, [aria-disabled="true"]')) return false
+  let el: Element | null = target
+  while (el) {
+    if (el.matches('[hidden], [inert], dialog:not([open])') || getComputedStyle(el).display === 'none'
+      || getComputedStyle(el).visibility === 'hidden') return false
+    const root = el.getRootNode()
+    el = el.parentElement ?? (root instanceof ShadowRoot ? root.host : null)
+  }
+  return true
 }

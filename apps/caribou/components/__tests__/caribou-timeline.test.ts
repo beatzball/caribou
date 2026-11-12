@@ -949,3 +949,28 @@ describe('<caribou-timeline> — a list', () => {
     expect(tl.shadowRoot!.querySelector('caribou-status-card')!.getAttribute('filter-context')).toBe('home')
   })
 })
+
+describe('keyboard focus rule 3', () => {
+  it('applying a focused banner focuses the resulting list', async () => {
+    const tl = await mount('home', asInitial([mkStatus('old')]))
+    storeOf(tl)._testOnlyPrepend(asStatuses([mkStatus('new')]))
+    await settle(tl)
+    const host = bannerButton(tl)!
+    host.shadowRoot!.querySelector<HTMLElement>('button')!.focus()
+    host.click()
+    await settle(tl)
+    expect(tl.shadowRoot!.activeElement).toBe(tl.shadowRoot!.querySelector('ul'))
+  })
+
+  it('applying while another control is focused preserves that focus', async () => {
+    const tl = await mount('home', asInitial([mkStatus('old')]))
+    storeOf(tl)._testOnlyPrepend(asStatuses([mkStatus('new')]))
+    await settle(tl)
+    const other = document.createElement('button')
+    document.body.append(other)
+    other.focus()
+    bannerButton(tl)!.click()
+    await settle(tl)
+    expect(document.activeElement).toBe(other)
+  })
+})

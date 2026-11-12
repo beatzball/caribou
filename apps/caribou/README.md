@@ -21,6 +21,24 @@ pnpm --filter caribou-app test:e2e   # playwright
 
 ## Conventions
 
+**Keyboard focus rules (#289), for Mastodon and Bluesky in both themes.**
+
+1. Phone document scrolling keeps keyboard focus above the fixed navigation,
+   including its border and safe-area inset.
+2. Skip to content reaches the shell's main region through shadow roots.
+   The next Tab starts in the page content, on direct loads and SPA visits.
+3. Applying new posts from the focused banner moves focus to the resulting
+   list after rendering, including a Bluesky gap replacement. Focus elsewhere
+   stays where the reader left it.
+4. Removing a focused attachment moves focus to the next Remove control,
+   else the previous one, else Add media. Background upload changes and
+   removals made while focus is elsewhere do not take focus.
+5. Removing a focused toast moves focus to a surviving toast control or the
+   connected previous work target. Timeout and stack eviction follow the
+   same rule. An action's own focus destination takes precedence.
+6. Focus recovery runs after user interaction and rendering; the server
+   render still equals the first client render.
+
 **Components are `LitElement`s with decorators.** `@customElement('caribou-x')`,
 `@property()` for public inputs, `@state()` for private reactive fields.
 `tsconfig.json` sets `experimentalDecorators` and turns `useDefineForClassFields`

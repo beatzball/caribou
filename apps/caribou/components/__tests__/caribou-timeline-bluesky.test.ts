@@ -130,7 +130,7 @@ describe('Following feed', () => {
     expect(tl.shadowRoot!.textContent).not.toContain('Checking this post')
   })
 
-  it('a catch-up that does not meet the top post says "Many new posts" and replaces the list', async () => {
+  it.each([true, false])('rule 3: a gap replaces the list and recovers only banner focus (focused %s)', async (focused) => {
     let polling = false
     signIn({
       getTimeline: vi.fn(async ({ cursor }: { cursor?: string }) => {
@@ -150,10 +150,17 @@ describe('Following feed', () => {
     await (banner as unknown as { updateComplete: Promise<boolean> }).updateComplete
     const button = banner.shadowRoot!.querySelector<HTMLElement>('[data-action="apply-new-posts"]')!
     expect(button.textContent!.trim()).toBe('Many new posts')
+    const other = document.createElement('button')
+    document.body.append(other)
+    if (focused) button.shadowRoot!.querySelector<HTMLElement>('button')!.focus()
+    else other.focus()
     button.click()
     await settle(tl)
     expect(ids(tl)[0]).toBe(uri('n0'))
     expect(ids(tl)).not.toContain(uri(1))
+    // Rule 3: replacing a Bluesky gap also recovers the banner's focus.
+    if (focused) expect(tl.shadowRoot!.activeElement).toBe(tl.shadowRoot!.querySelector('ul'))
+    else expect(document.activeElement).toBe(other)
   })
 
   it('a first page where no post could be mapped keeps a way to load more', async () => {
