@@ -1,4 +1,5 @@
 import { expect, test, type Page } from './_fixtures.js'
+import { checkComposeHistory } from './_compose-scroll.js'
 
 const INSTANCE = 'example.social'
 const AVATAR = `https://${INSTANCE}/a.png`
@@ -488,18 +489,21 @@ test('a fresh sign-in loads the account once, and compose then uses its default 
 })
 
 test('compose rule 3: native wheel cannot move the page; closing restores its position without a layout jump', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
   await seedSession(page)
   await mockApi(page)
   await gotoSettled(page, '/home')
   // Make the otherwise short fixture timeline scrollable.
-  await page.locator('body').evaluate((body) => { body.style.minHeight = '3000px' })
+  await page.locator('caribou-timeline').evaluate((timeline) => { timeline.style.minHeight = '3000px' })
   await page.evaluate(() => window.scrollTo(0, 400))
   const card = page.locator('caribou-status-card').first()
   const before = (await card.boundingBox())!
+  const rail = page.locator('caribou-nav-rail nav')
+  const railBefore = await rail.boundingBox()
   await page.keyboard.press('n')
   const dialog = page.getByRole('dialog', { name: 'New post' })
   await expect(dialog).toBeVisible()
-  await expect(page.locator('body')).toHaveCSS('position', 'fixed')
+  expect(await rail.boundingBox()).toEqual(railBefore)
   const locked = (await card.boundingBox())!
   expect(locked.x).toBeCloseTo(before.x, 0)
   expect(locked.y).toBeCloseTo(before.y, 0)
@@ -518,4 +522,45 @@ test('compose rule 3: native wheel cannot move the page; closing restores its po
   const after = (await card.boundingBox())!
   expect(after.x).toBeCloseTo(before.x, 0)
   expect(after.width).toBeCloseTo(before.width, 0)
+  expect(await rail.boundingBox()).toEqual(railBefore)
+})
+
+test('compose rule 3: Back then Forward restores the reading position with the real router', async ({ page }) => {
+  await checkComposeHistory(page)
+})
+
+test('compose rule 3: native touch scrolling stops behind the phone sheet and resumes on close', async ({ page, browserName }) => {
+  test.skip(browserName !== 'chromium', 'Native swipe input uses Chromium CDP; WebKit has tap automation only.')
+  await page.setViewportSize({ width: 393, height: 852 })
+  const input = await page.context().newCDPSession(page)
+  await input.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+  const swipe = async () => {
+    await input.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 200, y: 600 }] })
+    for (let i = 1; i <= 10; i++) {
+      await input.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 200, y: 600 - i * 30 }] })
+      await page.waitForTimeout(20)
+    }
+    await input.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await page.waitForTimeout(500)
+  }
+  await seedSession(page)
+  await mockApi(page)
+  await gotoSettled(page, '/home')
+  await page.locator('caribou-timeline').evaluate((timeline) => { timeline.style.minHeight = '4000px' })
+  await page.evaluate(() => window.scrollTo(0, 400))
+  // A control gesture proves this input drives the browser's native scroll.
+  await swipe()
+  const before = await page.evaluate(() => window.scrollY)
+  expect(before).toBeGreaterThan(400)
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('caribou:compose')))
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog).toBeVisible()
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
+  await swipe()
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  expect(await page.evaluate(() => window.scrollY)).toBe(before)
+  await swipe()
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(before)
 })

@@ -851,8 +851,10 @@ export class CaribouComposeDialog extends LitElement {
     }
   }
 
-  // Fixed body works on iOS, where overflow:hidden alone lets the page
-  // move behind a modal. Save before showModal/focus can scroll anything.
+  // Keep the document scroller in place: a fixed body shifts sticky rails
+  // and emits scrollY=0, which the router saves as the reading position.
+  // The native modal makes the background inert; root overflow/overscroll
+  // contain user scrolling while the sheet body remains scrollable.
   private lockPage() {
     const body = document.body
     const root = document.documentElement
@@ -862,12 +864,8 @@ export class CaribouComposeDialog extends LitElement {
     const y = window.scrollY
     const width = root.clientWidth
     const padding = parseFloat(getComputedStyle(body).paddingRight) || 0
-    body.style.position = 'fixed'
-    body.style.top = `${-y}px`
-    body.style.left = `${-x}px`
-    body.style.right = '0'
-    body.style.overflow = 'hidden'
     root.style.overflow = 'hidden'
+    root.style.overscrollBehavior = 'none'
     // Measure the actual change: an existing stable scrollbar gutter may
     // already reserve this space, in which case no padding is needed.
     const gutter = Math.max(0, root.clientWidth - width)
@@ -875,6 +873,8 @@ export class CaribouComposeDialog extends LitElement {
     this.releasePage = () => {
       body.style.cssText = bodyStyle
       root.style.cssText = rootStyle
+      // Usually nothing moved, so no restoration scroll event is needed.
+      if (window.scrollX === x && window.scrollY === y) return
       // An app-wide smooth-scroll rule must not animate this restoration.
       const behavior = root.style.getPropertyValue('scroll-behavior')
       const priority = root.style.getPropertyPriority('scroll-behavior')

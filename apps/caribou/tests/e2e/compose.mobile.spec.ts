@@ -1,4 +1,5 @@
 import { expect, test, type Page } from './_fixtures.js'
+import { checkComposeHistory } from './_compose-scroll.js'
 import { API, BOB, gotoSettled, json, signIn, status } from './_moderation.js'
 
 async function replyFromTimeline(page: Page) {
@@ -21,9 +22,9 @@ async function replyFromTimeline(page: Page) {
 }
 
 for (const close of ['Cancel', 'Escape'] as const) {
-  test(`rule 3: Reply locks the page against scroll attempts and touch; ${close} restores its position`, async ({ page }) => {
-    // Capture the position immediately before the reply opens (tap may scroll
-    // the button into view), and a card's screen position to detect page motion.
+  test(`rule 3: Reply keeps the document reading position; ${close} restores its position`, async ({ page }) => {
+    // Capture the position immediately before the reply opens: tapping may
+    // first scroll the button into view.
     await page.addInitScript(() => {
       window.addEventListener('caribou:compose', () => {
         document.body.dataset.beforeComposeY = String(window.scrollY)
@@ -32,25 +33,13 @@ for (const close of ['Cancel', 'Escape'] as const) {
     const dialog = await replyFromTimeline(page)
     const before = Number(await page.locator('body').getAttribute('data-before-compose-y'))
     expect(before).toBeGreaterThan(0)
-    await expect(page.locator('body')).toHaveCSS('position', 'fixed')
-    await expect(page.locator('body')).toHaveCSS('top', `${-before}px`)
-    const card = page.locator('caribou-status-card[data-status-id="6"]')
-    const top = (await card.boundingBox())!.y
-    // Mobile WebKit has no native wheel or swipe automation. Exercise the
-    // gesture listeners, then attempt scrolling the page directly. The
-    // desktop compose spec also exercises a native wheel input.
-    await dialog.evaluate((el) => {
-      for (const [type, y] of [['touchstart', 250], ['touchmove', 80], ['touchend', 80]] as const) {
-        const touch = { identifier: 1, target: el, clientX: 10, clientY: y }
-        el.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
-          touches: type === 'touchend' ? [] : [touch], changedTouches: [touch],
-        }))
-      }
-      window.scrollBy(0, 600)
-    })
-    // Give any asynchronous scrolling time to settle before measuring.
+    await expect(page.locator('html')).toHaveCSS('overflow', 'hidden')
+    await expect(page.locator('html')).toHaveCSS('overscroll-behavior', 'none')
+    await expect(page.locator('body')).not.toHaveCSS('position', 'fixed')
+    // This checks document position, not native swipe scrolling. Chromium
+    // CDP coverage in compose.spec.ts sends real touch input separately.
     await page.waitForTimeout(200)
-    expect((await card.boundingBox())!.y).toBeCloseTo(top, 0)
+    expect(await page.evaluate(() => window.scrollY)).toBe(before)
     if (close === 'Cancel') await dialog.getByRole('button', { name: 'Cancel' }).tap()
     else await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
@@ -92,4 +81,8 @@ test('rules 1 and 2: Reply and Cancel stay inside a shrinking and panning visual
   await body.evaluate((el) => { el.scrollTop = el.scrollHeight })
   const post = (await dialog.getByRole('button', { name: 'Reply', exact: true }).boundingBox())!
   expect(post.y + post.height).toBeLessThanOrEqual(390)
+})
+
+test('compose rule 3: Back then Forward restores the phone reading position with the real router', async ({ page }) => {
+  await checkComposeHistory(page)
 })

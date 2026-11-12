@@ -344,11 +344,14 @@ account).
 2. The sheet body scrolls with `overscroll-behavior: contain`. The header
    with Cancel and the toolbar with Post stay visible above the keyboard.
    Wide screens keep the centered dialog.
-3. Opening locks the page at its current scroll position without moving
-   desktop content when the scrollbar disappears. Post, Cancel, Escape,
-   an account change, and navigation release the lock and restore that
-   position and the previous page styles. Close and disconnect remove
-   the viewport listeners.
+3. Opening locks user scrolling on the document root, without fixing the
+   body or changing the document scroll offset. Sticky desktop rails stay
+   in place, scrollbar space is preserved, and the router keeps its reading
+   position through Back and Forward. The native modal makes the background
+   inert; root overscroll is disabled while the sheet body can still scroll.
+   Post, Cancel, Escape, an account change, and navigation release the lock
+   and restore that position and the previous page styles. Close and disconnect
+   remove the viewport listeners.
 4. The dialog keeps its accessible name and focus behavior. The server
    and first client render stay empty; viewport reads happen only on open.
 

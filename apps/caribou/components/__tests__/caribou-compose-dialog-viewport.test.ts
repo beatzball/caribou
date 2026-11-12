@@ -71,7 +71,8 @@ describe('compose viewport rules (#282)', () => {
     const dialog = await open(el)
     expect(dialog.open).toBe(true)
     expect(dialog.style.getPropertyValue('--compose-viewport-height')).toBe('')
-    expect(document.body.style.position).toBe('fixed')
+    expect(document.documentElement.style.overflow).toBe('hidden')
+    expect(document.body.style.position).not.toBe('fixed')
   })
 
   for (const path of ['Cancel', 'Post', 'Escape', 'account switch', 'navigation'] as const) {
@@ -85,8 +86,9 @@ describe('compose viewport rules (#282)', () => {
       const add = vi.spyOn(viewport, 'addEventListener')
       const remove = vi.spyOn(viewport, 'removeEventListener')
       const dialog = await open(el)
-      expect(document.body.style.position).toBe('fixed')
-      expect(document.body.style.top).toBe('-345px')
+      expect(document.body.style.position).toBe('relative')
+      expect(document.body.style.top).toBe('2px')
+      expect(document.documentElement.style.overscrollBehavior).toBe('none')
       expect(document.documentElement.style.overflow).toBe('hidden')
       expect(add.mock.calls.map(([event]) => event)).toEqual(['resize', 'scroll'])
       if (path === 'Cancel') {
@@ -109,7 +111,7 @@ describe('compose viewport rules (#282)', () => {
       await settle(el)
       expect(document.body.style.cssText).toBe(bodyStyle)
       expect(document.documentElement.style.cssText).toBe(rootStyle)
-      expect(window.scrollTo).toHaveBeenCalledWith(7, 345)
+      expect(window.scrollTo).not.toHaveBeenCalled()
       expect(remove.mock.calls).toEqual(add.mock.calls)
       if (path === 'Post') expect(create).toHaveBeenCalledOnce()
       const height = dialog.style.getPropertyValue('--compose-viewport-height')
@@ -126,6 +128,15 @@ describe('compose viewport rules (#282)', () => {
     await settle(el)
     expect(el.shadowRoot!.querySelector('dialog')?.open ?? false).toBe(false)
     expect(document.body.style.position).toBe('')
+  })
+
+  it('rule 3: restores the saved position if the browser moved it while focusing', async () => {
+    const el = await mount()
+    await open(el)
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(360)
+    el.shadowRoot!.querySelector<HTMLElement>('[data-action="cancel"]')!.click()
+    await settle(el)
+    expect(window.scrollTo).toHaveBeenCalledWith(7, 345)
   })
 
   it('rule 3: compensates for a removed desktop scrollbar and restores padding', async () => {
