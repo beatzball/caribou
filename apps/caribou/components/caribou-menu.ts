@@ -144,6 +144,7 @@ export class CaribouMenu extends LitElement {
 
   override disconnectedCallback() {
     document.removeEventListener('pointerdown', this.onOutside)
+    this.watchViewport(false)
     super.disconnectedCallback()
   }
 
@@ -176,7 +177,14 @@ export class CaribouMenu extends LitElement {
 
   private beforeChange(open: boolean) {
     if (!open) this._hadFocus = this.matches(':focus-within')
-    else if (this.anchored) this.placeNearTrigger()
+    else if (this.anchored) {
+      // A closed popover has no box. Measure it before it enters the top
+      // layer, without changing the server or first client render.
+      const panel = this.panel!
+      panel.style.display = 'flex'
+      this.placeNearTrigger()
+      panel.style.removeProperty('display')
+    }
   }
 
   // Inline insets win over the stylesheet's corner position. The panel is
@@ -186,21 +194,50 @@ export class CaribouMenu extends LitElement {
     const panel = this.panel
     if (!trigger || !panel) return
     const r = trigger.getBoundingClientRect()
-    const vw = document.documentElement.clientWidth || window.innerWidth
-    const vh = window.innerHeight
-    const right = Math.max(8, vw - r.right)
-    const below = r.bottom < vh * 0.6
-    panel.style.inset = below
-      ? `${r.bottom + 4}px ${right}px auto auto`
-      : `auto ${right}px ${vh - r.top + 4}px auto`
-    panel.style.maxBlockSize = below ? `${vh - r.bottom - 12}px` : `${r.top - 12}px`
+    const viewport = window.visualViewport
+    const left = viewport?.offsetLeft ?? 0
+    const top = viewport?.offsetTop ?? 0
+    const width = viewport?.width ?? (document.documentElement.clientWidth || window.innerWidth)
+    const height = viewport?.height ?? window.innerHeight
+    const edge = 8
+    const availableWidth = Math.max(0, width - 2 * edge)
+    panel.style.minInlineSize = `min(12rem, ${availableWidth}px)`
+    panel.style.maxInlineSize = `${availableWidth}px`
+    const bottom = top + height
+    const belowSpace = Math.max(0, bottom - Math.max(top + edge, r.bottom + 4) - edge)
+    const aboveSpace = Math.max(0, Math.min(bottom - edge, r.top - 4) - top - edge)
+    const below = belowSpace >= aboveSpace
+    panel.style.maxBlockSize = `${below ? belowSpace : aboveSpace}px`
+    const box = panel.getBoundingClientRect()
+    const x = Math.max(left + edge, Math.min(r.right - box.width, left + width - edge - box.width))
+    const y = below
+      ? Math.max(top + edge, Math.min(r.bottom + 4, bottom - edge - box.height))
+      : Math.max(top + edge, Math.min(r.top - 4 - box.height, bottom - edge - box.height))
+    panel.style.inset = 'auto'
+    panel.style.top = `${y}px`
+    panel.style.left = `${x}px`
+  }
+
+  private onViewportChange = () => {
+    if (this._open && this.anchored) this.placeNearTrigger()
+  }
+
+  private watchViewport(watch: boolean) {
+    const method = watch ? 'addEventListener' : 'removeEventListener'
+    window[method]('resize', this.onViewportChange)
+    window[method]('scroll', this.onViewportChange, true)
+    window.visualViewport?.[method]('resize', this.onViewportChange)
+    window.visualViewport?.[method]('scroll', this.onViewportChange)
   }
 
   private afterChange(open: boolean) {
     this._open = open
     this.trigger?.setAttribute('aria-expanded', String(open))
-    if (open) this.firstItem()?.focus()
-    else if (this._hadFocus) this.trigger?.focus()
+    this.watchViewport(open && this.anchored)
+    if (open) {
+      if (this.anchored) this.placeNearTrigger()
+      this.firstItem()?.focus()
+    } else if (this._hadFocus) this.trigger?.focus()
     this._hadFocus = false
   }
 

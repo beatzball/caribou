@@ -66,8 +66,19 @@ export class CaribouStatusMedia extends LitElement {
     }
     .alt {
       position: absolute; inset-block-end: var(--space-2); inset-inline-start: var(--space-2);
+      min-inline-size: 24px; min-block-size: 24px;
       padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
       color: #fff; background: rgb(0 0 0 / 0.7);
+    }
+    @media (pointer: coarse) {
+      .alt { min-inline-size: 44px; min-block-size: 44px; }
+    }
+    /* Keep ALT clear of the native video control bar. Audio and file
+       descriptions have their own row, rather than cover their controls. */
+    .item[data-type="video"] .alt { inset-block: var(--space-2) auto; }
+    .item:is([data-type="audio"], [data-type="unknown"]) { flex-direction: column; }
+    .item:is([data-type="audio"], [data-type="unknown"]) .alt {
+      position: static; align-self: flex-start; margin: var(--space-2);
     }
     .gifv-toggle {
       position: relative; display: block; width: 100%; height: 100%;
