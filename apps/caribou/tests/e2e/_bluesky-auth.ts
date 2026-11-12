@@ -35,6 +35,11 @@ export interface FixtureAuth {
   pdsCalls: { method: string; authorization: string | null; dpop: boolean; acceptLabelers: string | null }[]
   /** When true, the PDS refuses every token (the session ended at the server). */
   revokedAtServer: boolean
+  /** Temporary failure of refresh, without revoking the session. */
+  refreshFailure: 'offline' | 503 | null
+  refreshDelayMs: number
+  refreshTokens: Map<string, string>
+  issued: number
 }
 
 const CORS = {
@@ -104,6 +109,8 @@ const CONTENT_LABELERS = 'atproto-content-labelers'
 /** Installs the fixture servers on `page`. */
 export async function installFixtureAuth(page: Page, opts: {
   sub?: string
+  /** Share an authorization server across two tabs. */
+  state?: FixtureAuth
   xrpc?: XrpcAnswer
   /**
    * Expose `atproto-content-labelers` to the page. Off by default, as on the
@@ -111,10 +118,9 @@ export async function installFixtureAuth(page: Page, opts: {
    */
   exposeContentLabelers?: boolean
 } = {}): Promise<FixtureAuth> {
-  const state: FixtureAuth = { sub: opts.sub ?? null, tokenRequests: [], revoked: [], pdsCalls: [], revokedAtServer: false }
+  const state: FixtureAuth = opts.state ?? { sub: opts.sub ?? null, tokenRequests: [], revoked: [], pdsCalls: [], revokedAtServer: false, refreshFailure: null, refreshDelayMs: 0, refreshTokens: new Map(), issued: 0 }
   const pars = new Map<string, URLSearchParams>()
   const codes = new Map<string, URLSearchParams>()
-  let issued = 0
 
   // Caribou's own handle resolver (#181 serves it; the test answers for it).
   await page.route('**/xrpc/com.atproto.identity.resolveHandle?*', (route) => {
@@ -160,19 +166,33 @@ export async function installFixtureAuth(page: Page, opts: {
     })
   })
 
-  await page.route(`${ISSUER}/oauth/token`, (route) => {
+  await page.route(`${ISSUER}/oauth/token`, async (route) => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS })
     const body = new URLSearchParams(route.request().postData() ?? '')
     state.tokenRequests.push(body)
+    const refreshing = body.get('grant_type') === 'refresh_token'
     const par = codes.get(body.get('code') ?? '')
-    if (body.get('grant_type') !== 'authorization_code' || !par) return json(route, { error: 'invalid_grant' }, 400)
-    const hint = par.get('login_hint') ?? ''
-    const sub = state.sub ?? (hint.startsWith('did:') ? hint : HANDLES[hint] ?? ALICE)
-    // Each swap gives new tokens, so a test can tell an old one from a new one.
-    issued++
+    let sub: string
+    if (refreshing) {
+      if (state.refreshDelayMs) await new Promise((resolve) => setTimeout(resolve, state.refreshDelayMs))
+      if (state.refreshFailure === 'offline') return route.abort('internetdisconnected')
+      if (state.refreshFailure === 503) return json(route, { error: 'server_error' }, 503)
+      const token = body.get('refresh_token') ?? ''
+      const owner = state.refreshTokens.get(token)
+      if (state.revokedAtServer || !owner) return json(route, { error: 'invalid_grant' }, 400)
+      sub = owner
+      state.refreshTokens.delete(token) // Single use: concurrent reuse fails.
+    } else {
+      if (body.get('grant_type') !== 'authorization_code' || !par) return json(route, { error: 'invalid_grant' }, 400)
+      const hint = par.get('login_hint') ?? ''
+      sub = state.sub ?? (hint.startsWith('did:') ? hint : HANDLES[hint] ?? ALICE)
+    }
+    state.issued++
+    const refreshToken = `refresh-${sub}-${state.issued}`
+    state.refreshTokens.set(refreshToken, sub)
     return json(route, {
-      access_token: `access-${sub}-${issued}`, token_type: 'DPoP', expires_in: 3600,
-      refresh_token: `refresh-${sub}-${issued}`, scope: 'atproto transition:generic', sub,
+      access_token: `access-${sub}-${state.issued}`, token_type: 'DPoP', expires_in: 3600,
+      refresh_token: refreshToken, scope: 'atproto transition:generic', sub,
     })
   })
 

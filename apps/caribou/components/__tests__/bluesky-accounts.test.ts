@@ -135,3 +135,28 @@ describe('landing on a Bluesky account', () => {
     expect(replace).toHaveBeenCalledWith('/home')
   })
 })
+
+describe('session diagnostics rule 1: Settings accounts', () => {
+  it('shows a copyable latest safe reason with a Mastodon account active', async () => {
+    const { recordSessionEnd, readSessionEnds } = await import('@beatzball/caribou-bluesky-client/session-diagnostics')
+    addUserSession(masto())
+    recordSessionEnd('sign-out')
+    expect(readSessionEnds()).toHaveLength(1)
+    const el = await mount('caribou-settings-account')
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('[data-session-end]')).not.toBeNull())
+    const reason = el.shadowRoot!.querySelector('[data-session-end]')
+    expect(text(reason)).toContain('Last Bluesky session end')
+    expect(text(reason)).toContain('Signed out')
+    expect(text(reason)).toContain('online=')
+    expect(text(reason)).toContain('visibility=')
+  })
+
+  it('shows the last reason without a current account, and updates on a local end', async () => {
+    const { recordSessionEnd } = await import('@beatzball/caribou-bluesky-client/session-diagnostics')
+    const el = await mount('caribou-settings-account')
+    expect(el.shadowRoot!.querySelector('[data-session-end]')).toBeNull()
+    recordSessionEnd('sign-out')
+    await (el as unknown as { updateComplete: Promise<boolean> }).updateComplete
+    expect(text(el.shadowRoot!.querySelector('[data-session-end]'))).toContain('Signed out')
+  })
+})

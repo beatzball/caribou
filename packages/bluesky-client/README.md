@@ -241,7 +241,8 @@ keeps the cover.
 down after its definitions loaded loses them. A check asks `getServices`
 for the labelers the prefs name. A labeler it has no view for loses its
 definitions at once, and veil rule 1 covers again. A failed check changes
-nothing (a 401 ends the session). The definitions load or are checked:
+nothing (a 401 checks whether the stored session is gone). The definitions
+load or are checked:
 
 - on every account restore and every `reloadModeration` (a cover's Retry);
 - when the app comes back to the foreground, unless a load or check ran in
@@ -354,8 +355,8 @@ Retry does not help. Caribou does not remove it on its own.
   2. `getServices` for that DID once more. A view: the labeler is back.
      Nothing is written; the definitions are checked again
      (`recheckLabelers`), and the answer is `back`. A failed request
-     throws, and nothing is written. A 401 here or in the write also ends
-     the session ("401").
+     throws, and nothing is written. A 401 here or in the write checks whether
+     the stored session is gone ("Session recovery").
   3. The write is the SDK's `updatePreferences`: it reads the prefs again,
      under the agent's prefs lock, and puts back what the edit returns.
      The edit takes out only that DID from each `labelersPref`. Every other
@@ -415,8 +416,8 @@ not follow) and an optional `expiresAt`.
 8. **A pref Caribou cannot edit.** A `mutedWordsPref` with no `items`
    array: the write throws and writes nothing.
 9. **Failures.** A failed read or put throws, and nothing changes here. A
-   401 also ends the session ("401"). When the put worked but the load
-   after it failed, the answer says so (`reloadFailed: true`) and `prefs`
+   401 also checks whether the stored session is gone ("Session recovery").
+   When the put worked but the load after it failed, the answer says so (`reloadFailed: true`) and `prefs`
    is `null` (fail closed, as for any failed load).
 
 ## Signed-out pages (`src/signed-out.ts`, #186, #187)
@@ -941,13 +942,26 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   and the PDS from the token's audience, and answers `{ did, handle, pds,
   profile }`. A failed profile read does not fail the sign-in: the handle
   is then the one typed, or the DID.
-- **401.** The client's `onUnauthorized` is wired to `onExpired`. The SDK
-  deletes a session only on a 401 with a `DPoP`/`Bearer` challenge naming
-  `invalid_token`; any other 401 is also the end of the session for
-  Caribou. Transport errors are not 401s. The moderation loads
-  (`getPreferences`, `getServices`, at restore and in `reloadModeration`)
-  follow the same rule: a 401 calls `onExpired`, and the input is still
-  `null` (fail closed); a network error or a 5xx is only `null`.
+- **Session recovery (#284).**
+  1. The SDK wraps fetch transport failures as `FetchRequestError` and keeps
+     valid credentials while offline. Timeout, abort and 5xx failures keep
+     the stored session too. The next request retries; a token exchange is
+     never replayed automatically.
+  2. A 401 alone does not end an account. Check `restore(did, false)` without
+     refreshing: expire only when the SDK proves the session is gone. A
+     successful or transiently failed check keeps the account. This applies
+     to API calls and moderation loads; failed moderation stays fail closed.
+  3. The SDK's exclusive Web Lock covers each DID's stored read, refresh and
+     write across tabs. Active-account and act-as calls share that client;
+     do not add a second refresh or a lock around an already locked restore.
+  4. Each session end records a local diagnostic, last 20 entries, with time,
+     error class, a safe message, HTTP status, online state and visibility.
+     A late deletion event logs nothing while a newer session still restores.
+     A short hash correlates a sign-in, so later empty-store checks do not
+     replace its original end reason. Never persist raw errors, tokens,
+     DIDs, handles or request URLs. Known messages are mapped to fixed text; unknown text is redacted. Explicit
+     sign-out and deletions from another tab are included. Diagnostic storage
+     failure never changes session handling.
 - **Restore.** `restoreClient(oauth, did, opts)` calls `oauth.restore(did)`
   (by Caribou's stored DID, never the SDK's own last-session pointer),
   makes an `Agent`, loads the reader's moderation prefs and label
@@ -970,8 +984,14 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   `oauth.restore(did, false)`, and only when that says the session is gone
   does it call `onExpired`. The event can be late: a restore that started
   before a new sign-in to the same DID stored its tokens reports the
-  session deleted, and the new sign-in must not be marked expired. A 401 on
-  a request never sends `caribou:unauthorized`.
+  session deleted, and the new sign-in must not be marked expired. A deletion
+  received during a 401/deletion check is retained with its cause and triggers
+  one more check after the current check ends. Repeated notices coalesce.
+  A terminal check consumes its own missing-session notice without starting
+  a recursive check. A newer sign-in supersedes the earlier listener and any
+  check or queued notice it owns.
+  Only a check of the current sign-in may expire it or log its end. A 401 on
+  a request checks storage and never sends `caribou:unauthorized`.
 - **Sign-out.** One rule: **once sign-out starts for a DID, the SDK's
   session store refuses every write for that DID until a new sign-in for
   that DID starts.** Every SDK write of a session (the callback, every

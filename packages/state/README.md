@@ -133,10 +133,11 @@ both networks. These add to them:
    that client. When it fails with a network error, the call fails like any
    other (rule 5) and the next call tries the restore again. The session is
    gone when the SDK says so (refresh refused, token revoked, its `deleted`
-   event) or when any request answers 401, with or without a token
-   challenge. Then the client sends `caribou:session-expired` with its own
-   `generation` (rule 3) and every call fails with `unauthorized`. A
-   network error, a timeout or a 5xx is not a 401 and changes nothing. A
+   event). An API 401 alone does not prove that: the driver checks stored
+   credentials without refreshing and expires only when the SDK confirms
+   they are gone. Then the client sends `caribou:session-expired` with its
+   own `generation` (rule 3) and every call fails with `unauthorized`.
+   A temporary refresh or session-check failure changes nothing. A
    Bluesky client never sends `caribou:unauthorized`.
 10. **The restore runs only through the driver.** This package never loads
     the atproto libraries. The app sets a driver (`setBlueskyDriver`) that
