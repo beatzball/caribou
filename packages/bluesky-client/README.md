@@ -984,7 +984,13 @@ Browser only. It loads through `./browser`, in the lazy chunk.
   `oauth.restore(did, false)`, and only when that says the session is gone
   does it call `onExpired`. The event can be late: a restore that started
   before a new sign-in to the same DID stored its tokens reports the
-  session deleted, and the new sign-in must not be marked expired. A 401 on
+  session deleted, and the new sign-in must not be marked expired. A deletion
+  received during a 401/deletion check is retained with its cause and triggers
+  one more check after the current check ends. Repeated notices coalesce.
+  A terminal check consumes its own missing-session notice without starting
+  a recursive check. A newer sign-in supersedes the earlier listener and any
+  check or queued notice it owns.
+  Only a check of the current sign-in may expire it or log its end. A 401 on
   a request checks storage and never sends `caribou:unauthorized`.
 - **Sign-out.** One rule: **once sign-out starts for a DID, the SDK's
   session store refuses every write for that DID until a new sign-in for

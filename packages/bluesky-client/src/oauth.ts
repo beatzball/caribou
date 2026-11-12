@@ -391,29 +391,45 @@ export async function restoreClient(
     }
     throw err
   }
-  // The deleted event can be late: a restore that started before a new
-  // sign-in to the same DID stored its tokens finds nothing and reports the
-  // session deleted. So check: only when no session can be restored now is
-  // this one gone. A failed check that is not "gone" (offline) changes
-  // nothing (rule 5). The check's own failure reports "deleted" again; it
-  // is ignored while the check runs.
-  // One listener per DID and sign-in: a new sign-in supersedes the others.
+  // Verify late deletions against storage. A notice received after this
+  // check's stored read needs another check, with its original cause.
+  // A new sign-in supersedes this listener and every check it owns.
   const listeners = new Map([...deletedListeners.get(did) ?? []].filter(([k]) => k === opts.key))
+  type Notice = { cause: unknown; reason: 'sign-out' | 'deleted' }
   let checking = false
+  let pending: Notice | null = null
+  const current = () => deletedListeners.get(did)?.get(opts.key) === onDeleted
   const onDeleted = (cause?: unknown) => {
-    if (checking) return
+    if (!current()) return
+    const notice: Notice = { cause, reason: signingOut.has(did) ? 'sign-out' : 'deleted' }
+    if (checking) {
+      // Even a missing-session notice may come from an independent read.
+      // A terminal check consumes its own notice without checking again.
+      if (!pending || pending.cause === undefined && cause !== undefined) pending = notice
+      return
+    }
+    check(notice)
+  }
+  function finishCheck() {
+    checking = false
+    const next = pending
+    pending = null
+    if (next && current()) check(next)
+  }
+  function check(notice: Notice) {
     checking = true
-    const reason = signingOut.has(did) ? 'sign-out' : 'deleted'
-    oauth.restore(did, false).then(
-      () => { checking = false },
-      (err: unknown) => {
-        checking = false
-        if (!isGone(err)) return
-        logSessionEnd(did, reason, cause ?? err, `${did} ${opts.key}`)
-        if (listeners.get(opts.key) === onDeleted) listeners.delete(opts.key)
-        opts.onExpired()
-      },
-    )
+    oauth.restore(did, false).then(finishCheck, (err: unknown) => {
+      if (!current()) { checking = false; pending = null; return }
+      if (!isGone(err)) { finishCheck(); return }
+      // A check can itself fail before the retained event is handled.
+      // Prefer that event's cause to the resulting empty-store error.
+      const terminal = notice.cause === undefined ? pending ?? notice : notice
+      checking = false
+      pending = null
+      listeners.delete(opts.key)
+      logSessionEnd(did, terminal.reason, terminal.cause ?? err, `${did} ${opts.key}`)
+      opts.onExpired()
+    })
   }
   listeners.set(opts.key, onDeleted)
   deletedListeners.set(did, listeners)

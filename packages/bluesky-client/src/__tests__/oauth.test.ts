@@ -225,10 +225,11 @@ describe('restoreClient', () => {
     await vi.waitFor(() => expect(restore).toHaveBeenCalledTimes(3))
     await Promise.resolve()
     expect(onExpired).not.toHaveBeenCalled()
-    // Really gone. The check's own "deleted" report is ignored.
+    // Really gone. The check's own "deleted" report starts no extra check.
     restore.mockImplementationOnce(async () => {
-      notifySessionDeleted(ALICE)
-      throw new TokenRefreshError(ALICE, 'The session was deleted by another process')
+      const missing = new TokenRefreshError(ALICE, 'The session was deleted by another process')
+      notifySessionDeleted(ALICE, missing)
+      throw missing
     })
     notifySessionDeleted(ALICE)
     await vi.waitFor(() => expect(onExpired).toHaveBeenCalledTimes(1))

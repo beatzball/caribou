@@ -32,6 +32,7 @@ async function setup(doFetch: typeof fetch) {
   }
   let getter!: SessionGetter
   let server!: OAuthServerAgent
+  let serverFactory!: { fromIssuer: () => Promise<OAuthServerAgent> }
   let deleted!: (sub: string, cause: unknown) => unknown
   vi.spyOn(BrowserOAuthClient, 'load').mockImplementation(async (options) => {
     deleted = options.onSessionDeleted as typeof deleted
@@ -42,7 +43,7 @@ async function setup(doFetch: typeof fetch) {
     } as never, { get: async () => undefined, set: async () => {}, del: async () => {} }, {
       resolveFromIdentity: async () => ({ metadata: { issuer: ISSUER }, pds: new URL('https://pds.example.test') }),
     } as never, { sha256: async (input: string) => createHash('sha256').update(input).digest('base64url') } as never, undefined, options.fetch ?? doFetch)
-    const serverFactory = { fromIssuer: async () => server }
+    serverFactory = { fromIssuer: async () => server }
     getter = new SessionGetter(store as never, serverFactory as never, {
       hasImplementationLock: true, usingLock: requestLocalLock,
     } as never, { onSessionDeleted: options.onSessionDeleted })
@@ -50,10 +51,10 @@ async function setup(doFetch: typeof fetch) {
     Object.defineProperties(client, { sessionGetter: { value: getter }, serverFactory: { value: serverFactory } })
     return client
   })
-  // The configured fetch is the browser transport that loadOAuthClient wraps.
+  // Use the test transport for every SDK request.
   vi.stubGlobal('fetch', doFetch)
   const oauth = await loadOAuthClient({ clientId: `https://client.example.test/${crypto.randomUUID()}`, handleResolver: 'https://resolver.example.test' })
-  return { getter, stored, store, initial, server, oauth, deleted }
+  return { getter, stored, store, initial, server, serverFactory, oauth, deleted }
 }
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -153,4 +154,117 @@ it('session recovery rule 4: a late SDK deletion does not log an end for a worki
   await vi.waitFor(() => expect(restore).toHaveBeenCalledWith(DID, false))
   expect(onExpired).not.toHaveBeenCalled()
   expect(readSessionEnds()).toEqual([])
+})
+
+
+function localDiagnostics() {
+  const values = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+  })
+}
+
+function bare401(input: RequestInfo | URL) {
+  const request = input as Request
+  return request.url.includes('getTimeline')
+    ? Response.json({ error: 'AuthRequired' }, { status: 401 })
+    : Response.json({ preferences: [], views: [] })
+}
+
+// Keep API reads independent of SDK token reads: the review probe uses a
+// fake API session returning a bare 401, while every check uses the real
+// OAuthClient.restore and SessionGetter. Unfinished preference requests
+// must not accidentally trigger another SDK deletion and mask this race.
+function checkedApi(oauth: Pick<OAuthClient, 'restore'>) {
+  const session = {
+    did: DID,
+    fetchHandler: async (path: string, init?: RequestInit) =>
+      bare401(new Request(new URL(path, 'https://pds.example.test'), init)),
+  } as unknown as OAuthSession
+  return { restore: vi.fn((did: string, refresh?: boolean) => refresh === false
+    ? oauth.restore(did, false)
+    : Promise.resolve(session)) }
+}
+
+// OAuthClient.restore reads SessionGetter first, then awaits fromIssuer.
+// Pause there so the first check will return the credentials read before
+// a deletion. A later request must not be needed to notice that deletion.
+function pauseAfterRead(factory: { fromIssuer: () => Promise<OAuthServerAgent> }, server: OAuthServerAgent, fail = false) {
+  let resume!: () => void
+  let read!: () => void
+  const readDone = new Promise<void>((resolve) => { read = resolve })
+  const gate = new Promise<void>((resolve) => { resume = resolve })
+  vi.spyOn(factory, 'fromIssuer').mockImplementationOnce(async () => {
+    read()
+    await gate
+    if (fail) throw new TypeError('Failed to fetch')
+    return server
+  })
+  return { readDone, resume }
+}
+
+describe('deleted-event rule: retain independent notices during a check', () => {
+  it.each([{ fail: false, missing: false }, { fail: true, missing: false }, { fail: false, missing: true }])(
+    'a 401 check (transient failure=$fail, missing-store notice=$missing) retains a deletion after its stored read and logs the terminal cause',
+    async ({ fail, missing }) => {
+      localDiagnostics()
+      const { initial, oauth, getter, stored, server, serverFactory } = await setup(vi.fn(async (input) => bare401(input)))
+      initial.tokenSet.expires_at = '2999-01-01T00:00:00.000Z'
+      const onExpired = vi.fn()
+      const api = checkedApi(oauth)
+      const { client } = await restoreClient(api, DID, { userKey: `${DID}@bsky`, key: 'overlap', onExpired })
+      const restore = api.restore.mockClear()
+      const { readDone, resume } = pauseAfterRead(serverFactory, server, fail)
+      await expect(client.fetchTimeline('home', {})).rejects.toMatchObject({ code: 'unauthorized' })
+      await readDone
+      expect(restore).toHaveBeenCalledTimes(1)
+      const terminalCause = missing
+        ? new TokenRefreshError(DID, 'The session was deleted by another process')
+        : new TokenRevokedError(DID)
+      await getter.delStored(DID, terminalCause)
+      expect(stored.has(DID)).toBe(false)
+      // Repeated independent notifications coalesce and preserve the cause.
+      await getter.delStored(DID, terminalCause)
+      expect(onExpired).not.toHaveBeenCalled()
+      resume()
+      await vi.waitFor(() => expect(onExpired).toHaveBeenCalledOnce())
+      expect(restore).toHaveBeenCalledTimes(2)
+      expect(readSessionEnds()).toEqual([expect.objectContaining({
+        errorClass: missing ? 'TokenRefreshError' : 'TokenRevokedError',
+        message: missing ? 'No stored session' : 'Token was revoked',
+      })])
+    },
+  )
+
+  it.each([false, true])('a newer working sign-in survives an older deletion (new listener=%s)', async (newListener) => {
+    localDiagnostics()
+    const { initial, oauth, getter, stored, server, serverFactory } = await setup(vi.fn(async (input) => bare401(input)))
+    initial.tokenSet.expires_at = '2999-01-01T00:00:00.000Z'
+    const oldExpired = vi.fn()
+    const api = checkedApi(oauth)
+    const { client } = await restoreClient(api, DID, { userKey: `${DID}@bsky`, key: 'older', onExpired: oldExpired })
+    const restore = api.restore.mockClear()
+    const { readDone, resume } = pauseAfterRead(serverFactory, server)
+    await expect(client.fetchTimeline('home', {})).rejects.toMatchObject({ code: 'unauthorized' })
+    await readDone
+    const oldCheck = restore.mock.results[0]!.value as Promise<OAuthSession>
+    await getter.delStored(DID, new TokenRevokedError(DID))
+    await getter.setStored(DID, { ...initial, tokenSet: {
+      ...initial.tokenSet, access_token: 'new-generation-access', refresh_token: 'new-generation-refresh',
+    } } as never)
+    const freshExpired = vi.fn()
+    if (newListener) await restoreClient(api, DID, { userKey: `${DID}@bsky`, key: 'newer', onExpired: freshExpired })
+    resume()
+    await oldCheck
+    // Without a replacement listener the queued check must read the newer
+    // credentials; with one, only the newer listener may handle notices.
+    if (!newListener) await vi.waitFor(() => expect(restore).toHaveBeenCalledTimes(2))
+    await Promise.resolve()
+    expect(restore).toHaveBeenCalledTimes(2)
+    expect(oldExpired).not.toHaveBeenCalled()
+    expect(freshExpired).not.toHaveBeenCalled()
+    expect(stored.get(DID)).toMatchObject({ tokenSet: { access_token: 'new-generation-access' } })
+    expect(readSessionEnds()).toEqual([])
+  })
 })
