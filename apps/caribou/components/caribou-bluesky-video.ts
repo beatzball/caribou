@@ -22,7 +22,7 @@ export function videoAspect(card: PreviewCard): number {
   return Number.isFinite(ratio) && ratio > 0 ? ratio : 16 / 9
 }
 
-// Media Source Extensions, by name only: nothing loads (rule 3).
+// Media Source Extensions, by name only: nothing loads (rule 4).
 // `ManagedMediaSource` is Safari's (iPhone 17.1 and later).
 function hasMediaSource(): boolean {
   return typeof globalThis.MediaSource === 'function'
@@ -158,33 +158,36 @@ export class CaribouBlueskyVideo extends LitElement {
     if (this.phase === 'playing') return
     this.phase = 'playing'
     const run = ++this.run
-    void this.updateComplete.then(() => {
-      if (run !== this.run) return
-      this.video?.focus()
-      void this.attach(run)
-    })
+    // Rule 3: render now so native play() stays inside the press, keeping
+    // Safari's transient activation for an audible first play (#279).
+    this.performUpdate()
+    if (run !== this.run) return
+    this.video?.focus()
+    void this.attach(run)
   }
 
   private async attach(run: number) {
     const v = this.video
     const playlist = httpUrl(this.card?.embedUrl)
     if (!v || !playlist || run !== this.run) return
-    const native = v.canPlayType(HLS_TYPE) !== ''
-    // Rule 3: hls.js first wherever there is MSE, whatever `canPlayType`
-    // says (#277: Vivaldi answers "maybe" and then cannot play).
+    // Rule 3: native first, without awaiting an update or importing hls.js.
+    // Keep the playlist src and native remote playback (AirPlay, Chromecast).
+    if (v.canPlayType(HLS_TYPE)) {
+      this.playback = 'native'
+      v.src = playlist
+      void v.play().catch(() => { /* the browser refused; the controls stay */ })
+      return
+    }
+    // Rule 4: no native HLS. Lazy hls.js only when MSE is available.
     if (hasMediaSource()) {
       const attached = await this.attachHls(v, playlist, run)
       if (run !== this.run || attached) return
     }
-    // Rule 4: native HLS only where hls.js cannot run.
-    if (!native) { this.fail(); return }
-    this.playback = 'native'
-    v.src = playlist
-    void v.play().catch(() => { /* the browser refused; the controls stay */ })
+    this.fail()
   }
 
-  // Rule 3: hls.js, loaded now and only now. False when it cannot run here
-  // (it did not load, or it is not supported), so rule 4 can try native.
+  // Rule 4: hls.js, loaded only when needed. False when it cannot run here
+  // (it did not load, or it is not supported), so the caller shows the error.
   private async attachHls(v: HTMLVideoElement, playlist: string, run: number): Promise<boolean> {
     let HlsClass: typeof Hls
     try {

@@ -14,7 +14,7 @@ const TYPES: Record<string, string> = { m3u8: 'application/vnd.apple.mpegurl', m
 export const THUMB_BYTES = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64')
 
 // Returns the file names asked for, in order.
-export async function routeHlsFixture(page: Page): Promise<string[]> {
+export async function routeHlsFixture(page: Page, audible = false): Promise<string[]> {
   const served: string[] = []
   await page.route(`${VIDEO_HOST}/**`, (route) => {
     const name = new URL(route.request().url()).pathname.split('/').pop() ?? ''
@@ -22,7 +22,7 @@ export async function routeHlsFixture(page: Page): Promise<string[]> {
     const cors = { 'access-control-allow-origin': '*' }
     if (name === 'thumbnail.jpg') return route.fulfill({ status: 200, contentType: 'image/png', body: THUMB_BYTES })
     const type = TYPES[name.split('.').pop() ?? '']
-    const file = new URL(name, DIR)
+    const file = new URL(audible ? `audible/${name}` : name, DIR)
     if (!type || !/^[\w.]+$/.test(name) || !existsSync(file)) {
       return route.fulfill({ status: 404, headers: cors, body: 'not found' })
     }
