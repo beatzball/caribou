@@ -2,6 +2,7 @@ import { LitElement, html, css, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { effect } from '@preact/signals-core'
 import { activeUserKey, userName, users, type UserSession } from '@beatzball/caribou-state'
+import { readSessionEnds, SESSION_END_KEY, SESSION_END_EVENT } from '@beatzball/caribou-bluesky-client/session-diagnostics'
 import { spaClick } from './_spa-link.js'
 import { switchToAccount } from './_switch-account.js'
 import { fullHandle, networkLabel, orderAccounts } from './caribou-nav-rail.js'
@@ -58,10 +59,26 @@ export class CaribouSettingsAccount extends LitElement {
   @state() private accounts: UserSession[] = []
   @state() private activeKey: string | null = null
   private stop?: () => void
+  @state() private sessionEnd = ''
+  private readSessionEnd = () => {
+    const entry = readSessionEnds().at(-1)
+    this.sessionEnd = entry
+      ? `${entry.time}: ${entry.errorClass}: ${entry.message}; HTTP=${entry.status ?? 'none'}; online=${entry.online ?? 'unknown'}; visibility=${entry.visibility}`
+      : ''
+  }
+  private onStorage = (event: StorageEvent) => {
+    if (event.key === SESSION_END_KEY || event.key === null) this.readSessionEnd()
+  }
+
+  override firstUpdated() {
+    this.readSessionEnd()
+  }
 
   override connectedCallback() {
     super.connectedCallback()
     if (typeof window === 'undefined') return
+    window.addEventListener(SESSION_END_EVENT, this.readSessionEnd)
+    window.addEventListener('storage', this.onStorage)
     this.stop = effect(() => {
       this.accounts = orderAccounts(users.value.values(), activeUserKey.value)
       this.activeKey = activeUserKey.value
@@ -69,6 +86,10 @@ export class CaribouSettingsAccount extends LitElement {
   }
 
   override disconnectedCallback() {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(SESSION_END_EVENT, this.readSessionEnd)
+      window.removeEventListener('storage', this.onStorage)
+    }
     this.stop?.()
     this.stop = undefined
     super.disconnectedCallback()
@@ -83,7 +104,8 @@ export class CaribouSettingsAccount extends LitElement {
 
   override render() {
     const current = this.accounts.find((u) => u.userKey === this.activeKey)
-    if (!current) return nothing
+    const diagnostic = this.sessionEnd ? html`<p data-session-end>Last Bluesky session end: ${this.sessionEnd}</p>` : nothing
+    if (!current) return diagnostic
     const others = this.accounts.filter((u) => u !== current)
     return html`
       <div>
@@ -95,6 +117,7 @@ export class CaribouSettingsAccount extends LitElement {
             <span class="who-acct">${fullHandle(current)}${networkLabel(current)}</span>
           </span>
         </p>
+        ${diagnostic}
         <ul>
           <li><a href="/@me" @click=${spaClick}><caribou-icon name="user"></caribou-icon>Your profile</a></li>
           ${others.map((u) => html`<li><caribou-button class="switch" @click=${() => { void switchToAccount(u.userKey) }}

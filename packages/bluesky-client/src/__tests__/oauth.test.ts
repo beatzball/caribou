@@ -345,7 +345,7 @@ describe('restoreClient', () => {
     expect(Object.keys(out.labelDefs!)).toEqual([BSKY_LABELER_DID])
   })
 
-  it('recheckLabelers: a failed check keeps the definitions; a 401 ends the session', async () => {
+  it('session recovery rule 2: a failed check keeps definitions; a service 401 keeps the session', async () => {
     let services: () => Response = () => json({ views: [] })
     const session = fakeSession(ALICE, {
       'app.bsky.actor.getPreferences': () => json({ preferences: [] }),
@@ -360,21 +360,21 @@ describe('restoreClient', () => {
     expect(onExpired).not.toHaveBeenCalled()
     services = () => json({ error: 'AuthRequired' }, 401)
     await out.recheckLabelers()
-    expect(onExpired).toHaveBeenCalled()
+    expect(onExpired).not.toHaveBeenCalled()
   })
 
-  it('a 401 without a token challenge expires the session too', async () => {
+  it('session recovery rule 2: a 401 without a token challenge keeps the stored session', async () => {
     const session = fakeSession(ALICE, {
       'app.bsky.feed.getTimeline': () => json({ error: 'AuthRequired', message: 'no' }, 401),
     })
     const onExpired = vi.fn()
     const { client } = await restoreClient({ restore: async () => session } as never, ALICE, { userKey, onExpired, key: 'G1' })
     await expect(client.fetchTimeline('home', {})).rejects.toMatchObject({ code: 'unauthorized' })
-    expect(onExpired).toHaveBeenCalledTimes(1)
+    expect(onExpired).not.toHaveBeenCalled()
   })
 
   it.each(['app.bsky.actor.getPreferences', 'app.bsky.labeler.getServices'])(
-    'a 401 from %s at restore expires the session; moderation stays fail closed', async (method) => {
+    'session recovery rule 2: a 401 from %s at restore keeps the session; moderation stays fail closed', async (method) => {
       const routes: Record<string, () => Response> = {
         'app.bsky.actor.getPreferences': () => json({ preferences: [] }),
         'app.bsky.actor.putPreferences': () => new Response(null, { status: 200 }),
@@ -383,12 +383,12 @@ describe('restoreClient', () => {
       }
       const onExpired = vi.fn()
       const out = await restoreClient({ restore: async () => fakeSession(ALICE, routes) } as never, ALICE, { userKey, onExpired, key: 'M401' })
-      expect(onExpired).toHaveBeenCalledTimes(1)
+      expect(onExpired).not.toHaveBeenCalled()
       expect(method.endsWith('getPreferences') ? out.prefs : out.labelDefs).toBeNull()
     })
 
   it.each(['app.bsky.actor.getPreferences', 'app.bsky.labeler.getServices'])(
-    'a 401 from %s in reloadModeration expires the session too', async (method) => {
+    'session recovery rule 2: a 401 from %s in reloadModeration keeps the session', async (method) => {
       let fail = false
       const routes: Record<string, () => Response> = {
         'app.bsky.actor.getPreferences': () => json({ preferences: [] }),
@@ -402,9 +402,25 @@ describe('restoreClient', () => {
       expect(onExpired).not.toHaveBeenCalled()
       fail = true
       const again = await out.reloadModeration()
-      expect(onExpired).toHaveBeenCalledTimes(1)
+      expect(onExpired).not.toHaveBeenCalled()
       expect(method.endsWith('getPreferences') ? again.prefs : again.labelDefs).toBeNull()
     })
+
+  it('session recovery rule 2: a 401 expires only after storage confirms gone, and a failed check can retry', async () => {
+    const session = fakeSession(ALICE, {
+      'app.bsky.feed.getTimeline': () => json({ error: 'AuthRequired' }, 401),
+    })
+    const restore = vi.fn(async () => session)
+    const onExpired = vi.fn()
+    const { client } = await restoreClient({ restore } as never, ALICE, { userKey, onExpired, key: 'CHECK401' })
+    restore.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await expect(client.fetchTimeline('home', {})).rejects.toMatchObject({ code: 'unauthorized' })
+    await vi.waitFor(() => expect(restore).toHaveBeenCalledTimes(2))
+    expect(onExpired).not.toHaveBeenCalled()
+    restore.mockRejectedValueOnce(new TokenRevokedError(ALICE))
+    await expect(client.fetchTimeline('home', {})).rejects.toMatchObject({ code: 'unauthorized' })
+    await vi.waitFor(() => expect(onExpired).toHaveBeenCalledOnce())
+  })
 
   it('a 502 or a network error in the moderation loads: null, no expiry', async () => {
     const onExpired = vi.fn()

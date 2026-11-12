@@ -1954,3 +1954,17 @@ E2E_BASE_URL=http://localhost:4312 pnpm test:e2e
 never sign in, so the dummy credentials are never sent anywhere.
 `tests/integration/ssr-list-paint.test.ts` covers the same path in vitest: it
 starts its own server and seeds its own storage, and needs only the build.
+
+### Bluesky session diagnostics (#284)
+
+1. Settings → Accounts shows the latest local Bluesky session-end diagnostic
+   as selectable plain text, including its time, safe error class/message,
+   HTTP status, online state and tab visibility. It is readable even while
+   a Mastodon account is active or the Bluesky account is expired.
+2. Read diagnostics only after the first render; server HTML and the first
+   client render stay equal. Refresh the text on a local end or a storage
+   event from another tab. The log holds at most 20 entries in localStorage
+   and contains no tokens, DIDs, handles or raw server error text.
+3. A temporary Bluesky fetch or refresh failure leaves the account signed in
+   and can be retried. The SDK's lock serializes refresh across tabs.
+   Mastodon session behavior stays the same.

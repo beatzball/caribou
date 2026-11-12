@@ -208,7 +208,7 @@ describe('removeGoneLabeler', () => {
     expect(out.gone).toEqual([GONE])
   })
 
-  it('a 401 in the last check ends the session and writes nothing', async () => {
+  it('session recovery rule 2: a 401 in the last check keeps the session and writes nothing', async () => {
     const p = pds({ prefs: [LABELERS([GONE])], live: new Set() })
     const onExpired = vi.fn()
     const out = await restoreClient({ restore: async () => p.session } as never, ALICE, { userKey, onExpired, key: 'GL' })
@@ -216,7 +216,7 @@ describe('removeGoneLabeler', () => {
     p.calls.length = 0
     p.routes['app.bsky.labeler.getServices'] = () => json({ error: 'AuthRequired' }, 401)
     await expect(out.removeGoneLabeler(GONE)).rejects.toBeTruthy()
-    expect(onExpired).toHaveBeenCalledTimes(1)
+    expect(onExpired).not.toHaveBeenCalled()
     expect(writes(p.calls)).toHaveLength(0)
   })
 

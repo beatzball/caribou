@@ -301,12 +301,12 @@ describe('muted words: write (rules 5 to 9)', () => {
     expect(out.prefs!.mutedWords.map((w) => w.value)).toEqual(['kept'])
   })
 
-  it('rule 9: a 401 ends the session', async () => {
+  it('rule 9 / session recovery rule 2: a service 401 keeps stored credentials', async () => {
     const onExpired = vi.fn()
     const { out, routes } = await restore([MUTED([])], onExpired)
     routes['app.bsky.actor.getPreferences'] = () => json({ error: 'AuthenticationRequired' }, 401)
     await expect(out.editMutedWords(add('spoiler'))).rejects.toThrow()
-    expect(onExpired).toHaveBeenCalled()
+    expect(onExpired).not.toHaveBeenCalled()
   })
 
   it('rule 9: the put worked, the load after it failed: reloadFailed, prefs null', async () => {

@@ -9,6 +9,7 @@ import {
 import type { UserKey } from '@beatzball/caribou-auth'
 import type { CaribouClient } from '@beatzball/caribou-mastodon-client'
 import { createBlueskyClient, type BlueskyAgent } from './client.js'
+import { recordSessionEnd } from './session-diagnostics.js'
 import { detectFacets, nextRkey } from './compose.js'
 import { normalizeXrpcError } from './errors.js'
 import { goneLabelers, labelDefsFromServices, readerModerationSource, type LabelDefs } from './moderation.js'
@@ -100,7 +101,16 @@ export class SessionGone extends Error {
 // One client per page, keyed by its config.
 let shared: { key: string; client: Promise<BrowserOAuthClient> } | null = null
 // The deleted listeners: one per DID and sign-in (`RestoreOptions.key`).
-const deletedListeners = new Map<string, Map<string, () => void>>()
+const deletedListeners = new Map<string, Map<string, (cause?: unknown) => void>>()
+const diagnosticKeys = new Map<string, string>()
+
+function logSessionEnd(did: string, reason: Parameters<typeof recordSessionEnd>[0], cause: unknown, key = diagnosticKeys.get(did) ?? did): void {
+  // Production minification renames SDK constructors; instanceof remains stable.
+  const errorClass = cause instanceof TokenRefreshError ? 'TokenRefreshError'
+    : cause instanceof TokenRevokedError ? 'TokenRevokedError'
+      : cause instanceof TokenInvalidError ? 'TokenInvalidError' : undefined
+  recordSessionEnd(reason, cause, { key, errorClass })
+}
 
 /** The page's SDK client (README: "One OAuth client per page"). */
 export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAuthClient> {
@@ -110,7 +120,14 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
     clientId: config.clientId,
     handleResolver: config.handleResolver,
     responseMode: 'fragment',
-    onSessionDeleted: (sub: string) => { notifySessionDeleted(sub) },
+    onSessionDeleted: (sub, cause) => {
+      // Before a client restores (for example during callback), keep the
+      // original terminal cause. Live clients verify late events below.
+      if (!deletedListeners.get(sub)?.size && isGone(cause)) {
+        logSessionEnd(sub, signingOut.has(sub) ? 'sign-out' : 'deleted', cause)
+      }
+      notifySessionDeleted(sub, cause)
+    },
   }).then((c) => {
     // Every write of a session goes through the guard (README: "Sign-out").
     guardSessionStore(c)
@@ -122,8 +139,8 @@ export function loadOAuthClient(config: BlueskyOAuthConfig): Promise<BrowserOAut
 }
 
 /** The SDK's deleted event for `sub` (here or in another tab). */
-export function notifySessionDeleted(sub: string): void {
-  for (const fn of [...deletedListeners.get(sub)?.values() ?? []]) fn()
+export function notifySessionDeleted(sub: string, cause?: unknown): void {
+  for (const fn of [...deletedListeners.get(sub)?.values() ?? []]) fn(cause)
 }
 
 export type SignInInput =
@@ -254,7 +271,12 @@ export async function completeSignIn(
   // Caribou account, that one is now its session and stays.
   const refuse = async (make: (kept: boolean) => SignInRejected): Promise<never> => {
     const kept = opts.isKnown?.(session.did) ?? false
-    if (!kept) await oauth.revoke(session.did).catch(() => {})
+    if (!kept) {
+      await oauth.revoke(session.did).then(
+        () => { logSessionEnd(session.did, 'deleted', new TokenRevokedError(session.did)) },
+        () => {},
+      )
+    }
     throw make(kept)
   }
   // A callback without our state did not start here: store nothing.
@@ -301,7 +323,7 @@ export interface RestoredClient {
    * Checks the definitions again, for the labelers the prefs name now
    * (README, "Labeler coverage"). A labeler `getServices` no longer answers
    * for loses its definitions at once, so the veil covers again. A failed
-   * check changes nothing; a 401 ends the session.
+   * check changes nothing; a 401 checks whether the stored session is gone.
    */
   recheckLabelers(): Promise<ModerationInputs>
   /**
@@ -358,11 +380,15 @@ export interface RestoreOptions {
 export async function restoreClient(
   oauth: Pick<OAuthLike, 'restore'>, did: string, opts: RestoreOptions,
 ): Promise<RestoredClient> {
+  diagnosticKeys.set(did, `${did} ${opts.key}`)
   let session: OAuthSession
   try {
     session = await oauth.restore(did)
   } catch (err) {
-    if (isGone(err)) throw new SessionGone(err)
+    if (isGone(err)) {
+      logSessionEnd(did, 'restore', err, `${did} ${opts.key}`)
+      throw new SessionGone(err)
+    }
     throw err
   }
   // The deleted event can be late: a restore that started before a new
@@ -374,14 +400,16 @@ export async function restoreClient(
   // One listener per DID and sign-in: a new sign-in supersedes the others.
   const listeners = new Map([...deletedListeners.get(did) ?? []].filter(([k]) => k === opts.key))
   let checking = false
-  const onDeleted = () => {
+  const onDeleted = (cause?: unknown) => {
     if (checking) return
     checking = true
+    const reason = signingOut.has(did) ? 'sign-out' : 'deleted'
     oauth.restore(did, false).then(
       () => { checking = false },
       (err: unknown) => {
         checking = false
         if (!isGone(err)) return
+        logSessionEnd(did, reason, cause ?? err, `${did} ${opts.key}`)
         if (listeners.get(opts.key) === onDeleted) listeners.delete(opts.key)
         opts.onExpired()
       },
@@ -394,10 +422,10 @@ export async function restoreClient(
   // The moderation inputs. Either failing to load is null: fail closed.
   let prefs: ModerationPrefs | null = null
   let labelDefs: LabelDefs | null = null
-  // Missing is null (fail closed). A 401 also ends the session (README:
-  // "401"); a network error or a 5xx does not.
+  // Missing is null (fail closed). A 401 checks for a deleted session;
+  // the SDK can return a 401 after a transient forced-refresh failure.
   const failed = (err: unknown): null => {
-    if (normalizeXrpcError(err).code === 'unauthorized') opts.onExpired()
+    if (normalizeXrpcError(err).code === 'unauthorized') onDeleted()
     return null
   }
   const labelerDidsOf = (p: ModerationPrefs | null) => [...new Set([BSKY_LABELER_DID, ...(p?.labelers ?? []).map((l) => l.did)])]
@@ -460,9 +488,8 @@ export async function restoreClient(
     // browser can read it, else the labelers `configureLabelers` above sent
     // (README, "Labeler coverage").
     moderation: readerModerationSource(did, () => ({ prefs, labelDefs })),
-    // Any 401 ends the session (README: "401"), not only the challenged
-    // one the SDK deletes the session for.
-    onUnauthorized: opts.onExpired,
+    // A bare 401 or a failed forced refresh is not proof of revocation.
+    onUnauthorized: () => { onDeleted() },
     compose: { nextRkey, detectFacets: (text) => detectFacets(agent, text) },
     ...(opts.onMapError ? { onMapError: opts.onMapError } : {}),
   })
@@ -520,7 +547,7 @@ export async function restoreClient(
       if (!goneNow().includes(did)) {
         return { ...inputs(), outcome: prefs?.labelers.some((l) => l.did === did) ? 'back' : 'absent' }
       }
-      // A 401 ends the session (README: "401"); any failure throws.
+      // A 401 checks session storage; any failure throws.
       const ended = (err: unknown): never => {
         failed(err)
         throw err
@@ -644,6 +671,8 @@ export async function signOut(oauth: Pick<OAuthLike, 'revoke'>, did: string): Pr
   signingOut.add(did)
   const stored = await sdk.sessionGetter.getStored(did)
   if (!stored) return
-  await sdk.sessionGetter.delStored(did, new TokenRevokedError(did))
+  const cause = new TokenRevokedError(did)
+  await sdk.sessionGetter.delStored(did, cause)
+  logSessionEnd(did, 'sign-out', cause)
   revokeAtServer(sdk, stored)
 }
