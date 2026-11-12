@@ -463,6 +463,22 @@ requests and check the cached paint, the banner and the restored scroll.
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.
 
+**Background updates announce their state.**
+
+1. A timeline keeps a polite status region mounted at zero new posts. A
+   changed count announces availability (or “Many new posts” for a gap),
+   separately from the apply button, without moving focus. An unchanged
+   message does not update the region.
+2. Notifications keep one polite status region through filter changes. It
+   announces loading and the visible empty result, including empty pages
+   with an older cursor, while focus stays on the chosen filter. Errors
+   keep their alerts. Load older keeps its end-notice focus announcement
+   without a second live announcement.
+3. Route changes use the router's existing polite region once per
+   transition. Its document-title fallback can name nested or headingless
+   pages when descriptive titles are set before the router reveals them;
+   do not add a second route announcer.
+
 **Notifications poll once for the whole app.** `app-main.ts` calls
 `startUnreadNotifications()`; it follows the active session and keeps
 `unreadNotificationCount` (from `@beatzball/caribou-state`) current. The nav

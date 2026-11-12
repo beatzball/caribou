@@ -99,6 +99,10 @@ export class CaribouNotifications extends LitElement {
     .who a:hover { text-decoration: underline; }
     .who .rest { color: var(--fg-muted); }
     .rows > li.no-status.grouped .group-body { padding-bottom: var(--space-3); }
+    .announcement:empty {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+    }
     .notice { padding: var(--space-4); color: var(--fg-muted); }
     [role="alert"] { padding: var(--space-4); color: var(--danger); }
     .inline-error { padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--border); }
@@ -525,7 +529,26 @@ export class CaribouNotifications extends LitElement {
     return html`<li class=${cls}>${line}${this.renderGroupBody(g)}${card}</li>`
   }
 
-  private renderList() {
+  private shownItems(): NotificationGroup[] {
+    const hidden = new Set(this.silenced)
+    for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
+    return withoutSilencedAccounts(this.items, hidden)
+  }
+
+  private emptyMessage(): string {
+    return FILTERS.find((f) => f.value === this.filter)!.empty
+  }
+
+  private announcement(shown: NotificationGroup[]): string {
+    // Load older announces its end by focusing the notice. Do not also
+    // speak that notice through the live region. Errors have their alerts.
+    if (this.endedHere || (this.errorMsg && this.items.length === 0)) return ''
+    if (this.loading && this.items.length === 0) return 'Loading notifications…'
+    if (shown.length > 0) return ''
+    return this.hasMore ? 'Nothing to show here yet. Older notifications may follow.' : this.emptyMessage()
+  }
+
+  private renderList(shown: NotificationGroup[]) {
     // With rows on screen, a failed poll or Load older keeps them.
     if (this.errorMsg && this.items.length === 0) {
       return html`<div role="alert">
@@ -534,27 +557,20 @@ export class CaribouNotifications extends LitElement {
       </div>`
     }
     if (this.loading && this.items.length === 0) {
-      return html`<div class="notice">Loading notifications…</div>`
+      return nothing
     }
     // An empty page with a cursor is not the end (a Bluesky page of only
     // skipped notifications): older ones are still in reach.
-    const empty = FILTERS.find((f) => f.value === this.filter)!.empty
-    // Muted, blocked and (Bluesky) filtered authors leave their rows. The
-    // notices go by what is left.
-    const hidden = new Set(this.silenced)
-    for (const g of this.items) for (const a of g.accounts) if (this.authorUi(a).filter) hidden.add(a.id)
-    const shown = withoutSilencedAccounts(this.items, hidden)
     if (shown.length === 0 && !this.hasMore) {
       return html`<div>
         ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-        <div class=${this.endedHere ? 'notice end' : 'notice'} tabindex=${this.endedHere ? '-1' : nothing}>${empty}</div>
+        ${this.endedHere ? html`<div class="notice end" tabindex="-1">${this.emptyMessage()}</div>` : nothing}
       </div>`
     }
     return html`<div>
       ${this.errorMsg ? html`<div role="alert" class="inline-error">${this.errorMsg}</div>` : nothing}
-      ${shown.length === 0
-        ? html`<div class="notice">Nothing to show here yet. Older notifications may follow.</div>`
-        : html`<ul class="rows">${repeat(shown, (g) => g.key, (g) => this.renderItem(g))}</ul>`}
+      ${shown.length > 0
+        ? html`<ul class="rows">${repeat(shown, (g) => g.key, (g) => this.renderItem(g))}</ul>` : nothing}
       ${this.hasMore
         ? html`<div class="more"><caribou-button ?loading=${this.loading} @click=${this.onMore}>Load older</caribou-button></div>`
         : this.endedHere ? html`<div class="notice end" tabindex="-1">No older notifications.</div>` : nothing}
@@ -562,13 +578,18 @@ export class CaribouNotifications extends LitElement {
   }
 
   override render() {
+    // Both the visible notice and its live message describe the moderated
+    // rows, including a list whose authors have all been filtered out.
+    const shown = this.shownItems()
+    const announcement = this.announcement(shown)
     return html`<section aria-labelledby="notifications-h">
       <h1 id="notifications-h">Notifications</h1>
       <div class="filters" role="group" aria-label="Show">
         ${FILTERS.map((f) => html`<caribou-button pressed=${f.value === this.filter ? 'true' : 'false'}
           data-filter=${f.value} @click=${() => this.onFilter(f.value)}>${f.label}</caribou-button>`)}
       </div>
-      ${this.renderList()}
+      <div class=${announcement ? 'announcement notice' : 'announcement'} role="status" aria-live="polite" aria-atomic="true">${announcement}</div>
+      ${this.renderList(shown)}
     </section>`
   }
 }

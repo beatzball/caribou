@@ -8,6 +8,10 @@ import './caribou-button.js'
 export class CaribouNewPostsBanner extends LitElement {
   static override styles = css`
     :host { display: block; }
+    .announcement {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+    }
     /* The bar keeps the size it had as a native button: small text (the
        browser's button size) and no minimum height. */
     caribou-button {
@@ -33,11 +37,16 @@ export class CaribouNewPostsBanner extends LitElement {
   }
 
   override render() {
-    if (!this.count || this.count < 1) return nothing
-    return html`
-      <caribou-button variant="primary" data-action="apply-new-posts" @click=${this.onClick}>
-        ${this.many ? 'Many new posts' : `${this.count} new ${this.count === 1 ? 'post' : 'posts'}`}
-      </caribou-button>
-    `
+    const label = this.count > 0
+      ? this.many ? 'Many new posts' : `${this.count} new ${this.count === 1 ? 'post' : 'posts'}`
+      : ''
+    // Keep the region mounted before a background poll finds posts. Lit
+    // leaves an unchanged string alone, so other updates do not repeat it.
+    return html`<div>
+      <div class="announcement" role="status" aria-live="polite" aria-atomic="true">${label ? `${label} available.` : ''}</div>
+      ${label ? html`<caribou-button variant="primary" data-action="apply-new-posts" @click=${this.onClick}>
+        ${label}
+      </caribou-button>` : nothing}
+    </div>`
   }
 }
