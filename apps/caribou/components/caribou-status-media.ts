@@ -52,13 +52,26 @@ export class CaribouStatusMedia extends LitElement {
       background: var(--bg-2);
       display: flex; align-items: center; justify-content: center;
     }
-    .thumb { display: block; width: 100%; height: 100%; }
+    .thumb { position: relative; display: block; width: 100%; height: 100%; }
     img, video { display: block; width: 100%; height: 100%; object-fit: cover; }
     .grid[data-count="1"] img, .grid[data-count="1"] video { object-fit: contain; }
     audio { width: 100%; padding: var(--space-2); }
     .file { padding: var(--space-3); color: var(--accent); overflow-wrap: anywhere; }
     a:focus-visible, button:focus-visible {
       outline: 2px solid var(--accent); outline-offset: -2px;
+    }
+    /* Draw above opaque image/video children: a parent's inset shadow
+       would paint underneath them. Keep the strokes inside the clipped
+       grid and let pointer events reach the existing media control. */
+    a.thumb:focus-visible, .gifv-toggle:focus-visible { outline: none; }
+    a.thumb:focus-visible::after, .gifv-toggle:focus-visible::after {
+      content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+      border: 2px solid var(--overlay-bg);
+      box-shadow: inset 0 0 0 2px var(--overlay-fg), inset 0 0 0 4px var(--overlay-bg);
+    }
+    .alt:focus-visible, caribou-button.hide::part(button):focus-visible {
+      outline: 2px solid var(--overlay-fg); outline-offset: 2px;
+      box-shadow: 0 0 0 6px var(--overlay-bg);
     }
     button {
       font: inherit; cursor: pointer; border: 0;
@@ -67,7 +80,7 @@ export class CaribouStatusMedia extends LitElement {
     .alt {
       position: absolute; inset-block-end: var(--space-2); inset-inline-start: var(--space-2);
       padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
-      color: #fff; background: rgb(0 0 0 / 0.7);
+      color: var(--overlay-fg); background: var(--overlay-bg);
     }
     .gifv-toggle {
       position: relative; display: block; width: 100%; height: 100%;
@@ -76,7 +89,7 @@ export class CaribouStatusMedia extends LitElement {
     .gif-badge {
       position: absolute; inset-block-start: var(--space-2); inset-inline-start: var(--space-2);
       padding: 0 var(--space-2); font-size: 0.75rem; font-weight: 700;
-      color: #fff; background: rgb(0 0 0 / 0.7); border-radius: var(--radius-sm);
+      color: var(--overlay-fg); background: var(--overlay-bg); border-radius: var(--radius-sm);
     }
     /* Without the Popover API a [popover] is an ordinary element; keep the
        description out of the grid then. The image alt still carries it. */
@@ -100,7 +113,7 @@ export class CaribouStatusMedia extends LitElement {
       position: absolute; inset-block-start: var(--space-2); inset-inline-end: var(--space-2);
       font-size: 0.75rem;
       --caribou-button-size: 0;
-      --caribou-button-bg: rgb(0 0 0 / 0.7); --caribou-button-fg: #fff;
+      --caribou-button-bg: var(--overlay-bg); --caribou-button-fg: var(--overlay-fg);
     }
     caribou-button:is(.reveal, .hide)::part(button) {
       border: 0; border-radius: var(--radius-sm);

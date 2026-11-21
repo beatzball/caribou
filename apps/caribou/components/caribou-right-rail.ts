@@ -33,9 +33,10 @@ export class CaribouRightRail extends LitElement {
     form.search { position: relative; display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
     form.search input {
       flex: 1; min-width: 0; font: inherit; color: var(--fg-0);
-      background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md);
+      background: var(--bg-1); border: 1px solid var(--input-border); border-radius: var(--radius-md);
       padding: var(--space-2) var(--space-3);
     }
+    input::placeholder { color: var(--fg-muted); opacity: 1; }
     form.search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     form.search caribou-icon { position: absolute; left: var(--space-3); color: var(--fg-muted); pointer-events: none; }
     form.search input { padding-left: calc(var(--space-3) * 2 + 1em); }

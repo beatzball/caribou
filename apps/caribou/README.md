@@ -19,6 +19,24 @@ pnpm --filter caribou-app test:e2e   # playwright
 | `server/` | Nitro routes, API handlers and server-only libraries. |
 | `tests/` | `unit/`, `integration/` (SSR output), `e2e/` (Playwright). Component tests sit in `components/__tests__/`. |
 
+## Contrast rules (#288)
+
+1. Normal-size muted text and active boost/repost counts reach 4.5:1 on
+   canvas, panel, field and hover surfaces in both themes and networks.
+   Check each underlying surface with hover cleared, then check hover separately.
+2. Thread ancestors keep fully opaque text, links and action counts.
+   Spacing and the focused post's larger body distinguish thread positions.
+3. Enabled input and textarea placeholders use an explicit color and opacity
+   and reach 4.5:1 on the field fill in both browser engines and themes.
+4. Unfocused text-entry controls have a boundary reaching 3:1 against both
+   the field fill and the surrounding surface. Decorative borders keep their
+   separate token.
+5. Keyboard focus on media overlays stays visible over any image: opaque
+   backing and contrasting inner/outer strokes give an image-independent
+   indicator in both themes. Full-image focus strokes paint above image/video
+   children inside the clipped grid. Rendered pixels verify both strokes over
+   white and mixed images, GIF posters and playing GIF frames.
+
 ## Conventions
 
 **Keyboard focus rules (#289), for Mastodon and Bluesky in both themes.**
@@ -480,6 +498,23 @@ requests and check the cached paint, the banner and the restored scroll.
 **Server-only code stays out of the client bundle.** A page's `pageData`
 fetcher runs only on the server; reach heavy server modules (the jsdom-backed
 sanitizer) through a dynamic `import()` inside it.
+
+**Background updates announce their state.**
+
+1. A timeline keeps a polite status region mounted at zero new posts. A
+   changed count announces availability (or “Many new posts” for a gap),
+   separately from the apply button, without moving focus. An unchanged
+   message does not update the region.
+2. Notifications mount an empty polite status region alongside the visible
+   loading notice, then publish loading after mount. The same region announces
+   filter loading and the visible empty result, including empty pages with an
+   older cursor, while focus stays on the chosen filter. Errors keep their
+   alerts. Load older suppresses terminal live text before its request
+   completes and announces the end by focusing its end notice.
+3. Route changes use the router's existing polite region once per
+   transition. Its document-title fallback can name nested or headingless
+   pages when descriptive titles are set before the router reveals them;
+   do not add a second route announcer.
 
 **Notifications poll once for the whole app.** `app-main.ts` calls
 `startUnreadNotifications()`; it follows the active session and keeps

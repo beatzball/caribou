@@ -27,6 +27,15 @@ the theme switch propagates everywhere, including through shadow roots.
   in the root layout. Defines `:root` (dark default) and
   `[data-theme="light"]` overrides on the same set of variables.
 
+## Contrast rules (#288)
+
+1. `fg-muted` and `success` reach 4.5:1 against `bg-0`, `bg-1` and `bg-2`
+   in each theme, including small metadata and active action counts.
+2. `input-border` reaches 3:1 against those surfaces. `border` remains a
+   decorative separator; text-entry controls opt into `input-border`.
+3. `overlay-bg` and `overlay-fg` are opaque contrasting colors for media
+   controls and their focus strokes, independent of the image and theme.
+
 ## How it works
 
 Switching themes means flipping the attribute on `<html>` — no

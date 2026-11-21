@@ -142,6 +142,12 @@ describe('Following feed', () => {
     })
     const tl = await mount('home')
     expect(ids(tl)).toEqual([uri(1), uri(0)])
+    const region = tl.shadowRoot!.querySelector('caribou-new-posts-banner')!.shadowRoot!.querySelector('[role="status"]')!
+    expect(region).not.toBeNull()
+    expect(region.textContent).toBe('')
+    const reader = document.createElement('button')
+    document.body.append(reader)
+    reader.focus()
     polling = true
     await storeOf(tl).poll()
     await settle(tl)
@@ -150,6 +156,9 @@ describe('Following feed', () => {
     await (banner as unknown as { updateComplete: Promise<boolean> }).updateComplete
     const button = banner.shadowRoot!.querySelector<HTMLElement>('[data-action="apply-new-posts"]')!
     expect(button.textContent!.trim()).toBe('Many new posts')
+    expect(banner.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+    expect(region.textContent).toBe('Many new posts available.')
+    expect(document.activeElement).toBe(reader)
     const other = document.createElement('button')
     document.body.append(other)
     if (focused) button.shadowRoot!.querySelector<HTMLElement>('button')!.focus()
@@ -158,6 +167,8 @@ describe('Following feed', () => {
     await settle(tl)
     expect(ids(tl)[0]).toBe(uri('n0'))
     expect(ids(tl)).not.toContain(uri(1))
+    expect(banner.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+    expect(region.textContent).toBe('')
     // Rule 3: replacing a Bluesky gap also recovers the banner's focus.
     if (focused) expect(tl.shadowRoot!.activeElement).toBe(tl.shadowRoot!.querySelector('ul'))
     else expect(document.activeElement).toBe(other)
