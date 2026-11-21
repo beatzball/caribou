@@ -142,6 +142,12 @@ describe('Following feed', () => {
     })
     const tl = await mount('home')
     expect(ids(tl)).toEqual([uri(1), uri(0)])
+    const region = tl.shadowRoot!.querySelector('caribou-new-posts-banner')!.shadowRoot!.querySelector('[role="status"]')!
+    expect(region).not.toBeNull()
+    expect(region.textContent).toBe('')
+    const reader = document.createElement('button')
+    document.body.append(reader)
+    reader.focus()
     polling = true
     await storeOf(tl).poll()
     await settle(tl)
@@ -150,6 +156,9 @@ describe('Following feed', () => {
     await (banner as unknown as { updateComplete: Promise<boolean> }).updateComplete
     const button = banner.shadowRoot!.querySelector<HTMLElement>('[data-action="apply-new-posts"]')!
     expect(button.textContent!.trim()).toBe('Many new posts')
+    expect(banner.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+    expect(region.textContent).toBe('Many new posts available.')
+    expect(document.activeElement).toBe(reader)
     button.click()
     await settle(tl)
     expect(ids(tl)[0]).toBe(uri('n0'))

@@ -13,7 +13,7 @@ async function mount(count?: number): Promise<CaribouNewPostsBanner> {
 describe('<caribou-new-posts-banner>', () => {
   beforeEach(() => { document.body.replaceChildren() })
 
-  it('renders nothing while the count is zero', async () => {
+  it('has no apply action while the count is zero', async () => {
     const el = await mount()
     expect(el.shadowRoot!.querySelector('caribou-button')).toBeNull()
   })
@@ -55,5 +55,45 @@ describe('<caribou-new-posts-banner>', () => {
   it('does not mirror count to an attribute', async () => {
     const el = await mount(3)
     expect(el.hasAttribute('count')).toBe(false)
+  })
+})
+
+
+describe('background availability announcements (README rule 1)', () => {
+  it('keeps one initially empty polite region and changes only its message', async () => {
+    const el = await mount()
+    const region = el.shadowRoot!.querySelector('[role="status"]')!
+    expect(region).not.toBeNull()
+    expect(region.getAttribute('aria-live')).toBe('polite')
+    expect(region.getAttribute('aria-atomic')).toBe('true')
+    expect(region.textContent).toBe('')
+    const reader = document.createElement('button')
+    document.body.append(reader)
+    reader.focus()
+    const mutations: MutationRecord[] = []
+    const observer = new MutationObserver((records) => mutations.push(...records))
+    observer.observe(region, { childList: true, characterData: true, subtree: true })
+    for (const [count, many, message] of [
+      [1, false, '1 new post available.'],
+      [3, false, '3 new posts available.'],
+      [3, true, 'Many new posts available.'],
+      [4, true, 'Many new posts available.'],
+      [0, false, ''],
+    ] as const) {
+      el.count = count
+      el.many = many
+      await el.updateComplete
+      expect(el.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+      expect(region.textContent).toBe(message)
+      expect(document.activeElement).toBe(reader)
+      await Promise.resolve()
+      mutations.length = 0
+      el.requestUpdate()
+      await el.updateComplete
+      await Promise.resolve()
+      expect(mutations).toHaveLength(0)
+    }
+    observer.disconnect()
+    expect(region.querySelector('caribou-button')).toBeNull()
   })
 })
