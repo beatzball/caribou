@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.6
+
+### Patch Changes
+
+- [#293](https://github.com/beatzball/caribou/pull/293) [`160f02b`](https://github.com/beatzball/caribou/commit/160f02b29c41a4a5253eea1511786ac139c6a153) Thanks [@beatzball](https://github.com/beatzball)! - Keep phone post actions and anchored menus inside the viewport. Enlarge blog article links, attachment ALT badges, and compose media-label targets.
+
 ## 0.12.5
 
 ### Patch Changes
