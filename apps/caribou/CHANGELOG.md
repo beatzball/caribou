@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.5
+
+### Patch Changes
+
+- [#294](https://github.com/beatzball/caribou/pull/294) [`e54136a`](https://github.com/beatzball/caribou/commit/e54136afd2acb041d37630a09354f96a7e9003d3) Thanks [@beatzball](https://github.com/beatzball)! - Announce new-post availability and notification filter loading and empty results through persistent polite status regions while preserving reader focus.
+
 ## 0.12.4
 
 ### Patch Changes
