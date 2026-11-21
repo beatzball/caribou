@@ -1,5 +1,5 @@
 import { readingHeading } from '../components/_shared-styles.js'
-import { html } from 'lit'
+import { html, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { LitroPage, type LitroLocation } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
@@ -60,7 +60,7 @@ export class HomePage extends LitroPage {
     const data = (this.serverData ?? { shell: { instance: null } }) as HomeData
     return html`
       <caribou-app-shell instance=${data.shell.instance ?? ''}>
-        <h1 class="reading-heading">Home</h1>
+        ${this.signedIn ? html`<h1 class="reading-heading">Home</h1>` : nothing}
         ${this.signedIn && this.bluesky
           ? html`<caribou-feed-tabs feed=${this.feed}></caribou-feed-tabs>`
           : this.signedIn

@@ -46,6 +46,22 @@ export function titleStructureTests() {
         expect(escaped).toContain('<title>Search: &lt;/title&gt;&lt;script&gt; · Caribou</title>')
       })
 
+      test('rule 3: signed-out reading routes have one h1 on load and SPA navigation', async ({ page }) => {
+        for (const [path, tag] of [
+          ['/home', 'page-home'], ['/bookmarks', 'page-bookmarks'],
+          ['/local', 'page-local'], ['/public', 'page-public'],
+        ]) {
+          await gotoSettled(page, path!)
+          await page.evaluate((theme) => document.documentElement.setAttribute('data-theme', theme), theme)
+          await expect(livePage(page).getByRole('heading', { level: 1 })).toHaveCount(1)
+          await expect(livePage(page).getByRole('heading', { level: 1, name: 'Sign in to continue', exact: true })).toHaveCount(1)
+          await go(page, '/about', 'page-about')
+          await go(page, path!, tag!)
+          await expect(livePage(page).getByRole('heading', { level: 1 })).toHaveCount(1)
+          await expect(livePage(page).getByRole('heading', { level: 1, name: 'Sign in to continue', exact: true })).toHaveCount(1)
+        }
+      })
+
       test('rules 1 and 2: SPA, Back and Forward keep titles and one useful announcement', async ({ page }) => {
         const errors: string[] = []
         page.on('pageerror', (error) => errors.push(error.message))
@@ -94,6 +110,15 @@ export function titleStructureTests() {
           }
         })
       }
+
+      test('rule 2: a missing list keeps a descriptive route title', async ({ page }) => {
+        await signIn(page)
+        await serveLists(page, [])
+        await page.route(`${API}/v1/timelines/list/42*`, (route) => route.fulfill(json([])))
+        await gotoSettled(page, '/lists/42')
+        await expect(livePage(page).getByRole('heading', { level: 1 })).toHaveText('This list does not exist.')
+        await expect(page).toHaveTitle('List · Caribou')
+      })
 
       test('rule 2: a delayed list name cannot overwrite Settings after leaving', async ({ page }) => {
         await signIn(page)

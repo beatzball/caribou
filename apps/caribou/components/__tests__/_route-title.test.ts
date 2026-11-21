@@ -34,7 +34,7 @@ it('rule 2: a hidden or departed page cannot overwrite the current title', async
   const old = document.createElement('page-lists-id')
   old.attachShadow({ mode: 'open' }).innerHTML = '<caribou-list-header></caribou-list-header>'
   const header = old.shadowRoot!.firstElementChild!
-  header.attachShadow({ mode: 'open' }).innerHTML = '<h1>Birdwatching</h1>'
+  header.attachShadow({ mode: 'open' }).innerHTML = '<h1 data-list-title>Birdwatching</h1>'
   outlet.append(old)
   stop = startRouteTitles(outlet)
   await flush()
@@ -59,7 +59,7 @@ it('rule 2: a prepared hidden page cannot supply a name before the swap', async 
   page.hidden = true
   page.attachShadow({ mode: 'open' }).innerHTML = '<caribou-list-header></caribou-list-header>'
   const header = page.shadowRoot!.firstElementChild!
-  header.attachShadow({ mode: 'open' }).innerHTML = '<h1>Birdwatching</h1>'
+  header.attachShadow({ mode: 'open' }).innerHTML = '<h1 data-list-title>Birdwatching</h1>'
   outlet.append(page)
   stop = startRouteTitles(outlet)
   await flush()
@@ -69,9 +69,9 @@ it('rule 2: a prepared hidden page cannot supply a name before the swap', async 
   expect(document.title).toBe('Birdwatching · Caribou')
 })
 
-it('rule 2: a DID-to-handle rewrite keeps the mounted profile title', async () => {
+it.each(['/@did:plc:alice', '/@did:plc:alice/'])('rule 2: a DID-to-handle rewrite keeps the mounted profile title at %s', async (path) => {
   const { replaceDidRoute } = await import('../_bluesky-route.js')
-  history.replaceState(null, '', '/@did:plc:alice')
+  history.replaceState(null, '', path)
   const outlet = document.createElement('litro-outlet')
   document.body.append(outlet)
   const page = document.createElement('page-handle')
@@ -85,4 +85,47 @@ it('rule 2: a DID-to-handle rewrite keeps the mounted profile title', async () =
   header.shadowRoot!.querySelector('h1')!.textContent = 'Alice Example'
   await flush()
   expect(document.title).toBe('Alice Example · Caribou')
+})
+
+it('rule 2: a missing list keeps the route title instead of using the error sentence', async () => {
+  history.replaceState(null, '', '/lists/42')
+  const outlet = document.createElement('litro-outlet')
+  document.body.append(outlet)
+  const page = document.createElement('page-lists-id')
+  page.attachShadow({ mode: 'open' }).innerHTML = '<caribou-list-header></caribou-list-header>'
+  page.shadowRoot!.firstElementChild!.attachShadow({ mode: 'open' }).innerHTML = '<h1>This list does not exist.</h1>'
+  outlet.append(page)
+  stop = startRouteTitles(outlet)
+  await flush()
+  expect(document.title).toBe('List · Caribou')
+})
+
+it.each(['clear', 'blur', 'filter', 'missing', 'profile-blur'])('rule 2: server and client agree on a %s Bluesky thread', async (state) => {
+  const { serverRouteTitle } = await import('../../server/lib/route-title.js')
+  const clear = { blur: false, filter: false }
+  const status = {
+    account: {
+      displayName: 'Alice', username: 'alice',
+      bluesky: { moderation: { contexts: { profileView: { ...clear, blur: state === 'profile-blur' } } } },
+    },
+    bluesky: state === 'missing' ? {} : {
+      moderation: { contexts: { contentView: { blur: state === 'blur', filter: state === 'filter' } } },
+    },
+  }
+  history.replaceState(null, '', '/@alice.example.com/post')
+  const outlet = document.createElement('litro-outlet')
+  document.body.append(outlet)
+  const page = document.createElement('page-handle-statusid')
+  page.attachShadow({ mode: 'open' }).innerHTML = '<caribou-thread></caribou-thread>'
+  const thread = page.shadowRoot!.firstElementChild!
+  thread.attachShadow({ mode: 'open' }).innerHTML = '<caribou-status-card variant="focused"></caribou-status-card>'
+  const card = thread.shadowRoot!.firstElementChild!
+  Object.assign(card, { status })
+  card.attachShadow({ mode: 'open' }).innerHTML = '<a class="author"><strong>Alice</strong></a>'
+  outlet.append(page)
+  stop = startRouteTitles(outlet)
+  await flush()
+  const expected = state === 'clear' ? 'Thread by Alice · Caribou' : 'Thread · Caribou'
+  expect(serverRouteTitle(url('/@alice.example.com/post'), { kind: 'ok', focused: status })).toBe(expected)
+  expect(document.title).toBe(expected)
 })

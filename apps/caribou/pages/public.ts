@@ -69,7 +69,6 @@ export class PublicPage extends LitroPage {
     if (data.kind === 'auth-required') {
       return html`
         <caribou-app-shell instance=${inst}>
-        <h1 class="reading-heading">Public</h1>
           <caribou-auth-required
             label="/public needs to know which instance to query. Sign in once and Caribou will remember."
           ></caribou-auth-required>
@@ -79,7 +78,7 @@ export class PublicPage extends LitroPage {
     if (data.kind === 'error') {
       return html`
         <caribou-app-shell instance=${inst}>
-        <h1 class="reading-heading">Public</h1>
+          <h1 class="reading-heading">Public</h1>
           <article role="alert">
             Couldn't load /public. <litro-link href="/public">Retry</litro-link>
           </article>

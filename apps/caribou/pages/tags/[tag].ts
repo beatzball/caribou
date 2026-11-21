@@ -9,7 +9,6 @@ import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import { shellInfo } from '../../server/lib/shell-info.js'
 import { fetchTagTimeline } from '../../server/lib/mastodon-public.js'
 import { getStorage } from '../../server/lib/storage.js'
-import { PAGE_TITLE } from '../../server/lib/brand-head.js'
 import type { TimelinePageData, ShellInfo } from '../../server/lib/page-data-types.js'
 import '../../components/caribou-app-shell.js'
 import '../../components/caribou-timeline.js'
@@ -28,14 +27,7 @@ import { blueskyTagRedirect, parseTagParam, tagPath } from '../../components/_ta
 export type TagPageData = (TimelinePageData | { kind: 'not-found' } | { kind: 'bluesky' }) & {
   shell: ShellInfo
   tag: string
-  /** The document title; Litro moves it into `<title>` and out of the data. */
-  seoTitle?: string
 }
-
-const escapeHtml = (text: string): string =>
-  text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
-
-const titleFor = (tag: string) => `#${tag} · ${PAGE_TITLE}`
 
 // Whether the address bar shows the page for `tag`: the path segment names
 // it, as the page data read it (decoded for a name that is not a hashtag,
@@ -56,13 +48,11 @@ export const pageData = definePageData<TagPageData>(async (event) => {
   if (tag === null) {
     let shown = raw
     try { shown = decodeURIComponent(raw) } catch { /* keep it encoded */ }
-    return { kind: 'not-found', shell, tag: shown, seoTitle: escapeHtml(titleFor(shown)) }
+    return { kind: 'not-found', shell, tag: shown }
   }
-  // Litro writes `seoTitle` into the page as it is, so it is escaped here.
-  const seoTitle = escapeHtml(titleFor(tag))
   const query = getQuery(event)
-  if (query.net === 'bsky') return { kind: 'bluesky', shell, tag, seoTitle }
-  if (!resolution.instance) return { kind: 'auth-required', shell, tag, seoTitle }
+  if (query.net === 'bsky') return { kind: 'bluesky', shell, tag }
+  if (!resolution.instance) return { kind: 'auth-required', shell, tag }
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
     const fetched = await fetchTagTimeline({ instance: resolution.instance, tag, maxId })
@@ -71,9 +61,9 @@ export const pageData = definePageData<TagPageData>(async (event) => {
     const statuses = fetched.map((s) => sanitizeStatus(s))
     // The next page starts below the last post (see local.ts).
     const nextCursor = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', statuses, nextCursor, shell, tag, seoTitle }
+    return { kind: 'ok', statuses, nextCursor, shell, tag }
   } catch (err) {
-    return { kind: 'error', message: String(err), shell, tag, seoTitle }
+    return { kind: 'error', message: String(err), shell, tag }
   }
 })
 

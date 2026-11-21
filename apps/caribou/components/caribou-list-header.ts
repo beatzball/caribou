@@ -254,7 +254,7 @@ export class CaribouListHeader extends LitElement {
     const title = this.missing ? 'This list does not exist.' : this.known?.title ?? 'List'
     return html`<div>
       <header>
-        <h1>${title}</h1>
+        <h1 ?data-list-title=${!this.missing && !!this.known}>${title}</h1>
         ${this.titleError ? html`<div class="title-error"><span role="alert">${this.titleError}</span>
           <caribou-button class="retry-title" variant="secondary" @click=${this.onRetryTitle}>Retry</caribou-button></div>`
           : nothing}

@@ -1,3 +1,5 @@
+import type { Account, Status } from '@beatzball/caribou-mastodon-client'
+
 // Shared by the document head and the client lifecycle. Return plain text;
 // only the server's HTML boundary escapes it.
 const ROUTE_NAMES: Record<string, string> = {
@@ -30,4 +32,24 @@ export function routeTitle(url: URL, visibleName?: string | null): string {
     name = visibleName || 'List'
   }
   return `${name || 'Not found'} · Caribou`
+}
+
+// Keep the server and client guards equal even when the client can render
+// an author's name beside covered thread content.
+export function profileTitleName(account?: Account): string | undefined {
+  if (!account) return undefined
+  if (account.bluesky) {
+    const view = account.bluesky.moderation?.contexts.profileView
+    if (!view || view.blur || view.filter) return undefined
+  }
+  return account.displayName || account.username || undefined
+}
+
+export function threadTitleName(status?: Status): string | undefined {
+  if (!status) return undefined
+  if (status.bluesky) {
+    const view = status.bluesky.moderation?.contexts.contentView
+    if (!view || view.blur || view.filter) return undefined
+  }
+  return profileTitleName(status.account)
 }

@@ -3,6 +3,7 @@ import type * as H3 from 'h3'
 import type * as TagPageModule from '../../pages/tags/[tag].js'
 import type { CaribouTimeline } from '../../components/caribou-timeline.js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
+import { withRouteTitle } from '../../server/lib/route-title.js'
 import { startRouteTitles } from '../../components/_route-titles.js'
 import { fetchTagTimeline } from '../../server/lib/mastodon-public.js'
 
@@ -37,6 +38,12 @@ type FetcherEvent = Parameters<typeof TagPageModule.pageData.fetcher>[0]
 const eventFor = (tag: string, query = '') =>
   ({ url: `/tags/${tag}${query}`, params: { tag } }) as unknown as FetcherEvent
 
+async function titledTagData(tag: string) {
+  const { pageData } = await import('../../pages/tags/[tag].js')
+  const wrapped = withRouteTitle({ pageData }, new URL(`/tags/${tag}`, 'https://example.test'))
+  return (wrapped.pageData as typeof pageData).fetcher(eventFor(tag)) as Promise<TagPageModule.TagPageData & { seoTitle: string }>
+}
+
 const signedIn = () => vi.mocked(resolveInstanceForRoute).mockResolvedValue({
   instance: 'example.social', source: 'cookie',
 })
@@ -54,6 +61,7 @@ describe('/tags/[tag] pageData', () => {
       kind: 'ok', statuses: fixture, nextCursor: '10', tag: 'Caturday',
       shell: { instance: 'example.social', source: 'cookie' },
     })
+    expect(result).not.toHaveProperty('seoTitle')
     expect(fetchTagTimeline).toHaveBeenCalledWith(
       { instance: 'example.social', tag: 'Caturday', maxId: undefined },
     )
@@ -62,8 +70,7 @@ describe('/tags/[tag] pageData', () => {
   it('names the tag in the document title', async () => {
     signedIn()
     vi.mocked(fetchTagTimeline).mockResolvedValue([])
-    const { pageData } = await import('../../pages/tags/[tag].js')
-    const result = await pageData.fetcher(eventFor('Caturday'))
+    const result = await titledTagData('Caturday')
     expect(result.seoTitle).toBe('#Caturday · Caribou')
   })
 
@@ -71,8 +78,7 @@ describe('/tags/[tag] pageData', () => {
   // hashtag can hold markup, so that branch is the one to pin.
   it('escapes markup in the title of a name that is not a hashtag', async () => {
     signedIn()
-    const { pageData } = await import('../../pages/tags/[tag].js')
-    const result = await pageData.fetcher(eventFor(encodeURIComponent('</title><script>"x"&\'y\'')))
+    const result = await titledTagData(encodeURIComponent('</title><script>"x"&\'y\''))
     expect(result.kind).toBe('not-found')
     expect(result.seoTitle).toBe('#&lt;/title&gt;&lt;script&gt;&quot;x&quot;&amp;&#39;y&#39; · Caribou')
   })

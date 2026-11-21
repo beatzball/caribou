@@ -1,14 +1,17 @@
 import { ROUTE_ALIAS_EVENT } from './_bluesky-route.js'
-import { routeTitle } from './_route-title.js'
+import type { CaribouStatusCard } from './caribou-status-card.js'
+import { routeTitle, threadTitleName } from './_route-title.js'
 
 // Follow only the components that can refine a title. In particular, do not
 // observe entire timelines or their cards on every clock/count update.
+// Keep caribou-search here: typing changes the query with pushState or
+// replaceState without popstate; its result render triggers the title update.
 const TITLE_COMPONENTS = 'caribou-profile, caribou-profile-header, caribou-list-header, caribou-thread, caribou-status-card[variant="focused"], caribou-search'
 
 /** One lifecycle for the tab. Runs outside Lit templates, after hydration. */
 export function startRouteTitles(outlet: Element): () => void {
   const owners = new WeakMap<Element, string>()
-  const path = () => location.pathname.replace(/\/+$/, '') || '/'
+  const path = (pathname = location.pathname) => pathname.replace(/\/+$/, '') || '/'
   let current: Element | null = null
   let observed = new Set<Node>()
   const content = new MutationObserver(refresh)
@@ -44,8 +47,9 @@ export function startRouteTitles(outlet: Element): () => void {
       // Read rendered identity, never an account/store field: moderation
       // removes covered identity from these nodes until the reader reveals it.
       name = profile?.querySelector('h1')?.textContent?.trim()
-        || list?.querySelector('h1')?.textContent?.trim()
-        || focused?.querySelector('.author strong')?.textContent?.trim()
+        || list?.querySelector('h1[data-list-title]')?.textContent?.trim()
+        || (threadTitleName((focused?.host as CaribouStatusCard | undefined)?.status ?? undefined)
+          ? focused?.querySelector('.author strong')?.textContent?.trim() : undefined)
         || undefined
     }
     document.title = routeTitle(new URL(location.href), name)
@@ -57,7 +61,7 @@ export function startRouteTitles(outlet: Element): () => void {
   const alias = (event: Event) => {
     const { from, to } = (event as CustomEvent<{ from: string; to: string }>).detail
     for (const page of outlet.children) {
-      if (owners.get(page) === from) owners.set(page, to)
+      if (owners.get(page) === path(from)) owners.set(page, path(to))
     }
     refresh()
   }

@@ -1,5 +1,5 @@
 import { readingHeading } from '../components/_shared-styles.js'
-import { html } from 'lit'
+import { html, nothing } from 'lit'
 import { customElement, state } from 'lit/decorators.js'
 import { LitroPage } from '@beatzball/litro/runtime'
 import { definePageData } from '@beatzball/litro'
@@ -42,7 +42,7 @@ export class BookmarksPage extends LitroPage {
     const data = (this.serverData ?? { shell: { instance: null } }) as BookmarksData
     return html`
       <caribou-app-shell instance=${data.shell.instance ?? ''}>
-        <h1 class="reading-heading">Bookmarks</h1>
+        ${this.signedIn ? html`<h1 class="reading-heading">Bookmarks</h1>` : nothing}
         ${this.signedIn
           ? html`<caribou-timeline kind="bookmarks"></caribou-timeline>`
           : html`<caribou-auth-required

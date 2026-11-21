@@ -106,14 +106,18 @@ clean up in `disconnectedCallback`, and wait for
    including Back and Forward. Server and client share the route-name resolver.
    Search includes its query; tags keep their case; Blog articles name the post.
 2. Profile and thread titles use only identity allowed by moderation. Private
-   list names appear after the reader loads them. Only the connected, visible
-   page for the current address may refine its title; a late answer from a
+   list names appear after the reader loads them; a missing list keeps the
+   generic List title. Server and client share the guard for naming a
+   Bluesky thread: both its content and profile decisions must permit it.
+   Only the connected, visible page for the current address may refine its title; a late answer from a
    departed or hidden page cannot overwrite it. The title is ready before the
    router's existing route announcement. No second live region is added.
 3. The visible profile name is an h1, including after revealing a covered
    identity. A covered identity has no heading until reveal. Home, Local,
    Public, Bookmarks and threads have one page heading, visually hidden to
-   preserve the reading layout. Server and first client render stay equal.
+   preserve the reading layout. Auth-required branches use only the
+   placeholder’s h1, without a hidden reading heading. Server and first
+   client render stay equal.
 4. Desktop rail cards belong to a named complementary landmark. Search keeps
    its own named landmark. The phone's hidden rail adds no landmarks.
 

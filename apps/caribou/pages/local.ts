@@ -72,7 +72,6 @@ export class LocalPage extends LitroPage {
     if (data.kind === 'auth-required') {
       return html`
         <caribou-app-shell instance=${inst}>
-        <h1 class="reading-heading">Local</h1>
           <caribou-auth-required
             label="/local needs to know which instance to query. Sign in once and Caribou will remember."
           ></caribou-auth-required>
@@ -82,7 +81,7 @@ export class LocalPage extends LitroPage {
     if (data.kind === 'error') {
       return html`
         <caribou-app-shell instance=${inst}>
-        <h1 class="reading-heading">Local</h1>
+          <h1 class="reading-heading">Local</h1>
           <article role="alert">
             Couldn't load /local. <litro-link href="/local">Retry</litro-link>
           </article>
