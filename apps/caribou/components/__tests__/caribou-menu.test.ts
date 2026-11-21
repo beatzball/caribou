@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import '../caribou-menu.js'
 import { CaribouMenu } from '../caribou-menu.js'
 
@@ -22,6 +22,7 @@ const panel = (el: CaribouMenu) => el.shadowRoot!.querySelector<HTMLElement>('.p
 
 afterEach(() => {
   document.body.replaceChildren()
+  vi.unstubAllGlobals()
 })
 
 describe('caribou-menu', () => {
@@ -118,10 +119,11 @@ describe('caribou-menu', () => {
     const el = await mount()
     el.anchored = true
     await el.updateComplete
-    const vw = document.documentElement.clientWidth || window.innerWidth
+    panel(el).getBoundingClientRect = () => ({ width: 192, height: 120 }) as DOMRect
     trigger(el).getBoundingClientRect = () => ({ top: 100, bottom: 136, left: 200, right: 236, width: 36, height: 36 }) as DOMRect
     trigger(el).click()
-    expect(panel(el).style.inset).toBe(`140px ${vw - 236}px auto auto`)
+    expect(panel(el).style.left).toBe('44px')
+    expect(panel(el).style.top).toBe('140px')
     el.hide()
   })
 
@@ -130,10 +132,33 @@ describe('caribou-menu', () => {
     el.anchored = true
     await el.updateComplete
     const vh = window.innerHeight
+    panel(el).getBoundingClientRect = () => ({ width: 192, height: 120 }) as DOMRect
     trigger(el).getBoundingClientRect = () => ({ top: vh - 50, bottom: vh - 14, left: 10, right: 46, width: 36, height: 36 }) as DOMRect
     trigger(el).click()
-    expect(panel(el).style.inset).toMatch(new RegExp(`^auto \\d+px 54px auto$`))
+    expect(panel(el).style.left).toBe('8px')
+    expect(panel(el).style.top).toBe(`${vh - 174}px`)
     el.hide()
+  })
+
+  it('rule 2: clamps both edges inside an offset visual viewport and repositions on resize', async () => {
+    const viewport = new EventTarget() as EventTarget & { offsetLeft: number; offsetTop: number; width: number; height: number }
+    Object.assign(viewport, { offsetLeft: 40, offsetTop: 20, width: 320, height: 500 })
+    vi.stubGlobal('visualViewport', viewport)
+    const el = await mount()
+    el.anchored = true
+    await el.updateComplete
+    trigger(el).getBoundingClientRect = () => ({ top: 100, bottom: 144, left: 45, right: 89, width: 44, height: 44 }) as DOMRect
+    panel(el).getBoundingClientRect = () => ({ width: 192, height: 120 }) as DOMRect
+    el.show()
+    expect(panel(el).style.left).toBe('48px')
+    expect(panel(el).style.top).toBe('148px')
+    trigger(el).getBoundingClientRect = () => ({ top: 100, bottom: 144, left: 340, right: 384, width: 44, height: 44 }) as DOMRect
+    viewport.dispatchEvent(new Event('resize'))
+    expect(panel(el).style.left).toBe('160px')
+    el.hide()
+    viewport.width = 200
+    viewport.dispatchEvent(new Event('resize'))
+    expect(panel(el).style.left).toBe('160px')
   })
 
   it('focus() focuses the trigger', async () => {
