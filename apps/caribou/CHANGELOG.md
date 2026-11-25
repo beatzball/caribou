@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.7
+
+### Patch Changes
+
+- [#297](https://github.com/beatzball/caribou/pull/297) [`504db80`](https://github.com/beatzball/caribou/commit/504db8034b1ce3bd5e44af512987fe92e0c9b8d1) Thanks [@beatzball](https://github.com/beatzball)! - Keep keyboard focus clear of phone navigation and make Skip to content reach main. Restore focus after applying new posts, removing compose attachments, and dismissing toasts.
+
 ## 0.12.6
 
 ### Patch Changes
