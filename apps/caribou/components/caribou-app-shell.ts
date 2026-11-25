@@ -48,7 +48,7 @@ export class CaribouAppShell extends LitElement {
       <caribou-gone-labelers></caribou-gone-labelers>
       <div class="shell-grid">
         <caribou-nav-rail></caribou-nav-rail>
-        <main><slot></slot></main>
+        <main id="caribou-main" tabindex="-1"><slot></slot></main>
         <caribou-right-rail instance=${this.instance}></caribou-right-rail>
       </div>
       <caribou-toaster></caribou-toaster>

@@ -10,7 +10,7 @@ describe('caribou-app-shell SSR', () => {
     expect(out).toContain('<template shadowroot="open" shadowrootmode="open">')
     expect(out).toContain('<caribou-nav-rail')
     expect(out).toContain('<caribou-right-rail')
-    expect(out).toContain('<main><slot></slot></main>')
+    expect(out).toContain('<main id="caribou-main" tabindex="-1"><slot></slot></main>')
     expect(out).toContain('<p>page body</p>')
   })
 

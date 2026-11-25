@@ -715,3 +715,44 @@ describe('caribou-compose-dialog', () => {
     })
   })
 })
+
+describe('keyboard focus rule 4: Mastodon attachment removal', () => {
+  for (const state of ['uploaded', 'pending'] as const) {
+    for (const [count, at, next] of [[3, 0, 'm1'], [3, 1, 'm2'], [3, 2, 'm1'], [1, 0, null]] as const) {
+      it(`${state}: removing ${at} of ${count} selects ${next ?? 'Add media'}`, async () => {
+        signIn()
+        const media = Array.from({ length: count }, (_, i) => ({
+          id: `m${i}`, type: 'image' as const, url: '', previewUrl: null, description: '',
+        }))
+        saveDraft(KEY, 'new', emptyDraft({ media: state === 'uploaded' ? media : [] }))
+        const el = await mount()
+        await compose(el)
+        if (state === 'pending') {
+          Object.assign(el, { pending: media.map((m) => ({ localId: m.id,
+            file: new File(['image'], `${m.id}.png`, { type: 'image/png' }), previewUrl: '', description: '', state: 'uploading' })) })
+          await settle(el)
+        }
+        const row = state === 'pending' ? 'data-pending' : 'data-media'
+        const remove = $(el, `[${row}="m${at}"] [data-action="remove-media"]`)!
+        inner(remove).focus()
+        inner(remove).click()
+        await settle(el)
+        const target = next ? $(el, `[${row}="${next}"] [data-action="remove-media"]`) : $(el, '[data-action="add-media"]')
+        expect(el.shadowRoot!.activeElement).toBe(target)
+        expect(target!.shadowRoot!.activeElement).toBe(inner(target!))
+      })
+    }
+  }
+
+  it('removing in the background preserves the editor focus', async () => {
+    signIn()
+    saveDraft(KEY, 'new', emptyDraft({ media: [{ id: 'm1', type: 'image', url: '', previewUrl: null, description: '' }] }))
+    const el = await mount()
+    await compose(el)
+    const text = $(el, 'textarea')!
+    text.focus()
+    $(el, '[data-action="remove-media"]')!.click()
+    await settle(el)
+    expect(el.shadowRoot!.activeElement).toBe(text)
+  })
+})

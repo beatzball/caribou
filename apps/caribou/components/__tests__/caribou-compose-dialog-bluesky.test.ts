@@ -1918,3 +1918,23 @@ describe('Bluesky compose: who can reply, and quotes (#199)', () => {
     expect(g$(el, '[data-gates="quotes"]')).not.toBeNull()
   })
 })
+
+describe('keyboard focus rule 4: Bluesky attachment removal', () => {
+  for (const [count, at, next] of [[3, 0, 'i1'], [3, 1, 'i2'], [3, 2, 'i1'], [1, 0, null]] as const) {
+    it(`removing ${at} of ${count} selects ${next ?? 'Add media'}`, async () => {
+      signInBluesky()
+      saveDraft(KEY, 'new', emptyDraft({ bluesky: emptyBlueskyDraft({ images:
+        Array.from({ length: count }, (_, i) => ({ id: `i${i}`, blob: { $type: 'blob', ref: { $link: 'bafkimage' },
+          mimeType: 'image/png', size: 3 }, mime: 'image/png', size: 3, alt: '', aspectRatio: null })),
+      }) }))
+      const el = await mount()
+      await open(el)
+      const remove = $(el, `[data-bsky-image="i${at}"] [data-action="remove-media"]`)!
+      remove.shadowRoot!.querySelector<HTMLElement>('button')!.focus()
+      remove.click()
+      await settle(el)
+      const target = next ? $(el, `[data-bsky-image="${next}"] [data-action="remove-media"]`) : $(el, '[data-action="add-media"]')
+      expect(el.shadowRoot!.activeElement).toBe(target)
+    })
+  }
+})
