@@ -51,7 +51,7 @@ export class CaribouListDialog extends LitElement {
     label.field { display: block; margin-bottom: var(--space-1); color: var(--fg-1); }
     input[type="text"] {
       inline-size: 100%; padding: var(--space-2); font: inherit; color: var(--fg-0);
-      background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg-1); border: 1px solid var(--input-border); border-radius: var(--radius-sm);
     }
     input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     fieldset { margin: var(--space-3) 0 0; padding: 0; border: 0; }

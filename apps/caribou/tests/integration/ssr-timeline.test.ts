@@ -28,6 +28,9 @@ describe('caribou-timeline SSR', () => {
     expect(out.indexOf('post 2')).toBeLessThan(out.indexOf('post 1'))
     expect(out).not.toContain('No posts yet')
     expect(out).not.toContain('Loading your timeline')
+    // The first client render has the same initially empty polite region.
+    expect(out).toContain('role="status" aria-live="polite" aria-atomic="true"')
+    expect(out).not.toContain('new posts available.')
     // The data rides in the page's JSON once; it is not repeated as attributes.
     expect(out).not.toMatch(/\s(initial|status)="/)
   })

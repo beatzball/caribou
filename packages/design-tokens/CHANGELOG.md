@@ -1,5 +1,11 @@
 # @beatzball/caribou-design-tokens
 
+## 0.1.3
+
+### Patch Changes
+
+- [#295](https://github.com/beatzball/caribou/pull/295) [`5075d96`](https://github.com/beatzball/caribou/commit/5075d9667c9d53dd03ce6acd0c1f8b75bce2e3c9) Thanks [@beatzball](https://github.com/beatzball)! - Give muted text and success counts readable colors in both themes. Add separate field boundary and opaque media overlay tokens.
+
 ## 0.1.2
 
 ### Patch Changes

@@ -1,5 +1,32 @@
 # caribou-app
 
+## 0.12.7
+
+### Patch Changes
+
+- [#297](https://github.com/beatzball/caribou/pull/297) [`504db80`](https://github.com/beatzball/caribou/commit/504db8034b1ce3bd5e44af512987fe92e0c9b8d1) Thanks [@beatzball](https://github.com/beatzball)! - Keep keyboard focus clear of phone navigation and make Skip to content reach main. Restore focus after applying new posts, removing compose attachments, and dismissing toasts.
+
+## 0.12.6
+
+### Patch Changes
+
+- [#293](https://github.com/beatzball/caribou/pull/293) [`160f02b`](https://github.com/beatzball/caribou/commit/160f02b29c41a4a5253eea1511786ac139c6a153) Thanks [@beatzball](https://github.com/beatzball)! - Keep phone post actions and anchored menus inside the viewport. Enlarge blog article links, attachment ALT badges, and compose media-label targets.
+
+## 0.12.5
+
+### Patch Changes
+
+- [#294](https://github.com/beatzball/caribou/pull/294) [`e54136a`](https://github.com/beatzball/caribou/commit/e54136afd2acb041d37630a09354f96a7e9003d3) Thanks [@beatzball](https://github.com/beatzball)! - Announce new-post availability and notification filter loading and empty results through persistent polite status regions while preserving reader focus.
+
+## 0.12.4
+
+### Patch Changes
+
+- [#295](https://github.com/beatzball/caribou/pull/295) [`5075d96`](https://github.com/beatzball/caribou/commit/5075d9667c9d53dd03ce6acd0c1f8b75bce2e3c9) Thanks [@beatzball](https://github.com/beatzball)! - Improve placeholder and unfocused field contrast. Keep thread ancestors opaque and show contrasting keyboard focus over media. Paint image and GIF focus strokes above their media content.
+
+- Updated dependencies [[`5075d96`](https://github.com/beatzball/caribou/commit/5075d9667c9d53dd03ce6acd0c1f8b75bce2e3c9)]:
+  - @beatzball/caribou-design-tokens@0.1.3
+
 ## 0.12.3
 
 ### Patch Changes

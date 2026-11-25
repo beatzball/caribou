@@ -59,7 +59,7 @@ export class CaribouMutedWords extends LitElement {
     form:not([hidden]) { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
     label.field { display: flex; flex-direction: column; gap: var(--space-1); }
     input[type="text"], select {
-      font: inherit; color: var(--fg-0); background: var(--bg-1); border: 1px solid var(--border);
+      font: inherit; color: var(--fg-0); background: var(--bg-1); border: 1px solid var(--input-border);
       border-radius: var(--radius-md); padding: var(--space-2);
     }
     fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-3); }

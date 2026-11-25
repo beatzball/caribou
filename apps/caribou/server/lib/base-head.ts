@@ -6,7 +6,10 @@
 // `pageReset` — so without this rule the "hidden" page is laid out under the
 // current one for a frame. A document rule on the host element wins over
 // `:host`.
-const BASE_CSS = `litro-outlet > [hidden] { display: none; }`
+const BASE_CSS = `litro-outlet > [hidden] { display: none; }
+@media (max-width: 767px) {
+  html { scroll-padding-bottom: calc(61px + 16px + env(safe-area-inset-bottom, 0px)); }
+}`
 
 // Litro's shell writes its own viewport meta first; the last one wins. With
 // viewport-fit=cover the page reaches the screen edges and `env(safe-area-*)`

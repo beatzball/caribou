@@ -1,3 +1,4 @@
+import { recordNotificationAnnouncements } from './_notification-announcements.js'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Capabilities, CaribouClient, FetchNotificationsParams, Notification, NotificationPage, Status } from '@beatzball/caribou-mastodon-client'
 import {
@@ -528,4 +529,86 @@ describe('caribou-notifications, Bluesky: authors through the production moderat
       expect(lineText(rows(el)[0]!)).toBe('Someone (checking your moderation settings) followed you')
     })
   })
+})
+
+
+describe('notification filter announcements (README rule 2)', () => {
+  it.each(['light', 'dark'])('mounts empty before announcing a deferred initial request in %s theme', async (theme) => {
+    document.documentElement.dataset.theme = theme
+    let release!: () => void
+    fetchNotifications.mockImplementationOnce(() => new Promise<NotificationPage>((r) => { release = () => r(page([], { newestAt: null, unread: false })) }))
+    const el = document.createElement('caribou-notifications') as CaribouNotifications
+    const frames = recordNotificationAnnouncements(el)
+    document.body.appendChild(el)
+    await vi.waitFor(() => expect(frames.some((frame) => frame.message === 'Loading notifications…')).toBe(true))
+    expect(frames[0]!.message).toBe('')
+    expect(frames[0]!.notice).toBe('Loading notifications…')
+    const region = frames[0]!.region!
+    expect(region).not.toBeNull()
+    expect(region.getAttribute('aria-live')).toBe('polite')
+    expect(region.getAttribute('aria-atomic')).toBe('true')
+    expect(frames.every((frame) => frame.region === region)).toBe(true)
+    expect(el.shadowRoot!.querySelector('.notice')!.textContent).toBe('Loading notifications…')
+    release()
+    await vi.waitFor(() => expect(region.textContent).toBe('No notifications yet.'))
+    expect(el.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+    delete document.documentElement.dataset.theme
+  })
+
+  it.each(['light', 'dark'])('keeps a polite region and filter focus in %s theme', async (theme) => {
+    document.documentElement.dataset.theme = theme
+    fetchNotifications.mockResolvedValue(page([n(1, 'follow', '2026-11-07T12:00:00.000Z')], { newestAt: null, unread: false }))
+    const el = await mount()
+    const region = el.shadowRoot!.querySelector('[role="status"]')!
+    expect(region).not.toBeNull()
+    expect(region.getAttribute('aria-live')).toBe('polite')
+    expect(region.getAttribute('aria-atomic')).toBe('true')
+    expect(region.textContent).toBe('')
+    let release!: () => void
+    fetchNotifications.mockImplementationOnce(() => new Promise<NotificationPage>((r) => { release = () => r(page([], { newestAt: null, unread: false })) }))
+    const mentions = el.shadowRoot!.querySelector<HTMLElement>('[data-filter="mentions"]')!
+    mentions.focus()
+    mentions.click()
+    await vi.waitFor(() => expect(region.textContent).toBe('Loading notifications…'))
+    expect(el.shadowRoot!.activeElement).toBe(mentions)
+    release()
+    await vi.waitFor(() => expect(region.textContent).toBe('No mentions yet.'))
+    expect(el.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+    expect(el.shadowRoot!.activeElement).toBe(mentions)
+    expect(el.shadowRoot!.querySelectorAll('[role="status"]')).toHaveLength(1)
+    const mutations: MutationRecord[] = []
+    const observer = new MutationObserver((records) => mutations.push(...records))
+    observer.observe(region, { childList: true, characterData: true, subtree: true })
+    el.requestUpdate()
+    await el.updateComplete
+    await flush()
+    expect(mutations).toHaveLength(0)
+    observer.disconnect()
+    delete document.documentElement.dataset.theme
+  })
+})
+
+
+it('never publishes terminal live text before focusing the pagination end (README rule 2)', async () => {
+  fetchNotifications.mockResolvedValueOnce(page([], { newestAt: null, unread: false }, 'older'))
+  const el = await mount()
+  const region = el.shadowRoot!.querySelector('[role="status"]')!
+  expect(region).not.toBeNull()
+  expect(region.textContent).toBe('Nothing to show here yet. Older notifications may follow.')
+  const frames = recordNotificationAnnouncements(el)
+  let release!: () => void
+  fetchNotifications.mockImplementationOnce(() => new Promise<NotificationPage>((r) => { release = () => r(page([], { newestAt: null, unread: false })) }))
+  const more = el.shadowRoot!.querySelector<HTMLElement>('.more caribou-button')!
+  more.focus()
+  more.click()
+  await vi.waitFor(() => expect(region.textContent).toBe('Loading notifications…'))
+  release()
+  await vi.waitFor(() => expect(el.shadowRoot!.querySelector('.notice.end')).not.toBeNull())
+  await flush()
+  expect(frames.map((frame) => frame.message)).not.toContain('No notifications yet.')
+  expect(frames.every((frame) => frame.region === region)).toBe(true)
+  expect(el.shadowRoot!.activeElement).toBe(el.shadowRoot!.querySelector('.notice.end'))
+  expect(el.shadowRoot!.querySelector('[role="status"]')).toBe(region)
+  expect(region.textContent).toBe('')
+  expect(el.shadowRoot!.querySelector('.notice.end')!.closest('[aria-live], [role="status"]')).toBeNull()
 })
