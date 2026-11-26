@@ -300,10 +300,11 @@ export class CaribouStatusMedia extends LitElement {
   // touch's click cannot land on the page behind a viewer already closed.
   private emptyTap = false
   // Where the last press on the dialog went down, to tell a click from the
-  // end of a drag.
-  private press: Point | null = null
-  // A close waiting to see whether a click beside the image is the first of
-  // a double click.
+  // end of a drag, and whether it came while a close was waiting: then it
+  // is the second click of a double click.
+  private press: (Point & { second: boolean }) | null = null
+  // A close waiting to see whether a click on an empty place is the first
+  // of a double click.
   private closeTimer: ReturnType<typeof setTimeout> | null = null
 
   // Listen on every connect, so an element moved in the DOM keeps following
@@ -393,9 +394,10 @@ export class CaribouStatusMedia extends LitElement {
   }
 
   // A new press anywhere in the viewer: a waiting close is off.
+  // A new press anywhere in the viewer: a waiting close is off.
   private onDialogPointerDown = (e: PointerEvent) => {
+    if (e.isPrimary) this.press = { x: e.clientX, y: e.clientY, second: this.closeTimer !== null }
     this.cancelClose()
-    if (e.isPrimary) this.press = { x: e.clientX, y: e.clientY }
   }
 
   private cancelClose() {
@@ -404,33 +406,37 @@ export class CaribouStatusMedia extends LitElement {
     this.closeTimer = null
   }
 
+  // Close once no new press has come for a double click's time. The viewer
+  // stays open until then, so the second click of a double click lands in
+  // it, never on the page behind.
+  private closeSoon() {
+    this.cancelClose()
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = null
+      if (!isZoomed(this.zoom)) this.dialog?.close()
+    }, DOUBLE_TAP_MS)
+  }
+
   // The viewer draws no box, so at 1x a click on any empty place closes it:
   // the backdrop and the dialog's padding (both land on the dialog itself),
   // the empty part of the bar, and the stage around the image. A click on
   // the image, the description or a control does not, and neither does the
-  // end of a drag, a pinch or a pan. Zoomed, no click closes it.
+  // end of a drag, a pinch or a pan. Zoomed, no click closes it. A double
+  // click on an empty place keeps the viewer open; on the stage it zooms.
   private onDialogClick = (e: MouseEvent) => {
     const dialog = this.dialog
     if (!dialog) return
     const target = e.target as Element
+    const p = this.press
+    const second = p?.second ?? false
     if (this.stage?.contains(target)) {
-      // The stage's own pointer handlers told a tap from a gesture. A tap
-      // beside the image may be the first of a double tap, which zooms:
-      // close only if no second press comes in time. The viewer stays open
-      // until then, so a second click never reaches the page behind.
-      if (this.emptyTap) {
-        this.cancelClose()
-        this.closeTimer = setTimeout(() => {
-          this.closeTimer = null
-          if (!isZoomed(this.zoom)) this.dialog?.close()
-        }, DOUBLE_TAP_MS)
-      }
+      // The stage's own pointer handlers told a tap from a gesture.
+      if (this.emptyTap && !second) this.closeSoon()
       this.emptyTap = false
       return
     }
-    if (isZoomed(this.zoom) || !(target === dialog || target.matches('.bar'))) return
-    const p = this.press
-    if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= TAP_SLOP_PX) dialog.close()
+    if (isZoomed(this.zoom) || second || !(target === dialog || target.matches('.bar'))) return
+    if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= TAP_SLOP_PX) this.closeSoon()
   }
 
   // At 1x the image's box on screen is the picture.

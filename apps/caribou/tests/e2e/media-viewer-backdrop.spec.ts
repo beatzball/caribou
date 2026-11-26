@@ -233,7 +233,7 @@ test('a click on empty space closes the viewer; a click on the image, the text o
   expect(new URL(page.url()).pathname).toBe('/home')
 })
 
-test('a double click beside the image zooms there; neither click reaches the page behind', async ({ page }) => {
+test('a double click on any empty place keeps the viewer open, zooms only on the stage, and no click reaches the page behind', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await openTimeline(page)
   const v = viewer(page)
@@ -241,14 +241,41 @@ test('a double click beside the image zooms there; neither click reaches the pag
   await opened(page)
   const img = (await v.image.boundingBox())!
   const stage = (await v.stage.boundingBox())!
+  const dlg = (await v.dialog.boundingBox())!
+  const hint = (await v.dialog.locator('.hint').boundingBox())!
+  const close = (await v.close.boundingBox())!
   expect(img.x - stage.x).toBeGreaterThan(40)
+  expect(close.x - (hint.x + hint.width)).toBeGreaterThan(40)
+  expect(dlg.x).toBeGreaterThan(10)
   await recordClicks(page)
 
+  // Beside the image, on the stage: it zooms there.
   await page.mouse.dblclick((stage.x + img.x) / 2, img.y + img.height / 2)
   await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(2.5)
   await stillOpen(page, v.dialog)
-  expect(await clicks(page)).toEqual([true, true])
+  await page.keyboard.press('0')
+  await expect.poll(() => transformOf(v.image)).toBe('')
+
+  // The padding, the empty middle of the bar and the backdrop: it stays
+  // open at 1x.
+  const places = [
+    { name: 'padding', x: dlg.x + 4, y: dlg.y + dlg.height / 2 },
+    { name: 'bar', x: (hint.x + hint.width + close.x) / 2, y: close.y + close.height / 2 },
+    { name: 'backdrop', x: 5, y: 5 },
+  ]
+  for (const at of places) {
+    await page.mouse.dblclick(at.x, at.y)
+    await stillOpen(page, v.dialog)
+    expect(await transformOf(v.image), at.name).toBe('')
+  }
+  // Every click landed in the viewer: two on the stage, two on each place.
+  expect(await clicks(page)).toEqual(Array(2 + 2 * places.length).fill(true))
   expect(new URL(page.url()).pathname).toBe('/home')
+
+  // A single click on the backdrop still closes it.
+  await page.mouse.click(5, 5)
+  await expect(v.dialog).toBeHidden()
+  await expect(v.thumb).toBeFocused()
 })
 
 test('zoomed, no click closes the viewer: not beside the image, not on the padding, not on the backdrop', async ({ page }) => {
