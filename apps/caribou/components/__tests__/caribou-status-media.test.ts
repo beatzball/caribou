@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { CSSResult } from 'lit'
 import '../caribou-status-card.js'
 import '../caribou-status-media.js'
-import { aspectOf, type CaribouStatusMedia } from '../caribou-status-media.js'
+import { CaribouStatusMedia, aspectOf } from '../caribou-status-media.js'
 import { httpUrl } from '../_http-url.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
@@ -222,6 +223,29 @@ describe('<caribou-status-media>', () => {
     expect(httpUrl('javascript:void 0')).toBeUndefined()
     expect(httpUrl('not a url')).toBeUndefined()
     expect(httpUrl(null)).toBeUndefined()
+  })
+
+  // No browser in the e2e runs lacks backdrop-filter, and only Chromium can
+  // emulate reduced transparency, so the two fallbacks are checked here.
+  it('the viewer falls back to an 85% backdrop and solid surfaces with reduced transparency, and to a darker tint without blur', () => {
+    const cssText = (CaribouStatusMedia.styles as CSSResult[]).map((s) => s.cssText).join('\n')
+    const block = (head: string) => {
+      const start = cssText.indexOf(head)
+      expect(start, head).toBeGreaterThanOrEqual(0)
+      let depth = 0
+      for (let i = cssText.indexOf('{', start); i < cssText.length; i++) {
+        if (cssText[i] === '{') depth++
+        else if (cssText[i] === '}' && --depth === 0) return cssText.slice(start, i + 1).replace(/\s+/g, ' ')
+      }
+      throw new Error(`unclosed ${head}`)
+    }
+    const reduced = block('@media (prefers-reduced-transparency: reduce)')
+    expect(reduced).toMatch(/dialog::backdrop \{ background: rgb\(0 0 0 \/ 0\.85\); -webkit-backdrop-filter: none; backdrop-filter: none; \}/)
+    expect(reduced).toMatch(/dialog :is\(\.hint, p\) \{ background: var\(--overlay-bg\); \}/)
+    expect(reduced).toMatch(/caribou-button\.close \{ --caribou-button-bg: var\(--overlay-bg\); \}/)
+    const noBlur = block('@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))')
+    expect(noBlur).toMatch(/dialog::backdrop \{ background: rgb\(0 0 0 \/ 0\.8\); \}/)
+    expect(noBlur).toMatch(/dialog :is\(\.hint, p\) \{ background: rgb\(0 0 0 \/ 0\.8\); \}/)
   })
 })
 

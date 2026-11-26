@@ -159,14 +159,51 @@ export class CaribouStatusMedia extends LitElement {
     caribou-button.hide::part(button) { padding: var(--space-1) var(--space-2); }
     /* Drawn over the media, so the ring goes inside the box. */
     caribou-button:is(.reveal, .hide)::part(button):focus-visible { outline-offset: -2px; }
-    /* The viewer fills most of the screen, so a zoomed image has room. */
+    /* The viewer fills most of the screen, so a zoomed image has room. It
+       draws no box of its own: the image floats over the blurred page. */
     dialog {
       width: 95vw; height: 95vh; height: 95dvh;
       max-width: 95vw; max-height: 95vh; max-height: 95dvh; padding: var(--space-3);
-      color: var(--fg-0); background: var(--bg-1);
-      border: 1px solid var(--border); border-radius: var(--radius-md);
+      color: var(--overlay-fg); background: transparent;
+      border: 0; border-radius: 0; box-shadow: none;
     }
-    dialog::backdrop { background: rgb(0 0 0 / 0.85); }
+    /* A dark tint in both themes and a blur: the page keeps its shape but
+       cannot be read. Plain values, as a ::backdrop does not inherit
+       custom properties in every browser. */
+    dialog::backdrop {
+      background: rgb(0 0 0 / 0.55);
+      -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    }
+    /* The key hint, the description and Close each sit on a small dark
+       surface of their own, so they read over any page. No blur of their
+       own: inside the top-layer dialog a backdrop-filter does not reach the
+       page, and changed no pixel (checked in Chromium and Firefox). */
+    dialog :is(.hint, p) { color: var(--overlay-fg); background: rgb(0 0 0 / 0.65); }
+    dialog caribou-button.close {
+      --caribou-button-bg: rgb(0 0 0 / 0.65); --caribou-button-fg: var(--overlay-fg);
+    }
+    dialog caribou-button.close::part(button) { border-color: rgb(255 255 255 / 0.3); }
+    /* White on black: the ring shows over any page and any image. */
+    dialog caribou-button.close::part(button):focus-visible {
+      outline: 2px solid var(--overlay-fg); outline-offset: 2px;
+      box-shadow: 0 0 0 6px var(--overlay-bg);
+    }
+    /* No blur: a darker tint, so the image and the text still stand out. */
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      dialog::backdrop { background: rgb(0 0 0 / 0.8); }
+      dialog :is(.hint, p) { background: rgb(0 0 0 / 0.8); }
+      dialog caribou-button.close { --caribou-button-bg: rgb(0 0 0 / 0.8); }
+    }
+    /* The reader asked for less see-through: a near-opaque backdrop (85%
+       black), solid surfaces, no blur. */
+    @media (prefers-reduced-transparency: reduce) {
+      dialog::backdrop {
+        background: rgb(0 0 0 / 0.85);
+        -webkit-backdrop-filter: none; backdrop-filter: none;
+      }
+      dialog :is(.hint, p) { background: var(--overlay-bg); }
+      dialog caribou-button.close { --caribou-button-bg: var(--overlay-bg); }
+    }
     /* Not on a closed dialog: its own display: none must win. */
     dialog[open] { display: flex; flex-direction: column; }
     /* The zoom surface: the dialog's free height, at least half the screen.
@@ -194,13 +231,21 @@ export class CaribouStatusMedia extends LitElement {
     @media (prefers-reduced-motion: reduce) {
       dialog .stage img { transition: none; }
     }
-    dialog p { flex: none; margin: var(--space-2) 0 0; max-width: 60ch; white-space: pre-wrap; }
+    /* The description is a panel under the image, only as wide as its text. */
+    dialog p {
+      flex: none; align-self: center; margin: var(--space-2) 0 0;
+      max-width: min(60ch, 100%); padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-md); white-space: pre-wrap;
+    }
     dialog .bar {
       flex: none; display: flex; align-items: center; justify-content: space-between;
       gap: var(--space-2); margin-bottom: var(--space-2);
     }
     dialog .bar caribou-button { margin-inline-start: auto; }
-    .hint { font-size: 0.875rem; color: var(--fg-1); }
+    .hint {
+      font-size: 0.875rem; padding: var(--space-1) var(--space-3);
+      border-radius: 999px;
+    }
     /* No keyboard to speak of; the dialog still names the keys. */
     @media (pointer: coarse) {
       .hint { display: none; }
@@ -250,6 +295,17 @@ export class CaribouStatusMedia extends LitElement {
   private lastTap: { x: number; y: number; time: number } | null = null
   // A Safari trackpad pinch, from the zoom it started at.
   private safariPinch: Zoom | null = null
+  // The last tap on the stage was a single tap at 1x beside the image. The
+  // click that follows starts the close: the click, not the tap, so a
+  // touch's click cannot land on the page behind a viewer already closed.
+  private emptyTap = false
+  // Where the last press on the dialog went down, to tell a click from the
+  // end of a drag, and whether it came while a close was waiting: then it
+  // is the second click of a double click.
+  private press: (Point & { second: boolean }) | null = null
+  // A close waiting to see whether a click on an empty place is the first
+  // of a double click.
+  private closeTimer: ReturnType<typeof setTimeout> | null = null
 
   // Listen on every connect, so an element moved in the DOM keeps following
   // the setting. Before the first render only the listener is added:
@@ -265,6 +321,7 @@ export class CaribouStatusMedia extends LitElement {
     this.motionQuery?.removeEventListener('change', this.onMotionChange)
     this.motionQuery = null
     window.removeEventListener('resize', this.onResize)
+    this.cancelClose()
     super.disconnectedCallback()
   }
 
@@ -325,6 +382,10 @@ export class CaribouStatusMedia extends LitElement {
   }
 
   private onDialogClose = () => {
+    // The close event comes a task after the dialog closed, and the browser
+    // gives focus back first. An Enter on the thumbnail in between opens the
+    // viewer again; this late event must not empty it.
+    if (this.dialog?.open) return
     window.removeEventListener('resize', this.onResize)
     this.resetZoom()
     this.viewing = -1
@@ -332,14 +393,56 @@ export class CaribouStatusMedia extends LitElement {
     this.opener = null
   }
 
-  // A click on the backdrop lands on the dialog itself, and so does one on
-  // its padding; only a point outside the dialog's box closes it.
+  // A new press anywhere in the viewer: a waiting close is off.
+  // A new press anywhere in the viewer: a waiting close is off.
+  private onDialogPointerDown = (e: PointerEvent) => {
+    if (e.isPrimary) this.press = { x: e.clientX, y: e.clientY, second: this.closeTimer !== null }
+    this.cancelClose()
+  }
+
+  private cancelClose() {
+    if (this.closeTimer === null) return
+    clearTimeout(this.closeTimer)
+    this.closeTimer = null
+  }
+
+  // Close once no new press has come for a double click's time. The viewer
+  // stays open until then, so the second click of a double click lands in
+  // it, never on the page behind.
+  private closeSoon() {
+    this.cancelClose()
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = null
+      if (!isZoomed(this.zoom)) this.dialog?.close()
+    }, DOUBLE_TAP_MS)
+  }
+
+  // The viewer draws no box, so at 1x a click on any empty place closes it:
+  // the backdrop and the dialog's padding (both land on the dialog itself),
+  // the empty part of the bar, and the stage around the image. A click on
+  // the image, the description or a control does not, and neither does the
+  // end of a drag, a pinch or a pan. Zoomed, no click closes it. A double
+  // click on an empty place keeps the viewer open; on the stage it zooms.
   private onDialogClick = (e: MouseEvent) => {
     const dialog = this.dialog
-    if (!dialog || e.target !== dialog) return
-    const r = dialog.getBoundingClientRect()
-    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
-    if (!inside) dialog.close()
+    if (!dialog) return
+    const target = e.target as Element
+    const p = this.press
+    const second = p?.second ?? false
+    if (this.stage?.contains(target)) {
+      // The stage's own pointer handlers told a tap from a gesture.
+      if (this.emptyTap && !second) this.closeSoon()
+      this.emptyTap = false
+      return
+    }
+    if (isZoomed(this.zoom) || second || !(target === dialog || target.matches('.bar'))) return
+    if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= TAP_SLOP_PX) this.closeSoon()
+  }
+
+  // At 1x the image's box on screen is the picture.
+  private onImage(clientX: number, clientY: number): boolean {
+    const r = this.zoomImg?.getBoundingClientRect()
+    return !!r && clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom
   }
 
   // ---- Zoom -------------------------------------------------------------
@@ -379,6 +482,9 @@ export class CaribouStatusMedia extends LitElement {
     this.tap = null
     this.lastTap = null
     this.safariPinch = null
+    this.emptyTap = false
+    this.press = null
+    this.cancelClose()
     this.stage?.removeAttribute('data-dragging')
     this.setZoom(IDENTITY)
   }
@@ -402,6 +508,7 @@ export class CaribouStatusMedia extends LitElement {
       e.preventDefault()
     }
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    this.emptyTap = false
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     } catch { /* not an active pointer, as for a synthetic event */ }
@@ -452,6 +559,7 @@ export class CaribouStatusMedia extends LitElement {
       this.setZoom(doubleTap(this.zoom, this.fromCenter(clientX, clientY), this.bounds()), true)
     } else {
       this.lastTap = { x: clientX, y: clientY, time }
+      this.emptyTap = !isZoomed(this.zoom) && !this.onImage(clientX, clientY)
     }
   }
 
@@ -595,7 +703,8 @@ export class CaribouStatusMedia extends LitElement {
     const alt = m?.description ?? ''
     return html`
       <dialog aria-label=${alt || 'Image'} aria-describedby=${ifDefined(m ? 'zoom-hint' : undefined)}
-        @close=${this.onDialogClose} @click=${this.onDialogClick} @keydown=${this.onDialogKeydown}>
+        @close=${this.onDialogClose} @click=${this.onDialogClick} @keydown=${this.onDialogKeydown}
+        @pointerdown=${this.onDialogPointerDown}>
         ${m
           ? html`
               <div class="bar">

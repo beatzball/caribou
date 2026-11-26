@@ -111,6 +111,26 @@ test('a double tap toggles 2.5x; a tap on the image keeps the viewer, one on the
   await expect(v.dialog).toBeHidden()
 })
 
+test('a real tap on the empty stage beside the image closes the viewer; one on the description does not', async ({ page }) => {
+  await openTimeline(page)
+  const v = viewer(page)
+  await v.thumb.tap()
+  await opened(page)
+
+  await v.dialog.locator('p').tap()
+  await expect(v.dialog).toBeVisible()
+
+  // A 4:3 picture on a phone is a strip: empty stage above and below it.
+  const img = (await v.image.boundingBox())!
+  const stage = (await v.stage.boundingBox())!
+  expect(img.y - stage.y).toBeGreaterThan(40)
+  await page.touchscreen.tap(img.x + img.width / 2, (stage.y + img.y) / 2)
+  await expect(v.dialog).toBeHidden()
+  // The tap's click did not reach the page behind.
+  expect(new URL(page.url()).pathname).toBe('/home')
+  expect(await pageScale(page)).toBe(1)
+})
+
 test('a tall image with a long description: a double tap keeps the tapped point in place', async ({ page }) => {
   // No easing, so the box is final at once.
   await page.emulateMedia({ reducedMotion: 'reduce' })

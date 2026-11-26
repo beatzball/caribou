@@ -97,6 +97,24 @@ test('keys zoom in, out and back; closing and opening again starts at 1x', async
   expect(await transformOf(v.image)).toBe('')
 })
 
+test('opened again before the close event arrives, the viewer keeps its image', async ({ page }) => {
+  await openTimeline(page)
+  const v = viewer(page)
+  await v.thumb.click()
+  await opened(page)
+  // The close event is a task after close(); a reopen in that gap (an
+  // Enter on the thumbnail, which already has focus back) comes first.
+  await page.locator('caribou-status-media').evaluate((el) => {
+    el.shadowRoot!.querySelector('dialog')!.close()
+    el.shadowRoot!.querySelector<HTMLElement>('a.thumb')!.click()
+  })
+  await opened(page)
+  await expect(v.close).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(v.dialog).toBeHidden()
+  await expect(v.thumb).toBeFocused()
+})
+
 test('a double click toggles 2.5x on that point; a click on the image does not close the viewer', async ({ page }) => {
   await openTimeline(page)
   const v = viewer(page)
