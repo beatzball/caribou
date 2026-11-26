@@ -9,7 +9,6 @@ import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
 import { shellInfo } from '../../server/lib/shell-info.js'
 import { fetchTagTimeline } from '../../server/lib/mastodon-public.js'
 import { getStorage } from '../../server/lib/storage.js'
-import { PAGE_TITLE } from '../../server/lib/brand-head.js'
 import type { TimelinePageData, ShellInfo } from '../../server/lib/page-data-types.js'
 import '../../components/caribou-app-shell.js'
 import '../../components/caribou-timeline.js'
@@ -28,14 +27,7 @@ import { blueskyTagRedirect, parseTagParam, tagPath } from '../../components/_ta
 export type TagPageData = (TimelinePageData | { kind: 'not-found' } | { kind: 'bluesky' }) & {
   shell: ShellInfo
   tag: string
-  /** The document title; Litro moves it into `<title>` and out of the data. */
-  seoTitle?: string
 }
-
-const escapeHtml = (text: string): string =>
-  text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
-
-const titleFor = (tag: string) => `#${tag} · ${PAGE_TITLE}`
 
 // Whether the address bar shows the page for `tag`: the path segment names
 // it, as the page data read it (decoded for a name that is not a hashtag,
@@ -56,13 +48,11 @@ export const pageData = definePageData<TagPageData>(async (event) => {
   if (tag === null) {
     let shown = raw
     try { shown = decodeURIComponent(raw) } catch { /* keep it encoded */ }
-    return { kind: 'not-found', shell, tag: shown, seoTitle: escapeHtml(titleFor(shown)) }
+    return { kind: 'not-found', shell, tag: shown }
   }
-  // Litro writes `seoTitle` into the page as it is, so it is escaped here.
-  const seoTitle = escapeHtml(titleFor(tag))
   const query = getQuery(event)
-  if (query.net === 'bsky') return { kind: 'bluesky', shell, tag, seoTitle }
-  if (!resolution.instance) return { kind: 'auth-required', shell, tag, seoTitle }
+  if (query.net === 'bsky') return { kind: 'bluesky', shell, tag }
+  if (!resolution.instance) return { kind: 'auth-required', shell, tag }
   const maxId = typeof query.max_id === 'string' ? query.max_id : undefined
   try {
     const fetched = await fetchTagTimeline({ instance: resolution.instance, tag, maxId })
@@ -71,9 +61,9 @@ export const pageData = definePageData<TagPageData>(async (event) => {
     const statuses = fetched.map((s) => sanitizeStatus(s))
     // The next page starts below the last post (see local.ts).
     const nextCursor = statuses.length > 0 ? statuses[statuses.length - 1]!.id : null
-    return { kind: 'ok', statuses, nextCursor, shell, tag, seoTitle }
+    return { kind: 'ok', statuses, nextCursor, shell, tag }
   } catch (err) {
-    return { kind: 'error', message: String(err), shell, tag, seoTitle }
+    return { kind: 'error', message: String(err), shell, tag }
   }
 })
 
@@ -145,27 +135,14 @@ export class TagPage extends LitroPage {
     })
   }
 
-  // The server writes the title into the page. The router does not change
-  // it on a client-side move (brand-head.ts), so the page sets it, and puts
-  // the app's title back when it leaves. On a full load the router swaps in
-  // a second copy of the page before the first one leaves; that copy keeps
-  // the title.
-  //
-  // Only the page at the address sets it. A page the reader has left can
-  // still render: `enterWithCache` hands it fresh data after it is gone.
   protected override updated(changed: PropertyValues<this>) {
     if (changed.has('serverData' as keyof TagPage) && this.disposeSession) this.routeToBluesky()
-    const data = this.serverData as TagPageData | null
-    if (data?.tag && this.isConnected && atTagPath(data.tag)) document.title = titleFor(data.tag)
   }
 
   override disconnectedCallback() {
     this.disposeSession?.()
     this.disposeSession = null
     super.disconnectedCallback()
-    // No head: the whole document is going away.
-    if (!document.head || document.querySelector('page-tags-tag')) return
-    document.title = PAGE_TITLE
   }
 
   override render() {

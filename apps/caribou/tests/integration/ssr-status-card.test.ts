@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import type { Status } from '@beatzball/caribou-mastodon-client'
 import { html } from 'lit'
 import { ssr } from './_ssr.js'
 import '../../components/caribou-status-card.js'
@@ -20,9 +21,32 @@ describe('caribou-status-card SSR', () => {
     expect(out).toContain('data-variant="timeline"')
     expect(out).toContain('src="https://example.social/a-static.png"')
     expect(out).toContain('href="/@alice/42"')
-    expect(out).toMatch(/<strong><!--lit-part-->Alice/)
+    expect(out).toMatch(/<strong data-title-name><!--lit-part-->Alice/)
     // The object never becomes an attribute.
     expect(out).not.toMatch(/<caribou-status-card[^>]*\sstatus=/)
+  })
+
+  it.each(['clear', 'profile-blur', 'content-blur', 'missing'])('rule 2: SSR marks only a permitted author name in a %s Bluesky thread', async (state) => {
+    const clear = { blur: false, filter: false, alert: false, inform: false, noOverride: false, reasons: [] }
+    const contexts = Object.fromEntries(['contentList', 'contentView', 'contentMedia', 'avatar', 'banner', 'profileList', 'profileView']
+      .map((context) => [context, { ...clear }]))
+    const status = {
+      ...STATUS, id: 'at://did:plc:alice/app.bsky.feed.post/post',
+      account: {
+        ...STATUS.account, acct: 'alice.example.com',
+        bluesky: { did: 'did:plc:alice', handleInvalid: false, labels: [], moderation: {
+          contexts: { ...contexts, profileView: { ...clear, blur: state === 'profile-blur' } }, labelersCovered: [],
+        } },
+      },
+      bluesky: { uri: 'at://did:plc:alice/app.bsky.feed.post/post', cid: 'fixture',
+        likeUri: null, repostUri: null, replyRef: null, replyDisabled: false, embeddingDisabled: false,
+        viewerOf: null, labels: [], moderation: state === 'missing' ? undefined : {
+        contexts: { ...contexts, contentView: { ...clear, blur: state === 'content-blur' } }, labelersCovered: [],
+      } },
+    } as unknown as Status
+    const out = await ssr(html`<caribou-status-card variant="focused" .status=${status}></caribou-status-card>`)
+    if (state === 'clear') expect(out).toMatch(/<strong data-title-name><!--lit-part-->Alice/)
+    else expect(out).not.toContain('data-title-name')
   })
 
   it('prints the pre-sanitized content as given (the server has no DOMPurify)', async () => {

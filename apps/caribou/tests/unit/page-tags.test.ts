@@ -1,8 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type * as H3 from 'h3'
 import type * as TagPageModule from '../../pages/tags/[tag].js'
 import type { CaribouTimeline } from '../../components/caribou-timeline.js'
 import { resolveInstanceForRoute } from '../../server/lib/resolve-instance.js'
+import { withRouteTitle } from '../../server/lib/route-title.js'
+import { startRouteTitles } from '../../components/_route-titles.js'
 import { fetchTagTimeline } from '../../server/lib/mastodon-public.js'
 
 vi.mock('../../server/lib/resolve-instance.js', () => ({
@@ -36,6 +38,12 @@ type FetcherEvent = Parameters<typeof TagPageModule.pageData.fetcher>[0]
 const eventFor = (tag: string, query = '') =>
   ({ url: `/tags/${tag}${query}`, params: { tag } }) as unknown as FetcherEvent
 
+async function titledTagData(tag: string) {
+  const { pageData } = await import('../../pages/tags/[tag].js')
+  const wrapped = withRouteTitle({ pageData }, new URL(`/tags/${tag}`, 'https://example.test'))
+  return (wrapped.pageData as typeof pageData).fetcher(eventFor(tag)) as Promise<TagPageModule.TagPageData & { seoTitle: string }>
+}
+
 const signedIn = () => vi.mocked(resolveInstanceForRoute).mockResolvedValue({
   instance: 'example.social', source: 'cookie',
 })
@@ -53,6 +61,7 @@ describe('/tags/[tag] pageData', () => {
       kind: 'ok', statuses: fixture, nextCursor: '10', tag: 'Caturday',
       shell: { instance: 'example.social', source: 'cookie' },
     })
+    expect(result).not.toHaveProperty('seoTitle')
     expect(fetchTagTimeline).toHaveBeenCalledWith(
       { instance: 'example.social', tag: 'Caturday', maxId: undefined },
     )
@@ -61,8 +70,7 @@ describe('/tags/[tag] pageData', () => {
   it('names the tag in the document title', async () => {
     signedIn()
     vi.mocked(fetchTagTimeline).mockResolvedValue([])
-    const { pageData } = await import('../../pages/tags/[tag].js')
-    const result = await pageData.fetcher(eventFor('Caturday'))
+    const result = await titledTagData('Caturday')
     expect(result.seoTitle).toBe('#Caturday · Caribou')
   })
 
@@ -70,8 +78,7 @@ describe('/tags/[tag] pageData', () => {
   // hashtag can hold markup, so that branch is the one to pin.
   it('escapes markup in the title of a name that is not a hashtag', async () => {
     signedIn()
-    const { pageData } = await import('../../pages/tags/[tag].js')
-    const result = await pageData.fetcher(eventFor(encodeURIComponent('</title><script>"x"&\'y\'')))
+    const result = await titledTagData(encodeURIComponent('</title><script>"x"&\'y\''))
     expect(result.kind).toBe('not-found')
     expect(result.seoTitle).toBe('#&lt;/title&gt;&lt;script&gt;&quot;x&quot;&amp;&#39;y&#39; · Caribou')
   })
@@ -131,14 +138,23 @@ describe('/tags/[tag] pageData', () => {
 })
 
 describe('<page-tags-tag> render', () => {
-  beforeEach(() => { document.body.replaceChildren() })
+  let outlet: Element
+  let stop: () => void
+  beforeEach(() => {
+    document.body.replaceChildren()
+    outlet = document.createElement('litro-outlet')
+    document.body.append(outlet)
+    stop = startRouteTitles(outlet)
+  })
+  afterEach(() => { stop(); document.body.replaceChildren() })
 
   async function mount(serverData: TagPageModule.TagPageData | null) {
     await import('../../pages/tags/[tag].js')
     const el = document.createElement('page-tags-tag') as TagPageModule.TagPage
     el.serverData = serverData
-    document.body.appendChild(el)
+    outlet.appendChild(el)
     while (!(await el.updateComplete)) { /* until no update is pending */ }
+    await new Promise((resolve) => setTimeout(resolve, 0))
     return el
   }
 
@@ -160,12 +176,14 @@ describe('<page-tags-tag> render', () => {
     expect(timeline.shadowRoot!.querySelectorAll('caribou-status-card')).toHaveLength(1)
   })
 
-  it('sets the document title, and puts the app title back when it leaves', async () => {
+  it('sets the document title and follows the next route when it leaves', async () => {
     history.replaceState(null, '', '/tags/ai')
     const el = await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' })
     expect(document.title).toBe('#ai · Caribou')
     el.remove()
-    expect(document.title).toBe('Caribou')
+    history.pushState(null, '', '/home')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    expect(document.title).toBe('Home · Caribou')
   })
 
   // `enterWithCache` can hand a page its fresh data after the reader has
@@ -175,16 +193,17 @@ describe('<page-tags-tag> render', () => {
     const el = await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' })
     el.remove()
     history.replaceState(null, '', '/home')
+    window.dispatchEvent(new PopStateEvent('popstate'))
     el.serverData = { kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' }
     await el.updateComplete
-    expect(document.title).toBe('Caribou')
+    expect(document.title).toBe('Home · Caribou')
   })
 
   it('a page that is not the one at the address does not change the title', async () => {
     history.replaceState(null, '', '/home')
     document.title = 'Caribou'
     await mount({ kind: 'ok', statuses: [], nextCursor: null, shell, tag: 'ai' })
-    expect(document.title).toBe('Caribou')
+    expect(document.title).toBe('Home · Caribou')
   })
 
   it('sets the title of a non-ASCII tag, and of a name that is not a hashtag', async () => {

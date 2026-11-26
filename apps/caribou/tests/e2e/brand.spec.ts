@@ -5,16 +5,16 @@ async function gotoSettled(page: Page, path: string) {
   await page.locator('litro-outlet[data-litro-settled]').waitFor({ state: 'attached' })
 }
 
-test('the tab says Caribou on load and after client-side navigation', async ({ page }) => {
+test('rule 1: the tab names the route on load and after client-side navigation', async ({ page }) => {
   await gotoSettled(page, '/about')
-  await expect(page).toHaveTitle('Caribou')
+  await expect(page).toHaveTitle('About · Caribou')
 
   // A marker on window survives a client-side navigation, not a page load.
   await page.evaluate(() => { (window as unknown as { __spa: boolean }).__spa = true })
   await page.getByRole('link', { name: 'Privacy' }).click()
   await page.waitForURL('**/privacy')
   expect(await page.evaluate(() => (window as unknown as { __spa?: boolean }).__spa)).toBe(true)
-  await expect(page).toHaveTitle('Caribou')
+  await expect(page).toHaveTitle('Privacy · Caribou')
 })
 
 test('the head links the icons, the manifest and an absolute og:image', async ({ page }) => {

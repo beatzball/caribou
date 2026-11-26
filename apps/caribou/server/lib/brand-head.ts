@@ -13,10 +13,7 @@ export const APP_NAME = 'Caribou'
 export const THEME_COLOR = '#0d0d12'
 export const LIGHT_THEME_COLOR = '#fafafa'
 
-// The router does not change document.title on client-side navigation, so
-// a page title such as "Home · Caribou" would stay on the tab after the
-// reader moves to another page. Every page has the one title, except a
-// hashtag page, which sets and resets its own (`pages/tags/[tag].ts`).
+// Base brand name; route-title.ts resolves each document title.
 export const PAGE_TITLE = APP_NAME
 
 const escapeAttr = (text: string): string =>

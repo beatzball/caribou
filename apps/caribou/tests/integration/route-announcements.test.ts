@@ -1,10 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { LitroRouter } from '@beatzball/litro-router'
+import { startRouteTitles } from '../../components/_route-titles.js'
 import { activeUserKey } from '@beatzball/caribou-state'
 
 // #290's qualified route-name advisory shares #292's descriptive-title
 // fix. Pin the installed router's fallback contract with actual nested and
-// headingless pages, supplying the titles that the title lifecycle owns.
+// headingless pages with the real shared title lifecycle. Direct page
+// headings take precedence over its document-title fallback.
 // No second app announcer, dependency patch, or duplicate speech is needed.
 
 afterEach(() => {
@@ -33,26 +35,23 @@ it('uses descriptive titles for nested/headingless pages once per transition and
   const outlet = document.createElement('div')
   document.body.append(outlet)
   history.replaceState(null, '', '/settings')
+  const stopTitles = startRouteTitles(outlet)
   const router = new LitroRouter(outlet)
   const routes = [
     { path: '/settings', component: 'page-settings', action: async () => {
       await import('../../pages/settings.js')
-      document.title = 'Settings · Caribou'
     } },
     { path: '/notifications', component: 'page-notifications', action: async () => {
       await import('../../pages/notifications.js')
-      document.title = 'Notifications · Caribou'
     } },
     { path: '/home', component: 'page-home', action: async () => {
       await import('../../pages/home.js')
-      document.title = 'Home · Caribou'
     } },
     { path: '/tags/:tag', component: 'page-tags-tag', action: async () => {
       await import('../../pages/tags/[tag].js')
     } },
     { path: '/about', component: 'page-about', action: async () => {
       await import('../../pages/about.js')
-      document.title = 'About · Caribou'
     } },
   ]
   try {
@@ -71,17 +70,23 @@ it('uses descriptive titles for nested/headingless pages once per transition and
     await vi.waitFor(() => expect(messages()).toEqual(['Settings · Caribou']))
     expect(outlet.querySelector('page-settings')!.shadowRoot!.querySelector('caribou-settings')!.shadowRoot!.querySelector('h1')!.textContent).toBe('Settings')
     expect(document.activeElement).toBe(outlet)
-    for (const [path, expected] of [
-      ['/notifications', 'Notifications · Caribou'], ['/home', 'Home · Caribou'], ['/about', 'About'], ['/tags/aurora', '#aurora · Caribou'],
+    expect(document.title).toBe('Settings · Caribou')
+    for (const [path, expected, title] of [
+      ['/notifications', 'Notifications · Caribou', 'Notifications · Caribou'],
+      ['/home', 'Home', 'Home · Caribou'],
+      ['/about', 'About', 'About · Caribou'],
+      ['/tags/aurora', '#aurora · Caribou', '#aurora · Caribou'],
     ]) {
       LitroRouter.go(path!)
       await vi.waitFor(() => expect(region.textContent).toBe(expected), { timeout: 5000 })
       await vi.waitFor(() => expect(messages().at(-1)).toBe(expected), { timeout: 5000 })
+      expect(document.title).toBe(title)
       expect(document.activeElement).toBe(outlet)
       expect(document.querySelectorAll('#_litro_announce')).toHaveLength(1)
     }
-    expect(messages()).toEqual(['Settings · Caribou', 'Notifications · Caribou', 'Home · Caribou', 'About', '#aurora · Caribou'])
+    expect(messages()).toEqual(['Settings · Caribou', 'Notifications · Caribou', 'Home', 'About', '#aurora · Caribou'])
   } finally {
+    stopTitles()
     for (const [type, listener, options] of listeners) window.removeEventListener(type, listener, options)
   }
 })

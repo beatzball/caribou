@@ -78,8 +78,10 @@ export function decodeSegment(raw: string): string {
  * segment is a DID and the account has a valid handle. `rest` is what
  * follows the segment (a thread's `/<rkey>`).
  */
+export const ROUTE_ALIAS_EVENT = 'caribou:route-alias'
+
 export function replaceDidRoute(
-  win: Pick<Window, 'history' | 'location'>,
+  win: Pick<Window, 'history' | 'location'> & Partial<Pick<Window, 'dispatchEvent'>>,
   segment: string,
   account: { acct: string; bluesky?: { did: string; handleInvalid: boolean } | undefined },
   rest = '',
@@ -88,8 +90,12 @@ export function replaceDidRoute(
   const b = account.bluesky
   if (route.network !== 'bluesky' || route.by !== 'did' || !b || b.handleInvalid) return
   if (b.did !== route.actor || !account.acct.includes('.')) return
-  const { search, hash } = win.location
-  win.history.replaceState(win.history.state, '', `/@${account.acct}${rest}${search}${hash}`)
+  const { pathname: from, search, hash } = win.location
+  const to = `/@${account.acct}${rest}`
+  win.history.replaceState(win.history.state, '', `${to}${search}${hash}`)
+  // This canonical address names the same mounted page. Let the title
+  // lifecycle retain ownership without starting another router navigation.
+  win.dispatchEvent?.(new CustomEvent(ROUTE_ALIAS_EVENT, { detail: { from, to } }))
 }
 
 /**

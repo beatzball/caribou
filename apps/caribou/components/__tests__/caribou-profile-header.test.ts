@@ -50,7 +50,7 @@ describe('<caribou-profile-header>', () => {
     const el = await mount(ACCOUNT)
     const root = el.shadowRoot!
     expect(root.querySelector('img.avatar')).not.toBeNull()
-    expect(root.querySelector('.name')?.textContent).toBe('Alice')
+    expect(root.querySelector('h1.name')?.textContent).toBe('Alice')
     expect(root.querySelector('.handle')?.textContent).toBe('@alice@example.social')
     expect(root.querySelector('.bio')?.innerHTML).toContain('<p>bio</p>')
     const counts = [...root.querySelectorAll('.counts span')].map((s) => s.textContent?.trim())
@@ -59,7 +59,7 @@ describe('<caribou-profile-header>', () => {
 
   it('falls back to the username when there is no display name', async () => {
     const el = await mount({ ...ACCOUNT, displayName: '' })
-    expect(el.shadowRoot!.querySelector('.name')?.textContent).toBe('alice')
+    expect(el.shadowRoot!.querySelector('h1.name')?.textContent).toBe('alice')
   })
 
   it('sanitizes the bio on the client', async () => {
@@ -234,6 +234,7 @@ describe('<caribou-profile-header> follow button', () => {
     const client = signIn()
     const fetchRel = vi.spyOn(client, 'fetchRelationships').mockResolvedValue([rel()])
     const el = await mountWith(ME)
+    expect(el.shadowRoot!.querySelector('h1.name')?.textContent).toBe('Alice')
     expect(button(el)).toBeNull()
     expect(fetchRel).not.toHaveBeenCalled()
   })

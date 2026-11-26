@@ -1,3 +1,4 @@
+import { readingHeading } from './_shared-styles.js'
 import { LitElement, html, css, nothing, type PropertyValues } from 'lit'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
@@ -86,13 +87,13 @@ function threadItems({ focused, ancestors, descendants }: ThreadInitial): Thread
 
 @customElement('caribou-thread')
 export class CaribouThread extends LitElement {
-  static override styles = css`
+  static override styles = [readingHeading, css`
     :host { display: block; }
     ul { list-style: none; padding: 0; margin: 0; }
     /* A card hidden by a filter, a mute or a block takes its row with it. */
     li:has(> caribou-status-card[hidden]) { display: none; }
     .loading { padding: var(--space-4); color: var(--fg-muted); }
-  `
+  `]
 
   // Attribute `statusid`.
   @property({ reflect: true }) statusId = ''
@@ -181,19 +182,22 @@ export class CaribouThread extends LitElement {
 
   override render() {
     const thread = this.thread ?? this.initial
-    if (!thread) return html`<div class="loading">Loading…</div>`
+    if (!thread) return html`<div><h1 class="reading-heading">Thread</h1><div class="loading">Loading…</div></div>`
     // `repeat` keys each row by status id, so a reply that arrives later
     // moves the existing rows instead of rebuilding them; only the indent
     // of a row changes when its depth does.
     return html`
-      <ul>
-        ${repeat(threadItems(thread), (item) => item.status.id, ({ status, variant, depth }) => html`<li
-          data-depth=${depth ?? nothing}
-          style=${depth === null ? nothing : `margin-inline-start:calc(var(--space-4) * ${depth})`}
-          ><caribou-status-card variant=${variant} data-id=${status.id} data-depth=${depth ?? nothing}
-            filter-context="thread" .status=${status}></caribou-status-card
-        ></li>`)}
-      </ul>
+      <div>
+        <h1 class="reading-heading">Thread</h1>
+        <ul>
+          ${repeat(threadItems(thread), (item) => item.status.id, ({ status, variant, depth }) => html`<li
+            data-depth=${depth ?? nothing}
+            style=${depth === null ? nothing : `margin-inline-start:calc(var(--space-4) * ${depth})`}
+            ><caribou-status-card variant=${variant} data-id=${status.id} data-depth=${depth ?? nothing}
+              filter-context="thread" .status=${status}></caribou-status-card
+          ></li>`)}
+        </ul>
+      </div>
     `
   }
 }
