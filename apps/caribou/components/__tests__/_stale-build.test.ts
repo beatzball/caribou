@@ -110,6 +110,84 @@ describe('stale build reload', () => {
     expect(assign).toHaveBeenCalledOnce()
   })
 
+  // A route action whose import is still loading. `fail()` rejects it the
+  // way the browser does when it drops the request.
+  function pendingRoute(path: string) {
+    let fail!: () => void
+    const [route] = withStaleBuildReload([{ path, action: () => new Promise<void>((_, reject) => {
+      fail = () => reject(loadError())
+    }) }], env)
+    return { route: route!, fail: () => fail() }
+  }
+
+  it('a route import the browser drops because the page is leaving does not reload', async () => {
+    // WebKit fails the page chunk of a full load of `/` when the reader
+    // leaves at once. A load of `/` then cancels their navigation.
+    const target = new EventTarget()
+    installPreloadErrorReload(target, env)
+    const { route, fail } = pendingRoute('/')
+    let settled = false
+    void route.action!().then(() => { settled = true }, () => { settled = true })
+    target.dispatchEvent(new Event('beforeunload'))
+    fail()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(assign).not.toHaveBeenCalled()
+    expect(console.error).not.toHaveBeenCalled()
+    // The router keeps waiting: it neither mounts the page nor stops.
+    expect(settled).toBe(false)
+    expect(sessionStorage.getItem('caribou.stale-reload')).toBeNull()
+    // Back from the back-forward cache: the page is live again.
+    target.dispatchEvent(new Event('pageshow'))
+    void route.action!().catch(() => {})
+    fail()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(assign).toHaveBeenCalledOnce()
+  })
+
+  it('a route that starts while the page is leaving does not reload either', async () => {
+    // The app's first route can start after `beforeunload`; the browser then
+    // fails its import at once.
+    const target = new EventTarget()
+    installPreloadErrorReload(target, env)
+    target.dispatchEvent(new Event('beforeunload'))
+    const [route] = withStaleBuildReload([{ path: '/', action: () => Promise.reject(loadError()) }], env)
+    void route!.action!()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(assign).not.toHaveBeenCalled()
+  })
+
+  it('after a leave that did not happen, the next tap on a link still recovers a stale tab', async () => {
+    // A link that downloads a file fires `beforeunload`, and the page stays.
+    // No `pageshow` follows.
+    const target = new EventTarget()
+    installPreloadErrorReload(target, env)
+    target.dispatchEvent(new Event('beforeunload'))
+    const [route] = withStaleBuildReload([{ path: '/local', action: () => Promise.reject(loadError()) }], env)
+    target.dispatchEvent(new Event('pointerdown'))
+    void route!.action!()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(assign).toHaveBeenCalledWith(location.href)
+    expect(console.error).toHaveBeenCalledOnce()
+  })
+
+  for (const make of [() => new Event('pointerdown'), () => new Event('keydown')]) {
+    const type = make().type
+    it(`after a leave that did not happen, the reader's ${type} lets a chunk failure reload again`, () => {
+      const target = new EventTarget()
+      installPreloadErrorReload(target, env)
+      target.dispatchEvent(new Event('beforeunload'))
+      target.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: loadError() }))
+      expect(assign).not.toHaveBeenCalled()
+      target.dispatchEvent(make())
+      target.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: loadError() }))
+      expect(assign).toHaveBeenCalledOnce()
+    })
+  }
+
   it('ignores a vite:preloadError that is not a load failure', () => {
     const target = new EventTarget()
     installPreloadErrorReload(target, env)

@@ -85,7 +85,9 @@ test.describe('Bluesky hashtag page, signed out', () => {
   })
 
   // #251 review: with a Mastodon account active, `/` forwards to Home, so
-  // Sign in goes to the add-account page.
+  // Sign in goes to the add-account page. The test leaves `/` at once, while
+  // its page chunk can still be loading. WebKit and Firefox then fail that
+  // import, and the stale-build reload of `/` once cancelled the goto.
   test('Sign in opens the add-account page with a Mastodon account active', async ({ page }) => {
     await page.goto('/')
     await page.evaluate(() => {
