@@ -110,6 +110,30 @@ describe('stale build reload', () => {
     expect(assign).toHaveBeenCalledOnce()
   })
 
+  it('a route import the browser drops because the page is leaving does not reload', async () => {
+    // WebKit fails the page chunk of a full load of `/` when the reader
+    // leaves at once. A load of `/` then cancels their navigation.
+    const target = new EventTarget()
+    installPreloadErrorReload(target, env)
+    const [route] = withStaleBuildReload([{ path: '/', action: () => Promise.reject(loadError()) }], env)
+    target.dispatchEvent(new Event('beforeunload'))
+    let settled = false
+    void route!.action!().then(() => { settled = true }, () => { settled = true })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(assign).not.toHaveBeenCalled()
+    expect(console.error).not.toHaveBeenCalled()
+    // The router keeps waiting: it neither mounts the page nor stops.
+    expect(settled).toBe(false)
+    expect(sessionStorage.getItem('caribou.stale-reload')).toBeNull()
+    // Back from the back-forward cache: the page is live again.
+    target.dispatchEvent(new Event('pageshow'))
+    void route!.action!()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(assign).toHaveBeenCalledOnce()
+  })
+
   it('ignores a vite:preloadError that is not a load failure', () => {
     const target = new EventTarget()
     installPreloadErrorReload(target, env)

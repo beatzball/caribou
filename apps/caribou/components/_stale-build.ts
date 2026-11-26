@@ -10,6 +10,11 @@
  * Two places see the failure: Vite's `vite:preloadError` event, for any
  * dynamic import, and the route action, which the router awaits and never
  * catches. Both call `reloadOnce`.
+ *
+ * Neither may act while the page is leaving. WebKit and Firefox fail a
+ * dynamic import that is still loading when the page navigates away, and a
+ * load then cancels the reader's own navigation: they land back on the page
+ * they left.
  */
 
 const KEY = 'caribou.stale-reload'
@@ -22,6 +27,11 @@ const MAX_TRIED = 20
 // preload helper fires its event, then rethrows into the route action), and
 // only the first one may act.
 let reloading = false
+
+// Set from `beforeunload` until `pageshow` (`installPreloadErrorReload`
+// listens for both). Caribou never cancels `beforeunload`, so once it fires
+// the page goes, unless it comes back from the back-forward cache.
+let leaving = false
 
 export interface StaleBuildEnv {
   assign: (href: string) => void
@@ -85,9 +95,10 @@ export function reloadOnce(href: string, env: StaleBuildEnv = browserEnv): boole
   return true
 }
 
-/** For tests: forget that a load has started. */
+/** For tests: forget that a load has started, or that the page is leaving. */
 export function resetStaleBuildReload(): void {
   reloading = false
+  leaving = false
 }
 
 interface RouteWithAction {
@@ -112,6 +123,10 @@ export function withStaleBuildReload<R extends RouteWithAction>(routes: R[], env
           await action()
         } catch (err) {
           if (!isModuleLoadError(err)) throw err
+          // The browser dropped the import because the page is leaving: the
+          // reader's own navigation is under way. Keep the router waiting,
+          // as below; a load now would cancel that navigation.
+          if (leaving) return new Promise<never>(() => {})
           // The unload drops the console in some browsers; say why first.
           console.error('[caribou] a page chunk failed to load; loading the page from the server', err)
           // The page is going away. Keep the router waiting rather than let
@@ -126,14 +141,11 @@ export function withStaleBuildReload<R extends RouteWithAction>(routes: R[], env
 
 /**
  * Reloads on Vite's `vite:preloadError` when a module failed to load. Not
- * while the page is leaving: Firefox fails a dynamic import that is still
- * loading when the page navigates away (the Bluesky chunk on a Bluesky
- * page), and a reload then would cancel the reader's own navigation. Caribou
- * never cancels `beforeunload`, so once it fires the page goes, unless it
- * comes back from the back-forward cache (`pageshow`).
+ * while the page is leaving (the Bluesky chunk on a Bluesky page, or the
+ * page chunk of a full load the reader leaves at once). It also tells the
+ * route actions of `withStaleBuildReload` when the page is leaving.
  */
 export function installPreloadErrorReload(target: EventTarget, env?: StaleBuildEnv): void {
-  let leaving = false
   target.addEventListener('beforeunload', () => { leaving = true })
   target.addEventListener('pageshow', () => { leaving = false })
   target.addEventListener('vite:preloadError', (event) => {
