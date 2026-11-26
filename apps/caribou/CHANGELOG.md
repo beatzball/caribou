@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.9
+
+### Patch Changes
+
+- [#304](https://github.com/beatzball/caribou/pull/304) [`fc1d47d`](https://github.com/beatzball/caribou/commit/fc1d47dc01620adabf661d0f36d8b6ba3f0aaa7b) Thanks [@beatzball](https://github.com/beatzball)! - Zoom the image in the media viewer, not the page. The viewer now fills most of the screen. Pinch, double-tap, ctrl+wheel or a trackpad pinch zoom and pan only the image, and a zoomed image uses the whole viewer. The `+`, `-` and `0` keys zoom, and the arrow keys move a zoomed image; the dialog names these keys. The Close bar stays in place, and closing resets the zoom. Page zoom stays on everywhere else.
+
 ## 0.12.8
 
 ### Patch Changes
