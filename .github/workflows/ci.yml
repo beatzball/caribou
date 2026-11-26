@@ -61,28 +61,41 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: coverage, path: '**/coverage/**' }
 
-  # One job per Playwright project (see apps/caribou/playwright.config.ts),
-  # all in parallel. Before this split, one job ran the four projects one
-  # after another: about 13-15 min (Nov 2026). Now the wall time is the
-  # slowest job, webkit, at about 7.5 min. The others take about 5 min
-  # (firefox), 3.5 min (chromium) and 2 min (mobile-webkit). The `e2e` job
-  # below gathers the results.
+  # Each Playwright project (see apps/caribou/playwright.config.ts) is cut
+  # into shards, and every shard is its own job, all in parallel. CI runs
+  # one test at a time (workers: 1), so a job's time grows with the number
+  # of tests. With one job per project (Nov 26 2026, 583 tests), webkit took
+  # 11-15 min and timed out at 15 on main; firefox took 9-12, chromium 7-9,
+  # mobile-webkit 3-4. `--shard` splits the tests evenly by count, skipped
+  # tests included, so shard 1 (fewer skips) runs longest. Give a project
+  # another shard when its slowest job passes 60% of the timeout (9 min).
+  # The `e2e` job below gathers the results.
   e2e-browser:
     # The release PR only bumps versions and changelogs. Its merge to main
     # runs e2e again before deploy, so running it on the PR too buys nothing.
     # The repo check stops a fork from skipping it by naming its branch the
     # same. Keep this condition the same as the one in `e2e`.
     if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
-    name: e2e (${{ matrix.project }})
+    name: e2e (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
-    # The slowest job (webkit) takes about 7.5 min, setup included.
+    # Shard jobs on Nov 26 2026, setup included (under 1 min): firefox 5.6
+    # and 7.2 min, webkit 4.7-6.5, chromium 4.3-5.0, mobile-webkit 3.0.
+    # The slowest is under 50% of the timeout.
     timeout-minutes: 15
     needs: checks
     strategy:
-      # Let every browser finish, so one red run shows all the failures.
+      # Let every shard finish, so one red run shows all the failures.
       fail-fast: false
       matrix:
-        project: [chromium, firefox, webkit, mobile-webkit]
+        include:
+          - { project: chromium, shard: 1, shards: 2 }
+          - { project: chromium, shard: 2, shards: 2 }
+          - { project: firefox, shard: 1, shards: 2 }
+          - { project: firefox, shard: 2, shards: 2 }
+          - { project: webkit, shard: 1, shards: 3 }
+          - { project: webkit, shard: 2, shards: 3 }
+          - { project: webkit, shard: 3, shards: 3 }
+          - { project: mobile-webkit, shard: 1, shards: 1 }
     # The image ships the browsers and their system packages, so the job skips
     # `playwright install --with-deps`. Its apt step once stalled for 36 min
     # on a slow Ubuntu mirror.
@@ -96,23 +109,26 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      # No separate `pnpm build` step: Playwright's webServer builds the app
+      # before it starts the server, and the app is the only package with a
+      # build. A step here built it a second time.
+      #
       # Firefox refuses to start as root when HOME belongs to another user.
       # Set it here, not as job env, which the runner's own docker CLI reads too.
-      # No `--` before the flag: pnpm would pass it on to Playwright, which
+      # No `--` before the flags: pnpm would pass them on to Playwright, which
       # then reads `--project` as a file filter.
-      - run: HOME=/root pnpm test:e2e --project=${{ matrix.project }}
+      - run: HOME=/root pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/${{ matrix.shards }}
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-${{ matrix.project }}-${{ matrix.shard }}of${{ matrix.shards }}
           path: apps/caribou/playwright-report
 
   # The required status check on main, and what deploy waits for. It passes
-  # only when every browser job passed. A required check that is skipped
-  # counts as passed, so this job always runs and decides by itself.
+  # only when every shard of every browser passed. A required check that is
+  # skipped counts as passed, so this job always runs and decides by itself.
   #
-  # The browser jobs are skipped in two cases. On the release PR that is
+  # The shard jobs are skipped in two cases. On the release PR that is
   # fine (see above), so `e2e` passes. When `checks` fails they are skipped
   # too; then `e2e` fails, so a skip can never hide a broken run.
   e2e:
@@ -121,7 +137,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check every browser passed
+      - name: Check every shard passed
         env:
           RESULT: ${{ needs.e2e-browser.result }}
           RELEASE_PR: ${{ github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository }}
@@ -133,7 +149,7 @@ jobs:
             echo "::notice::e2e is skipped on the release PR."
             exit 0
           fi
-          echo "::error::A browser job did not pass (result: $RESULT)."
+          echo "::error::An e2e shard did not pass (result: $RESULT)."
           exit 1
 
   changeset-check:
