@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.11
+
+### Patch Changes
+
+- [#312](https://github.com/beatzball/caribou/pull/312) [`957a4cb`](https://github.com/beatzball/caribou/commit/957a4cb0b2d14f0fea944846f7065cd665aa614e) Thanks [@beatzball](https://github.com/beatzball)! - On a phone, the media viewer's dim now reaches the top and bottom of the screen. While the viewer is open, the browser's own bars take the same dim: Safari 26 on iOS from a thin strip at each edge of the page, older Safari and Chrome from the theme color. Closing the viewer gives the bars the page color back, also after a theme change while it was open. Close, the key hint and the description stay clear of the notch and the home indicator, in portrait and landscape.
+
 ## 0.12.10
 
 ### Patch Changes
