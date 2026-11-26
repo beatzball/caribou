@@ -28,9 +28,12 @@ const MAX_TRIED = 20
 // only the first one may act.
 let reloading = false
 
-// Set from `beforeunload` until `pageshow` (`installPreloadErrorReload`
-// listens for both). Caribou never cancels `beforeunload`, so once it fires
-// the page goes, unless it comes back from the back-forward cache.
+// Set on `beforeunload` (`installPreloadErrorReload` listens). Caribou never
+// cancels it, but a leave can still not happen: a link that downloads a
+// file, Stop, a prompt from another script. So the page is live again on
+// `pageshow` (back from the back-forward cache) and on the reader's next
+// `pointerdown` or `keydown`. Not when a route action starts: the app's
+// first route can start after `beforeunload`, while the page really leaves.
 let leaving = false
 
 export interface StaleBuildEnv {
@@ -146,8 +149,12 @@ export function withStaleBuildReload<R extends RouteWithAction>(routes: R[], env
  * route actions of `withStaleBuildReload` when the page is leaving.
  */
 export function installPreloadErrorReload(target: EventTarget, env?: StaleBuildEnv): void {
+  const live = () => { leaving = false }
   target.addEventListener('beforeunload', () => { leaving = true })
-  target.addEventListener('pageshow', () => { leaving = false })
+  target.addEventListener('pageshow', live)
+  // Capture, so a handler that stops the event cannot hide it.
+  target.addEventListener('pointerdown', live, { capture: true })
+  target.addEventListener('keydown', live, { capture: true })
   target.addEventListener('vite:preloadError', (event) => {
     const err = (event as Event & { payload?: unknown }).payload
     if (!isModuleLoadError(err) || leaving) return
