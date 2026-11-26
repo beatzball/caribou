@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.12
+
+### Patch Changes
+
+- [#315](https://github.com/beatzball/caribou/pull/315) [`d545778`](https://github.com/beatzball/caribou/commit/d545778d4333c04af2ebaf22720fd941b78470e2) Thanks [@beatzball](https://github.com/beatzball)! - Leaving a page while its code is still loading no longer sends you back to it. In Safari and Firefox, a typed address, a bookmark or a link to another site opened right after a page loaded could land on the page you left. The app read the code the browser dropped as a sign of a new deploy and loaded the old page again, which cancelled your navigation. Now it does not reload while the page is leaving.
+
 ## 0.12.11
 
 ### Patch Changes
