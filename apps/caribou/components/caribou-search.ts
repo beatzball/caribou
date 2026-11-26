@@ -96,7 +96,7 @@ export class CaribouSearch extends LitElement {
        <caribou-button type="submit"> cannot do (README, Shared controls). */
     .submit {
       display: inline-flex; align-items: center; justify-content: center;
-      min-width: 44px; min-height: 44px; font-size: 20px; color: var(--fg-1);
+      min-width: 44px; min-height: 44px; font-size: 1.25rem; color: var(--fg-1);
       background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;
     }
     .submit:hover { color: var(--fg-0); }

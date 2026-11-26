@@ -1635,6 +1635,7 @@ active. Accounts live in the browser; the server keeps no session.
 | `caribou.activeUserKey` | the active account's `userKey` (`name@server`), or `null` |
 | `caribou.prefs.<userKey>` | that account's settings: `theme`, `defaultTimeline`, `shortcuts`, `lastSeenNotificationId` (removed on its sign-out; a 401 keeps it) |
 | `caribou.drafts.<userKey>` | that account's compose drafts (removed on its sign-out; a 401 keeps them) |
+| `caribou.textSize` | the text size, for this device and every account: `xs`, `sm`, `md`, `lg` or `xl` as plain text (not through `caribou-state`; see Settings) |
 
 **Switching reloads the page.** A switch from the account menu, a sign-out
 that leaves another account, and a 401 on the active account all change the
@@ -1761,6 +1762,23 @@ system's setting. `<html>` is outside every template, so hydration is not
 touched. Light tokens are `[data-theme="light"]` in
 `packages/design-tokens/tokens.css`. `tests/e2e/settings.spec.ts` checks
 the first frame.
+
+**Text size**: Smallest, Smaller, Default, Larger or Largest (`xs` to `xl`;
+`md` is the default and the size the app had before). Unlike the rest of
+the page it is per device, not per account: one key, `caribou.textSize`,
+applied for every account and when no one is signed in. Before the first
+paint an inline script (`server/lib/text-size-head.ts`, beside the theme
+script on every page, and allowed by hash on the sign-in completion page)
+sets `data-text-size` on `<html>`; the default sets none. `tokens.css` maps
+each step to a percentage root `font-size`, so it scales the reader's own
+browser size and zoom still works. Text is in `rem`, so one value moves it
+all: write new font sizes in `rem` or `em`, never `px`, and give boxes that
+hold text room to grow (wrap, `min-width: 0`). `startTextSize`
+(`components/_text-size.ts`, from `app-main.ts`) follows a change on
+/settings and in other tabs (the `storage` event).
+`tests/e2e/text-size.spec.ts` checks the first frame, and
+`text-size.mobile.spec.ts` checks that every page fits a 320px phone at the
+largest step.
 
 **Default timeline**: Home, Local or Public. `/` forwards there (above), and
 the sign-in completion page goes there for an account that chose one.

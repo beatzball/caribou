@@ -28,7 +28,10 @@ export class CaribouBlueskySignin extends LitElement {
     form { display: flex; flex-direction: column; gap: var(--space-3); max-width: 400px; margin: 0 auto; }
     label { color: var(--fg-1); }
     .hint { color: var(--fg-2); font-size: 0.875rem; margin: 0; }
+    /* font: inherit, as every other field: the browser's own input font
+       is a fixed size, which would not follow the text size setting. */
     input {
+      font: inherit;
       padding: var(--space-3); border-radius: var(--radius-md);
       border: 1px solid var(--input-border); background: var(--bg-1); color: var(--fg-0);
     }

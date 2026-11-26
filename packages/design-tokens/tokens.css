@@ -45,5 +45,15 @@
 html { color-scheme: dark; background: var(--bg-0); color: var(--fg-0); }
 html[data-theme="light"] { color-scheme: light; }
 
+/* Text size (Settings > Appearance), per device. A head script sets
+   data-text-size on <html> before the first paint; the default step sets
+   none, so the root keeps the browser's own size. Percent, not px: each
+   step scales the reader's browser or system text size, and zoom still
+   works. Text is in rem, so it all follows this one value. */
+html[data-text-size="xs"] { font-size: 87.5%; }
+html[data-text-size="sm"] { font-size: 93.75%; }
+html[data-text-size="lg"] { font-size: 112.5%; }
+html[data-text-size="xl"] { font-size: 125%; }
+
 body { margin: 0; font-family: var(--font-body); background: var(--bg-0); color: var(--fg-0); }
 * { box-sizing: border-box; }

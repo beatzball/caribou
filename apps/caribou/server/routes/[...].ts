@@ -10,6 +10,7 @@ import { resolveOrigin } from '../lib/public-origin.js';
 import { ROOT_FORWARD_HEAD } from '../lib/root-forward-head.js';
 import { READER_VEIL_HEAD } from '../lib/reader-veil-head.js';
 import { THEME_HEAD } from '../lib/theme-head.js';
+import { TEXT_SIZE_HEAD } from '../lib/text-size-head.js';
 import { TIMELINE_SPLASH_HEAD } from '../lib/timeline-splash-head.js';
 import { routeTitle } from '../../components/_route-title.js';
 import { escapeTitle, withRouteTitle } from '../lib/route-title.js';
@@ -31,7 +32,7 @@ export default defineEventHandler(async (event) => {
     setResponseStatus(event, 404);
     setResponseHeader(event, 'content-type', 'text/html; charset=utf-8');
     return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}${TOKENS_HEAD}${THEME_HEAD}</head>
+<html lang="en"><head><meta charset="UTF-8" /><title>Not found · ${PAGE_TITLE}</title>${ICONS_HEAD}${TOKENS_HEAD}${THEME_HEAD}${TEXT_SIZE_HEAD}</head>
 <body><h1>404 — Not Found</h1><p>No page matched <code>${escapeHtml(pathname)}</code>.</p></body>
 </html>`;
   }
@@ -69,11 +70,13 @@ export default defineEventHandler(async (event) => {
     // before the first paint. On `/` it runs first as well: the forward ends `/` as hidden
     // text, and its screen must have the reader's colors. Running twice is
     // on purpose: the first run is before the theme-color meta exists, and
-    // the last one (when `/` stays) sets that meta.
+    // the last one (when `/` stays) sets that meta. TEXT_SIZE_HEAD follows
+    // it on every page: it puts the device's text size on <html> before the
+    // first paint (`server/lib/text-size-head.ts`).
     routeMeta: {
       title: escapeTitle(routeTitle(url)),
       head: (matched.path === '/' ? THEME_HEAD + ROOT_FORWARD_HEAD
-        : (SPLASH_TARGETS as readonly string[]).includes(matched.path) ? TIMELINE_SPLASH_HEAD : '') + TOKENS_HEAD + BASE_HEAD + READER_VEIL_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD,
+        : (SPLASH_TARGETS as readonly string[]).includes(matched.path) ? TIMELINE_SPLASH_HEAD : '') + TOKENS_HEAD + BASE_HEAD + READER_VEIL_HEAD + brandHead(resolveOrigin(event)) + THEME_HEAD + TEXT_SIZE_HEAD,
     },
     appScriptUrl: APP_SCRIPT_URL,
     skipLinks: [{ label: 'Skip to content', href: '#caribou-main' }],

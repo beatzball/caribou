@@ -27,7 +27,7 @@ export class CaribouSettingsAccount extends LitElement {
       width: 48px; height: 48px; flex: none; border-radius: 50%; object-fit: cover;
       background: var(--bg-2); color: var(--fg-1);
       display: inline-flex; align-items: center; justify-content: center;
-      font-weight: 600; font-size: 20px; text-transform: uppercase;
+      font-weight: 600; font-size: 1.25rem; text-transform: uppercase;
     }
     .who-text { display: flex; flex-direction: column; min-width: 0; }
     .who-label { color: var(--fg-muted); font-size: 0.875em; }
@@ -53,7 +53,7 @@ export class CaribouSettingsAccount extends LitElement {
     }
     caribou-button.switch::part(button):hover { background: var(--bg-1); color: var(--fg-0); }
     form { display: contents; }
-    caribou-icon { font-size: 20px; flex: none; }
+    caribou-icon { font-size: 1.25rem; flex: none; }
   `
 
   @state() private accounts: UserSession[] = []

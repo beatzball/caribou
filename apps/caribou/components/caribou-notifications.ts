@@ -73,7 +73,7 @@ export class CaribouNotifications extends LitElement {
       padding: var(--space-3) var(--space-4) 0; color: var(--fg-1);
     }
     li.no-status:not(.grouped) .line { padding-bottom: var(--space-3); }
-    .line caribou-icon { font-size: 18px; color: var(--accent); flex-shrink: 0; }
+    .line caribou-icon { font-size: 1.125rem; color: var(--accent); flex-shrink: 0; }
     .line a { color: var(--fg-0); font-weight: 600; text-decoration: none; }
     .line a:hover { text-decoration: underline; }
     .line > span { min-width: 0; overflow-wrap: anywhere; }

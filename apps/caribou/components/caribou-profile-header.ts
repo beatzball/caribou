@@ -29,12 +29,16 @@ export class CaribouProfileHeader extends LitElement {
   static override styles = [mastodonLinkText, css`
     :host { display: block; border-bottom: 1px solid var(--border); }
     .banner { aspect-ratio: 3/1; background: var(--bg-2); }
-    .row    { display: flex; gap: var(--space-3); padding: var(--space-3); }
+    /* The follow button and menu wrap under the name when the name would
+       get less than 5em: on a narrow phone, or with a large text size. */
+    .row    { display: flex; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3); }
+    .who    { flex: 1 1 0; min-width: 5em; }
+    .who .name, .who .handle { overflow-wrap: anywhere; }
     img.avatar { width: 80px; height: 80px; border-radius: var(--radius-md); flex-shrink: 0; }
     /* A Bluesky avatar or banner label (README, "Bluesky views"). */
     .banner.blurred, img.avatar.blurred { filter: blur(12px); }
     .banner.blurred { clip-path: inset(0); }
-    .profile-cover .notice { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--fg-muted); }
+    .profile-cover .notice { flex: 1 1 0; display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; color: var(--fg-muted); }
     .profile-cover .notice p { margin: 0; }
     .vh {
       position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -428,7 +432,7 @@ export class CaribouProfileHeader extends LitElement {
       <div class=${blurBanner ? 'banner blurred' : 'banner'} style=${banner}></div>
       <div class="row">
         <img class=${blurAvatar ? 'avatar blurred' : 'avatar'} src=${a.avatarStatic || a.avatar} alt="" loading="lazy" decoding="async" />
-        <div>
+        <div class="who">
           <h1 class="name">${a.displayName || a.username}</h1>
           <div class="handle">@${a.acct}</div>
           ${this.renderBadges()}
@@ -452,7 +456,7 @@ export class CaribouProfileHeader extends LitElement {
   private renderIdentity(a: Account) {
     return html`<div class="identity">
       <div class="row">
-        <div>
+        <div class="who">
           <h1 class="name">${a.displayName || a.username}</h1>
           <div class="handle">@${a.acct}</div>
           ${this.renderBadges()}
