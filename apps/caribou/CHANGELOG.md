@@ -1,5 +1,11 @@
 # caribou-app
 
+## 0.12.8
+
+### Patch Changes
+
+- [#296](https://github.com/beatzball/caribou/pull/296) [`9f59562`](https://github.com/beatzball/caribou/commit/9f595628ac69b141634ffd787ba67079e4eac2d3) Thanks [@beatzball](https://github.com/beatzball)! - Give routes descriptive titles across full loads and client navigation, preserving thread author titles before lazy elements upgrade. Expose profile and reading-page headings, keep one h1 in sign-in placeholders, and group supporting desktop rail content in a named landmark.
+
 ## 0.12.7
 
 ### Patch Changes
