@@ -116,11 +116,20 @@ for (const theme of ['light', 'dark'] as const) {
       expect(s.tint).toBe('rgba(0, 0, 0, 0.8)')
     }
 
-    // The size of the dialog is as before.
+    // The dialog fills the window, so the dim reaches every edge. Its
+    // padding keeps the content where it was: 2.5% in from each side, plus
+    // the old padding (12px). No safe area on a desktop.
     const box = (await v.dialog.boundingBox())!
     const size = page.viewportSize()!
-    expect(Math.abs(box.width - size.width * 0.95)).toBeLessThan(1)
-    expect(Math.abs(box.height - size.height * 0.95)).toBeLessThan(1)
+    expect(box).toEqual({ x: 0, y: 0, width: size.width, height: size.height })
+    const bar = (await v.dialog.locator('.bar').boundingBox())!
+    const stage = (await v.stage.boundingBox())!
+    expect(Math.abs(bar.y - (size.height * 0.025 + 12))).toBeLessThan(1)
+    expect(Math.abs(stage.x - (size.width * 0.025 + 12))).toBeLessThan(1)
+    expect(Math.abs(stage.width - (size.width * 0.95 - 24))).toBeLessThan(1)
+    // No edge strips on a desktop: there are no browser bars to color.
+    await expect(v.dialog.locator('.edge')).toHaveCount(2)
+    for (const edge of await v.dialog.locator('.edge').all()) await expect(edge).toBeHidden()
 
     // Nothing tints or blurs the image itself.
     for (const el of [v.stage, v.image]) {
@@ -246,7 +255,8 @@ test('a double click on any empty place keeps the viewer open, zooms only on the
   const close = (await v.close.boundingBox())!
   expect(img.x - stage.x).toBeGreaterThan(40)
   expect(close.x - (hint.x + hint.width)).toBeGreaterThan(40)
-  expect(dlg.x).toBeGreaterThan(10)
+  // The dialog fills the window; its padding is where the backdrop shows.
+  expect(stage.x - dlg.x).toBeGreaterThan(10)
   await recordClicks(page)
 
   // Beside the image, on the stage: it zooms there.
@@ -256,8 +266,8 @@ test('a double click on any empty place keeps the viewer open, zooms only on the
   await page.keyboard.press('0')
   await expect.poll(() => transformOf(v.image)).toBe('')
 
-  // The padding, the empty middle of the bar and the backdrop: it stays
-  // open at 1x.
+  // The padding, the empty middle of the bar and the corner of the
+  // backdrop: it stays open at 1x.
   const places = [
     { name: 'padding', x: dlg.x + 4, y: dlg.y + dlg.height / 2 },
     { name: 'bar', x: (hint.x + hint.width + close.x) / 2, y: close.y + close.height / 2 },
@@ -295,7 +305,7 @@ test('zoomed, no click closes the viewer: not beside the image, not on the paddi
   await page.mouse.click(stage.x + 20, stage.y + 40)
   await stillOpen(page, v.dialog)
   // The padding and the backdrop wait for 1x too.
-  expect(dlg.x).toBeGreaterThan(10)
+  expect(stage.x - dlg.x).toBeGreaterThan(10)
   await page.mouse.click(dlg.x + 4, dlg.y + dlg.height / 2)
   await page.mouse.click(5, 5)
   await stillOpen(page, v.dialog)
