@@ -145,6 +145,9 @@ clean up in `disconnectedCallback`, and wait for
    list names appear after the reader loads them; a missing list keeps the
    generic List title. Server and client share the guard for naming a
    Bluesky thread: both its content and profile decisions must permit it.
+   Cards mark permitted author names with `data-title-name`, derived from the
+   same status on server and first client render. Title startup reads only
+   that rendered marker, even before lazy page/card elements upgrade.
    Only the connected, visible page for the current address may refine its title; a late answer from a
    departed or hidden page cannot overwrite it. The title is ready before the
    router's existing route announcement. No second live region is added.

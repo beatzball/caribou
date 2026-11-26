@@ -120,12 +120,46 @@ it.each(['clear', 'blur', 'filter', 'missing', 'profile-blur'])('rule 2: server 
   const thread = page.shadowRoot!.firstElementChild!
   thread.attachShadow({ mode: 'open' }).innerHTML = '<caribou-status-card variant="focused"></caribou-status-card>'
   const card = thread.shadowRoot!.firstElementChild!
-  Object.assign(card, { status })
-  card.attachShadow({ mode: 'open' }).innerHTML = '<a class="author"><strong>Alice</strong></a>'
+  card.attachShadow({ mode: 'open' }).innerHTML = `<a class="author"><strong${state === 'clear' ? ' data-title-name' : ''}>Alice</strong></a>`
+  expect(card).not.toHaveProperty('status')
   outlet.append(page)
   stop = startRouteTitles(outlet)
   await flush()
   const expected = state === 'clear' ? 'Thread by Alice · Caribou' : 'Thread · Caribou'
   expect(serverRouteTitle(url('/@alice.example.com/post'), { kind: 'ok', focused: status })).toBe(expected)
   expect(document.title).toBe(expected)
+})
+
+it('rule 2: full load keeps the server title for an un-upgraded Mastodon thread', async () => {
+  const { serverRouteTitle } = await import('../../server/lib/route-title.js')
+  const address = url('/@alice@example.social/42')
+  const data = { kind: 'ok', focused: { account: { displayName: 'Alice', username: 'alice' } } }
+  const serverTitle = serverRouteTitle(address, data)
+  history.replaceState(null, '', address.pathname)
+  const outlet = document.createElement('litro-outlet')
+  document.body.append(outlet)
+  const page = document.createElement('page-handle-statusid')
+  page.attachShadow({ mode: 'open' }).innerHTML = '<caribou-thread></caribou-thread>'
+  const thread = page.shadowRoot!.firstElementChild!
+  thread.attachShadow({ mode: 'open' }).innerHTML = '<caribou-status-card variant="focused"></caribou-status-card>'
+  const card = thread.shadowRoot!.firstElementChild!
+  card.attachShadow({ mode: 'open' }).innerHTML = '<a class="author"><strong data-title-name>Alice</strong></a>'
+  // Declarative shadow roots exist before the lazy page/card module runs;
+  // the corresponding .status property does not.
+  expect(card).not.toHaveProperty('status')
+  outlet.append(page)
+  document.title = serverTitle
+  stop = startRouteTitles(outlet)
+  expect(document.title).toBe(serverTitle)
+  await flush()
+  expect(document.title).toBe(serverTitle)
+
+  // A permission change may update only the marker, keeping the same text.
+  const name = card.shadowRoot!.querySelector('strong')!
+  name.removeAttribute('data-title-name')
+  await flush()
+  expect(document.title).toBe('Thread · Caribou')
+  name.setAttribute('data-title-name', '')
+  await flush()
+  expect(document.title).toBe(serverTitle)
 })

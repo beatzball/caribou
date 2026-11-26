@@ -1,6 +1,5 @@
 import { ROUTE_ALIAS_EVENT } from './_bluesky-route.js'
-import type { CaribouStatusCard } from './caribou-status-card.js'
-import { routeTitle, threadTitleName } from './_route-title.js'
+import { routeTitle } from './_route-title.js'
 
 // Follow only the components that can refine a title. In particular, do not
 // observe entire timelines or their cards on every clock/count update.
@@ -18,7 +17,7 @@ export function startRouteTitles(outlet: Element): () => void {
   const observe = (root: Node) => {
     if (observed.has(root)) return
     observed.add(root)
-    content.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden'] })
+    content.observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'data-title-name'] })
   }
   const roots = (element: Element, found: ShadowRoot[] = []): ShadowRoot[] => {
     if (!element.shadowRoot) return found
@@ -48,8 +47,7 @@ export function startRouteTitles(outlet: Element): () => void {
       // removes covered identity from these nodes until the reader reveals it.
       name = profile?.querySelector('h1')?.textContent?.trim()
         || list?.querySelector('h1[data-list-title]')?.textContent?.trim()
-        || (threadTitleName((focused?.host as CaribouStatusCard | undefined)?.status ?? undefined)
-          ? focused?.querySelector('.author strong')?.textContent?.trim() : undefined)
+        || focused?.querySelector('.author strong[data-title-name]')?.textContent?.trim()
         || undefined
     }
     document.title = routeTitle(new URL(location.href), name)

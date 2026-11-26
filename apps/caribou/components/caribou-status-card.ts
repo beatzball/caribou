@@ -32,6 +32,7 @@ import { showStatusHistory } from './caribou-status-history.js'
 import { spaClick } from './_spa-link.js'
 import { tagPath } from './_tag-path.js'
 import { blueskyTagPathOf, hashtagOf, sameUrl } from './_post-links.js'
+import { threadTitleName } from './_route-title.js'
 import { mastodonLinkText } from './_shared-styles.js'
 import './caribou-icon.js'
 import './caribou-icon-button.js'
@@ -1550,7 +1551,7 @@ export class CaribouStatusCard extends LitElement {
                      loading="lazy"
                      decoding="async"
                      @error=${this.onAvatarError} />
-                <strong>${authorName}</strong>
+                <strong ?data-title-name=${!!threadTitleName(this.status ?? undefined)}>${authorName}</strong>
                 <span class="acct">@${display.account.acct}</span>
               </a>
               ${this.renderPermalink(display, html`<time datetime=${dt}>${timeLabel}</time>`, timeLabel)}
