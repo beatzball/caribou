@@ -9,6 +9,7 @@ import {
   wheelScale, zoomAt, type Bounds, type Point, type Zoom,
 } from './_media-zoom.js'
 import { DIM, dimOf } from './_media-dim.js'
+import { fade, shouldClose, velocity, type Sample } from './_media-swipe.js'
 import { dimChrome } from './_theme.js'
 import './caribou-button.js'
 
@@ -33,6 +34,11 @@ const DOUBLE_TAP_MS = 300
 const DOUBLE_TAP_PX = 30
 // A pointer that moves less than this before it lifts is a tap.
 const TAP_SLOP_PX = 10
+// A swipe that closes the viewer flies the image out for this long (the
+// image's and the backdrop's transitions), then closes it.
+const FLY_OUT_MS = 200
+// The swipe keeps this many recent moves for its speed.
+const SWIPE_SAMPLES = 32
 
 // Safari's own pinch events: trackpad pinch on macOS, and pinch on iOS
 // next to the touches. Not in the DOM types.
@@ -276,14 +282,37 @@ export class CaribouStatusMedia extends LitElement {
     /* A finger or wheel moves the image itself; only a double tap or a key
        eases. */
     dialog .stage[data-instant] img { transition: none; }
+    /* Swipe to dismiss (_media-swipe.ts): the viewer fades the backdrop and
+       the edge strips with rules it writes in its own <style class="fade">,
+       as a ::backdrop has no style attribute and does not inherit custom
+       properties in every browser. Under the pointer they follow it at
+       once; after a release they ease out or back, and a short swipe's
+       image springs back. */
+    dialog::backdrop { transition: opacity 0.2s ease-out; }
+    dialog .edge { transition: opacity 0.2s ease-out; }
+    dialog[data-swiping]::backdrop { transition: none; }
+    dialog[data-swiping] .edge { transition: none; }
+    @media (prefers-reduced-motion: no-preference) {
+      dialog .stage[data-spring] img { transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
+    }
     @media (prefers-reduced-motion: reduce) {
       dialog .stage img { transition: none; }
+      dialog::backdrop { transition: none; }
+      dialog .edge { transition: none; }
     }
-    /* The description is a panel under the image, only as wide as its text. */
+    /* The description is a panel under the image, only as wide as its text.
+       A long one scrolls on its own: a drag on the image swipes the viewer
+       away, so it no longer scrolls the dialog. */
     dialog p {
       flex: none; align-self: center; margin: var(--space-2) 0 0;
       max-width: min(60ch, 100%); padding: var(--space-2) var(--space-3);
       border-radius: var(--radius-md); white-space: pre-wrap;
+      max-height: 30vh; max-height: 30dvh; overflow-y: auto; overscroll-behavior: contain;
+    }
+    /* A description that scrolls is a tab stop; white on black, as Close. */
+    dialog p:focus-visible {
+      outline: 2px solid var(--overlay-fg); outline-offset: 2px;
+      box-shadow: 0 0 0 6px var(--overlay-bg);
     }
     dialog .bar {
       flex: none; display: flex; align-items: center; justify-content: space-between;
@@ -331,6 +360,8 @@ export class CaribouStatusMedia extends LitElement {
   private motionQuery: MediaQueryList | null = null
   // Undoes the dim on the browser's own bars, while the viewer is open.
   private undimChrome: (() => void) | null = null
+  // The reader's transparency setting, watched while the viewer is open.
+  private transparencyQuery: MediaQueryList | null = null
 
   // The lightbox image's zoom. It is written to the image's style by hand,
   // not rendered: a pointer move must not wait for an update.
@@ -356,6 +387,15 @@ export class CaribouStatusMedia extends LitElement {
   // A close waiting to see whether a click on an empty place is the first
   // of a double click.
   private closeTimer: ReturnType<typeof setTimeout> | null = null
+  // At 1x a single pointer down on the stage may become a swipe, once it
+  // leaves the tap slop. A second pointer disarms it: that is a pinch.
+  private swipeArmed = false
+  // A swipe under way: how far the image has moved (down is positive), and
+  // the latest moves, for the speed at release.
+  private swipe: { dy: number; samples: Sample[] } | null = null
+  // A swipe let go past the threshold: the image flies out, then the
+  // viewer closes.
+  private leaving: ReturnType<typeof setTimeout> | null = null
 
   // Listen on every connect, so an element moved in the DOM keeps following
   // the setting. Before the first render only the listener is added:
@@ -372,6 +412,7 @@ export class CaribouStatusMedia extends LitElement {
     this.motionQuery = null
     window.removeEventListener('resize', this.onResize)
     this.cancelClose()
+    this.stopLeaving()
     this.undim()
     super.disconnectedCallback()
   }
@@ -432,13 +473,37 @@ export class CaribouStatusMedia extends LitElement {
       this.renderRoot.querySelector<HTMLElement>('caribou-button.close')?.focus()
       window.addEventListener('resize', this.onResize)
       this.undim()
-      this.undimChrome = dimChrome(dimOf(dialog))
+      this.dimBars()
+      this.transparencyQuery = window.matchMedia('(prefers-reduced-transparency: reduce)')
+      this.transparencyQuery.addEventListener('change', this.dimBars)
+      this.syncDescription()
     })
   }
 
+  // The browser's bars take the dialog's dim. Again when the reader's
+  // transparency setting changes while the viewer is open: the backdrop
+  // and the strips follow the CSS at once, and the bars must match.
+  private dimBars = () => {
+    const dialog = this.dialog
+    if (!dialog?.open) return
+    this.undimChrome?.()
+    this.undimChrome = dimChrome(dimOf(dialog))
+  }
+
   private undim() {
+    this.transparencyQuery?.removeEventListener('change', this.dimBars)
+    this.transparencyQuery = null
     this.undimChrome?.()
     this.undimChrome = null
+  }
+
+  // A description too long for its panel scrolls, and is then a tab stop,
+  // so a keyboard can scroll it too.
+  private syncDescription() {
+    const p = this.renderRoot.querySelector<HTMLElement>('dialog p')
+    if (!p) return
+    if (p.scrollHeight > p.clientHeight) p.tabIndex = 0
+    else p.removeAttribute('tabindex')
   }
 
   private onDialogClose = () => {
@@ -454,7 +519,6 @@ export class CaribouStatusMedia extends LitElement {
     this.opener = null
   }
 
-  // A new press anywhere in the viewer: a waiting close is off.
   // A new press anywhere in the viewer: a waiting close is off.
   private onDialogPointerDown = (e: PointerEvent) => {
     if (e.isPrimary) this.press = { x: e.clientX, y: e.clientY, second: this.closeTimer !== null }
@@ -533,6 +597,7 @@ export class CaribouStatusMedia extends LitElement {
     const img = this.zoomImg
     if (!stage || !img) return
     stage.toggleAttribute('data-instant', !ease)
+    stage.removeAttribute('data-spring')
     stage.toggleAttribute('data-zoomed', isZoomed(next))
     img.style.transform = transformOf(next)
   }
@@ -546,6 +611,12 @@ export class CaribouStatusMedia extends LitElement {
     this.emptyTap = false
     this.press = null
     this.cancelClose()
+    this.stopLeaving()
+    this.swipeArmed = false
+    this.swipe = null
+    this.dialog?.removeAttribute('data-swiping')
+    this.stage?.removeAttribute('data-spring')
+    this.setFade(null)
     this.stage?.removeAttribute('data-dragging')
     this.setZoom(IDENTITY)
   }
@@ -553,6 +624,109 @@ export class CaribouStatusMedia extends LitElement {
   // A new window size moves the image's bounds; keep it inside them.
   private onResize = () => {
     this.setZoom(clampPan(this.zoom, this.bounds()))
+    this.syncDescription()
+  }
+
+  // ---- Swipe to dismiss ---------------------------------------------------
+
+  private reducedMotion(): boolean {
+    return this.motionQuery?.matches ?? false
+  }
+
+  // Moves the image `dy` up or down from its place at 1x: at once under the
+  // pointer, eased when it flies out, sprung when it goes back.
+  private placeSwipe(dy: number, how: 'instant' | 'ease' | 'spring') {
+    const stage = this.stage
+    const img = this.zoomImg
+    if (!stage || !img) return
+    stage.toggleAttribute('data-instant', how === 'instant')
+    stage.toggleAttribute('data-spring', how === 'spring')
+    img.style.transform = dy ? `translateY(${dy}px)` : transformOf(this.zoom)
+  }
+
+  // The backdrop's and the edge strips' opacity, as rules in the viewer's
+  // own <style class="fade">: a ::backdrop has no style attribute, and does
+  // not inherit custom properties in every browser. A rule reaches it in
+  // Chromium, Firefox and WebKit alike. Null takes the rules away: the full
+  // dim again.
+  private setFade(opacity: number | null) {
+    const sheet = this.renderRoot.querySelector<HTMLStyleElement>('dialog style.fade')?.sheet
+    if (!sheet) return
+    if (opacity === null) {
+      while (sheet.cssRules.length) sheet.deleteRule(0)
+      return
+    }
+    if (!sheet.cssRules.length) {
+      sheet.insertRule('dialog .edge {}', 0)
+      sheet.insertRule('dialog::backdrop {}', 0)
+    }
+    for (const rule of Array.from(sheet.cssRules)) {
+      (rule as CSSStyleRule).style.setProperty('opacity', String(opacity))
+    }
+  }
+
+  private dragSwipe(dy: number, time: number) {
+    const swipe = this.swipe ?? (this.swipe = { dy: 0, samples: [] })
+    swipe.dy = dy
+    swipe.samples.push({ y: dy, t: time })
+    if (swipe.samples.length > SWIPE_SAMPLES) swipe.samples.shift()
+    this.dialog?.toggleAttribute('data-swiping', true)
+    this.placeSwipe(dy, 'instant')
+    this.setFade(fade(dy, this.bounds().stage.height))
+  }
+
+  // A second finger turns the swipe into a pinch: the image goes back to
+  // its place at once, and the pinch starts from there.
+  private cancelSwipe() {
+    this.swipeArmed = false
+    if (!this.swipe) return
+    this.swipe = null
+    this.dialog?.removeAttribute('data-swiping')
+    this.placeSwipe(0, 'instant')
+    this.setFade(null)
+  }
+
+  // The pointer let go (`up`) or the browser took it (pointercancel): close
+  // past the threshold or on a flick, else spring back. The release itself
+  // is the last sample, so a pointer that stopped before it let go is not a
+  // flick.
+  private releaseSwipe(up: boolean, time: number) {
+    const swipe = this.swipe
+    this.swipe = null
+    this.dialog?.removeAttribute('data-swiping')
+    if (!swipe) return
+    swipe.samples.push({ y: swipe.dy, t: time })
+    if (up && shouldClose(swipe.dy, velocity(swipe.samples), this.bounds().stage.height)) {
+      this.leave(Math.sign(swipe.dy))
+    } else {
+      this.placeSwipe(0, this.reducedMotion() ? 'instant' : 'spring')
+      this.setFade(null)
+    }
+  }
+
+  // The image flies out the way it went and the dim fades, then the viewer
+  // closes; with reduced motion it closes at once. Either way the close
+  // waits a task: a mouse release still sends its click, and that click
+  // must land in the viewer, not on the page behind it.
+  private leave(direction: number) {
+    const dialog = this.dialog
+    if (!dialog) return
+    this.stopLeaving()
+    const motion = !this.reducedMotion()
+    if (motion) {
+      this.placeSwipe(direction * window.innerHeight, 'ease')
+      this.setFade(0)
+    }
+    this.leaving = setTimeout(() => {
+      this.leaving = null
+      dialog.close()
+    }, motion ? FLY_OUT_MS : 0)
+  }
+
+  private stopLeaving() {
+    if (this.leaving === null) return
+    clearTimeout(this.leaving)
+    this.leaving = null
   }
 
   // Start the gesture again from the zoom and pointers as they are now.
@@ -568,19 +742,22 @@ export class CaribouStatusMedia extends LitElement {
       // No text selection or image drag; focus stays where it is.
       e.preventDefault()
     }
+    // The viewer is on its way out.
+    if (this.leaving !== null) return
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     this.emptyTap = false
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     } catch { /* not an active pointer, as for a synthetic event */ }
     this.tap = this.pointers.size === 1 ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null
+    if (this.pointers.size === 1) this.swipeArmed = !isZoomed(this.zoom)
+    else this.cancelSwipe()
     this.stage?.toggleAttribute('data-dragging', true)
     this.restartGesture()
   }
 
   private onPointerMove = (e: PointerEvent) => {
-    const last = this.pointers.get(e.pointerId)
-    if (!last) return
+    if (!this.pointers.has(e.pointerId)) return
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (this.tap && Math.hypot(e.clientX - this.tap.x, e.clientY - this.tap.y) > TAP_SLOP_PX) {
       this.tap = null
@@ -597,10 +774,10 @@ export class CaribouStatusMedia extends LitElement {
       const p0 = g.points[0]!
       const p1 = now[0]!
       this.setZoom(panBy(g.zoom, p1.x - p0.x, p1.y - p0.y, b))
-    } else if (e.pointerType !== 'mouse' && this.pointers.size === 1) {
-      // At 1x a finger on the image still scrolls a long description into
-      // view; the surface took that from the browser with the pinch.
-      this.dialog?.scrollBy(0, last.y - e.clientY)
+    } else if (this.swipeArmed && !this.tap && now.length === 1 && g.points.length === 1) {
+      // At 1x one pointer, once out of the tap slop, moves the image up or
+      // down with it (a mouse too). A long description scrolls on its own.
+      this.dragSwipe(now[0]!.y - g.points[0]!.y, e.timeStamp)
     }
   }
 
@@ -608,7 +785,11 @@ export class CaribouStatusMedia extends LitElement {
     if (!this.pointers.delete(e.pointerId)) return
     const tapped = e.type === 'pointerup' && this.tap?.id === e.pointerId
     this.tap = null
-    if (this.pointers.size === 0) this.stage?.removeAttribute('data-dragging')
+    if (this.pointers.size === 0) {
+      this.stage?.removeAttribute('data-dragging')
+      this.swipeArmed = false
+      if (this.swipe) this.releaseSwipe(e.type === 'pointerup', e.timeStamp)
+    }
     this.restartGesture()
     if (tapped) this.onTap(e.clientX, e.clientY, e.timeStamp)
   }
@@ -768,6 +949,7 @@ export class CaribouStatusMedia extends LitElement {
         @pointerdown=${this.onDialogPointerDown}>
         ${m
           ? html`
+              <style class="fade"></style>
               <div class="edge top" aria-hidden="true"></div>
               <div class="edge bottom" aria-hidden="true"></div>
               <div class="bar">

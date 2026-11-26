@@ -1,7 +1,7 @@
 import type { CDPSession } from '@playwright/test'
-import { expect, test, type Page } from './_fixtures.js'
-import { LIGHT_THEME_COLOR, THEME_COLOR } from '../../server/lib/brand-head.js'
+import { expect, test } from './_fixtures.js'
 import { opened, openTimeline, viewer } from './_media-viewer.js'
+import { PAGE, corners, dim, expectBars, near, pixels, setTheme, sum, themeColor } from './_media-edges.js'
 
 // On a phone the browser's own bars (the status bar, the address bar) sit
 // outside the page, so the viewer's backdrop cannot paint them. Safari 26
@@ -11,61 +11,7 @@ import { opened, openTimeline, viewer } from './_media-viewer.js'
 // the dim over the page color. These tests run in Chromium at a phone size,
 // with touch: Firefox has no isMobile, and safe areas need Chromium's CDP.
 
-type Rgb = [number, number, number]
-
-const PREFS = 'caribou.prefs.alice@example.social'
-const PAGE = { light: LIGHT_THEME_COLOR, dark: THEME_COLOR } as const
 const PHONE = { width: 390, height: 844 }
-
-// Black at `alpha` over a `#rrggbb` color: what the backdrop's tint makes of
-// the page color. Worked out here on its own, not with the app's helper.
-function dim(hex: string, alpha: number): Rgb {
-  const n = parseInt(hex.slice(1), 16)
-  return [n >> 16, (n >> 8) & 255, n & 255].map((c) => c * (1 - alpha)) as Rgb
-}
-
-function near(actual: number[], expected: Rgb, tolerance = 2) {
-  for (let i = 0; i < 3; i++) expect(Math.abs(actual[i]! - expected[i]!), `${actual} vs ${expected}`).toBeLessThanOrEqual(tolerance)
-}
-
-const sum = (rgb: number[]) => rgb[0]! + rgb[1]! + rgb[2]!
-
-async function setTheme(page: Page, theme: 'light' | 'dark' | 'system') {
-  await page.addInitScript(([key, theme]) => localStorage.setItem(key!, JSON.stringify({ theme })), [PREFS, theme])
-}
-
-const themeColor = (page: Page) => page.locator('meta[name="theme-color"]').getAttribute('content')
-
-// A #rrggbb meta value, within one step of `rgb` (rounding).
-async function expectBars(page: Page, rgb: Rgb) {
-  const hex = await themeColor(page)
-  expect(hex).toMatch(/^#[0-9a-f]{6}$/)
-  const n = parseInt(hex!.slice(1), 16)
-  near([n >> 16, (n >> 8) & 255, n & 255], rgb, 1)
-}
-
-// The screen's pixels at these CSS points, from a real screenshot.
-async function pixels(page: Page, points: Array<{ x: number; y: number }>): Promise<number[][]> {
-  const png = (await page.screenshot({ scale: 'css' })).toString('base64')
-  return page.evaluate(async ({ png, points }) => {
-    const img = new Image()
-    img.src = `data:image/png;base64,${png}`
-    await img.decode()
-    const canvas = document.createElement('canvas')
-    canvas.width = img.naturalWidth
-    canvas.height = img.naturalHeight
-    const ctx = canvas.getContext('2d')!
-    ctx.drawImage(img, 0, 0)
-    return points.map((p) => Array.from(ctx.getImageData(p.x, p.y, 1, 1).data.slice(0, 3)))
-  }, { png, points })
-}
-
-function corners(size: { width: number; height: number }) {
-  return [
-    { x: 1, y: 1 }, { x: size.width - 2, y: 1 },
-    { x: 1, y: size.height - 2 }, { x: size.width - 2, y: size.height - 2 },
-  ]
-}
 
 async function safeArea(cdp: CDPSession, insets: { top: number; right: number; bottom: number; left: number }) {
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets })
@@ -119,7 +65,8 @@ test.describe('on a phone', () => {
       await v.close.click()
       await expect(v.dialog).toBeHidden()
       await expect(edges).toHaveCount(0)
-      expect(await themeColor(page)).toBe(PAGE[theme])
+      // The close event, a task after the dialog hides, gives the color back.
+      await expect.poll(() => themeColor(page)).toBe(PAGE[theme])
       await expect(v.thumb).toBeFocused()
     })
   }
@@ -143,7 +90,8 @@ test.describe('on a phone', () => {
     // Escape closes it as well.
     await page.keyboard.press('Escape')
     await expect(v.dialog).toBeHidden()
-    expect(await themeColor(page)).toBe(PAGE.light)
+    // The close event, a task after the dialog hides, gives the color back.
+    await expect.poll(() => themeColor(page)).toBe(PAGE.light)
   })
 
   test('with reduced transparency the strips and the theme-color take the 85% dim, as the backdrop does', async ({ page }) => {
@@ -159,11 +107,59 @@ test.describe('on a phone', () => {
     const tint = await v.dialog.evaluate((el) => getComputedStyle(el, '::backdrop').backgroundColor)
     expect(tint).toBe('rgba(0, 0, 0, 0.85)')
     await expectBars(page, dim(PAGE.light, 0.85))
+    // At 85% black the page under a see-through strip would look like the
+    // strip itself. So paint the page's edges pure red and blue first: an
+    // opaque strip still shows the dim over the page color, with no red or
+    // blue in it.
+    await page.evaluate(() => {
+      for (const [edge, color] of [['top', '#f00'], ['bottom', '#00f']] as const) {
+        const band = document.createElement('div')
+        band.className = 'test-band'
+        band.style.cssText = `position: fixed; inset-inline: 0; ${edge}: 0; height: 60px; z-index: 9; background: ${color}`
+        document.body.append(band)
+      }
+    })
     const [topMid, bottomMid] = await pixels(page, [
       { x: PHONE.width / 2, y: 4 }, { x: PHONE.width / 2, y: PHONE.height - 5 },
     ])
     near(topMid!, dim(PAGE.light, 0.85))
     near(bottomMid!, dim(PAGE.light, 0.85))
+    // Below the strip and its fade, the band shows through the backdrop:
+    // the bands are there.
+    const [underTop] = await pixels(page, [{ x: PHONE.width / 2, y: 40 }])
+    expect(underTop![0]! - underTop![1]!, `${underTop}`).toBeGreaterThan(20)
+  })
+
+  test('a change of the transparency setting while open moves the bars to the new dim; after close it changes nothing', async ({ page }) => {
+    const cdp = await page.context().newCDPSession(page)
+    const transparency = (value: string) => cdp.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-transparency', value }],
+    })
+    await setTheme(page, 'light')
+    await openTimeline(page)
+    const v = viewer(page)
+    await v.thumb.click()
+    await opened(page)
+    await expectBars(page, dim(PAGE.light, 0.55))
+    const before = await themeColor(page)
+
+    await transparency('reduce')
+    await expect.poll(() => themeColor(page)).not.toBe(before)
+    await expectBars(page, dim(PAGE.light, 0.85))
+    await transparency('no-preference')
+    await expect.poll(async () => {
+      const hex = await themeColor(page)
+      return parseInt(hex!.slice(1, 3), 16)
+    }).toBeGreaterThan(100)
+    await expectBars(page, dim(PAGE.light, 0.55))
+
+    await v.close.click()
+    await expect(v.dialog).toBeHidden()
+    // The close event, a task after the dialog hides, gives the color back.
+    await expect.poll(() => themeColor(page)).toBe(PAGE.light)
+    await transparency('reduce')
+    await page.waitForTimeout(100)
+    expect(await themeColor(page)).toBe(PAGE.light)
   })
 
   test('Close and the description stay inside the safe area, in portrait and landscape', async ({ page }) => {

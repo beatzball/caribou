@@ -208,10 +208,11 @@ test('a click on empty space closes the viewer; a click on the image, the text o
   await v.dialog.locator('.hint').click()
   await stillOpen(page, v.dialog)
 
-  // A drag beside the image is not a click.
+  // A drag beside the image is not a click. Sideways: a fast drag up or
+  // down is a swipe that closes the viewer (media-viewer-swipe.spec.ts).
   await page.mouse.move(beside.x, beside.y)
   await page.mouse.down()
-  await page.mouse.move(beside.x, beside.y + 80, { steps: 5 })
+  await page.mouse.move(beside.x - 30, beside.y, { steps: 5 })
   await page.mouse.up()
   await stillOpen(page, v.dialog)
   // Nor is one that starts on the padding and ends there.
