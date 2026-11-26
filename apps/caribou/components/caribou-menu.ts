@@ -58,7 +58,7 @@ export class CaribouMenu extends LitElement {
     .trigger:hover { background: var(--bg-1); }
     .trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .trigger[aria-expanded="true"] { background: var(--bg-2); color: var(--fg-0); }
-    caribou-icon { font-size: 20px; }
+    caribou-icon { font-size: 1.25rem; }
     /* Link-hint tools (Vimium) test the element at the trigger's center. A
        nested shadow root or a slotted node there reads as covering the
        button, so the hint is lost (#111). Clicks go to the button itself. */

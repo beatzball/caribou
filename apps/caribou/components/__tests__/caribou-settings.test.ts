@@ -6,6 +6,7 @@ import type { LitElement } from 'lit'
 import '../caribou-settings.js'
 import { SETTINGS_SECTIONS } from '../_settings-sections.js'
 import { startTheme } from '../_theme.js'
+import { startTextSize, textSize } from '../_text-size.js'
 import { switchToAccount } from '../_switch-account.js'
 import { PACKAGE_VERSION } from '../../server/build-meta.generated.js'
 
@@ -62,6 +63,8 @@ describe('caribou-settings', () => {
     stopTheme = undefined
     document.body.replaceChildren()
     document.documentElement.removeAttribute('data-theme')
+    document.documentElement.removeAttribute('data-text-size')
+    textSize.value = 'md'
     users.value = new Map()
     activeUserKey.value = null
   })
@@ -149,6 +152,85 @@ describe('caribou-settings', () => {
       expect(document.documentElement.dataset.theme).toBe('dark')
       const status = inner(root, 'appearance').querySelector('[role="status"]')!
       expect(status.textContent).toMatch(/not saved/i)
+    })
+  })
+
+  describe('text size', () => {
+    const appearance = (root: ShadowRoot) => inner(root, 'appearance')
+    const radios = (root: ShadowRoot) =>
+      [...appearance(root).querySelectorAll<HTMLInputElement>('input[name="text-size"]')]
+    const pick = (input: HTMLInputElement) => {
+      input.checked = true
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    it('offers five steps in a labelled group, with the default checked', async () => {
+      const root = await mount()
+      const list = radios(root)
+      expect(list.map((r) => r.value)).toEqual(['xs', 'sm', 'md', 'lg', 'xl'])
+      expect(list.map((r) => r.closest('label')!.textContent!.trim()))
+        .toEqual(['Smallest', 'Smaller', 'Default', 'Larger', 'Largest'])
+      expect(list.find((r) => r.checked)?.value).toBe('md')
+      const group = list[0]!.closest('fieldset')!
+      expect(group.querySelector('legend')?.textContent).toBe('Text size')
+      const about = appearance(root).getElementById(group.getAttribute('aria-describedby')!)
+      expect(about?.textContent).toMatch(/this device, for every account/)
+      // Outside the group, so it is read once, as the description.
+      expect(group.contains(about)).toBe(false)
+    })
+
+    it('shows a sample post, hidden from assistive technology', async () => {
+      const sample = appearance(await mount()).querySelector('.sample')!
+      expect(sample.getAttribute('aria-hidden')).toBe('true')
+      expect(sample.textContent).toContain('@alice@example.social')
+    })
+
+    it('checks the stored step', async () => {
+      localStorage.setItem('caribou.textSize', 'lg')
+      expect(radios(await mount()).find((r) => r.checked)?.value).toBe('lg')
+    })
+
+    it('saves a choice for the device and applies it at once', async () => {
+      const list = radios(await mount())
+      pick(list[4]!)
+      expect(localStorage.getItem('caribou.textSize')).toBe('xl')
+      expect(document.documentElement.getAttribute('data-text-size')).toBe('xl')
+      // Not in the account's prefs.
+      expect(prefs().textSize).toBeUndefined()
+      pick(list[2]!)
+      expect(localStorage.getItem('caribou.textSize')).toBe('md')
+      expect(document.documentElement.hasAttribute('data-text-size')).toBe(false)
+    })
+
+    it('follows a change made in another tab', async () => {
+      const stop = startTextSize(window, document)
+      try {
+        const root = await mount()
+        localStorage.setItem('caribou.textSize', 'sm')
+        window.dispatchEvent(new StorageEvent('storage', { key: 'caribou.textSize', newValue: 'sm' }))
+        await settle(root.host.shadowRoot!.querySelector('caribou-settings-appearance') as LitElement)
+        expect(radios(root).find((r) => r.checked)?.value).toBe('sm')
+        expect(document.documentElement.getAttribute('data-text-size')).toBe('sm')
+      } finally {
+        stop()
+      }
+    })
+
+    it('a refused save keeps the stored step and says so', async () => {
+      localStorage.setItem('caribou.textSize', 'lg')
+      const root = await mount()
+      const list = radios(root)
+      const spy = refuseWrites()
+      try {
+        pick(list[0]!)
+        await settle(root.host.shadowRoot!.querySelector('caribou-settings-appearance') as LitElement)
+      } finally {
+        spy.mockRestore()
+      }
+      expect(list.find((r) => r.checked)?.value).toBe('lg')
+      expect(localStorage.getItem('caribou.textSize')).toBe('lg')
+      expect(document.documentElement.getAttribute('data-text-size')).not.toBe('xs')
+      expect(appearance(root).querySelector('[role="status"]')!.textContent).toMatch(/not saved/i)
     })
   })
 

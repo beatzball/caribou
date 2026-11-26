@@ -58,8 +58,9 @@ export class CaribouMutedWords extends LitElement {
     [role="alert"] { color: var(--danger); margin: var(--space-2) 0; }
     form:not([hidden]) { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-4); }
     label.field { display: flex; flex-direction: column; gap: var(--space-1); }
+    /* Never under 16px: iOS zooms the page into a smaller focused field (README, Text size). */
     input[type="text"], select {
-      font: inherit; color: var(--fg-0); background: var(--bg-1); border: 1px solid var(--input-border);
+      font: inherit; font-size: max(1em, 16px); color: var(--fg-0); background: var(--bg-1); border: 1px solid var(--input-border);
       border-radius: var(--radius-md); padding: var(--space-2);
     }
     fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-3); }

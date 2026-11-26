@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { ICONS_HEAD, PAGE_TITLE } from './brand-head.js'
 import { THEME_SCRIPT } from './theme-head.js'
+import { TEXT_SIZE_SCRIPT } from './text-size-head.js'
+import { TEXT_SIZE_CSS } from '../../components/_text-size.js'
 
 // The page that ends a sign-in. Only `/api/signin/callback` serves it, and
 // only after the callback checked this browser's `caribou.signin` cookie and
@@ -17,14 +19,17 @@ export interface CompletedSession {
 }
 
 // The page has no design tokens, so it names the two themes' colours
-// (`--fg-0`, `--bg-0`, `--accent` in tokens.css). THEME_SCRIPT in the head
-// sets `data-theme` before the first paint, as on every other page.
+// (`--fg-0`, `--bg-0`, `--accent` in tokens.css) and takes the text size
+// steps' rules from `TEXT_SIZE_CSS`. THEME_SCRIPT and TEXT_SIZE_SCRIPT in the
+// head set `data-theme` and `data-text-size` before the first paint, as on
+// the app's pages.
 const STYLE = `
     body { font-family: system-ui, sans-serif; padding: 2rem; color: #e4e4e7; background: #0d0d12; }
     a { color: #60a5fa; }
     html[data-theme="light"] { color-scheme: light; }
     html[data-theme="light"] body { color: #18181b; background: #fafafa; }
     html[data-theme="light"] a { color: #2563eb; }
+    ${TEXT_SIZE_CSS.replace(/\n/g, '\n    ')}
   `
 
 // Reads the session from the JSON block, stores it next to the accounts
@@ -81,12 +86,12 @@ const SCRIPT = `
 const sha256 = (text: string): string => `'sha256-${createHash('sha256').update(text).digest('base64')}'`
 
 /**
- * Only the page's own script, the theme script and the style may run. The
- * JSON block is data, not a script, so CSP does not apply to it.
+ * Only the page's own script, the theme and text size scripts and the style
+ * may run. The JSON block is data, not a script, so CSP does not apply to it.
  */
 export const COMPLETE_PAGE_CSP = [
   "default-src 'none'",
-  `script-src ${sha256(SCRIPT)} ${sha256(THEME_SCRIPT)}`,
+  `script-src ${sha256(SCRIPT)} ${sha256(THEME_SCRIPT)} ${sha256(TEXT_SIZE_SCRIPT)}`,
   `style-src ${sha256(STYLE)}`,
   "img-src 'self'",
   "base-uri 'none'",
@@ -118,6 +123,7 @@ function page(body: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>${STYLE}</style>
   <script>${THEME_SCRIPT}</script>
+  <script>${TEXT_SIZE_SCRIPT}</script>
 </head>
 <body>
 ${body}

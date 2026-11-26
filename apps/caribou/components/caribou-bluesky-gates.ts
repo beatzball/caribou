@@ -43,7 +43,8 @@ export class CaribouBlueskyGates extends LitElement {
     .group { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
     label { display: inline-flex; gap: var(--space-2); align-items: center; min-block-size: 2.25rem; }
     input { margin: 0; accent-color: var(--accent); }
-    select { font: inherit; min-block-size: 2.25rem; max-inline-size: 100%; }
+    /* Never under 16px: iOS zooms the page into a smaller focused field (README, Text size). */
+    select { font: inherit; font-size: max(1em, 16px); min-block-size: 2.25rem; max-inline-size: 100%; }
     .note { margin: 0; color: var(--fg-muted); font-size: 0.875rem; }
     .note:empty { display: none; }
     .note[data-problem] { color: var(--danger); }

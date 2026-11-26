@@ -284,8 +284,9 @@ export class CaribouComposeDialog extends LitElement {
     }
     .reply-to strong { color: var(--fg-0); }
     .acct { color: var(--fg-muted); }
+    /* Never under 16px: iOS zooms the page into a smaller focused field (README, Text size). */
     textarea, input[type="text"], select {
-      width: 100%; font: inherit; color: var(--fg-0); background: var(--bg-1);
+      width: 100%; font: inherit; font-size: max(1em, 16px); color: var(--fg-0); background: var(--bg-1);
       border: 1px solid var(--input-border); border-radius: var(--radius-md); padding: var(--space-2);
     }
     input::placeholder, textarea::placeholder { color: var(--fg-muted); opacity: 1; }

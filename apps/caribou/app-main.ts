@@ -18,6 +18,7 @@ import {
 } from './components/_switch-account.js'
 import { installPreloadErrorReload, withStaleBuildReload } from './components/_stale-build.js'
 import { startTheme } from './components/_theme.js'
+import { startTextSize } from './components/_text-size.js'
 import { startChangelogSeen } from './components/_changelog-seen.js'
 import { startShortcuts } from './components/_shortcuts.js'
 import { installBlueskyDriver, loadsAccountOn } from './components/_bluesky-session.js'
@@ -40,6 +41,8 @@ if (typeof window !== 'undefined') {
   // The head script set the theme before the first paint; this keeps it in
   // step with /settings, an account switch and the system setting.
   startTheme(window, document)
+  // The same for the text size, which is per device: /settings and other tabs.
+  startTextSize(window, document)
   // A session from sign-in has no account yet. Load it in the background,
   // now and whenever the active user changes.
   // Not on the Bluesky callback page, which leaves for /home at once.

@@ -124,16 +124,16 @@ export class CaribouNavRail extends LitElement {
     .compose-btn::part(button) { justify-content: flex-start; }
     :host([signed-out]) caribou-signout-form,
     :host([signed-out]) .signed-in-only { display: none; }
-    .icon { font-size: 20px; flex-shrink: 0; }
+    .icon { font-size: 1.25rem; flex-shrink: 0; }
     /* The icon and the count share one box, so the badge can sit on the
        icon's corner when the label is hidden. */
     .icon-wrap { position: relative; display: inline-flex; }
     .more-trigger { display: inline-flex; }
     .badge {
       position: absolute; top: -6px; right: -8px;
-      min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
-      border-radius: 8px; background: var(--accent); color: var(--bg-0);
-      font-size: 11px; font-weight: 600; line-height: 16px; text-align: center;
+      min-width: 1rem; height: 1rem; padding: 0 0.25rem; box-sizing: border-box;
+      border-radius: 0.5rem; background: var(--accent); color: var(--bg-0);
+      font-size: 0.6875rem; font-weight: 600; line-height: 1rem; text-align: center;
     }
     .sr-only {
       position: absolute; width: 1px; height: 1px; overflow: hidden;
@@ -154,7 +154,7 @@ export class CaribouNavRail extends LitElement {
       width: 32px; height: 32px; flex: none; border-radius: 50%; object-fit: cover;
       background: var(--bg-2); color: var(--fg-1);
       display: inline-flex; align-items: center; justify-content: center;
-      font-weight: 600; font-size: 14px; text-transform: uppercase;
+      font-weight: 600; font-size: 0.875rem; text-transform: uppercase;
     }
     .who-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
     .who-name, .who-acct {

@@ -85,8 +85,9 @@ export class CaribouSearch extends LitElement {
   static override styles = [boxReset, css`
     :host { display: block; }
     form { display: flex; gap: var(--space-2); padding: 0 var(--space-3) var(--space-3); }
+    /* Never under 16px: iOS zooms the page into a smaller focused field (README, Text size). */
     input {
-      flex: 1; min-width: 0; font: inherit; color: var(--fg-0);
+      flex: 1; min-width: 0; font: inherit; font-size: max(1em, 16px); color: var(--fg-0);
       background: var(--bg-1); border: 1px solid var(--input-border); border-radius: var(--radius-md);
       padding: var(--space-2) var(--space-3); min-height: 44px;
     }
@@ -96,7 +97,7 @@ export class CaribouSearch extends LitElement {
        <caribou-button type="submit"> cannot do (README, Shared controls). */
     .submit {
       display: inline-flex; align-items: center; justify-content: center;
-      min-width: 44px; min-height: 44px; font-size: 20px; color: var(--fg-1);
+      min-width: 44px; min-height: 44px; font-size: 1.25rem; color: var(--fg-1);
       background: var(--bg-1); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer;
     }
     .submit:hover { color: var(--fg-0); }
