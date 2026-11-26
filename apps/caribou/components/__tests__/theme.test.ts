@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { activeUserKey, users } from '@beatzball/caribou-state'
 import type { UserKey } from '@beatzball/caribou-auth'
 import {
-  THEME_COLORS, applyTheme, resolveTheme, setThemePref, startTheme, themeFromStorage,
+  THEME_COLORS, applyTheme, chromeDim, dimChrome, dimmed, resolveTheme, setThemePref, startTheme,
+  themeColor, themeFromStorage,
 } from '../_theme.js'
+import { DIM } from '../_media-dim.js'
 import { THEME_HEAD } from '../../server/lib/theme-head.js'
 import { THEME_COLOR } from '../../server/lib/brand-head.js'
 
@@ -90,8 +92,52 @@ describe('THEME_COLORS', () => {
   })
 })
 
+describe('dimmed', () => {
+  it('is black at that alpha over the colour', () => {
+    expect(dimmed('#fafafa', 0.55)).toBe('#717171')
+    expect(dimmed('#0d0d12', 0.55)).toBe('#060608')
+    expect(dimmed('#fafafa', 0.8)).toBe('#323232')
+    expect(dimmed('#fafafa', 0.85)).toBe('#262626')
+    expect(dimmed('#ff8000', 0.5)).toBe('#804000')
+  })
+
+  it('keeps the colour at 0, is black at 1, and clamps outside that', () => {
+    expect(dimmed('#fafafa', 0)).toBe('#fafafa')
+    expect(dimmed('#fafafa', 1)).toBe('#000000')
+    expect(dimmed('#fafafa', -1)).toBe('#fafafa')
+    expect(dimmed('#fafafa', 2)).toBe('#000000')
+  })
+
+  it('every dim of the media viewer darkens both theme colours', () => {
+    for (const pct of Object.values(DIM)) {
+      for (const theme of ['light', 'dark'] as const) {
+        const c = themeColor(theme, pct / 100)
+        expect(c).toMatch(/^#[0-9a-f]{6}$/)
+        expect(parseInt(c.slice(1, 3), 16)).toBeLessThan(parseInt(THEME_COLORS[theme].slice(1, 3), 16))
+      }
+    }
+  })
+})
+
+describe('themeColor', () => {
+  it('is the page colour with no dim, and the dim over it with one', () => {
+    expect(themeColor('light', null)).toBe(THEME_COLORS.light)
+    expect(themeColor('dark', null)).toBe(THEME_COLORS.dark)
+    expect(themeColor('light', 0.55)).toBe(dimmed(THEME_COLORS.light, 0.55))
+  })
+})
+
 describe('applyTheme', () => {
   afterEach(() => { document.head.innerHTML = '' })
+
+  it('with a dim, the theme-color meta is the dim over the page colour', () => {
+    const meta = document.createElement('meta')
+    meta.name = 'theme-color'
+    document.head.append(meta)
+    applyTheme(document, 'light', 0.55)
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(meta.content).toBe('#717171')
+  })
 
   it('sets data-theme and the theme-color meta', () => {
     const meta = document.createElement('meta')
@@ -147,6 +193,68 @@ describe('startTheme', () => {
 
     activeUserKey.value = null
     expect(document.documentElement.dataset.theme).toBe('dark')
+  })
+
+  describe('with a full-screen dim (the media viewer)', () => {
+    let meta: HTMLMetaElement
+    const content = () => meta.getAttribute('content')
+    afterEach(() => {
+      chromeDim.value = null
+      meta.remove()
+    })
+
+    function start(light: boolean) {
+      meta = document.createElement('meta')
+      meta.name = 'theme-color'
+      document.head.append(meta)
+      const media = fakeMedia(light)
+      users.value = new Map([[key, { userKey: key } as never]])
+      activeUserKey.value = key
+      setThemePref('system')
+      stop = startTheme(media.win, document)
+      return media
+    }
+
+    it('dims the bars while open and gives the page colour back on close', () => {
+      start(true)
+      expect(content()).toBe(THEME_COLORS.light)
+      const undo = dimChrome(0.55)
+      expect(content()).toBe(dimmed(THEME_COLORS.light, 0.55))
+      undo()
+      expect(content()).toBe(THEME_COLORS.light)
+      expect(chromeDim.value).toBeNull()
+    })
+
+    it('a theme change while open dims the new theme, and close leaves the new theme, not the old one', () => {
+      const media = start(true)
+      const undo = dimChrome(0.85)
+      expect(content()).toBe(dimmed(THEME_COLORS.light, 0.85))
+      media.fire(false)
+      expect(document.documentElement.dataset.theme).toBe('dark')
+      expect(content()).toBe(dimmed(THEME_COLORS.dark, 0.85))
+      undo()
+      expect(content()).toBe(THEME_COLORS.dark)
+    })
+
+    it('a setting change while open does the same', () => {
+      start(false)
+      const undo = dimChrome(0.8)
+      setThemePref('light')
+      expect(content()).toBe(dimmed(THEME_COLORS.light, 0.8))
+      undo()
+      expect(content()).toBe(THEME_COLORS.light)
+    })
+
+    it('a late undo from a replaced dim leaves the newer dim alone; undo twice is harmless', () => {
+      start(true)
+      const first = dimChrome(0.55)
+      const second = dimChrome(0.85)
+      first()
+      expect(content()).toBe(dimmed(THEME_COLORS.light, 0.85))
+      second()
+      second()
+      expect(content()).toBe(THEME_COLORS.light)
+    })
   })
 
   it('stops listening when stopped', () => {

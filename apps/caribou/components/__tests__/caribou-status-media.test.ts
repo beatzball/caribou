@@ -4,6 +4,8 @@ import '../caribou-status-card.js'
 import '../caribou-status-media.js'
 import { CaribouStatusMedia, aspectOf } from '../caribou-status-media.js'
 import { httpUrl } from '../_http-url.js'
+import { DIM, dimOf } from '../_media-dim.js'
+import { chromeDim } from '../_theme.js'
 import type { CaribouStatusCard } from '../caribou-status-card.js'
 
 type Media = CaribouStatusMedia['media'][number]
@@ -227,18 +229,22 @@ describe('<caribou-status-media>', () => {
 
   // No browser in the e2e runs lacks backdrop-filter, and only Chromium can
   // emulate reduced transparency, so the two fallbacks are checked here.
-  it('the viewer falls back to an 85% backdrop and solid surfaces with reduced transparency, and to a darker tint without blur', () => {
-    const cssText = (CaribouStatusMedia.styles as CSSResult[]).map((s) => s.cssText).join('\n')
-    const block = (head: string) => {
-      const start = cssText.indexOf(head)
-      expect(start, head).toBeGreaterThanOrEqual(0)
-      let depth = 0
-      for (let i = cssText.indexOf('{', start); i < cssText.length; i++) {
-        if (cssText[i] === '{') depth++
-        else if (cssText[i] === '}' && --depth === 0) return cssText.slice(start, i + 1).replace(/\s+/g, ' ')
-      }
-      throw new Error(`unclosed ${head}`)
+  const cssText = (CaribouStatusMedia.styles as CSSResult[]).map((s) => s.cssText).join('\n')
+  // The rule or block that starts at `head` (from `from` on), on one line.
+  const block = (head: string, from = 0) => {
+    const start = cssText.indexOf(head, from)
+    expect(start, head).toBeGreaterThanOrEqual(0)
+    let depth = 0
+    for (let i = cssText.indexOf('{', start); i < cssText.length; i++) {
+      if (cssText[i] === '{') depth++
+      else if (cssText[i] === '}' && --depth === 0) return cssText.slice(start, i + 1).replace(/\s+/g, ' ')
     }
+    throw new Error(`unclosed ${head}`)
+  }
+  // The viewer's own `dialog { … }` rule.
+  const dialogRule = () => block('dialog {', cssText.indexOf('dialog {'))
+
+  it('the viewer falls back to an 85% backdrop and solid surfaces with reduced transparency, and to a darker tint without blur', () => {
     const reduced = block('@media (prefers-reduced-transparency: reduce)')
     expect(reduced).toMatch(/dialog::backdrop \{ background: rgb\(0 0 0 \/ 0\.85\); -webkit-backdrop-filter: none; backdrop-filter: none; \}/)
     expect(reduced).toMatch(/dialog :is\(\.hint, p\) \{ background: var\(--overlay-bg\); \}/)
@@ -246,6 +252,109 @@ describe('<caribou-status-media>', () => {
     const noBlur = block('@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))')
     expect(noBlur).toMatch(/dialog::backdrop \{ background: rgb\(0 0 0 \/ 0\.8\); \}/)
     expect(noBlur).toMatch(/dialog :is\(\.hint, p\) \{ background: rgb\(0 0 0 \/ 0\.8\); \}/)
+  })
+
+  // The backdrop, the edge strips and the theme-color show one dim. In each
+  // case the backdrop's alpha and the dialog's --dim (which the strips and
+  // the theme-color read) come from the same row of DIM.
+  it('each case sets the backdrop alpha and --dim from the same row of DIM', () => {
+    expect(DIM).toEqual({ blur: 55, solid: 80, reduced: 85 })
+    const cases: Array<[string, number]> = [
+      ['@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))', DIM.solid],
+      ['@media (prefers-reduced-transparency: reduce)', DIM.reduced],
+    ]
+    expect(dialogRule()).toContain(`--dim: ${DIM.blur}%;`)
+    expect(block('dialog::backdrop {')).toContain(`background: rgb(0 0 0 / ${DIM.blur / 100});`)
+    for (const [head, pct] of cases) {
+      const b = block(head)
+      expect(b, head).toContain(`dialog { --dim: ${pct}%; }`)
+      expect(b, head).toContain(`dialog::backdrop { background: rgb(0 0 0 / ${pct / 100});`)
+    }
+    // Reduced transparency comes last, so it wins when both apply, for the
+    // backdrop and --dim alike.
+    expect(cssText.indexOf(cases[1]![0])).toBeGreaterThan(cssText.indexOf(cases[0]![0]))
+    // The strips are the dim over the page color.
+    expect(dialogRule()).toContain('--dim-page: color-mix(in srgb, black var(--dim), var(--bg-0));')
+  })
+
+  // Close, the hint and the description stay out of the notch and the home
+  // indicator on all four sides, in portrait and landscape.
+  it('the viewer fills the window and pads each side by the safe area or 2.5%, whichever is more', () => {
+    const rule = dialogRule()
+    expect(rule).toContain('inset: 0; margin: 0;')
+    expect(rule).toContain('max-width: none; max-height: none;')
+    for (const [side, unit] of [['top', 'dvh'], ['right', 'vw'], ['bottom', 'dvh'], ['left', 'vw']]) {
+      expect(rule, side).toContain(`calc(max(2.5${unit}, env(safe-area-inset-${side}, 0px)) + var(--space-3))`)
+    }
+  })
+
+  it('the edge strips are fixed, full width, the opaque dim, under the content, take no clicks, and only on touch screens', () => {
+    const coarse = block('@media (pointer: coarse)', cssText.indexOf('dialog .edge {'))
+    expect(coarse).toContain('dialog .edge { display: block; position: fixed; inset-inline: 0; z-index: -1; block-size: 12px; pointer-events: none; background-color: var(--dim-page); }')
+    expect(coarse).toContain('dialog .edge.top { inset-block-start: 0; }')
+    expect(coarse).toContain('dialog .edge.bottom { inset-block-end: 0; }')
+    expect(cssText).toMatch(/dialog \.edge \{ display: none; \}\s*@media \(pointer: coarse\)/)
+  })
+})
+
+describe('<caribou-status-media> viewer and the browser bars', () => {
+  beforeEach(() => {
+    document.body.replaceChildren()
+    chromeDim.value = null
+  })
+
+  async function openViewer(el: CaribouStatusMedia) {
+    ;($(el, 'a.thumb') as HTMLElement).click()
+    while (!(await el.updateComplete)) { /* render again */ }
+    await new Promise((r) => setTimeout(r, 0))
+    return $(el, 'dialog') as HTMLDialogElement
+  }
+
+  it('dims the bars while open, with the dim the dialog shows, and undims on close', async () => {
+    const el = await mount([media('a', { description: 'A red fox' })])
+    expect($$(el, '.edge')).toHaveLength(0)
+    const dialog = await openViewer(el)
+    expect(dialog.open).toBe(true)
+    expect(chromeDim.value).toBe(dimOf(dialog))
+    const edges = $$(el, 'dialog > .edge')
+    expect(edges.map((e) => e.className)).toEqual(['edge top', 'edge bottom'])
+    for (const e of edges) expect(e.getAttribute('aria-hidden')).toBe('true')
+
+    dialog.close()
+    dialog.dispatchEvent(new Event('close'))
+    expect(chromeDim.value).toBeNull()
+    await el.updateComplete
+    expect($$(el, '.edge')).toHaveLength(0)
+  })
+
+  it('a viewer taken out of the page while open undims the bars', async () => {
+    const el = await mount([media('a')])
+    await openViewer(el)
+    expect(chromeDim.value).not.toBeNull()
+    document.body.replaceChildren()
+    expect(chromeDim.value).toBeNull()
+  })
+
+  it('a close event that comes after the viewer opened again keeps the dim', async () => {
+    const el = await mount([media('a')])
+    const dialog = await openViewer(el)
+    dialog.close()
+    const again = await openViewer(el)
+    expect(again.open).toBe(true)
+    dialog.dispatchEvent(new Event('close'))
+    expect(chromeDim.value).toBe(dimOf(again))
+  })
+
+  it('dimOf reads --dim, and falls back to the blur row', () => {
+    const d = document.createElement('div')
+    document.body.append(d)
+    expect(dimOf(d)).toBe(DIM.blur / 100)
+    d.style.setProperty('--dim', '85%')
+    expect(dimOf(d)).toBe(0.85)
+    d.style.setProperty('--dim', 'bogus')
+    expect(dimOf(d)).toBe(DIM.blur / 100)
+    d.style.setProperty('--dim', '150%')
+    expect(dimOf(d)).toBe(DIM.blur / 100)
   })
 })
 

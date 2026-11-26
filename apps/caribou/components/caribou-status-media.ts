@@ -8,6 +8,8 @@ import {
   IDENTITY, KEY_STEP, PAN_STEP, clampPan, doubleTap, isZoomed, panBy, pinch, transformOf,
   wheelScale, zoomAt, type Bounds, type Point, type Zoom,
 } from './_media-zoom.js'
+import { DIM, dimOf } from './_media-dim.js'
+import { dimChrome } from './_theme.js'
 import './caribou-button.js'
 
 type Media = MediaAttachment
@@ -159,20 +161,64 @@ export class CaribouStatusMedia extends LitElement {
     caribou-button.hide::part(button) { padding: var(--space-1) var(--space-2); }
     /* Drawn over the media, so the ring goes inside the box. */
     caribou-button:is(.reveal, .hide)::part(button):focus-visible { outline-offset: -2px; }
-    /* The viewer fills most of the screen, so a zoomed image has room. It
-       draws no box of its own: the image floats over the blurred page. */
+    /* The viewer fills the window, so a zoomed image has room and the dim
+       reaches every edge. Its padding keeps the image, Close and the
+       description 2.5% in from each side, as before, and out of the notch
+       and the home indicator (the safe area). It draws no box of its own:
+       the image floats over the blurred page. */
     dialog {
-      width: 95vw; height: 95vh; height: 95dvh;
-      max-width: 95vw; max-height: 95vh; max-height: 95dvh; padding: var(--space-3);
+      inset: 0; margin: 0;
+      width: auto; height: auto; max-width: none; max-height: none;
+      padding:
+        calc(max(2.5vh, env(safe-area-inset-top, 0px)) + var(--space-3))
+        calc(max(2.5vw, env(safe-area-inset-right, 0px)) + var(--space-3))
+        calc(max(2.5vh, env(safe-area-inset-bottom, 0px)) + var(--space-3))
+        calc(max(2.5vw, env(safe-area-inset-left, 0px)) + var(--space-3));
+      padding-block:
+        calc(max(2.5dvh, env(safe-area-inset-top, 0px)) + var(--space-3))
+        calc(max(2.5dvh, env(safe-area-inset-bottom, 0px)) + var(--space-3));
       color: var(--overlay-fg); background: transparent;
       border: 0; border-radius: 0; box-shadow: none;
+      /* The dim in percent black (_media-dim.ts), and that dim over the
+         page color: what the page looks like under the backdrop. */
+      --dim: ${DIM.blur}%;
+      --dim-page: color-mix(in srgb, black var(--dim), var(--bg-0));
     }
     /* A dark tint in both themes and a blur: the page keeps its shape but
        cannot be read. Plain values, as a ::backdrop does not inherit
        custom properties in every browser. */
     dialog::backdrop {
-      background: rgb(0 0 0 / 0.55);
+      background: rgb(0 0 0 / ${DIM.blur / 100});
       -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    }
+    /* The browser's own bars sit outside the page, so the backdrop cannot
+       reach them. Safari 26 on iOS colors its status bar and bottom bar
+       from a fixed element at the middle of each edge of the page: its
+       background color, when it spans the width. A strip at each edge in
+       the dim over the page color gives both bars the dim, over the color
+       a sticky header or the nav bar gave them. Older Safari and Chrome
+       follow the theme-color meta instead (dimChrome, _theme.ts). The
+       strips sit under the dialog's content and take no clicks; a short
+       fade hides their inner edge. Touch screens only: a desktop has no
+       such bars. */
+    dialog .edge { display: none; }
+    @media (pointer: coarse) {
+      dialog .edge {
+        display: block; position: fixed; inset-inline: 0; z-index: -1;
+        block-size: 12px; pointer-events: none;
+        background-color: var(--dim-page);
+      }
+      dialog .edge.top { inset-block-start: 0; }
+      dialog .edge.bottom { inset-block-end: 0; }
+      dialog .edge::after {
+        content: ''; position: absolute; inset-inline: 0; block-size: 12px;
+      }
+      dialog .edge.top::after {
+        inset-block-start: 100%; background: linear-gradient(var(--dim-page), transparent);
+      }
+      dialog .edge.bottom::after {
+        inset-block-end: 100%; background: linear-gradient(transparent, var(--dim-page));
+      }
     }
     /* The key hint, the description and Close each sit on a small dark
        surface of their own, so they read over any page. No blur of their
@@ -190,15 +236,17 @@ export class CaribouStatusMedia extends LitElement {
     }
     /* No blur: a darker tint, so the image and the text still stand out. */
     @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-      dialog::backdrop { background: rgb(0 0 0 / 0.8); }
+      dialog { --dim: ${DIM.solid}%; }
+      dialog::backdrop { background: rgb(0 0 0 / ${DIM.solid / 100}); }
       dialog :is(.hint, p) { background: rgb(0 0 0 / 0.8); }
       dialog caribou-button.close { --caribou-button-bg: rgb(0 0 0 / 0.8); }
     }
     /* The reader asked for less see-through: a near-opaque backdrop (85%
        black), solid surfaces, no blur. */
     @media (prefers-reduced-transparency: reduce) {
+      dialog { --dim: ${DIM.reduced}%; }
       dialog::backdrop {
-        background: rgb(0 0 0 / 0.85);
+        background: rgb(0 0 0 / ${DIM.reduced / 100});
         -webkit-backdrop-filter: none; backdrop-filter: none;
       }
       dialog :is(.hint, p) { background: var(--overlay-bg); }
@@ -281,6 +329,8 @@ export class CaribouStatusMedia extends LitElement {
 
   private opener: HTMLElement | null = null
   private motionQuery: MediaQueryList | null = null
+  // Undoes the dim on the browser's own bars, while the viewer is open.
+  private undimChrome: (() => void) | null = null
 
   // The lightbox image's zoom. It is written to the image's style by hand,
   // not rendered: a pointer move must not wait for an update.
@@ -322,6 +372,7 @@ export class CaribouStatusMedia extends LitElement {
     this.motionQuery = null
     window.removeEventListener('resize', this.onResize)
     this.cancelClose()
+    this.undim()
     super.disconnectedCallback()
   }
 
@@ -375,10 +426,19 @@ export class CaribouStatusMedia extends LitElement {
     // Focus Close by hand, as the edit history dialog does, rather than
     // trust the browser to find the button inside the shared control's root.
     void this.updateComplete.then(() => {
-      this.dialog?.showModal()
+      const dialog = this.dialog
+      if (!dialog) return
+      dialog.showModal()
       this.renderRoot.querySelector<HTMLElement>('caribou-button.close')?.focus()
       window.addEventListener('resize', this.onResize)
+      this.undim()
+      this.undimChrome = dimChrome(dimOf(dialog))
     })
+  }
+
+  private undim() {
+    this.undimChrome?.()
+    this.undimChrome = null
   }
 
   private onDialogClose = () => {
@@ -387,6 +447,7 @@ export class CaribouStatusMedia extends LitElement {
     // viewer again; this late event must not empty it.
     if (this.dialog?.open) return
     window.removeEventListener('resize', this.onResize)
+    this.undim()
     this.resetZoom()
     this.viewing = -1
     this.opener?.focus()
@@ -707,6 +768,8 @@ export class CaribouStatusMedia extends LitElement {
         @pointerdown=${this.onDialogPointerDown}>
         ${m
           ? html`
+              <div class="edge top" aria-hidden="true"></div>
+              <div class="edge bottom" aria-hidden="true"></div>
               <div class="bar">
                 <span class="hint" id="zoom-hint">Keys: + and − to zoom, arrows to move, 0 to reset</span>
                 <caribou-button class="close" variant="secondary"

@@ -1760,7 +1760,12 @@ leaves dark. After that `startTheme` (`components/_theme.ts`, from
 system's setting. `<html>` is outside every template, so hydration is not
 touched. Light tokens are `[data-theme="light"]` in
 `packages/design-tokens/tokens.css`. `tests/e2e/settings.spec.ts` checks
-the first frame.
+the first frame. While a full-screen dim is open (the media viewer calls
+`dimChrome`), the theme-color is that dim over the page color, so the
+browser's bars look dimmed too; `startTheme` keeps it right through a
+theme change and gives the page color back on close. The viewer's dim
+levels are in `components/_media-dim.ts`, one table for the backdrop, the
+edge strips and the theme-color (`tests/e2e/media-viewer-edges.spec.ts`).
 
 **Default timeline**: Home, Local or Public. `/` forwards there (above), and
 the sign-in completion page goes there for an account that chose one.
