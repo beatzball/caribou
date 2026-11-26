@@ -175,18 +175,14 @@ export class CaribouStatusMedia extends LitElement {
       -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
     }
     /* The key hint, the description and Close each sit on a small dark
-       surface of their own, so they read over any page. */
-    dialog :is(.hint, p) {
-      color: var(--overlay-fg); background: rgb(0 0 0 / 0.65);
-      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-    }
+       surface of their own, so they read over any page. No blur of their
+       own: inside the top-layer dialog a backdrop-filter does not reach the
+       page, and changed no pixel (checked in Chromium and Firefox). */
+    dialog :is(.hint, p) { color: var(--overlay-fg); background: rgb(0 0 0 / 0.65); }
     dialog caribou-button.close {
       --caribou-button-bg: rgb(0 0 0 / 0.65); --caribou-button-fg: var(--overlay-fg);
     }
-    dialog caribou-button.close::part(button) {
-      border-color: rgb(255 255 255 / 0.3);
-      -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-    }
+    dialog caribou-button.close::part(button) { border-color: rgb(255 255 255 / 0.3); }
     /* White on black: the ring shows over any page and any image. */
     dialog caribou-button.close::part(button):focus-visible {
       outline: 2px solid var(--overlay-fg); outline-offset: 2px;
@@ -198,18 +194,15 @@ export class CaribouStatusMedia extends LitElement {
       dialog :is(.hint, p) { background: rgb(0 0 0 / 0.8); }
       dialog caribou-button.close { --caribou-button-bg: rgb(0 0 0 / 0.8); }
     }
-    /* The reader asked for less see-through: solid fills, no blur. */
+    /* The reader asked for less see-through: a near-opaque backdrop (85%
+       black), solid surfaces, no blur. */
     @media (prefers-reduced-transparency: reduce) {
       dialog::backdrop {
         background: rgb(0 0 0 / 0.85);
         -webkit-backdrop-filter: none; backdrop-filter: none;
       }
-      dialog :is(.hint, p) {
-        background: var(--overlay-bg);
-        -webkit-backdrop-filter: none; backdrop-filter: none;
-      }
+      dialog :is(.hint, p) { background: var(--overlay-bg); }
       dialog caribou-button.close { --caribou-button-bg: var(--overlay-bg); }
-      dialog caribou-button.close::part(button) { -webkit-backdrop-filter: none; backdrop-filter: none; }
     }
     /* Not on a closed dialog: its own display: none must win. */
     dialog[open] { display: flex; flex-direction: column; }
@@ -303,12 +296,15 @@ export class CaribouStatusMedia extends LitElement {
   // A Safari trackpad pinch, from the zoom it started at.
   private safariPinch: Zoom | null = null
   // The last tap on the stage was a single tap at 1x beside the image. The
-  // click that follows closes the viewer: the click, not the tap, so a
+  // click that follows starts the close: the click, not the tap, so a
   // touch's click cannot land on the page behind a viewer already closed.
   private emptyTap = false
   // Where the last press on the dialog went down, to tell a click from the
   // end of a drag.
   private press: Point | null = null
+  // A close waiting to see whether a click beside the image is the first of
+  // a double click.
+  private closeTimer: ReturnType<typeof setTimeout> | null = null
 
   // Listen on every connect, so an element moved in the DOM keeps following
   // the setting. Before the first render only the listener is added:
@@ -324,6 +320,7 @@ export class CaribouStatusMedia extends LitElement {
     this.motionQuery?.removeEventListener('change', this.onMotionChange)
     this.motionQuery = null
     window.removeEventListener('resize', this.onResize)
+    this.cancelClose()
     super.disconnectedCallback()
   }
 
@@ -395,29 +392,45 @@ export class CaribouStatusMedia extends LitElement {
     this.opener = null
   }
 
+  // A new press anywhere in the viewer: a waiting close is off.
   private onDialogPointerDown = (e: PointerEvent) => {
+    this.cancelClose()
     if (e.isPrimary) this.press = { x: e.clientX, y: e.clientY }
   }
 
-  // The viewer draws no box, so a click on any empty place closes it: the
-  // backdrop and the dialog's padding (both land on the dialog itself), the
-  // empty part of the bar, and at 1x the stage around the image. A click on
+  private cancelClose() {
+    if (this.closeTimer === null) return
+    clearTimeout(this.closeTimer)
+    this.closeTimer = null
+  }
+
+  // The viewer draws no box, so at 1x a click on any empty place closes it:
+  // the backdrop and the dialog's padding (both land on the dialog itself),
+  // the empty part of the bar, and the stage around the image. A click on
   // the image, the description or a control does not, and neither does the
-  // end of a drag, a pinch or a pan.
+  // end of a drag, a pinch or a pan. Zoomed, no click closes it.
   private onDialogClick = (e: MouseEvent) => {
     const dialog = this.dialog
     if (!dialog) return
     const target = e.target as Element
-    let empty = false
     if (this.stage?.contains(target)) {
-      // The stage's own pointer handlers told a tap from a gesture.
-      empty = this.emptyTap
-    } else if (target === dialog || target.matches('.bar')) {
-      const p = this.press
-      empty = !p || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= TAP_SLOP_PX
+      // The stage's own pointer handlers told a tap from a gesture. A tap
+      // beside the image may be the first of a double tap, which zooms:
+      // close only if no second press comes in time. The viewer stays open
+      // until then, so a second click never reaches the page behind.
+      if (this.emptyTap) {
+        this.cancelClose()
+        this.closeTimer = setTimeout(() => {
+          this.closeTimer = null
+          if (!isZoomed(this.zoom)) this.dialog?.close()
+        }, DOUBLE_TAP_MS)
+      }
+      this.emptyTap = false
+      return
     }
-    this.emptyTap = false
-    if (empty) dialog.close()
+    if (isZoomed(this.zoom) || !(target === dialog || target.matches('.bar'))) return
+    const p = this.press
+    if (!p || Math.hypot(e.clientX - p.x, e.clientY - p.y) <= TAP_SLOP_PX) dialog.close()
   }
 
   // At 1x the image's box on screen is the picture.
@@ -465,6 +478,7 @@ export class CaribouStatusMedia extends LitElement {
     this.safariPinch = null
     this.emptyTap = false
     this.press = null
+    this.cancelClose()
     this.stage?.removeAttribute('data-dragging')
     this.setZoom(IDENTITY)
   }

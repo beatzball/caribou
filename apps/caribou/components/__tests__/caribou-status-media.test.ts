@@ -227,7 +227,7 @@ describe('<caribou-status-media>', () => {
 
   // No browser in the e2e runs lacks backdrop-filter, and only Chromium can
   // emulate reduced transparency, so the two fallbacks are checked here.
-  it('the viewer falls back to solid fills with reduced transparency, and to a darker tint without blur', () => {
+  it('the viewer falls back to an 85% backdrop and solid surfaces with reduced transparency, and to a darker tint without blur', () => {
     const cssText = (CaribouStatusMedia.styles as CSSResult[]).map((s) => s.cssText).join('\n')
     const block = (head: string) => {
       const start = cssText.indexOf(head)
@@ -241,7 +241,7 @@ describe('<caribou-status-media>', () => {
     }
     const reduced = block('@media (prefers-reduced-transparency: reduce)')
     expect(reduced).toMatch(/dialog::backdrop \{ background: rgb\(0 0 0 \/ 0\.85\); -webkit-backdrop-filter: none; backdrop-filter: none; \}/)
-    expect(reduced).toMatch(/dialog :is\(\.hint, p\) \{ background: var\(--overlay-bg\); -webkit-backdrop-filter: none; backdrop-filter: none; \}/)
+    expect(reduced).toMatch(/dialog :is\(\.hint, p\) \{ background: var\(--overlay-bg\); \}/)
     expect(reduced).toMatch(/caribou-button\.close \{ --caribou-button-bg: var\(--overlay-bg\); \}/)
     const noBlur = block('@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))')
     expect(noBlur).toMatch(/dialog::backdrop \{ background: rgb\(0 0 0 \/ 0\.8\); \}/)

@@ -63,6 +63,30 @@ async function expectReadable(target: Locator) {
   expect(ratio(c.white.fg, c.white.bg), 'over a white page with no tint').toBeGreaterThanOrEqual(4.5)
 }
 
+// A click beside the image closes the viewer only once no second click
+// came for a double click (300ms). Wait past that before saying a click
+// did not close it.
+async function stillOpen(page: Page, dialog: Locator) {
+  await page.waitForTimeout(400)
+  await expect(dialog).toBeVisible()
+}
+
+// Record every click the document sees, and whether it was inside the
+// viewer's dialog.
+function recordClicks(page: Page) {
+  return page.evaluate(() => {
+    const w = window as Window & { inViewer?: boolean[] }
+    w.inViewer = []
+    document.addEventListener('click', (e) => {
+      w.inViewer!.push(e.composedPath().some((n) => n instanceof HTMLDialogElement))
+    }, true)
+  })
+}
+
+function clicks(page: Page) {
+  return page.evaluate(() => (window as Window & { inViewer?: boolean[] }).inViewer)
+}
+
 async function whitePage(page: Page, theme: 'light' | 'dark') {
   await page.evaluate((theme) => {
     document.documentElement.dataset.theme = theme
@@ -128,7 +152,7 @@ for (const theme of ['light', 'dark'] as const) {
   })
 }
 
-test('with reduced transparency the backdrop is solid and nothing blurs', async ({ page, browserName }) => {
+test('with reduced transparency the backdrop is an 85% black tint, the surfaces are solid, and nothing blurs', async ({ page, browserName }) => {
   test.skip(browserName !== 'chromium', 'Playwright cannot emulate reduced transparency; CDP is Chromium only')
   const cdp = await page.context().newCDPSession(page)
   await cdp.send('Emulation.setEmulatedMedia', {
@@ -173,21 +197,21 @@ test('a click on empty space closes the viewer; a click on the image, the text o
   await v.image.click()
   await v.dialog.locator('p').click()
   await v.dialog.locator('.hint').click()
-  await expect(v.dialog).toBeVisible()
+  await stillOpen(page, v.dialog)
 
   // A drag beside the image is not a click.
   await page.mouse.move(beside.x, beside.y)
   await page.mouse.down()
   await page.mouse.move(beside.x, beside.y + 80, { steps: 5 })
   await page.mouse.up()
-  await expect(v.dialog).toBeVisible()
+  await stillOpen(page, v.dialog)
   // Nor is one that starts on the padding and ends there.
   const dlg = (await v.dialog.boundingBox())!
   await page.mouse.move(dlg.x + 4, dlg.y + 100)
   await page.mouse.down()
   await page.mouse.move(dlg.x + 4, dlg.y + 200, { steps: 5 })
   await page.mouse.up()
-  await expect(v.dialog).toBeVisible()
+  await stillOpen(page, v.dialog)
 
   // A click on the stage beside the image closes it, and focus goes back.
   await page.mouse.click(beside.x, beside.y)
@@ -209,7 +233,25 @@ test('a click on empty space closes the viewer; a click on the image, the text o
   expect(new URL(page.url()).pathname).toBe('/home')
 })
 
-test('zoomed, a click on the stage beside the image does not close the viewer', async ({ page }) => {
+test('a double click beside the image zooms there; neither click reaches the page behind', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await openTimeline(page)
+  const v = viewer(page)
+  await v.thumb.click()
+  await opened(page)
+  const img = (await v.image.boundingBox())!
+  const stage = (await v.stage.boundingBox())!
+  expect(img.x - stage.x).toBeGreaterThan(40)
+  await recordClicks(page)
+
+  await page.mouse.dblclick((stage.x + img.x) / 2, img.y + img.height / 2)
+  await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(2.5)
+  await stillOpen(page, v.dialog)
+  expect(await clicks(page)).toEqual([true, true])
+  expect(new URL(page.url()).pathname).toBe('/home')
+})
+
+test('zoomed, no click closes the viewer: not beside the image, not on the padding, not on the backdrop', async ({ page }) => {
   // A tall picture: empty stage on each side, even zoomed in.
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await openTimeline(page, { portrait: true })
@@ -217,13 +259,19 @@ test('zoomed, a click on the stage beside the image does not close the viewer', 
   await v.thumb.click()
   await opened(page)
   const stage = (await v.stage.boundingBox())!
+  const dlg = (await v.dialog.boundingBox())!
 
   await page.keyboard.press('+')
   await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(1.5)
   const zoomed = (await v.image.boundingBox())!
   expect(zoomed.x - stage.x).toBeGreaterThan(40)
   await page.mouse.click(stage.x + 20, stage.y + 40)
-  await expect(v.dialog).toBeVisible()
+  await stillOpen(page, v.dialog)
+  // The padding and the backdrop wait for 1x too.
+  expect(dlg.x).toBeGreaterThan(10)
+  await page.mouse.click(dlg.x + 4, dlg.y + dlg.height / 2)
+  await page.mouse.click(5, 5)
+  await stillOpen(page, v.dialog)
   expect(scaleOf(await transformOf(v.image))).toBe(1.5)
 
   // Back at 1x the same kind of click closes it. A point far from the last
