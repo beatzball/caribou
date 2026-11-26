@@ -66,8 +66,9 @@ jobs:
   # one test at a time (workers: 1), so a job's time grows with the number
   # of tests. With one job per project (Nov 26 2026, 583 tests), webkit took
   # 11-15 min and timed out at 15 on main; firefox took 9-12, chromium 7-9,
-  # mobile-webkit 3-4. `--shard` splits the tests evenly by count. Give a
-  # project another shard when its slowest job passes 60% of the timeout.
+  # mobile-webkit 3-4. `--shard` splits the tests evenly by count, skipped
+  # tests included, so shard 1 (fewer skips) runs longest. Give a project
+  # another shard when its slowest job passes 60% of the timeout (9 min).
   # The `e2e` job below gathers the results.
   e2e-browser:
     # The release PR only bumps versions and changelogs. Its merge to main
@@ -77,7 +78,9 @@ jobs:
     if: ${{ !(github.head_ref == 'changeset-release/main' && github.event.pull_request.head.repo.full_name == github.repository) }}
     name: e2e (${{ matrix.project }} ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-latest
-    # The slowest shard takes about N min, setup included (about 1.5 min).
+    # Shard jobs on Nov 26 2026, setup included (under 1 min): firefox 5.6
+    # and 7.2 min, webkit 4.7-6.5, chromium 4.3-5.0, mobile-webkit 3.0.
+    # The slowest is under 50% of the timeout.
     timeout-minutes: 15
     needs: checks
     strategy:
