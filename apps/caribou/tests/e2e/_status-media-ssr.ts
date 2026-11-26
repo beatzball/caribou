@@ -42,9 +42,9 @@ export const SSR_STATUS_MEDIA = String.raw`<caribou-status-media ><template shad
           <!--/lit-part--><!--/lit-part-->
         </div>
         <!--lit-part--><!--/lit-part-->
-        <!--lit-part 9lrDgH7Jo/M=-->
-      <!--lit-node 0--><dialog aria-label="Image"  
-        >
+        <!--lit-part /0l86g5jYB0=-->
+      <!--lit-node 0--><dialog aria-label="Image" 
+          >
         <!--lit-part--><!--/lit-part-->
       </dialog>
     <!--/lit-part-->

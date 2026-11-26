@@ -1,6 +1,8 @@
 import type { Locator } from '@playwright/test'
 import { expect, test } from './_fixtures.js'
-import { centerOf, opened, openTimeline, pageScale, scaleOf, transformOf, viewer } from './_media-viewer.js'
+import {
+  LONG_ALT, centerOf, opened, openTimeline, pageScale, placeOf, pointOn, scaleOf, transformOf, viewer,
+} from './_media-viewer.js'
 
 // The media viewer on a phone (iPhone 15, WebKit): a pinch or a double tap
 // on the image zooms the image, and the page itself stays at 1x.
@@ -36,6 +38,11 @@ test('a pinch zooms the image, not the page, and Close stays in place', async ({
   expect(await v.stage.evaluate((el) => getComputedStyle(el).touchAction)).toBe('none')
   const closeBox = await v.close.boundingBox()
 
+  // A 4:3 picture on a phone is a strip at 1x; the stage is the viewer's
+  // free height.
+  const strip = (await v.image.boundingBox())!
+  expect((await v.stage.boundingBox())!.height).toBeGreaterThan(strip.height * 1.5)
+
   const c = await centerOf(v.image)
   await touches(v.image, [
     { type: 'pointerdown', id: 1, x: c.x - 30, y: c.y },
@@ -51,6 +58,13 @@ test('a pinch zooms the image, not the page, and Close stays in place', async ({
   await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(3)
   expect(await pageScale(page)).toBe(1)
   expect(await v.close.boundingBox()).toEqual(closeBox)
+  // The zoomed image fills the whole stage, not only its 1x strip.
+  const stage = (await v.stage.boundingBox())!
+  const img = (await v.image.boundingBox())!
+  expect(img.x).toBeLessThanOrEqual(stage.x + 0.5)
+  expect(img.y).toBeLessThanOrEqual(stage.y + 0.5)
+  expect(img.x + img.width).toBeGreaterThanOrEqual(stage.x + stage.width - 0.5)
+  expect(img.y + img.height).toBeGreaterThanOrEqual(stage.y + stage.height - 0.5)
 
   // One finger pans the zoomed image.
   const zoomed = await transformOf(v.image)
@@ -95,4 +109,28 @@ test('a double tap toggles 2.5x; a tap on the image keeps the viewer, one on the
   // At 1x a tap on the backdrop does.
   await page.touchscreen.tap(4, 4)
   await expect(v.dialog).toBeHidden()
+})
+
+test('a tall image with a long description: a double tap keeps the tapped point in place', async ({ page }) => {
+  // No easing, so the box is final at once.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await openTimeline(page, { portrait: true, alt: LONG_ALT })
+  const v = viewer(page)
+  await v.thumb.tap()
+  await opened(page)
+
+  const c = await centerOf(v.image)
+  const box = (await v.image.boundingBox())!
+  const at = { x: c.x + box.width / 6, y: c.y - box.height / 8 }
+  const p = await pointOn(v.image, at)
+  const tap: Step[] = [
+    { type: 'pointerdown', id: 1, x: at.x, y: at.y },
+    { type: 'pointerup', id: 1, x: at.x, y: at.y },
+  ]
+  await touches(v.image, [...tap, ...tap])
+  await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(2.5)
+  const now = await placeOf(v.image, p)
+  expect(Math.abs(now.x - at.x)).toBeLessThan(1)
+  expect(Math.abs(now.y - at.y)).toBeLessThan(1)
+  expect(await pageScale(page)).toBe(1)
 })

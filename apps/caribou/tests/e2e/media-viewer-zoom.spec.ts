@@ -1,5 +1,7 @@
 import { expect, test } from './_fixtures.js'
-import { centerOf, opened, openTimeline, pageScale, scaleOf, transformOf, viewer } from './_media-viewer.js'
+import {
+  LONG_ALT, centerOf, opened, openTimeline, pageScale, placeOf, pointOn, scaleOf, transformOf, viewer,
+} from './_media-viewer.js'
 
 // The media viewer zooms its image, never the page: ctrl+wheel (a trackpad
 // pinch arrives as one), a double click, and the + / - / 0 keys.
@@ -63,8 +65,29 @@ test('keys zoom in, out and back; closing and opening again starts at 1x', async
   }
   expect(await transformOf(v.image)).toBe('')
 
+  // The dialog names the keys.
+  await expect(v.dialog).toHaveAccessibleDescription(/\+ and − to zoom, arrows to move, 0 to reset/)
+  // At 1x the arrows are not taken: they scroll as usual.
+  const arrowTaken = () => v.close.evaluate((el) => {
+    const e = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true, cancelable: true })
+    el.dispatchEvent(e)
+    return e.defaultPrevented
+  })
+  expect(await arrowTaken()).toBe(false)
+
+  // Zoomed, the arrows move the image: right shows more of the right side.
   await page.keyboard.press('+')
-  await expect.poll(() => transformOf(v.image)).not.toBe('')
+  await page.keyboard.press('+')
+  await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(2.25)
+  const xOf = async () => Number(/translate\((-?[\d.]+)px/.exec(await transformOf(v.image))?.[1] ?? 0)
+  const yOf = async () => Number(/translate\(-?[\d.]+px, (-?[\d.]+)px/.exec(await transformOf(v.image))?.[1] ?? 0)
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(xOf).toBeLessThan(0)
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(xOf).toBe(0)
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(yOf).toBeLessThan(0)
+  expect(await arrowTaken()).toBe(true)
   await page.keyboard.press('Escape')
   await expect(v.dialog).toBeHidden()
   await expect(v.thumb).toBeFocused()
@@ -93,6 +116,28 @@ test('a double click toggles 2.5x on that point; a click on the image does not c
   // At 1x the backdrop still closes it.
   await page.mouse.click(5, 5)
   await expect(v.dialog).toBeHidden()
+})
+
+test('a tall image with a long description: a double click keeps the clicked point in place', async ({ page }) => {
+  // No easing, so the box is final at once.
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await openTimeline(page, { portrait: true, alt: LONG_ALT })
+  const v = viewer(page)
+  await v.thumb.click()
+  await opened(page)
+  const img = (await v.image.boundingBox())!
+  const stage = (await v.stage.boundingBox())!
+  // The description is wider than the image, so the stage is too.
+  expect(stage.width).toBeGreaterThan(img.width)
+
+  const c = await centerOf(v.image)
+  const at = { x: c.x, y: c.y - img.height / 4 }
+  const p = await pointOn(v.image, at)
+  await page.mouse.dblclick(at.x, at.y)
+  await expect.poll(async () => scaleOf(await transformOf(v.image))).toBe(2.5)
+  const now = await placeOf(v.image, p)
+  expect(Math.abs(now.x - at.x)).toBeLessThan(1)
+  expect(Math.abs(now.y - at.y)).toBeLessThan(1)
 })
 
 test('the zoom eases only without reduced motion', async ({ page }) => {

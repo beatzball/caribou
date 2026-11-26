@@ -5,8 +5,8 @@ import type { MediaAttachment } from '@beatzball/caribou-mastodon-client'
 import { boxReset } from './_shared-styles.js'
 import { httpUrl } from './_http-url.js'
 import {
-  IDENTITY, KEY_STEP, clampPan, doubleTap, isZoomed, panBy, pinch, transformOf,
-  wheelScale, zoomAt, type Point, type Size, type Zoom,
+  IDENTITY, KEY_STEP, PAN_STEP, clampPan, doubleTap, isZoomed, panBy, pinch, transformOf,
+  wheelScale, zoomAt, type Bounds, type Point, type Zoom,
 } from './_media-zoom.js'
 import './caribou-button.js'
 
@@ -159,19 +159,31 @@ export class CaribouStatusMedia extends LitElement {
     caribou-button.hide::part(button) { padding: var(--space-1) var(--space-2); }
     /* Drawn over the media, so the ring goes inside the box. */
     caribou-button:is(.reveal, .hide)::part(button):focus-visible { outline-offset: -2px; }
+    /* The viewer fills most of the screen, so a zoomed image has room. */
     dialog {
-      max-width: 95vw; max-height: 95vh; padding: var(--space-3);
+      width: 95vw; height: 95vh; height: 95dvh;
+      max-width: 95vw; max-height: 95vh; max-height: 95dvh; padding: var(--space-3);
       color: var(--fg-0); background: var(--bg-1);
       border: 1px solid var(--border); border-radius: var(--radius-md);
     }
     dialog::backdrop { background: rgb(0 0 0 / 0.85); }
-    dialog img { width: auto; height: auto; max-width: 100%; max-height: 80vh; margin: 0 auto; object-fit: contain; }
-    /* The zoom surface. It takes pinch and pan from the browser, so the
-       page does not zoom; the rest of the dialog and the page keep page
-       zoom. It clips the zoomed image, so the Close bar stays clear. */
+    /* Not on a closed dialog: its own display: none must win. */
+    dialog[open] { display: flex; flex-direction: column; }
+    /* The zoom surface: the dialog's free height, at least half the screen.
+       It takes pinch and pan from the browser, so the page does not zoom;
+       the rest of the dialog and the page keep page zoom. It clips the
+       zoomed image, so the Close bar stays clear. */
     dialog .stage {
+      position: relative; flex: 1 1 auto; min-height: 50vh;
       overflow: hidden; touch-action: none;
       user-select: none; -webkit-user-select: none;
+    }
+    /* At 1x the image fits the stage, centered, and is never made bigger
+       than its file. */
+    dialog .stage img {
+      display: block; position: absolute; inset: 0; margin: auto;
+      width: auto; height: auto; max-width: 100%; max-height: 100%;
+      object-fit: contain;
     }
     dialog .stage[data-zoomed] { cursor: grab; }
     dialog .stage[data-zoomed][data-dragging] { cursor: grabbing; }
@@ -182,8 +194,17 @@ export class CaribouStatusMedia extends LitElement {
     @media (prefers-reduced-motion: reduce) {
       dialog .stage img { transition: none; }
     }
-    dialog p { margin: var(--space-2) 0 0; max-width: 60ch; white-space: pre-wrap; }
-    dialog .bar { display: flex; justify-content: flex-end; margin-bottom: var(--space-2); }
+    dialog p { flex: none; margin: var(--space-2) 0 0; max-width: 60ch; white-space: pre-wrap; }
+    dialog .bar {
+      flex: none; display: flex; align-items: center; justify-content: space-between;
+      gap: var(--space-2); margin-bottom: var(--space-2);
+    }
+    dialog .bar caribou-button { margin-inline-start: auto; }
+    .hint { font-size: 0.875rem; color: var(--fg-1); }
+    /* No keyboard to speak of; the dialog still names the keys. */
+    @media (pointer: coarse) {
+      .hint { display: none; }
+    }
   `]
 
   @property({ attribute: false }) media: Media[] = []
@@ -323,10 +344,15 @@ export class CaribouStatusMedia extends LitElement {
 
   // ---- Zoom -------------------------------------------------------------
 
-  // The image's size at 1x. The transform does not change it.
-  private frame(): Size {
+  // The image's size at 1x, and the stage's. The transform changes
+  // neither.
+  private bounds(): Bounds {
     const img = this.zoomImg
-    return { width: img?.offsetWidth ?? 0, height: img?.offsetHeight ?? 0 }
+    const stage = this.stage
+    return {
+      image: { width: img?.offsetWidth ?? 0, height: img?.offsetHeight ?? 0 },
+      stage: { width: stage?.clientWidth ?? 0, height: stage?.clientHeight ?? 0 },
+    }
   }
 
   // A point on screen, from the image's center at 1x. The image is
@@ -359,7 +385,7 @@ export class CaribouStatusMedia extends LitElement {
 
   // A new window size moves the image's bounds; keep it inside them.
   private onResize = () => {
-    this.setZoom(clampPan(this.zoom, this.frame()))
+    this.setZoom(clampPan(this.zoom, this.bounds()))
   }
 
   // Start the gesture again from the zoom and pointers as they are now.
@@ -394,15 +420,15 @@ export class CaribouStatusMedia extends LitElement {
     const g = this.gesture
     if (!g) return
     const now = [...this.pointers.values()].slice(0, 2).map((p) => this.fromCenter(p.x, p.y))
-    const frame = this.frame()
+    const b = this.bounds()
     if (now.length >= 2 && g.points.length >= 2) {
       const [a0, b0] = g.points as [Point, Point]
       const [a1, b1] = now as [Point, Point]
-      this.setZoom(pinch(g.zoom, distance(a0, b0), midpoint(a0, b0), distance(a1, b1), midpoint(a1, b1), frame))
+      this.setZoom(pinch(g.zoom, distance(a0, b0), midpoint(a0, b0), distance(a1, b1), midpoint(a1, b1), b))
     } else if (isZoomed(this.zoom) && now.length === 1 && g.points.length === 1) {
       const p0 = g.points[0]!
       const p1 = now[0]!
-      this.setZoom(panBy(g.zoom, p1.x - p0.x, p1.y - p0.y, frame))
+      this.setZoom(panBy(g.zoom, p1.x - p0.x, p1.y - p0.y, b))
     } else if (e.pointerType !== 'mouse' && this.pointers.size === 1) {
       // At 1x a finger on the image still scrolls a long description into
       // view; the surface took that from the browser with the pinch.
@@ -423,7 +449,7 @@ export class CaribouStatusMedia extends LitElement {
     const last = this.lastTap
     if (last && time - last.time < DOUBLE_TAP_MS && Math.hypot(clientX - last.x, clientY - last.y) < DOUBLE_TAP_PX) {
       this.lastTap = null
-      this.setZoom(doubleTap(this.zoom, this.fromCenter(clientX, clientY), this.frame()), true)
+      this.setZoom(doubleTap(this.zoom, this.fromCenter(clientX, clientY), this.bounds()), true)
     } else {
       this.lastTap = { x: clientX, y: clientY, time }
     }
@@ -433,16 +459,16 @@ export class CaribouStatusMedia extends LitElement {
   // the page. A plain wheel pans a zoomed image, and scrolls as usual at 1x.
   private onWheel = (e: WheelEvent) => {
     const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16
-      : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? this.frame().height : 1
+      : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? this.bounds().stage.height : 1
     if (e.ctrlKey) {
       e.preventDefault()
       // Safari's own pinch events have it.
       if (this.safariPinch) return
       const scale = wheelScale(this.zoom.scale, e.deltaY * unit)
-      this.setZoom(zoomAt(this.zoom, scale, this.fromCenter(e.clientX, e.clientY), this.frame()))
+      this.setZoom(zoomAt(this.zoom, scale, this.fromCenter(e.clientX, e.clientY), this.bounds()))
     } else if (isZoomed(this.zoom)) {
       e.preventDefault()
-      this.setZoom(panBy(this.zoom, -e.deltaX * unit, -e.deltaY * unit, this.frame()))
+      this.setZoom(panBy(this.zoom, -e.deltaX * unit, -e.deltaY * unit, this.bounds()))
     }
   }
 
@@ -460,9 +486,11 @@ export class CaribouStatusMedia extends LitElement {
   private onGestureChange = (e: Event) => {
     e.preventDefault()
     const start = this.safariPinch
-    if (!start || this.pointers.size > 0) return
+    // Fingers down: the pointer handlers zoom. The second check holds even
+    // if iOS sends this before both pointerdowns.
+    if (!start || this.pointers.size > 0 || this.gesture?.points.length === 2) return
     const g = e as GestureEvent
-    this.setZoom(zoomAt(start, start.scale * g.scale, this.fromCenter(g.clientX, g.clientY), this.frame()))
+    this.setZoom(zoomAt(start, start.scale * g.scale, this.fromCenter(g.clientX, g.clientY), this.bounds()))
   }
 
   private onGestureEnd = (e: Event) => {
@@ -471,14 +499,23 @@ export class CaribouStatusMedia extends LitElement {
   }
 
   // `+` / `=` zoom in, `-` zooms out, `0` resets, about the image's center.
-  // With ctrl or cmd the keys stay the browser's page zoom.
+  // On a zoomed image the arrows show more of that side. With ctrl or cmd
+  // the keys stay the browser's page zoom; at 1x the arrows scroll as usual.
   private onDialogKeydown = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey || !this.zoomImg) return
+    const b = this.bounds()
     const center = { x: 0, y: 0 }
+    const dx = b.stage.width * PAN_STEP
+    const dy = b.stage.height * PAN_STEP
+    const zoomed = isZoomed(this.zoom)
     let next: Zoom
-    if (e.key === '+' || e.key === '=') next = zoomAt(this.zoom, this.zoom.scale * KEY_STEP, center, this.frame())
-    else if (e.key === '-' || e.key === '_') next = zoomAt(this.zoom, this.zoom.scale / KEY_STEP, center, this.frame())
+    if (e.key === '+' || e.key === '=') next = zoomAt(this.zoom, this.zoom.scale * KEY_STEP, center, b)
+    else if (e.key === '-' || e.key === '_') next = zoomAt(this.zoom, this.zoom.scale / KEY_STEP, center, b)
     else if (e.key === '0') next = IDENTITY
+    else if (zoomed && e.key === 'ArrowLeft') next = panBy(this.zoom, dx, 0, b)
+    else if (zoomed && e.key === 'ArrowRight') next = panBy(this.zoom, -dx, 0, b)
+    else if (zoomed && e.key === 'ArrowUp') next = panBy(this.zoom, 0, dy, b)
+    else if (zoomed && e.key === 'ArrowDown') next = panBy(this.zoom, 0, -dy, b)
     else return
     e.preventDefault()
     this.setZoom(next, true)
@@ -557,12 +594,15 @@ export class CaribouStatusMedia extends LitElement {
     const m = this.viewing >= 0 ? items[this.viewing] : undefined
     const alt = m?.description ?? ''
     return html`
-      <dialog aria-label=${alt || 'Image'} @close=${this.onDialogClose} @click=${this.onDialogClick}
-        @keydown=${this.onDialogKeydown}>
+      <dialog aria-label=${alt || 'Image'} aria-describedby=${ifDefined(m ? 'zoom-hint' : undefined)}
+        @close=${this.onDialogClose} @click=${this.onDialogClick} @keydown=${this.onDialogKeydown}>
         ${m
           ? html`
-              <div class="bar"><caribou-button class="close" variant="secondary"
-                @click=${() => this.dialog?.close()}>Close</caribou-button></div>
+              <div class="bar">
+                <span class="hint" id="zoom-hint">Keys: + and − to zoom, arrows to move, 0 to reset</span>
+                <caribou-button class="close" variant="secondary"
+                  @click=${() => this.dialog?.close()}>Close</caribou-button>
+              </div>
               <div class="stage"
                 @pointerdown=${this.onPointerDown} @pointermove=${this.onPointerMove}
                 @pointerup=${this.onPointerUp} @pointercancel=${this.onPointerUp}

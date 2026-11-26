@@ -4,7 +4,11 @@ import {
   isZoomed, panBy, pinch, transformOf, wheelScale, zoomAt, type Point, type Zoom,
 } from '../_media-zoom.js'
 
-const FRAME = { width: 400, height: 300 }
+// An image that fills its stage at 1x.
+const FRAME = { image: { width: 400, height: 300 }, stage: { width: 400, height: 300 } }
+// A 4:3 image in a taller, wider stage, and a tall one in the same stage.
+const WIDE = { image: { width: 400, height: 300 }, stage: { width: 600, height: 500 } }
+const TALL = { image: { width: 200, height: 400 }, stage: { width: 600, height: 500 } }
 
 // Where an image point (from the center, at 1x) shows on screen.
 const onScreen = (z: Zoom, p: Point): Point => ({ x: z.x + z.scale * p.x, y: z.y + z.scale * p.y })
@@ -39,8 +43,8 @@ describe('clampPan', () => {
     for (const scale of [1.2, 2, 3.7, 4]) {
       const z = clampPan({ scale, x: 1e6, y: -1e6 }, FRAME)
       // The image's left edge is at most the frame's left edge, and so on.
-      expect(z.x - (scale * FRAME.width) / 2).toBeLessThanOrEqual(-FRAME.width / 2 + 1e-9)
-      expect(z.y + (scale * FRAME.height) / 2).toBeGreaterThanOrEqual(FRAME.height / 2 - 1e-9)
+      expect(z.x - (scale * 400) / 2).toBeLessThanOrEqual(-400 / 2 + 1e-9)
+      expect(z.y + (scale * 300) / 2).toBeGreaterThanOrEqual(300 / 2 - 1e-9)
     }
   })
 
@@ -173,5 +177,55 @@ describe('transformOf', () => {
   it('translates, then scales, about the center', () => {
     expect(transformOf({ scale: 2, x: 10, y: -5 })).toBe('translate(10px, -5px) scale(2)')
     expect(isZoomed({ scale: 2, x: 0, y: 0 })).toBe(true)
+  })
+})
+
+describe('a stage bigger than the image', () => {
+  it('keeps the image centered while it still fits', () => {
+    // 1.2x of 400×300 is 480×360, inside 600×500.
+    expect(clampPan({ scale: 1.2, x: 80, y: -60 }, WIDE)).toEqual({ scale: 1.2, x: 0, y: 0 })
+  })
+
+  it('lets an edge come to the stage edge once the image is bigger', () => {
+    // 2x is 800×600: 100 spare each side, 50 above and below.
+    expect(clampPan({ scale: 2, x: 999, y: -999 }, WIDE)).toEqual({ scale: 2, x: 100, y: -50 })
+    for (const scale of [1.6, 2, 3, 4]) {
+      const z = clampPan({ scale, x: -1e6, y: 1e6 }, WIDE)
+      const w = scale * 400
+      const h = scale * 300
+      // An edge never comes inside the stage on an axis where the image is bigger.
+      if (w > 600) expect(z.x + w / 2).toBeGreaterThanOrEqual(300 - 1e-9)
+      else expect(z.x).toBe(0)
+      if (h > 500) expect(z.y - h / 2).toBeLessThanOrEqual(-250 + 1e-9)
+      else expect(z.y).toBe(0)
+    }
+  })
+
+  it('a tall image moves up and down but stays centered across', () => {
+    // 2.5x of 200×400 is 500×1000: narrower than the stage, much taller.
+    const z = clampPan({ scale: 2.5, x: 50, y: 999 }, TALL)
+    expect(z).toEqual({ scale: 2.5, x: 0, y: 250 })
+  })
+
+  it('a double tap keeps the tapped point in place where the image overflows', () => {
+    const at = { x: 30, y: -40 }
+    const z = doubleTap(IDENTITY, at, WIDE)
+    // 2.5x is 1000×750: 200 spare across, 125 up and down.
+    expect(z.scale).toBe(2.5)
+    expect(onScreen(z, at).x).toBeCloseTo(at.x)
+    expect(onScreen(z, at).y).toBeCloseTo(at.y)
+  })
+
+  it('on a tall image, a double tap keeps the tapped height and centers across', () => {
+    const at = { x: 60, y: -80 }
+    const z = doubleTap(IDENTITY, at, TALL)
+    expect(z.x).toBe(0)
+    expect(onScreen(z, at).y).toBeCloseTo(at.y)
+  })
+
+  it('a pinch about a corner stops where the edge meets the stage', () => {
+    const z = pinch(IDENTITY, 100, { x: 290, y: 240 }, 400, { x: 290, y: 240 }, WIDE)
+    // 4x is 1600×1200: 500 spare across, 350 up and down.
+    expect(z).toEqual({ scale: 4, x: -500, y: -350 })
   })
 })
