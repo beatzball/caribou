@@ -308,6 +308,10 @@ export class CaribouStatusMedia extends LitElement {
       max-width: min(60ch, 100%); padding: var(--space-2) var(--space-3);
       border-radius: var(--radius-md); white-space: pre-wrap;
       max-height: 30vh; max-height: 30dvh; overflow-y: auto; overscroll-behavior: contain;
+      /* On a short screen (a phone on its side) it gives way to the stage's
+         half of the height, so the dialog never has to scroll. A scroll
+         box may shrink below its text; a short one keeps its own height. */
+      flex-shrink: 1;
     }
     /* A description that scrolls is a tab stop; white on black, as Close. */
     dialog p:focus-visible {
@@ -499,11 +503,18 @@ export class CaribouStatusMedia extends LitElement {
 
   // A description too long for its panel scrolls, and is then a tab stop,
   // so a keyboard can scroll it too.
+  // A focusable box needs a role and a name, so it is a named region then;
+  // a short one is plain text.
   private syncDescription() {
     const p = this.renderRoot.querySelector<HTMLElement>('dialog p')
     if (!p) return
-    if (p.scrollHeight > p.clientHeight) p.tabIndex = 0
-    else p.removeAttribute('tabindex')
+    if (p.scrollHeight > p.clientHeight) {
+      p.tabIndex = 0
+      p.setAttribute('role', 'region')
+      p.setAttribute('aria-label', 'Description')
+    } else {
+      for (const name of ['tabindex', 'role', 'aria-label']) p.removeAttribute(name)
+    }
   }
 
   private onDialogClose = () => {

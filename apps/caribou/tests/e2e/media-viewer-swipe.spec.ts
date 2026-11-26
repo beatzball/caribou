@@ -199,8 +199,10 @@ test('a long description scrolls on its own; a drag on the image is a swipe, not
   const p = v.dialog.locator('p')
   const box = await p.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, tab: el.getAttribute('tabindex') }))
   expect(box.scroll).toBeGreaterThan(box.client)
-  // It scrolls, so a keyboard can reach it.
+  // It scrolls, so a keyboard can reach it: a named region, as a tab stop.
   expect(box.tab).toBe('0')
+  await expect(v.dialog.getByRole('region', { name: 'Description' })).toBeVisible()
+  expect(await p.getAttribute('role')).toBe('region')
   expect(await p.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto')
 
   // The wheel over it scrolls it, not the page, and the viewer stays.
@@ -221,9 +223,43 @@ test('a long description scrolls on its own; a drag on the image is a swipe, not
   await expect(v.dialog).toBeHidden()
 })
 
-test('a short description is not a scroller or a tab stop', async ({ page }) => {
+test('a short description is not a scroller, a tab stop or a region', async ({ page }) => {
   const { v } = await open(page)
-  expect(await v.dialog.locator('p').getAttribute('tabindex')).toBeNull()
+  const p = v.dialog.locator('p')
+  await expect(p).toBeVisible()
+  expect(await p.getAttribute('tabindex')).toBeNull()
+  expect(await p.getAttribute('role')).toBeNull()
+  expect(await p.getAttribute('aria-label')).toBeNull()
+  await expect(v.dialog.getByRole('region', { name: 'Description' })).toHaveCount(0)
+})
+
+test.describe('on a landscape phone', () => {
+  // Short and wide: the bar, the stage's half of the height and a long
+  // description must all fit, or the panel's end is out of reach (a drag
+  // on the image swipes; it no longer scrolls the dialog).
+  test.skip(({ browserName }) => browserName !== 'chromium', 'isMobile and the safe-area override are Chromium only')
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 844, height: 390 } })
+
+  for (const inset of [0, 21]) {
+    test(`a long description fits: the dialog does not scroll and the panel ends inside the window (home indicator ${inset}px)`, async ({ page }) => {
+      const cdp = await page.context().newCDPSession(page)
+      await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, right: inset ? 59 : 0, bottom: inset, left: inset ? 59 : 0 } })
+      await openTimeline(page, { alt: Array(12).fill(LONG_ALT).join(' ') })
+      const v = viewer(page)
+      await v.thumb.tap()
+      await opened(page)
+      const fit = await v.dialog.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }))
+      expect(fit.scroll, 'the dialog scrolls').toBeLessThanOrEqual(fit.client)
+      const p = v.dialog.locator('p')
+      const pb = (await p.boundingBox())!
+      expect(pb.y + pb.height).toBeLessThanOrEqual(390 - inset)
+      // It still shows some lines, scrolls on its own, and is a tab stop.
+      expect(pb.height).toBeGreaterThanOrEqual(40)
+      await expect(v.dialog.getByRole('region', { name: 'Description' })).toBeVisible()
+      // The stage keeps its half of the height.
+      expect((await v.stage.boundingBox())!.height).toBeGreaterThanOrEqual(390 / 2 - 0.5)
+    })
+  }
 })
 
 test.describe('on a touch screen', () => {
