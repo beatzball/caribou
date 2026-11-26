@@ -1,5 +1,11 @@
 # @beatzball/caribou-design-tokens
 
+## 0.2.0
+
+### Minor Changes
+
+- [#311](https://github.com/beatzball/caribou/pull/311) [`f1c7417`](https://github.com/beatzball/caribou/commit/f1c7417b4558483f46b91c6fd21f6e712153f107) Thanks [@beatzball](https://github.com/beatzball)! - `tokens.css` maps `data-text-size` on `<html>` to a percentage root font size: `xs` 87.5%, `sm` 93.75%, `lg` 112.5% and `xl` 125%. Without the attribute the root keeps the browser's own size.
+
 ## 0.1.3
 
 ### Patch Changes

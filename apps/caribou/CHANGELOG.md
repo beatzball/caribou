@@ -1,5 +1,16 @@
 # caribou-app
 
+## 0.14.0
+
+### Minor Changes
+
+- [#311](https://github.com/beatzball/caribou/pull/311) [`f1c7417`](https://github.com/beatzball/caribou/commit/f1c7417b4558483f46b91c6fd21f6e712153f107) Thanks [@beatzball](https://github.com/beatzball)! - Settings → Appearance has a Text size control with five steps: Smallest, Smaller, Default, Larger and Largest. Default is the size the app had before. One choice changes posts, names, menus, buttons and the compose box together. It is kept on this device, for every account and when no one is signed in, and it applies before the first paint, so a page never shows the wrong size first. The change shows at once, in other open tabs too, and a sample post under the choices shows post text at that size. The size is a percentage of the browser's own text size, so browser zoom and the system text size still work. At the largest step on a 320px-wide phone, the checked pages (home, a thread, a profile, notifications, search, settings, both sign-in forms and Muted words) do not scroll sideways: a profile's Follow button now moves under the name when the name would have too little room. The Mastodon server and Bluesky handle fields on the sign-in page now use the page font, as every other field does, so they follow the text size too. Text fields never go under 16px, so at the two smaller steps iOS Safari does not zoom the page when a field gets focus.
+
+### Patch Changes
+
+- Updated dependencies [[`f1c7417`](https://github.com/beatzball/caribou/commit/f1c7417b4558483f46b91c6fd21f6e712153f107)]:
+  - @beatzball/caribou-design-tokens@0.2.0
+
 ## 0.13.0
 
 ### Minor Changes
