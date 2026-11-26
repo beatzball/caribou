@@ -31,8 +31,9 @@ export class CaribouRightRail extends LitElement {
     :host(:not([signed-out])) .browsing { display: none; }
     [aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; padding: var(--space-1) 0; }
     form.search { position: relative; display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+    /* Never under 16px: iOS zooms the page into a smaller focused field (README, Text size). */
     form.search input {
-      flex: 1; min-width: 0; font: inherit; color: var(--fg-0);
+      flex: 1; min-width: 0; font: inherit; font-size: max(1em, 16px); color: var(--fg-0);
       background: var(--bg-1); border: 1px solid var(--input-border); border-radius: var(--radius-md);
       padding: var(--space-2) var(--space-3);
     }

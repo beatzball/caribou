@@ -1,7 +1,7 @@
 import { COMPLETE_PAGE_CSP, completeSigninPage } from '../../server/lib/signin-complete-page.js'
 import { expect, test, type Page } from './_fixtures.js'
 import {
-  INSTANCE, expectNavItemsFit, expectNoSidewaysScroll, gotoSettled, openPage, signIn, storeTextSize,
+  INSTANCE, expectNavItemsFit, expectNoSidewaysScroll, fieldFontSizes, gotoSettled, openPage, signIn, storeTextSize,
 } from './_text-size.js'
 
 // The text size setting (issue 309): five steps, per device, applied before
@@ -168,6 +168,26 @@ test('a refused save puts the text size back and says so', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Appearance' }).getByRole('status')).toHaveText(/Not saved/)
   await expect(group.getByRole('radio', { name: 'Default' })).toBeChecked()
   expect(await attr(page)).toBeNull()
+})
+
+// The right rail's search field is only on wide screens; the phone spec
+// checks the others. iOS zooms into a focused field under 16px.
+test('at Smallest the search fields stay 16px; at Default they are the root size', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await signIn(page)
+  for (const [size, check] of [
+    ['xs', (px: number) => expect(px).toBeGreaterThanOrEqual(16)],
+    ['md', (px: number) => expect(px).toBe(16)],
+  ] as const) {
+    await gotoSettled(page, '/about')
+    await page.evaluate((s) => { localStorage.setItem('caribou.textSize', s) }, size)
+    await openPage(page, '/search?q=bob', 'caribou-search')
+    if (size === 'md') await expect(page.locator('html')).not.toHaveAttribute('data-text-size')
+    else await expect(page.locator('html')).toHaveAttribute('data-text-size', size)
+    const fields = await fieldFontSizes(page)
+    expect(fields.map((f) => f.field)).toEqual(expect.arrayContaining(['caribou-search search-q', 'caribou-right-rail rail-search']))
+    for (const { size: px } of fields) check(px)
+  }
 })
 
 // Desktop and tablet widths at the largest step: the rail's labels, the

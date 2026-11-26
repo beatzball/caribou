@@ -34,7 +34,9 @@ const NOT_SAVED = 'Not saved. This browser did not let Caribou store the setting
 export class CaribouSettingsAppearance extends LitElement {
   static override styles = [choiceStyles, css`
     fieldset + fieldset { margin-top: var(--space-4); }
-    .about { margin: 0 0 var(--space-2); padding: 0 var(--space-2); color: var(--fg-muted); font-size: 0.875em; }
+    /* Outside the fieldset, so a screen reader reads it once: as the
+       group's description, not again as its content. */
+    .about { margin: var(--space-1) 0 0; padding: 0 var(--space-2); color: var(--fg-muted); font-size: 0.875em; }
     .sample {
       display: flex; gap: var(--space-3); margin: var(--space-2) 0 0; padding: var(--space-3);
       border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-1);
@@ -106,23 +108,23 @@ export class CaribouSettingsAppearance extends LitElement {
       </fieldset>
       <fieldset aria-describedby="text-size-about">
         <legend>Text size</legend>
-        <p class="about" id="text-size-about">Applies on this device, for every account.</p>
         ${TEXT_SIZE_OPTIONS.map((o) => html`
           <label>
             <input type="radio" name="text-size" value=${o.value} .checked=${live(this.size === o.value)} @change=${this.onSizeChange} />
             ${o.label}
           </label>`)}
-        <div class="sample" aria-hidden="true">
-          <div class="sample-avatar"></div>
-          <div class="sample-body">
-            <div class="sample-header">
-              <span class="sample-name">Alice Example</span>
-              <span class="sample-acct">@alice@example.social</span>
-            </div>
-            <p class="sample-text">This is how posts look at this size. Names, menus and the compose box change with it.</p>
-          </div>
-        </div>
       </fieldset>
+      <p class="about" id="text-size-about">Applies on this device, for every account.</p>
+      <div class="sample" aria-hidden="true">
+        <div class="sample-avatar"></div>
+        <div class="sample-body">
+          <div class="sample-header">
+            <span class="sample-name">Alice Example</span>
+            <span class="sample-acct">@alice@example.social</span>
+          </div>
+          <p class="sample-text">This is how posts look at this size. Names, menus and the compose box change with it.</p>
+        </div>
+      </div>
       <p class="status" role="status">${this.status}</p>
     `
   }

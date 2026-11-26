@@ -175,6 +175,8 @@ describe('caribou-settings', () => {
       expect(group.querySelector('legend')?.textContent).toBe('Text size')
       const about = appearance(root).getElementById(group.getAttribute('aria-describedby')!)
       expect(about?.textContent).toMatch(/this device, for every account/)
+      // Outside the group, so it is read once, as the description.
+      expect(group.contains(about)).toBe(false)
     })
 
     it('shows a sample post, hidden from assistive technology', async () => {

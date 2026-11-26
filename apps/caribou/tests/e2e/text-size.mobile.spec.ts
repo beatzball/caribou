@@ -1,6 +1,7 @@
 import { expect, test, type Page } from './_fixtures.js'
 import {
-  PAGES, expectNavItemsFit, expectNoSidewaysScroll, gotoSettled, openPage, signIn, storeTextSize,
+  PAGES, expectNavItemsFit, expectNoSidewaysScroll, fieldFontSizes, gotoSettled, openCompose, openMutedWords,
+  openPage, openSignin, signIn, storeTextSize,
 } from './_text-size.js'
 import { livePage } from './_server-page.js'
 
@@ -23,16 +24,58 @@ test('the sign-in page fits at the largest step', async ({ page }) => {
   await expectNoSidewaysScroll(page, '/')
 })
 
-test('every page fits at the largest step', async ({ page }) => {
+test('the checked pages fit at the largest step', async ({ page }) => {
   await storeTextSize(page, 'xl')
   await signIn(page)
-  for (const { path, ready } of PAGES) {
-    await openPage(page, path, ready)
+  for (const { name, open } of PAGES) {
+    await open(page)
     await expect(page.locator('html')).toHaveAttribute('data-text-size', 'xl')
-    await expectNoSidewaysScroll(page, path)
-    await expectNavItemsFit(page)
+    await expectNoSidewaysScroll(page, name)
+    // The sign-in page has no nav rail.
+    if (await livePage(page).locator('caribou-nav-rail').count()) await expectNavItemsFit(page)
   }
 })
+
+// iOS Safari zooms the page when a focused field's text is under 16px. At
+// Smallest the root is 14px, so every text field keeps 16px at least; at
+// Default it is the root size, as before.
+for (const [size, check] of [
+  ['xs', (px: number) => expect(px).toBeGreaterThanOrEqual(16)],
+  ['md', (px: number) => expect(px).toBe(16)],
+] as const) {
+  test(`at ${size}, every text field is ${size === 'xs' ? 'at least' : 'exactly'} 16px`, async ({ page }) => {
+    await storeTextSize(page, size)
+    await signIn(page)
+    const seen: string[] = []
+    const opens: Array<[string, () => Promise<unknown>]> = [
+      ['sign-in, Mastodon', () => openSignin(page, 'Mastodon')],
+      ['sign-in, Bluesky', () => openSignin(page, 'Bluesky')],
+      ['search', () => openPage(page, '/search?q=bob', 'caribou-search')],
+      ['muted words', () => openMutedWords(page)],
+      ['new list', async () => {
+        await openPage(page, '/lists', 'caribou-lists')
+        await livePage(page).getByRole('button', { name: 'New list' }).click()
+        await expect(page.getByRole('dialog').getByRole('textbox').first()).toBeVisible()
+      }],
+      ['compose', () => openCompose(page)],
+    ]
+    for (const [where, open] of opens) {
+      await open()
+      const fields = await fieldFontSizes(page)
+      expect(fields.length, where).toBeGreaterThan(0)
+      for (const { field, size: px } of fields) {
+        seen.push(`${where}: ${field}`)
+        check(px)
+      }
+    }
+    // The fields the issue names: search, compose, sign-in, Muted words.
+    expect(seen.join('\n')).toMatch(/search-q/)
+    expect(seen.join('\n')).toMatch(/compose-text/)
+    expect(seen.join('\n')).toMatch(/server/)
+    expect(seen.join('\n')).toMatch(/bsky-handle/)
+    expect(seen.join('\n')).toMatch(/caribou-muted-words value/)
+  })
+}
 
 // `scroll-padding-bottom` in `server/lib/base-head.ts` counts on a 61px bar.
 test('the bottom bar keeps its height at the largest step', async ({ page }) => {

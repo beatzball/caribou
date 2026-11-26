@@ -71,8 +71,8 @@ export default defineEventHandler(async (event) => {
     // text, and its screen must have the reader's colors. Running twice is
     // on purpose: the first run is before the theme-color meta exists, and
     // the last one (when `/` stays) sets that meta. TEXT_SIZE_HEAD follows
-    // it on every page: it puts the device's text size on <html> before the
-    // first paint (`server/lib/text-size-head.ts`).
+    // it: it puts the device's text size on <html> before the first paint
+    // (`server/lib/text-size-head.ts`). On a `/` that forwards it never runs.
     routeMeta: {
       title: escapeTitle(routeTitle(url)),
       head: (matched.path === '/' ? THEME_HEAD + ROOT_FORWARD_HEAD

@@ -49,8 +49,9 @@ export class CaribouListDialog extends LitElement {
     dialog::backdrop { background: rgb(0 0 0 / 0.5); }
     h2 { margin: 0 0 var(--space-3); font-size: 1.125rem; }
     label.field { display: block; margin-bottom: var(--space-1); color: var(--fg-1); }
+    /* Never under 16px: iOS zooms the page into a smaller focused field (README, Text size). */
     input[type="text"] {
-      inline-size: 100%; padding: var(--space-2); font: inherit; color: var(--fg-0);
+      inline-size: 100%; padding: var(--space-2); font: inherit; font-size: max(1em, 16px); color: var(--fg-0);
       background: var(--bg-1); border: 1px solid var(--input-border); border-radius: var(--radius-sm);
     }
     input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -29,6 +29,20 @@ export const DEFAULT_TEXT_SIZE: TextSize = 'md'
 export const TEXT_SIZE_KEY = 'caribou.textSize'
 export const TEXT_SIZE_ATTR = 'data-text-size'
 
+/**
+ * The root font size of each step but the default, in percent of the
+ * browser's own size. tokens.css holds the same rules (a unit test compares
+ * them); `TEXT_SIZE_CSS` gives them to a page without the tokens.
+ */
+export const TEXT_SIZE_PERCENT: Readonly<Record<Exclude<TextSize, 'md'>, number>> = {
+  xs: 87.5, sm: 93.75, lg: 112.5, xl: 125,
+}
+
+/** The tokens.css rules for `TEXT_SIZE_PERCENT`, one per line. */
+export const TEXT_SIZE_CSS = Object.entries(TEXT_SIZE_PERCENT)
+  .map(([id, pct]) => `html[${TEXT_SIZE_ATTR}="${id}"] { font-size: ${pct}%; }`)
+  .join('\n')
+
 /** The step for a stored value. The default for anything else. */
 export function textSizeOf(raw: unknown): TextSize {
   return (TEXT_SIZES as readonly unknown[]).includes(raw) ? raw as TextSize : DEFAULT_TEXT_SIZE

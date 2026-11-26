@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  DEFAULT_TEXT_SIZE, TEXT_SIZES, applyTextSize, currentTextSize, setTextSize, startTextSize,
-  textSize, textSizeFromStorage, textSizeOf, type TextSize,
+  DEFAULT_TEXT_SIZE, TEXT_SIZES, TEXT_SIZE_CSS, TEXT_SIZE_PERCENT, applyTextSize, currentTextSize, setTextSize,
+  startTextSize, textSize, textSizeFromStorage, textSizeOf, type TextSize,
 } from '../_text-size.js'
+import { SIGNIN_FALLBACK_PAGE } from '../../server/lib/signin-complete-page.js'
 import { TEXT_SIZE_HEAD, TEXT_SIZE_SCRIPT } from '../../server/lib/text-size-head.js'
 import { TOKENS_CSS } from '../../server/lib/tokens-head.generated.js'
 
@@ -90,15 +91,25 @@ describe('textSizeOf', () => {
   })
 })
 
-describe('tokens.css', () => {
+// The `html[data-text-size]` rules in a stylesheet, as [id, percent].
+const sizeRules = (css: string) =>
+  [...css.matchAll(/html\[data-text-size="(\w+)"\]\s*\{\s*font-size:\s*([\d.]+)%;\s*\}/g)]
+    .map((m) => [m[1], Number(m[2])])
+
+describe('the step percentages', () => {
   // Smaller to larger, in percent of the browser's own size; the default
   // has no rule at all, so the root keeps the browser's size.
-  it('maps each step but the default to a percentage root font-size', () => {
-    const rules = [...TOKENS_CSS.matchAll(/html\[data-text-size="(\w+)"\]\s*\{\s*font-size:\s*([\d.]+)%;\s*\}/g)]
-      .map((m) => [m[1], Number(m[2])])
-    expect(rules).toEqual([['xs', 87.5], ['sm', 93.75], ['lg', 112.5], ['xl', 125]])
+  it('tokens.css maps each step but the default to its percentage', () => {
+    expect(sizeRules(TOKENS_CSS)).toEqual([['xs', 87.5], ['sm', 93.75], ['lg', 112.5], ['xl', 125]])
+    expect(sizeRules(TOKENS_CSS)).toEqual(Object.entries(TEXT_SIZE_PERCENT))
     expect(TOKENS_CSS).not.toMatch(/data-text-size="md"/)
     expect(TOKENS_CSS).not.toMatch(/text-size-adjust/)
+  })
+
+  // The sign-in pages have no tokens; they carry their own copy.
+  it('the sign-in pages have the same rules as tokens.css', () => {
+    expect(sizeRules(SIGNIN_FALLBACK_PAGE)).toEqual(sizeRules(TOKENS_CSS))
+    expect(sizeRules(TEXT_SIZE_CSS)).toEqual(sizeRules(TOKENS_CSS))
   })
 })
 

@@ -1,9 +1,15 @@
-// An inline script for the head of every HTML page that has the theme script
+// An inline script for the head of each HTML page that has the theme script
 // (`theme-head.ts`): the app's pages, the 404 page and the sign-in pages
 // (`signin-complete-page.ts`). It puts the device's text size on `<html>`
 // before the first paint, so a page never shows the wrong size first
 // (issue 309). The rules are `textSizeFromStorage` and `applyTextSize` in
 // `components/_text-size.ts`; the tests run both on the same cases.
+//
+// One exception: `/` with an active account. Its forward script
+// (`root-forward-head.ts`) ends the document before this script, so it never
+// runs there. What `/` then shows is the loading screen, whose font is a
+// fixed 16px on purpose (`components/_splash.ts`), and after the time limit
+// the stuck page, at the browser's own size.
 //
 // - The size is per device: it reads `caribou.textSize` and nothing about
 //   the accounts.

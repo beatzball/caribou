@@ -137,16 +137,6 @@ export async function gotoSettled(page: Page, path: string) {
   await expect(page.locator('litro-outlet > *')).toHaveCount(1)
 }
 
-// Each page to check, and an element on it that shows its content loaded.
-export const PAGES: Array<{ path: string; ready: string }> = [
-  { path: '/home', ready: 'caribou-timeline caribou-status-card' },
-  { path: '/@bob/42', ready: 'caribou-thread caribou-status-card' },
-  { path: '/@bob', ready: 'caribou-profile caribou-status-card' },
-  { path: '/notifications', ready: 'caribou-notifications li' },
-  { path: '/search?q=bob', ready: 'caribou-search' },
-  { path: '/settings', ready: 'caribou-settings-appearance' },
-]
-
 // A full load of a thread or a profile reads it on the server, from the
 // instance cookie's server, which no browser route can answer. So each page
 // opens from /home as a client-side navigation, as a reader gets there.
@@ -161,6 +151,86 @@ export async function openPage(page: Page, path: string, ready: string) {
     await expect(page.locator('litro-outlet > *')).toHaveCount(1)
   }
   await expect(livePage(page).locator(ready).first()).toBeVisible()
+}
+
+/** `/?add`, the sign-in form of a signed-in reader, on the network's tab. */
+export async function openSignin(page: Page, network: 'Mastodon' | 'Bluesky') {
+  await gotoSettled(page, '/?add')
+  await page.getByRole('tab', { name: network }).click()
+  await expect(page.getByRole('tabpanel', { name: network }).getByRole('textbox')).toBeVisible()
+}
+
+// Settings > Filters, mutes and blocks, with the Muted words form. That
+// section is Bluesky's, and its form shows once the reader's words have
+// loaded. A Bluesky sign-in through the test fixture hangs in WebKit on
+// macOS (bluesky-muted-words.spec.ts skips it there), so the real element is
+// put in this page's Filters section, with one long word as its list.
+export async function openMutedWords(page: Page) {
+  await openPage(page, '/settings/moderation', 'caribou-moderation-settings h1')
+  await livePage(page).locator('caribou-moderation-settings').evaluate(async (host) => {
+    const section = host.shadowRoot!.querySelector('section[aria-labelledby="filters-h"]')!
+    // `words` is the element's private state: set from outside on purpose.
+    const words = document.createElement('caribou-muted-words') as unknown as HTMLElement & {
+      words: unknown; updateComplete: Promise<unknown>
+    }
+    section.replaceChildren(section.querySelector('h2')!, words)
+    await words.updateComplete
+    words.words = [{
+      id: 'w1', value: 'a-long-muted-phrase-with-no-spaces-in-it', targets: ['content', 'tag'], actorTarget: 'all',
+    }]
+    await words.updateComplete
+  })
+  await expect(livePage(page).locator('caribou-muted-words input[name="value"]')).toBeVisible()
+}
+
+/** The compose dialog from the nav rail, with the content warning and poll fields open. */
+export async function openCompose(page: Page) {
+  await openPage(page, '/home', 'caribou-status-card')
+  await livePage(page).locator('caribou-nav-rail .compose-btn').click()
+  const dialog = page.getByRole('dialog', { name: 'New post' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Content warning', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Poll', exact: true }).click()
+  await expect(dialog.getByRole('textbox', { name: 'Option 1' })).toBeVisible()
+  return dialog
+}
+
+// Each page to check at the largest step on a phone.
+export const PAGES: Array<{ name: string; open: (page: Page) => Promise<void> }> = [
+  ...[
+    { path: '/home', ready: 'caribou-timeline caribou-status-card' },
+    { path: '/@bob/42', ready: 'caribou-thread caribou-status-card' },
+    { path: '/@bob', ready: 'caribou-profile caribou-status-card' },
+    { path: '/notifications', ready: 'caribou-notifications li' },
+    { path: '/search?q=bob', ready: 'caribou-search' },
+    { path: '/settings', ready: 'caribou-settings-appearance' },
+  ].map(({ path, ready }) => ({ name: path, open: (page: Page) => openPage(page, path, ready) })),
+  { name: '/?add, Mastodon', open: (page) => openSignin(page, 'Mastodon') },
+  { name: '/?add, Bluesky', open: (page) => openSignin(page, 'Bluesky') },
+  { name: '/settings/moderation, Muted words', open: openMutedWords },
+]
+
+/**
+ * The font size of every shown text field (text inputs, text areas,
+ * selects), in every shadow root.
+ */
+export async function fieldFontSizes(page: Page): Promise<Array<{ field: string; size: number }>> {
+  return page.evaluate(() => {
+    const out: Array<{ field: string; size: number }> = []
+    const walk = (root: Document | ShadowRoot, host: string) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) walk(el.shadowRoot, el.localName)
+        const text = el instanceof HTMLInputElement
+          ? ['text', 'search', 'url', 'email', 'number', 'password', 'tel'].includes(el.type)
+          : el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+        if (!text || el.getBoundingClientRect().width === 0) continue
+        const name = el.id || el.getAttribute('name') || el.getAttribute('aria-label') || el.localName
+        out.push({ field: `${host} ${name}`, size: parseFloat(getComputedStyle(el).fontSize) })
+      }
+    }
+    walk(document, 'document')
+    return out
+  })
 }
 
 /** The document is no wider than the window: nothing scrolls sideways. */

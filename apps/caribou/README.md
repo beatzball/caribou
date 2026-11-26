@@ -1766,19 +1766,31 @@ the first frame.
 **Text size**: Smallest, Smaller, Default, Larger or Largest (`xs` to `xl`;
 `md` is the default and the size the app had before). Unlike the rest of
 the page it is per device, not per account: one key, `caribou.textSize`,
-applied for every account and when no one is signed in. Before the first
-paint an inline script (`server/lib/text-size-head.ts`, beside the theme
-script on every page, and allowed by hash on the sign-in completion page)
-sets `data-text-size` on `<html>`; the default sets none. `tokens.css` maps
-each step to a percentage root `font-size`, so it scales the reader's own
-browser size and zoom still works. Text is in `rem`, so one value moves it
-all: write new font sizes in `rem` or `em`, never `px`, and give boxes that
-hold text room to grow (wrap, `min-width: 0`). `startTextSize`
-(`components/_text-size.ts`, from `app-main.ts`) follows a change on
-/settings and in other tabs (the `storage` event).
-`tests/e2e/text-size.spec.ts` checks the first frame, and
-`text-size.mobile.spec.ts` checks that every page fits a 320px phone at the
-largest step.
+applied for every account and when no one is signed in. It can only be
+changed while signed in, though: `/settings` needs an account. Before the
+first paint an inline script (`server/lib/text-size-head.ts`, beside the
+theme script, and allowed by hash on the sign-in completion page) sets
+`data-text-size` on `<html>`; the default sets none. The one page it does
+not reach is `/` with an active account: the forward ends that document
+first, so the loading screen (a fixed 16px on purpose) and, after the time
+limit, the stuck page show at the browser's own size. `tokens.css` maps
+each step to a percentage root `font-size` (`TEXT_SIZE_PERCENT` in
+`components/_text-size.ts` is the same table; a unit test keeps them and the
+sign-in page's copy equal), so it scales the reader's own browser size and
+zoom still works. Text is in `rem`, so one value moves it all: write new
+font sizes in `rem` or `em`, never `px`, and give boxes that hold text room
+to grow (wrap, `min-width: 0`). Text fields are the exception at the small
+end: they inherit the page font but never go under 16px
+(`font-size: max(1em, 16px)`), because iOS Safari zooms the page into a
+focused field with smaller text. At Default and above that changes
+nothing. `startTextSize` (`components/_text-size.ts`, from `app-main.ts`)
+follows a change on /settings and in other tabs (the `storage` event).
+`tests/e2e/text-size.spec.ts` checks the first frame.
+`text-size.mobile.spec.ts` checks, at the largest step on a 320px phone,
+the pages listed in `PAGES` (`tests/e2e/_text-size.ts`: home, a thread, a
+profile, notifications, search, settings, both sign-in forms and Muted
+words), the More menu and the compose dialog, and that every text field is
+16px or more at Smallest.
 
 **Default timeline**: Home, Local or Public. `/` forwards there (above), and
 the sign-in completion page goes there for an account that chose one.

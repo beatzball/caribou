@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { ICONS_HEAD, PAGE_TITLE } from './brand-head.js'
 import { THEME_SCRIPT } from './theme-head.js'
 import { TEXT_SIZE_SCRIPT } from './text-size-head.js'
+import { TEXT_SIZE_CSS } from '../../components/_text-size.js'
 
 // The page that ends a sign-in. Only `/api/signin/callback` serves it, and
 // only after the callback checked this browser's `caribou.signin` cookie and
@@ -18,19 +19,17 @@ export interface CompletedSession {
 }
 
 // The page has no design tokens, so it names the two themes' colours
-// (`--fg-0`, `--bg-0`, `--accent` in tokens.css) and the text size steps.
-// THEME_SCRIPT and TEXT_SIZE_SCRIPT in the head set `data-theme` and
-// `data-text-size` before the first paint, as on every other page.
+// (`--fg-0`, `--bg-0`, `--accent` in tokens.css) and takes the text size
+// steps' rules from `TEXT_SIZE_CSS`. THEME_SCRIPT and TEXT_SIZE_SCRIPT in the
+// head set `data-theme` and `data-text-size` before the first paint, as on
+// the app's pages.
 const STYLE = `
     body { font-family: system-ui, sans-serif; padding: 2rem; color: #e4e4e7; background: #0d0d12; }
     a { color: #60a5fa; }
     html[data-theme="light"] { color-scheme: light; }
     html[data-theme="light"] body { color: #18181b; background: #fafafa; }
     html[data-theme="light"] a { color: #2563eb; }
-    html[data-text-size="xs"] { font-size: 87.5%; }
-    html[data-text-size="sm"] { font-size: 93.75%; }
-    html[data-text-size="lg"] { font-size: 112.5%; }
-    html[data-text-size="xl"] { font-size: 125%; }
+    ${TEXT_SIZE_CSS.replace(/\n/g, '\n    ')}
   `
 
 // Reads the session from the JSON block, stores it next to the accounts
